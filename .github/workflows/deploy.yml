@@ -140,6 +140,13 @@ jobs:
               [ "$i" -lt "$ATTEMPTS" ] && sleep $BACKOFF
             done
             echo "  FAIL $1 -> last status $code, wanted $2${3:+ containing '$3'} (gave up after $ATTEMPTS tries)"
+            echo "  ---- diagnostics for $1 ----"
+            curl -sSI --max-time 20 "$1" | tr -d '\r' | sed 's/^/    /'
+            echo "    bytes received: $(printf '%s' "$body" | wc -c)"
+            echo "    first 300 bytes:"
+            printf '%s' "$body" | head -c 300 | sed 's/^/    | /'
+            echo ""
+            echo "  ---- end diagnostics ----"
             fail=1
           }
 
