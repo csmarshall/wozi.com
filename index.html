@@ -65,8 +65,9 @@ a:hover{color:var(--ink);}
   <div ref="{{ stageRef }}" onPointerDown="{{ onGrab }}" onPointerEnter="{{ onStageEnter }}" onPointerLeave="{{ onStageLeave }}" style="{{ stageStyle }}">
     {{ gearArt }}
     <sc-for list="{{ links }}" as="link" hint-placeholder-count="7">
-      <a href="{{ link.href }}" title="{{ link.label }}" onMouseEnter="{{ link.enter }}" onMouseLeave="{{ link.leave }}" onFocus="{{ link.enter }}" onBlur="{{ link.leave }}" style="{{ link.discStyle }}">
+      <a href="{{ link.href }}" aria-label="{{ link.label }}" onMouseEnter="{{ link.enter }}" onMouseLeave="{{ link.leave }}" onFocus="{{ link.enter }}" onBlur="{{ link.leave }}" style="{{ link.discStyle }}">
         {{ link.iconEl }}
+        {{ link.tipEl }}
       </a>
     </sc-for>
 
@@ -1136,6 +1137,25 @@ class Component extends DCLogic {
         }),
         enter: () => this.setState({ hover: g.slug }),
         leave: () => this.setState({ hover: null }),
+        /* The label used to be a native `title`, whose appearance delay belongs to
+           the OS — about a second, and not reachable from CSS or JS. Rendering it
+           makes the timing ours: it comes up in 90ms off the same hover state that
+           already drives the badge. The badges do not rotate, only the gear SVGs
+           do, so a transition here does not touch the one-clock invariant. The
+           counter-scale holds the text still while the badge grows to 1.16. */
+        tipEl: h('span', {
+          style: {
+            position: 'absolute', bottom: 'calc(100% + 9px)', left: '50%',
+            transform: 'translateX(-50%) scale(' + (on ? 1 / 1.16 : 1) + ')',
+            transformOrigin: 'bottom center',
+            padding: '3px 8px', borderRadius: '7px',
+            background: 'var(--ink)', color: 'var(--bg)',
+            font: '600 12px/1.45 Manrope, system-ui, sans-serif', letterSpacing: '.01em',
+            whiteSpace: 'nowrap', pointerEvents: 'none', zIndex: 30,
+            opacity: on ? 1 : 0,
+            transition: 'opacity .09s ease'
+          }
+        }, SITES[g.slug] ? SITES[g.slug].label : ''),
         discStyle: {
           position: 'absolute',
           left: 'calc(' + g.cx + 'px * var(--gs))', top: 'calc(' + g.cy + 'px * var(--gs))',
