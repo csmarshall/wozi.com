@@ -325,30 +325,49 @@ class Component extends DCLogic {
     const ghosts = [];
     this._seed = 20260729;
     const hosts = [solved.gears[0], solved.gears[solved.gears.length - 1]];
-    const usedEdge = [];
     const taken = [];
     const crosses = (p1, p2, p3, p4) => {
       const s = (a, b, c) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
       return s(p1, p2, p3) * s(p1, p2, p4) < 0 && s(p3, p4, p1) * s(p3, p4, p2) < 0;
     };
+    /* The escape runs continue the train's OWN AXIS rather than leaving by whichever
+       screen edge happens to be nearest. Nearest-edge was measuring the wrong thing:
+       on a wide, short viewport the closest edges are the top and bottom, so one run
+       climbed off the top and the other dropped off the bottom — a horizontal train
+       with a vertical tail at each end, which reads as an S rather than as a machine
+       continuing past the frame (#10). Continuing the axis is what SESSION-LOG says
+       these are for, and it fills a wide display instead of stranding the train in
+       the middle of one. */
+    const first = solved.gears[0], last = solved.gears[solved.gears.length - 1];
+    const axisDeg = Math.atan2(last.cy - first.cy, last.cx - first.cx) * 180 / Math.PI;
+    /* How far a heading travels before it leaves the viewport. */
+    const reachAlong = (px, py, deg) => {
+      const a = deg * Math.PI / 180, dx = Math.cos(a), dy = Math.sin(a);
+      let t = Infinity;
+      if (dx > 1e-6) t = Math.min(t, (vw - px) / dx);
+      else if (dx < -1e-6) t = Math.min(t, -px / dx);
+      if (dy > 1e-6) t = Math.min(t, (vh - py) / dy);
+      else if (dy < -1e-6) t = Math.min(t, -py / dy);
+      return Math.max(0, t === Infinity ? 0 : t);
+    };
     hosts.forEach((host, ei) => {
       const sx = rect.left + host.cx * gs, sy = rect.top + host.cy * gs;
-      /* Nearest screen edge to this end of the train: never the same edge as the other
-         run, and never on a heading that would cross it. */
-      const near = [
-        { ang: 180, reach: sx }, { ang: 0, reach: vw - sx },
-        { ang: -90, reach: sy }, { ang: 90, reach: vh - sy }
-      ].sort((a, b) => a.reach - b.reach).filter(o => usedEdge.indexOf(o.ang) < 0);
-      let e = near[0];
-      for (let q = 0; q < near.length; q++) {
-        const o = near[q], oa = o.ang * Math.PI / 180;
-        const seg = [{ x: sx, y: sy }, { x: sx + (o.reach + 80) * Math.cos(oa), y: sy + (o.reach + 80) * Math.sin(oa) }];
-        if (!taken.some(t => crosses(seg[0], seg[1], t[0], t[1]))) { e = o; break; }
+      /* The first wheel continues backwards along the axis, the last one onwards.
+         A small arc either side is searched only to dodge a run already placed —
+         the axis itself is always tried first. */
+      const want = ei === 0 ? axisDeg + 180 : axisDeg;
+      let e = null;
+      const offsets = [0, 16, -16, 32, -32, 50, -50];
+      for (let q = 0; q < offsets.length; q++) {
+        const ang = want + offsets[q];
+        const reach = reachAlong(sx, sy, ang);
+        const oa = ang * Math.PI / 180;
+        const seg = [{ x: sx, y: sy }, { x: sx + (reach + 80) * Math.cos(oa), y: sy + (reach + 80) * Math.sin(oa) }];
+        if (!taken.some(t => crosses(seg[0], seg[1], t[0], t[1]))) { e = { ang: ang, reach: reach }; break; }
       }
       if (!e) return;
       const ea = e.ang * Math.PI / 180;
       taken.push([{ x: sx, y: sy }, { x: sx + (e.reach + 80) * Math.cos(ea), y: sy + (e.reach + 80) * Math.sin(ea) }]);
-      usedEdge.push(e.ang);
       if (e.reach < 60) return;
       const span = e.reach / gs;
       let prev = { cx: host.cx, cy: host.cy, r: host.r, teeth: host.teeth, dir: host.dir, phase: host.phase };
