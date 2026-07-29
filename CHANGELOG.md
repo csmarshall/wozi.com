@@ -7,6 +7,18 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **#20 — Docs described a chain and a belt that render nowhere.** Every document
+  in the repo said the page had a roller chain and a toothed belt; the shipped
+  train is fully direct-mesh and draws neither. Verified against the served page:
+  zero of 100 paths carry a `stroke-dasharray` or `stroke-dashoffset`. The cause
+  is simply that no `TRAIN` entry carries a `link`, so `solve()` yields no runs
+  and `chainEl()` is never called. Worst of it was in `CLAUDE.md`: the documented
+  verification recipe told the next reader to check that `stroke-dashoffset` was
+  changing, a check that **cannot pass on healthy code** — the mirror of #7, where
+  a static train photographed perfectly. Recipe rewritten around values that
+  exist, and the strand code documented as a dormant capability (how to re-enable
+  it, and the four rules from #4/#5/#8/#9 a new run must still satisfy) rather
+  than deleted or left unexplained.
 - **#19 — Train rendered smaller the larger the window got.** The fit scale was
   capped at 1.15, while the viewport spread boost widens the solve on big screens
   — so a large display produced a wide solve squeezed back down to small wheels

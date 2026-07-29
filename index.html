@@ -95,7 +95,9 @@ const CLEARANCE = 13; /* px kept between the tip circles of wheels that are not 
    metal  — 'steel' | 'brass'
    Add or remove an entry and the whole train re-solves: spacing, direction, ratio. */
 /* Seven site wheels of near-equal size, each with its own web design.
-   `link: 'chain'` drives the next wheel by roller chain instead of tooth mesh. */
+   `link: 'chain'` (or `'belt'`) drives the next wheel by strand instead of tooth mesh.
+   No entry sets one today, so no chain or belt is drawn — see CLAUDE.md,
+   "Dormant capability: chain and belt", before re-enabling either. */
 /* One directly-meshed train: every wheel drives its neighbour, so spacing is fixed by
    the pitch radii and only the bearing varies — a gentle serpentine, no slack to fold. */
 const TRAIN = [
@@ -826,7 +828,10 @@ class Component extends DCLogic {
     );
   }
 
-  /* Roller chain wrapped around two sprockets: external tangents + wrap arcs. */
+  /* Roller chain wrapped around two sprockets: external tangents + wrap arcs.
+     Uninvoked as shipped — no TRAIN entry carries a `link`, so solve() yields no
+     runs and this is never called. Kept on purpose, intact and correct, against
+     wanting a strand back later. */
   chainEl(key, a, b) {
     const h = React.createElement;
     /* Chain/belt pitch is the gears' own circular pitch (π × module), and the strand

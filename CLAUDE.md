@@ -20,10 +20,13 @@ runtime it loads. Serve the folder; that is the deploy.
 
 ## Invariants
 
-**One clock.** Every wheel transform and every strand's `stroke-dashoffset` is
-derived from the same master angle each tick — one tooth of travel per tooth of
-the driving sprocket, in whichever direction the train is turning. Reversing the
-drag must reverse the chain and belt.
+**One clock.** Every wheel transform is derived from the same master angle each
+tick — one tooth of travel per tooth of the driving sprocket, in whichever
+direction the train is turning. The same rule binds any drive strand: its
+`stroke-dashoffset` comes off that master angle too, so reversing the drag
+reverses the strand with it. No chain or belt is enabled in the shipped train
+(see *Dormant capability* below), but this invariant is what makes re-enabling
+one safe.
 
 **Lighting from directly above.** All shading is symmetric about the vertical
 axis: vertical body gradients, radial highlights at 50% horizontally, specular
@@ -50,15 +53,52 @@ on an explicit `isIntersecting === false` *after* the stage has non-zero size,
 and the flag must be one expression evaluated in `step()`. Latching it true
 froze the entire page (#7).
 
+## Dormant capability: chain and belt
+
+The shipped train is fully direct-mesh — every wheel drives its neighbour, so
+spacing is fixed by the pitch radii and only the bearing varies. That was a
+deliberate late decision: a serpentine with no slack cannot fold, which is how
+#9 was finally settled.
+
+The roller chain and toothed belt are **not deleted, only uninvoked**, and the
+implementation is intact:
+
+- `chainEl()` builds both variants — external tangents plus far-side wrap arcs,
+  with dash arrays at the gears' own circular pitch (π × module), so every roller
+  drops into a tooth space.
+- `applyRotation()` drives every tracked strand's `stroke-dashoffset` off the
+  master angle.
+- `solve()` reads `belt: t.link` and creates a run wherever a `TRAIN` entry
+  carries one.
+
+To bring one back, put `link: 'chain'` or `link: 'belt'` on the `TRAIN` entry
+that should drive its successor by strand instead of tooth mesh. Nothing else
+needs wiring — the solver picks it up.
+
+Re-enabling means re-earning the four rules the strands cost the most to learn. A
+run must wrap the **far** side of the sprocket (#4), must not cross another run
+(#5), must be long enough to read as span rather than wrap (#8), and must head
+*away* from the centroid of the wheels already placed (#9). The solver still
+enforces all four; they are simply not exercised while no entry has a `link`.
+
 ## Verifying a change
 
 Never trust the screenshot alone — a static train looks fine in a still. Serve
 the page and check, ~700ms apart:
 
-- gear `transform` values advance
-- `stroke-dashoffset` on the chain/belt paths is non-empty and changing
-- no console errors
-- hub badges sit at 0px offset from their wheel centres
+- gear `transform` values advance — all of them, not just the first
+- no console errors. A `/favicon.ico` 404 is expected and benign: the real icon
+  is a `data:` URI injected through `helmet`, so the browser asks for the default
+  path first.
+- hub badges sit at ~0px offset from their wheel centres
+- each badge contains an `<svg>`. Empty badges mean the page was opened from
+  `file://` instead of served — `loadIcons()` fetches them, and its `.catch`
+  swallows the failure silently.
+
+Only if a drive strand has been enabled: its `stroke-dashoffset` is non-empty and
+changing. **The shipped direct-mesh train has no strands, so there is no
+`stroke-dashoffset` anywhere on the page** — an absent value is correct here, not
+a regression.
 
 ## Change tracking
 

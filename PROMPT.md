@@ -6,9 +6,14 @@ your first message. Everything it needs is in this folder.
 ---
 
 You are taking over an existing, finished design: the wozi.com landing page. It
-is a single-file animated gear train — seven meshed wheels, a roller chain and a
-toothed belt, each wheel carrying one social link at its hub. `index.html` opens
-directly in a browser and is the whole site; `support.js` is its runtime.
+is a single-file animated gear train — seven directly meshed wheels, each
+carrying one social link at its hub. `index.html` is the whole site and
+`support.js` is its runtime. Serve the folder rather than opening the file: the
+hub icons are fetched at runtime, so `file://` leaves every badge empty without
+raising an error.
+
+(Chain and belt drive runs are implemented and documented in `CLAUDE.md`, but no
+wheel enables one — the shipped train is direct-mesh throughout.)
 
 This is **shipping code, not a mock to reimplement.** Do not rewrite it in a
 framework, do not extract a build step, do not restyle it. Read `CLAUDE.md`

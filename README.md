@@ -3,8 +3,7 @@
 The landing page for wozi.com: a single-file, self-contained animated gear train.
 Each wheel carries one social link at its hub; the whole train is driven by a
 physics loop (flywheel inertia, drag-to-spin, meshed ratios) rather than CSS
-animation, so every wheel, the roller chain and the toothed belt stay in exact
-mechanical sync.
+animation, so every wheel stays in exact mechanical sync with its neighbours.
 
 ## Files
 
@@ -26,12 +25,14 @@ directly from `file://` leaves the badges empty.
 
 - **Solver.** Wheel sizes, tooth counts and centre distances are derived at
   runtime from one module constant (`MODULE`), so every wheel meshes by
-  construction. Drive runs (chain, belt) are placed by a search that rejects any
-  route that crosses another run, passes over a third wheel, or doubles back
-  through the middle of the group.
+  construction. The shipped train is fully direct-mesh: every wheel drives its
+  neighbour, so only the bearing between centres varies — a gentle serpentine
+  with no slack to fold. Chain and belt drive runs are still implemented and
+  still solved for, but no wheel currently enables one; `CLAUDE.md` documents how
+  to bring them back.
 - **One frame loop.** No CSS animations. A single `requestAnimationFrame` step
-  integrates a master angle; every wheel transform and every strand's
-  `stroke-dashoffset` is derived from it. One tooth of travel per tooth of the
+  integrates a master angle; every wheel transform — and any enabled strand's
+  `stroke-dashoffset` — is derived from it. One tooth of travel per tooth of the
   driving sprocket, in whichever direction the train is turning.
 - **Layers.** Optional detail passes (spin-up, engraved rims, parallax,
   character marks, hover drag) are independent flags and compose freely.

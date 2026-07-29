@@ -45,6 +45,14 @@ a third wheel, shares an edge with an outrigger, or heads back toward the
 centroid of the wheels already placed, and searches a ±150° arc to find a bearing
 that satisfies all of it.
 
+That is where the strands *ended*, but not where the page did. The train that
+shipped is fully direct-mesh: no entry in `TRAIN` carries a `link`, so no chain
+and no belt are drawn. Having every wheel drive its neighbour fixes spacing at
+the pitch radii and leaves only the bearing free — a serpentine with no slack,
+which cannot fold no matter what the solver does. The strand code stays in the
+file, intact and correct, against wanting it later; `CLAUDE.md` records how to
+re-enable it and which of the four hard-won rules a new run has to satisfy.
+
 **Performance was a real constraint, then stopped being one.** Per-wheel
 `drop-shadow` filters were the dominant cost — nine filtered SVGs re-rasterising
 every frame. Removing them (baking shadows into the artwork), dropping the
