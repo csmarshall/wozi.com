@@ -12,7 +12,13 @@ address and mobile number.
 The deploy **names the paths it publishes** rather than excluding the ones it
 does not — a whitelist, so a new file cannot reach the web by being forgotten.
 
-Published: `index.html`, `support.js`, `assets/`, `cards/`, `ssh_public_key`.
+Published: `index.html`, `support.js`, `assets/`, `cards/`, `keybase.html`,
+`ssh_public_key`.
+
+`keybase.html` is a signed ownership proof and is kept live deliberately — the
+claim only verifies while the file is reachable, so dropping it from the include
+list silently breaks it. Its content is signature-covered: serve it byte-exact or
+not at all.
 
 Never published: `legacy/` (the archive of everything retired from the bucket),
 and every document in the repo root — `CLAUDE.md`, `README.md`, `CHANGELOG.md`,

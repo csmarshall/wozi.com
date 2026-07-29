@@ -7,12 +7,25 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Added
 
+- **#22 — www, TLS and directory URLs fixed at the edge.** `https://www.wozi.com`
+  had never worked: www was a plain CNAME to the HTTP-only S3 website endpoint and
+  was not an alias on the distribution, so it failed TLS outright rather than
+  redirecting. A new ACM cert covers both names, www is now an alias on the
+  distribution, and one CloudFront viewer-request function does two jobs —
+  redirects www to the apex preserving path and query, and rewrites any
+  trailing-slash URI to `index.html`. That second rule fixes `/cards/`, which had
+  been returning **200 with a zero-byte body**: the origin is the S3 REST endpoint
+  behind an OAI, so S3's own `IndexDocument` never runs and CloudFront's
+  `DefaultRootObject` only covers `/`. Bucket versioning was enabled before any
+  cleanup, so everything retired that day is still recoverable as a `null` version
+  behind a delete marker.
+
 - **#21 — The repo is now the source of truth for the whole bucket.** Everything
   in `s3://wozi.com` and `s3://www.wozi.com` was pulled in, and the repo made
-  private to hold it. Still served: the gear train, `cards/` and
+  private to hold it. Still served: the gear train, `cards/`, `keybase.html` and
   `ssh_public_key`. Retired into `legacy/`: the 2023 landing page and its assets,
-  the Keybase proof, the 2014 resume, `Spacer.gif`, and the entire `www` bucket
-  (unreachable for years behind a redirect-all rule). Deploys publish an explicit
+  the 2014 resume, `Spacer.gif`, and the entire `www` bucket (unreachable for
+  years behind a redirect-all rule). Deploys publish an explicit
   **whitelist** of paths, so nothing reaches the web by being forgotten.
   **Melissa's contact card was removed from the site and deliberately kept out of
   this repo entirely** — `cards/index.html` had been a byte-identical duplicate of
