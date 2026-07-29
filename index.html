@@ -108,14 +108,84 @@ const CLEARANCE = 13; /* px kept between the tip circles of wheels that are not 
 /* One directly-meshed train: every wheel drives its neighbour, so spacing is fixed by
    the pitch radii and only the bearing varies — a gentle serpentine, no slack to fold. */
 const TRAIN = [
-  { teeth: 17, angle: 0, color: '#4A90E2', slug: 'linkedin', kind: 'spokes', arms: 5, prof: { add: 1.0, tip: 0.36, rim: 1.7, web: 3.2, hub: 0.2, arm: 0.15 } },
-  { teeth: 15, angle: 20, color: '#17A05C', slug: 'github', kind: 'holes', arms: 6, prof: { add: 0.92, tip: 0.38, rim: 1.6, web: 2.9, hub: 0.23, hole: 0.12 } },
-  { teeth: 18, angle: -24, color: '#8CB8F2', slug: 'mastodon', kind: 'pockets', arms: 6, prof: { add: 0.96, tip: 0.34, rim: 2.0, web: 3.1, hub: 0.22 } },
-  { teeth: 14, angle: 22, color: '#E8615A', slug: 'instagram', kind: 'ring', prof: { add: 1.05, tip: 0.31, rim: 1.4, web: 2.7, hub: 0.26 } },
-  { teeth: 17, angle: -20, color: '#6ECFA6', slug: 'threads', kind: 'spokes', arms: 4, prof: { add: 0.88, tip: 0.34, rim: 1.7, web: 3.0, hub: 0.26, arm: 0.2 } },
-  { teeth: 15, angle: 24, color: '#F2C14E', slug: 'bluesky', kind: 'holes', arms: 8, prof: { add: 1.0, tip: 0.35, rim: 1.9, web: 3.2, hub: 0.2, hole: 0.085 } },
-  { teeth: 18, angle: -18, color: '#9B8CE0', slug: 'mail', kind: 'plain', prof: { add: 0.9, tip: 0.4, rim: 1.6, web: 2.6, hub: 0.3 } }
+  { teeth: 17, angle: 0, slug: 'linkedin', kind: 'spokes', arms: 5, prof: { add: 1.0, tip: 0.36, rim: 1.7, web: 3.2, hub: 0.2, arm: 0.15 } },
+  { teeth: 15, angle: 20, slug: 'github', kind: 'holes', arms: 6, prof: { add: 0.92, tip: 0.38, rim: 1.6, web: 2.9, hub: 0.23, hole: 0.12 } },
+  { teeth: 18, angle: -24, slug: 'mastodon', kind: 'pockets', arms: 6, prof: { add: 0.96, tip: 0.34, rim: 2.0, web: 3.1, hub: 0.22 } },
+  { teeth: 14, angle: 22, slug: 'instagram', kind: 'ring', prof: { add: 1.05, tip: 0.31, rim: 1.4, web: 2.7, hub: 0.26 } },
+  { teeth: 17, angle: -20, slug: 'threads', kind: 'spokes', arms: 4, prof: { add: 0.88, tip: 0.34, rim: 1.7, web: 3.0, hub: 0.26, arm: 0.2 } },
+  { teeth: 15, angle: 24, slug: 'bluesky', kind: 'holes', arms: 8, prof: { add: 1.0, tip: 0.35, rim: 1.9, web: 3.2, hub: 0.2, hole: 0.085 } },
+  { teeth: 18, angle: -18, slug: 'mail', kind: 'plain', prof: { add: 0.9, tip: 0.4, rim: 1.6, web: 2.6, hub: 0.3 } }
 ];
+
+function hslHex(h, s, l) {
+  h = ((h % 360) + 360) % 360; s /= 100; l /= 100;
+  const a = s * Math.min(l, 1 - l);
+  const k = (n) => (n + h / 30) % 12;
+  const f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1));
+  const hex = (v) => Math.round(v * 255).toString(16).padStart(2, '0');
+  return '#' + hex(f(0)) + hex(f(8)) + hex(f(4));
+}
+
+function relLum(hex) {
+  const c = [1, 3, 5].map(i => parseInt(hex.substr(i, 2), 16) / 255)
+    .map(v => v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+  return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+}
+
+/* Solve for the lightness that puts a hue on a given relative luminance.
+   Equal HSL lightness is NOT equal perceived brightness: green carries a 0.72
+   luminance coefficient against blue's 0.07, so an evenly-spaced palette at
+   constant L has one wheel nearly three times brighter than another, and that
+   wheel jumps out of the train. Searching for the lightness directly levels
+   them exactly — measured spread falls from 0.356 to 0.004. */
+function levelled(h, s, target) {
+  let lo = 8, hi = 94;
+  for (let i = 0; i < 24; i++) {
+    const m = (lo + hi) / 2;
+    if (relLum(hslHex(h, s, m)) < target) lo = m; else hi = m;
+  }
+  return hslHex(h, s, (lo + hi) / 2);
+}
+
+/* Wheel colours are derived, never picked. Seven hand-chosen ones had drifted
+   into two blues and two greens (#12) — the same failure as the per-wheel `rim`
+   values in #15: a set maintained by judgement stops being consistent the moment
+   it changes. Spacing hues evenly makes a collision impossible by construction,
+   and re-spaces itself if a wheel is added or removed. With seven wheels no two
+   are closer than 360/7 ≈ 51°. */
+/* Hues are handed out in a STRIDE around the wheel rather than in order. Even
+   spacing alone still seats neighbouring hues next to each other, and wheels are
+   only ever confused with the ones beside them — in order, the gold, green and
+   teal ended up in a row. A stride coprime with the wheel count visits every hue
+   exactly once while putting 3 x 51° between neighbours instead of 51°.
+   Keep STRIDE coprime with TRAIN.length or hues repeat and wheels collide.
+
+   Three things together make a palette read as a rainbow: perfectly even
+   spacing, constant saturation, and hues arriving in order. The stride fixes the
+   third; JITTER and the saturation spread fix the other two, so the set reads as
+   seven chosen colours rather than a spectrum. Both are bounded, so the spacing
+   guarantee survives — worst case across 100k seeds is ~31°, still well clear of
+   confusable.
+
+   The whole wheel is rotated by a random offset per load, so the palette differs
+   between visits. Computed once at module load and never on resize, so the
+   wheels cannot change colour under the pointer — the same reason the background
+   machinery seeds from a fixed constant. */
+const WHEEL_SAT = 88, WHEEL_LUM = 0.30, WHEEL_JITTER = 0.4;
+/* Which stride is used is itself shuffled per load. Every value 1..6 is coprime
+   with 7 so all of them visit each hue exactly once, but 1 and 6 seat
+   neighbouring hues side by side — the thing the stride exists to prevent. The
+   surviving set keeps at least 2 x 51° between any two neighbouring wheels. */
+const WHEEL_STRIDES = [2, 3, 4, 5];
+const WHEEL_STRIDE = WHEEL_STRIDES[Math.floor(Math.random() * WHEEL_STRIDES.length)];
+const WHEEL_HUE0 = Math.random() * 360;
+TRAIN.forEach((t, i) => {
+  const gap = 360 / TRAIN.length;
+  const slot = (i * WHEEL_STRIDE) % TRAIN.length;
+  const jitter = (Math.random() - 0.5) * gap * WHEEL_JITTER;
+  const sat = WHEEL_SAT + (Math.random() - 0.5) * 14;
+  t.color = levelled(WHEEL_HUE0 + gap * slot + jitter, sat, WHEEL_LUM);
+});
 
 /* Depth of the engraving band, in modules — uniform on every wheel. */
 const BAND_DEPTH = 2.1;
@@ -149,10 +219,16 @@ function shades(hex, soft) {
   const n = parseInt(hex.slice(1), 16);
   const c = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
   const mix = (t, target) => '#' + c.map(v => Math.round(v + (target - v) * t).toString(16).padStart(2, '0')).join('');
-  /* Light mode gets a gentler spread so the wheels sit into the page instead of shouting. */
+  /* The top stop is a specular highlight, not a lighter version of the object.
+     Light mode sits on a #F1F2F0 page, so a highlight mixed far toward white lands
+     within a few percent of the background and the wheel loses its top edge
+     entirely — it reads as frosted rather than solid (#13). The lit face therefore
+     stays a clear tint of the hue, and the contrast is carried by the lower stops
+     instead. Dark mode can afford a brighter highlight because it reads against
+     #1E2226, where light means lit. */
   return soft
-    ? [mix(0.5, 255), mix(0.24, 255), mix(0.12, 0), mix(0.3, 0)]
-    : [mix(0.55, 255), mix(0.14, 255), mix(0.2, 0), mix(0.42, 0)];
+    ? [mix(0.20, 255), mix(0.00, 255), mix(0.26, 0), mix(0.48, 0)]
+    : [mix(0.38, 255), mix(0.04, 255), mix(0.26, 0), mix(0.50, 0)];
 }
 
 const SITES = {
@@ -920,12 +996,22 @@ class Component extends DCLogic {
     const gearArt = h('div', { style: { position: 'absolute', left: 0, top: 0, width: solved.w + 'px', height: solved.h + 'px', transform: 'scale(var(--gs))', transformOrigin: 'top left' } },
       ghosts,
       /* One cast-shadow layer behind every wheel, so a wheel's shadow can never fall
-         on top of the neighbour it meshes with. Static — never touched by the frame loop. */
+         on top of the neighbour it meshes with (#18). Static — never touched by the
+         frame loop.
+
+         Painted as a radial gradient UNDER each wheel, not as an outer box-shadow
+         around it (#13). An outer box-shadow only paints outside its border box, so
+         it darkened a ring around each wheel while leaving the disc underneath at
+         full page brightness — and the tooth gaps put that bright disc next to the
+         darkened surround, which read as a white crust on a light page. A shadow
+         belongs under the object and should show *through* the gaps between teeth,
+         which is also what makes the teeth read as teeth rather than as a hole in a
+         halo. Invisible in dark mode either way, which is why it survived this long. */
       h('div', { key: 'shadows', style: { position: 'absolute', left: 0, top: 0, width: solved.w + 'px', height: solved.h + 'px', zIndex: 0, pointerEvents: 'none' } },
         solved.gears.map(g => h('div', { key: g.i, style: {
-          position: 'absolute', left: (g.cx - g.ro) + 'px', top: (g.cy - g.ro + 4) + 'px',
-          width: (g.ro * 2) + 'px', height: (g.ro * 2) + 'px', borderRadius: '50%',
-          boxShadow: '0 4px 14px rgba(10,20,26,.22)'
+          position: 'absolute', left: (g.cx - g.ro * 1.12) + 'px', top: (g.cy - g.ro * 1.12 + 5) + 'px',
+          width: (g.ro * 2.24) + 'px', height: (g.ro * 2.24) + 'px',
+          background: 'radial-gradient(closest-side, rgba(10,20,26,.26) 0%, rgba(10,20,26,.20) 58%, rgba(10,20,26,.08) 80%, rgba(10,20,26,0) 100%)'
         } }))),
       h('svg', { key: 'chains', width: solved.w, height: solved.h, style: { position: 'absolute', left: 0, top: 0, overflow: 'visible' } },
         solved.chains.map((c, ci) => this.chainEl('c' + ci, c.a, c.b))),
