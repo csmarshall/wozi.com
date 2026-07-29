@@ -76,8 +76,13 @@ but sitting on the arc as a baseline rather than centred on it.
 
 ## Decisions worth keeping
 
-- **One imperfection, not seven.** A single fractured tooth reads as a machine
-  that has been used. Marks on every wheel read as broken.
+- ~~**One imperfection, not seven.**~~ *Reversed on 2026-07-29 (#15).* The
+  original reasoning was that a single fractured tooth reads as a machine that has
+  been used, while marks on every wheel read as broken. In practice the flag then
+  meant "wear on wheel 2", not "wear on", which made the toggle hard to read as a
+  layer at all. `character` is now all-or-nothing across the train, with the chip
+  in a different position on each wheel so seven fractures do not line up into a
+  pattern.
 - **Blind pockets were a mistake.** A milled pocket at this scale looks like a
   hole that failed to punch. Every opening is now cut clean through.
 - **The stamps are real notation.** `M7 Z17` is module and tooth count, the two

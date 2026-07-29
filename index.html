@@ -835,7 +835,14 @@ class Component extends DCLogic {
     const p = shades(g.color || '#C9D2D6', this.state.theme !== 'dark');
     const id = 'gr' + g.i, size = (g.ro + 6) * 2, r = g.r, m = MODULE;
     const prof = g.prof;
-    const path = this.teethPath(g.teeth, r, prof, this.props.character && g.i === 2 ? Math.max(1, Math.round(g.teeth * 0.3)) : -1);
+    /* LAYER: character — the flag is all-or-nothing across the train, so it reads
+       as "wear on" rather than "wear on one particular wheel". The chipped tooth
+       moves around the blank from wheel to wheel: seven fractures in the same
+       relative position would read as a pattern, which is the one thing damage
+       must not do. The stride is coprime with nothing in particular — it only has
+       to avoid landing in the same place twice running. */
+    const chip = this.props.character ? (g.i * 5 + 3) % g.teeth : -1;
+    const path = this.teethPath(g.teeth, r, prof, chip);
     /* Every wheel carries the same engraving band: a solid annulus one module deep just
        inside the tooth roots. The web is held clear of it so nothing is ever cut through
        the lettering, and because MODULE is shared the band is identical on all wheels. */
