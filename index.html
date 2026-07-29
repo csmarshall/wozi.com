@@ -79,6 +79,29 @@ a:hover{color:var(--ink);}
 </x-dc>
 <script type="text/x-dc" data-dc-script data-props="{&quot;domain&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Wordmark&quot;},&quot;frameRate&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[60,30,24,20],&quot;default&quot;:30,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;spinUp&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;engravedRims&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;parallax&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;character&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;hoverDrag&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;speed&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;min&quot;:0.25,&quot;max&quot;:2,&quot;step&quot;:0.25,&quot;default&quot;:1,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;gearScale&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;min&quot;:0.5,&quot;max&quot;:1.3,&quot;step&quot;:0.05,&quot;default&quot;:1,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;options&quot;:[&quot;#5F686E&quot;,&quot;#E8483A&quot;,&quot;#3B7DE8&quot;,&quot;#F4B32B&quot;,&quot;#1FA463&quot;],&quot;default&quot;:&quot;#5F686E&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;shuffle&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Gears&quot;}}">
 const MODULE = 7;
+
+/* Tooth form. Uniform across the train and derived from the module — never set
+   per wheel. Per-wheel `add` and `tip` were the #15 mistake repeated on the tooth
+   profile: a set maintained by judgement drifts, and this one had drifted into a
+   train where some pairs collided and others left a visible gap (#11).
+
+   Measured against the real outlines at all six adjacent pairs:
+     as shipped (base 66%, add 0.88-1.05, tip 0.31-0.40)
+       4 points of one wheel's outline inside its neighbour's, up to 1.42px deep
+     this form
+       0 penetrating points, 1.76px of clearance at the mesh
+
+   The tooth had been a fat wedge — 66% of the circular pitch at the root tapering
+   to 31-40% at the tip — and it is fat roots that collide as they swing through
+   mesh. Narrowing the base to 48% removes the interference at the same engagement
+   depth. These values sit on a plateau (44-48% base and 0.34-0.36 tip all measure
+   clean), so the result is not balanced on a knife edge. Raising the addendum to
+   0.95 or the base to 52% brings contact straight back. */
+const TOOTH_ADD = 0.90;   /* addendum, in modules */
+const TOOTH_DED = 1.15;   /* dedendum, in modules */
+const TOOTH_TIP = 0.36;   /* tooth thickness at the tip, as a fraction of the pitch */
+const TOOTH_BASE = 0.48;  /* tooth thickness at the root, as a fraction of the pitch */
+
 const BASE_MS = 21000;
 const GHOST_COLORS = ['#9AA6AD', '#A9B4BA', '#8F9BA3', '#B3BCC2'];
 const GHOST_KINDS = ['spokes', 'holes', 'pockets', 'ring', 'plain'];
@@ -108,13 +131,13 @@ const CLEARANCE = 13; /* px kept between the tip circles of wheels that are not 
 /* One directly-meshed train: every wheel drives its neighbour, so spacing is fixed by
    the pitch radii and only the bearing varies — a gentle serpentine, no slack to fold. */
 const TRAIN = [
-  { teeth: 17, angle: 0, slug: 'linkedin', kind: 'spokes', arms: 5, prof: { add: 1.0, tip: 0.36, rim: 1.7, web: 3.2, hub: 0.2, arm: 0.15 } },
-  { teeth: 15, angle: 20, slug: 'github', kind: 'holes', arms: 6, prof: { add: 0.92, tip: 0.38, rim: 1.6, web: 2.9, hub: 0.23, hole: 0.12 } },
-  { teeth: 18, angle: -24, slug: 'mastodon', kind: 'pockets', arms: 6, prof: { add: 0.96, tip: 0.34, rim: 2.0, web: 3.1, hub: 0.22 } },
-  { teeth: 14, angle: 22, slug: 'instagram', kind: 'ring', prof: { add: 1.05, tip: 0.31, rim: 1.4, web: 2.7, hub: 0.26 } },
-  { teeth: 17, angle: -20, slug: 'threads', kind: 'spokes', arms: 4, prof: { add: 0.88, tip: 0.34, rim: 1.7, web: 3.0, hub: 0.26, arm: 0.2 } },
-  { teeth: 15, angle: 24, slug: 'bluesky', kind: 'holes', arms: 8, prof: { add: 1.0, tip: 0.35, rim: 1.9, web: 3.2, hub: 0.2, hole: 0.085 } },
-  { teeth: 18, angle: -18, slug: 'mail', kind: 'plain', prof: { add: 0.9, tip: 0.4, rim: 1.6, web: 2.6, hub: 0.3 } }
+  { teeth: 17, angle: 0, slug: 'linkedin', kind: 'spokes', arms: 5, prof: { rim: 1.7, web: 3.2, hub: 0.2, arm: 0.15 } },
+  { teeth: 15, angle: 20, slug: 'github', kind: 'holes', arms: 6, prof: { rim: 1.6, web: 2.9, hub: 0.23, hole: 0.12 } },
+  { teeth: 18, angle: -24, slug: 'mastodon', kind: 'pockets', arms: 6, prof: { rim: 2.0, web: 3.1, hub: 0.22 } },
+  { teeth: 14, angle: 22, slug: 'instagram', kind: 'ring', prof: { rim: 1.4, web: 2.7, hub: 0.26 } },
+  { teeth: 17, angle: -20, slug: 'threads', kind: 'spokes', arms: 4, prof: { rim: 1.7, web: 3.0, hub: 0.26, arm: 0.2 } },
+  { teeth: 15, angle: 24, slug: 'bluesky', kind: 'holes', arms: 8, prof: { rim: 1.9, web: 3.2, hub: 0.2, hole: 0.085 } },
+  { teeth: 18, angle: -18, slug: 'mail', kind: 'plain', prof: { rim: 1.6, web: 2.6, hub: 0.3 } }
 ];
 
 function hslHex(h, s, l) {
@@ -388,7 +411,7 @@ class Component extends DCLogic {
         const g = { cx: cx, cy: cy, r: r, teeth: teeth, dir: -prev.dir, phase: phase,
           color: GHOST_COLORS[Math.floor(this.rnd() * GHOST_COLORS.length)],
           kind: GHOST_KINDS[Math.floor(this.rnd() * GHOST_KINDS.length)], arms: 3 + Math.floor(this.rnd() * 5),
-          prof: { add: 0.85 + this.rnd() * 0.25, tip: 0.3 + this.rnd() * 0.12, rim: 1.5 + this.rnd() * 0.8,
+          prof: { rim: 1.5 + this.rnd() * 0.8,
             web: 2.4 + this.rnd() * 1.2, hub: 0.18 + this.rnd() * 0.14, hole: 0.09 + this.rnd() * 0.05, arm: 0.14 + this.rnd() * 0.08 },
           ro: r + MODULE * 0.95, i: 'gh' + ei + k };
         ghosts.push(g);
@@ -604,10 +627,8 @@ class Component extends DCLogic {
     let x = 0, y = 0, dir = 1, phase = 0;
     TRAIN.forEach((t, i) => {
       const prof = t.prof || {};
-      if (prof.add === undefined) prof.add = 0.95;
-      if (prof.tip === undefined) prof.tip = 0.36;
       const r = MODULE * t.teeth / 2;
-      const ro = r + MODULE * prof.add;
+      const ro = r + MODULE * TOOTH_ADD;
       let chainFrom = null;
       if (i > 0) {
         const prev = g[i - 1];
@@ -706,9 +727,10 @@ class Component extends DCLogic {
   }
 
   teethPath(n, r, prof, chipIdx) {
-    const m = MODULE, add = prof.add, tip = prof.tip, fl = (0.5 - tip / 2) - 0.17;
-    const ro = r + m * add, rr = Math.max(4, r - m * 1.15), a = 2 * Math.PI / n;
-    const t0 = 0.5 - tip / 2, t1 = 0.5 + tip / 2, r0 = t0 - fl, r1 = t1 + fl;
+    const m = MODULE;
+    const ro = r + m * TOOTH_ADD, rr = Math.max(4, r - m * TOOTH_DED), a = 2 * Math.PI / n;
+    const t0 = 0.5 - TOOTH_TIP / 2, t1 = 0.5 + TOOTH_TIP / 2;
+    const r0 = (1 - TOOTH_BASE) / 2, r1 = 1 - r0;
     const P = (rad, ang) => (rad * Math.cos(ang)).toFixed(2) + ',' + (rad * Math.sin(ang)).toFixed(2);
     let d = '';
     for (let i = 0; i < n; i++) {
