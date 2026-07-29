@@ -7,6 +7,21 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Added
 
+- **#23 — Deploys from GitHub Actions, keyless.** Push to `main` publishes to
+  `s3://wozi.com` and invalidates CloudFront. Auth is GitHub OIDC into
+  `wozi-com-deploy`, whose trust policy pins the subject to
+  `repo:csmarshall/wozi.com:ref:refs/heads/main` — repo *and* branch, so a fork or
+  a side branch cannot assume it — and whose permissions reach exactly one bucket
+  and one distribution. No long-lived keys exist anywhere. The job publishes an
+  explicit whitelist and deliberately does **not** pass `--delete`: a bad sync
+  with it empties the live site, while a stale object is merely untidy.
+  Invalidation is not optional, since the distribution's default TTL is 86400 and
+  a deploy would otherwise be invisible for a day. The run then verifies the live
+  site over HTTPS and fails if anything is wrong, including asserting the icons
+  are served as `image/svg+xml` — served as anything else, `loadIcons()` still
+  fetches them, its `.catch` swallows the failure, and every badge renders empty
+  with no console error.
+
 - **#22 — www, TLS and directory URLs fixed at the edge.** `https://www.wozi.com`
   had never worked: www was a plain CNAME to the HTTP-only S3 website endpoint and
   was not an alias on the distribution, so it failed TLS outright rather than

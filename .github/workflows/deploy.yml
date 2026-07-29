@@ -1,0 +1,163 @@
+name: deploy
+
+# Publishes the site to s3://wozi.com and invalidates CloudFront.
+#
+# Two things about this deploy are deliberate and easy to get wrong later:
+#
+#   1. It publishes an explicit WHITELIST of paths. Adding a file to the repo
+#      does not put it on the web — it has to be named here too. That is what
+#      keeps legacy/ and every .md in the repo off a public site.
+#
+#   2. It does not pass --delete. Removing a file from the web is a deliberate
+#      manual step, because the downside is asymmetric: a bad sync with --delete
+#      empties the live site, while a stale object is merely untidy. Bucket
+#      versioning is on, so a manual delete is recoverable for 90 days.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'legacy/**'
+      - '.gitignore'
+  workflow_dispatch:
+
+# Never let two deploys race each other onto the same bucket.
+concurrency:
+  group: deploy-wozi-com
+  cancel-in-progress: false
+
+permissions:
+  id-token: write   # required to request the OIDC token
+  contents: read
+
+env:
+  BUCKET: s3://wozi.com
+  DISTRIBUTION: E3VOOVXS0KK0E5
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assume the deploy role via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::464480389332:role/wozi-com-deploy
+          role-session-name: gha-wozi-deploy-${{ github.run_id }}
+          aws-region: us-east-1
+
+      # Content types are set explicitly for everything that browsers get wrong
+      # or that has no useful extension. The .svg case is the one that bites:
+      # served as anything but image/svg+xml, loadIcons() still fetches them,
+      # the .catch swallows the failure, and every hub badge renders empty with
+      # no console error at all.
+
+      - name: Publish HTML
+        run: |
+          for f in index.html keybase.html cards/index.html cards/charles/index.html; do
+            aws s3 cp "$f" "$BUCKET/$f" \
+              --content-type "text/html; charset=utf-8" \
+              --cache-control "public, max-age=300" \
+              --only-show-errors
+            echo "  $f"
+          done
+
+      - name: Publish the runtime
+        run: |
+          aws s3 cp support.js "$BUCKET/support.js" \
+            --content-type "text/javascript; charset=utf-8" \
+            --cache-control "public, max-age=300" \
+            --only-show-errors
+          echo "  support.js"
+
+      - name: Publish hub icons
+        run: |
+          aws s3 sync assets/ "$BUCKET/assets/" \
+            --content-type "image/svg+xml" \
+            --cache-control "public, max-age=86400" \
+            --exclude "*" --include "*.svg" \
+            --only-show-errors
+          aws s3 ls "$BUCKET/assets/icons/" | awk '{print "  assets/icons/" $4}'
+
+      - name: Publish card assets
+        run: |
+          aws s3 cp cards/styles/qrserve.css "$BUCKET/cards/styles/qrserve.css" \
+            --content-type "text/css; charset=utf-8" \
+            --cache-control "public, max-age=86400" --only-show-errors
+          aws s3 cp cards/images/icon.png "$BUCKET/cards/images/icon.png" \
+            --content-type "image/png" \
+            --cache-control "public, max-age=86400" --only-show-errors
+          aws s3 cp cards/charles/contact.vcf "$BUCKET/cards/charles/contact.vcf" \
+            --content-type "text/vcard; charset=utf-8" \
+            --cache-control "public, max-age=300" --only-show-errors
+          echo "  cards/styles/qrserve.css, cards/images/icon.png, cards/charles/contact.vcf"
+
+      - name: Publish the SSH public key
+        run: |
+          # No extension, so without an explicit type browsers download it
+          # instead of showing it.
+          aws s3 cp ssh_public_key "$BUCKET/ssh_public_key" \
+            --content-type "text/plain; charset=utf-8" \
+            --cache-control "public, max-age=300" --only-show-errors
+          echo "  ssh_public_key"
+
+      - name: Invalidate CloudFront
+        id: invalidate
+        run: |
+          # Mandatory, not optional. The distribution's default TTL is 86400,
+          # so without this a deploy is invisible for up to a day.
+          ID=$(aws cloudfront create-invalidation \
+                 --distribution-id "$DISTRIBUTION" --paths "/*" \
+                 --query 'Invalidation.Id' --output text)
+          echo "id=$ID" >> "$GITHUB_OUTPUT"
+          echo "invalidation $ID"
+          aws cloudfront wait invalidation-completed \
+            --distribution-id "$DISTRIBUTION" --id "$ID"
+          echo "invalidation complete"
+
+      - name: Verify the deploy is actually live
+        run: |
+          set -o pipefail
+          fail=0
+          check() { # check <url> <expected-status> <expected-substring>
+            body=$(curl -sS --max-time 20 -w '\n%{http_code}' "$1")
+            code=$(printf '%s' "$body" | tail -1)
+            if [ "$code" != "$2" ]; then
+              echo "  FAIL $1 -> $code (wanted $2)"; fail=1; return
+            fi
+            if [ -n "$3" ] && ! printf '%s' "$body" | grep -q "$3"; then
+              echo "  FAIL $1 -> $code but missing '$3'"; fail=1; return
+            fi
+            echo "  ok   $1 -> $code"
+          }
+          check https://wozi.com/ 200 'support.js'
+          check https://wozi.com/support.js 200 ''
+          check https://wozi.com/assets/icons/github.svg 200 'svg'
+          check https://wozi.com/cards/ 200 'Charles'
+          check https://wozi.com/keybase.html 200 ''
+          check https://wozi.com/ssh_public_key 200 'ssh-'
+          # The badges silently break if this is not image/svg+xml.
+          ct=$(curl -sSI https://wozi.com/assets/icons/github.svg | tr -d '\r' \
+               | awk -F': ' 'tolower($1)=="content-type"{print $2}')
+          if [ "$ct" = "image/svg+xml" ]; then
+            echo "  ok   icon content-type is $ct"
+          else
+            echo "  FAIL icon content-type is '$ct', wanted image/svg+xml"; fail=1
+          fi
+          exit $fail
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### wozi.com deploy"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Result | ${{ job.status }} |"
+            echo "| Commit | \`${{ github.sha }}\` |"
+            echo "| Invalidation | \`${{ steps.invalidate.outputs.id }}\` |"
+            echo "| Live | https://wozi.com |"
+          } >> "$GITHUB_STEP_SUMMARY"
