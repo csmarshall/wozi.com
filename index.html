@@ -30,7 +30,10 @@
   /* Corner spacing is one icon width, so the gap around the theme toggle reads
      the same as the icon it sits next to. The button is larger than its icon and
      centres it, so the button box is pulled in by half that difference — derived
-     rather than hardcoded, so changing either size keeps the icon on the mark. */
+     rather than hardcoded, so changing either size keeps the icon on the mark.
+     The wordmark sits on --btnoff, the same offset as the button's box, so the
+     two bottom/top corners are inset by the same amount rather than one being
+     measured to a box and the other to a glyph. */
   --icon:20px; --btn:44px;
   --corner:var(--icon);
   --btnoff:calc(var(--corner) - (var(--btn) - var(--icon)) / 2);
@@ -73,7 +76,7 @@ a:hover{color:var(--ink);}
 
   </div>
 
-  <div ref="{{ colRef }}" style="position:fixed;left:var(--corner);bottom:var(--corner);z-index:15;">
+  <div ref="{{ colRef }}" style="position:fixed;left:var(--btnoff);bottom:var(--btnoff);z-index:15;">
     <div style="display:flex;align-items:baseline;gap:2px;font-weight:800;font-size:clamp(30px,4.6vw,54px);letter-spacing:-0.045em;line-height:1;color:var(--ink);">
       <span>{{ brandName }}</span>
       <span style="width:.16em;height:.16em;border-radius:50%;background:var(--accent);align-self:flex-end;margin-bottom:.14em;"></span>
@@ -262,9 +265,23 @@ function shades(hex, soft) {
      stays a clear tint of the hue, and the contrast is carried by the lower stops
      instead. Dark mode can afford a brighter highlight because it reads against
      #1E2226, where light means lit. */
+  /* Five stops, brightest first: highlight, upper body, lower body, darkest, and a
+     bounce-light lift for the very bottom edge (#19). The bounce is deliberately
+     kept darker than the mid tone so it can never rival the top highlight — light
+     thrown back off whatever the wheel sits on, not a second source. */
+  /* The two themes light the same metal differently, and should look it.
+     Light mode is daylight: a bright specular top, a light upper body, and the
+     tone falling away underneath — a wide range, high on the scale. Dark mode is
+     a spotlit machine: a cooler highlight and far deeper shadow, a wide range
+     sitting low on the scale.
+
+     Both stay monotonic top to bottom apart from the final bounce (#19). The
+     silhouette in light mode is carried by the --edge stroke and the cast shadow,
+     not by making the whole wheel dark, which is what flattened the two themes
+     into each other. */
   return soft
-    ? [mix(0.20, 255), mix(0.00, 255), mix(0.26, 0), mix(0.48, 0)]
-    : [mix(0.38, 255), mix(0.04, 255), mix(0.26, 0), mix(0.50, 0)];
+    ? [mix(0.52, 255), mix(0.22, 255), mix(0.10, 0), mix(0.34, 0), mix(0.22, 0)]
+    : [mix(0.38, 255), mix(0.04, 255), mix(0.26, 0), mix(0.50, 0), mix(0.38, 0)];
 }
 
 const SITES = {
@@ -958,12 +975,18 @@ class Component extends DCLogic {
       h('defs', null,
         /* All shading is symmetric about the vertical axis — lit from above, never from
            a corner — so concentric webs and hubs read as centred. */
+        /* One light, above. The stops descend from the highlight to the darkest
+           point and only lift in the last tenth, where bounce light off the
+           surface below genuinely reaches. The previous profile went
+           light-base-dark-BASE-darkest, which put a second highlight below centre
+           and made every wheel read as lit from underneath — measurably so, top
+           half darker than bottom at all eight pinned rotations (#19). */
         h('linearGradient', { id: id + 'f', x1: '50%', y1: '0%', x2: '50%', y2: '100%' },
           h('stop', { offset: '0%', stopColor: p[0] }),
-          h('stop', { offset: '24%', stopColor: p[1] }),
-          h('stop', { offset: '48%', stopColor: p[2] }),
-          h('stop', { offset: '68%', stopColor: p[1] }),
-          h('stop', { offset: '100%', stopColor: p[3] })),
+          h('stop', { offset: '20%', stopColor: p[1] }),
+          h('stop', { offset: '56%', stopColor: p[2] }),
+          h('stop', { offset: '90%', stopColor: p[3] }),
+          h('stop', { offset: '100%', stopColor: p[4] })),
         h('radialGradient', { id: id + 'w', cx: '50%', cy: '34%', r: '78%' },
           h('stop', { offset: '0%', stopColor: p[2] }),
           h('stop', { offset: '62%', stopColor: p[3] }),
