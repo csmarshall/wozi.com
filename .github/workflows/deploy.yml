@@ -121,31 +121,55 @@ jobs:
         run: |
           set -o pipefail
           fail=0
+
+          # Each assertion retries. A completed invalidation does not guarantee
+          # every edge has already purged, so a single-shot check immediately
+          # after one is inherently racy — it fails on a deploy that is fine.
+          ATTEMPTS=6
+          BACKOFF=10
+
           check() { # check <url> <expected-status> <expected-substring>
-            body=$(curl -sS --max-time 20 -w '\n%{http_code}' "$1")
-            code=$(printf '%s' "$body" | tail -1)
-            if [ "$code" != "$2" ]; then
-              echo "  FAIL $1 -> $code (wanted $2)"; fail=1; return
-            fi
-            if [ -n "$3" ] && ! printf '%s' "$body" | grep -q "$3"; then
-              echo "  FAIL $1 -> $code but missing '$3'"; fail=1; return
-            fi
-            echo "  ok   $1 -> $code"
+            local code body
+            for i in $(seq 1 $ATTEMPTS); do
+              body=$(curl -sS --max-time 20 -w '\n%{http_code}' "$1" || true)
+              code=$(printf '%s' "$body" | tail -1)
+              if [ "$code" = "$2" ] && { [ -z "$3" ] || printf '%s' "$body" | grep -q "$3"; }; then
+                echo "  ok   $1 -> $code${3:+ (contains '$3')}"
+                return 0
+              fi
+              [ "$i" -lt "$ATTEMPTS" ] && sleep $BACKOFF
+            done
+            echo "  FAIL $1 -> last status $code, wanted $2${3:+ containing '$3'} (gave up after $ATTEMPTS tries)"
+            fail=1
           }
+
+          check_content_type() { # check_content_type <url> <expected>
+            local ct
+            for i in $(seq 1 $ATTEMPTS); do
+              ct=$(curl -sSI --max-time 20 "$1" | tr -d '\r' \
+                   | awk -F': ' 'tolower($1)=="content-type"{print $2}')
+              if [ "$ct" = "$2" ]; then echo "  ok   $1 is $ct"; return 0; fi
+              [ "$i" -lt "$ATTEMPTS" ] && sleep $BACKOFF
+            done
+            echo "  FAIL $1 is '$ct', wanted '$2'"
+            fail=1
+          }
+
           check https://wozi.com/ 200 'support.js'
           check https://wozi.com/support.js 200 ''
           check https://wozi.com/assets/icons/github.svg 200 'svg'
           check https://wozi.com/cards/ 200 'Charles'
           check https://wozi.com/keybase.html 200 ''
           check https://wozi.com/ssh_public_key 200 'ssh-'
-          # The badges silently break if this is not image/svg+xml.
-          ct=$(curl -sSI https://wozi.com/assets/icons/github.svg | tr -d '\r' \
-               | awk -F': ' 'tolower($1)=="content-type"{print $2}')
-          if [ "$ct" = "image/svg+xml" ]; then
-            echo "  ok   icon content-type is $ct"
-          else
-            echo "  FAIL icon content-type is '$ct', wanted image/svg+xml"; fail=1
-          fi
+          # Served as anything but image/svg+xml, loadIcons() still fetches the
+          # badges, its .catch swallows the failure, and every hub renders empty
+          # with no console error. Assert it explicitly.
+          check_content_type https://wozi.com/assets/icons/github.svg image/svg+xml
+          # www must redirect to the apex rather than fail TLS, as it did before #22.
+          wwwcode=$(curl -sS -o /dev/null --max-time 20 -w '%{http_code}' https://www.wozi.com/ || true)
+          if [ "$wwwcode" = "301" ]; then echo "  ok   https://www.wozi.com -> 301"; \
+          else echo "  FAIL https://www.wozi.com -> $wwwcode, wanted 301"; fail=1; fi
+
           exit $fail
 
       - name: Summary
