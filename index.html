@@ -1,0 +1,963 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;800&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='%233B7DE8'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%23fff'/%3E%3C/svg%3E" />
+<title>wozi.com</title>
+<style>
+:root{
+  --bg:#F1F2F0; --ink:#20302E; --muted:#788B89; --hair:#D9DEDC; --chip:#FFFFFF;
+  --accent:#3B7DE8; --shadow:0 1px 2px rgba(20,40,38,.06);
+  --m1:#FFFFFF; --m2:#D4DADE; --m3:#98A2A9; --m4:#5F686E;
+  --b1:#F7E7BE; --b2:#DFC183; --b3:#B08F45; --b4:#7A5F28;
+  --edge:rgba(12,22,28,.38); --gloss:rgba(255,255,255,.8);
+  --s:1; --gsm:1; --gsfit:0.86; --gs:calc(var(--gsfit) * var(--gsm));
+  --dir:row; --pad:5vw; --gap:4vw; --colw:400px;
+}
+:root[data-theme="dark"]{
+  --bg:#1E2226; --ink:#EEF1F0; --muted:#93A5A3; --hair:#373E3D; --chip:#2A3034;
+  --accent:#7FA9F0; --shadow:0 1px 2px rgba(0,0,0,.35);
+  --m1:#AEB8BF; --m2:#7C858C; --m3:#4E565C; --m4:#2B3135;
+  --b1:#D8B978; --b2:#A98844; --b3:#75592A; --b4:#463618;
+  --edge:rgba(0,0,0,.6); --gloss:rgba(255,255,255,.38);
+}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:'Manrope',system-ui,sans-serif;-webkit-font-smoothing:antialiased;}
+a{color:var(--accent);text-decoration:none;}
+a:hover{color:var(--ink);}
+@media (max-width:1080px){:root{--gap:2rem;--pad:6vw;}}
+@media (max-width:760px){:root{--pad:28px;--colw:100%;}}
+@media (max-width:430px){:root{--gap:1.25rem;}}
+@keyframes rotate{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+@keyframes rotate-back{from{transform:rotate(0)}to{transform:rotate(-360deg)}}
+@keyframes signsway{from{transform:translate(-50%,0) rotate(-1.2deg)}to{transform:translate(-50%,-14px) rotate(1.2deg)}}
+@keyframes chainrun{to{stroke-dashoffset:calc(var(--pitch) * -1)}}
+@keyframes chainrun-back{to{stroke-dashoffset:var(--pitch)}}
+</style>
+</helmet>
+
+<div style="min-height:100vh;box-sizing:border-box;display:flex;flex-direction:var(--dir);align-items:center;justify-content:center;gap:var(--gap);padding:var(--pad);background:var(--bg);overflow:hidden;">
+
+  <button onClick="{{ toggleTheme }}" title="{{ themeLabel }}" aria-label="{{ themeLabel }}" style="position:fixed;top:clamp(14px,2vw,24px);right:clamp(16px,2.2vw,28px);z-index:20;display:flex;align-items:center;justify-content:center;width:44px;height:44px;padding:0;border:0;border-radius:999px;background:transparent;color:var(--muted);cursor:pointer;transition:color .18s ease;" style-hover="color:var(--ink);">
+    {{ themeIcon }}
+  </button>
+
+  <div ref="{{ stageRef }}" onPointerDown="{{ onGrab }}" onPointerEnter="{{ onStageEnter }}" onPointerLeave="{{ onStageLeave }}" style="{{ stageStyle }}">
+    {{ gearArt }}
+    <sc-for list="{{ links }}" as="link" hint-placeholder-count="7">
+      <a href="{{ link.href }}" title="{{ link.label }}" onMouseEnter="{{ link.enter }}" onMouseLeave="{{ link.leave }}" onFocus="{{ link.enter }}" onBlur="{{ link.leave }}" style="{{ link.discStyle }}">
+        {{ link.iconEl }}
+      </a>
+    </sc-for>
+
+  </div>
+
+  <div ref="{{ colRef }}" style="position:fixed;left:clamp(16px,2.2vw,28px);bottom:clamp(14px,2vw,24px);z-index:15;">
+    <div style="display:flex;align-items:baseline;gap:2px;font-weight:800;font-size:clamp(30px,4.6vw,54px);letter-spacing:-0.045em;line-height:1;color:var(--ink);">
+      <span>{{ brandName }}</span>
+      <span style="width:.16em;height:.16em;border-radius:50%;background:var(--accent);align-self:flex-end;margin-bottom:.14em;"></span>
+      <span style="color:var(--muted);font-weight:600;">{{ brandTld }}</span>
+    </div>
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;domain&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Wordmark&quot;},&quot;frameRate&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[60,30,24,20],&quot;default&quot;:30,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;spinUp&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;engravedRims&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;parallax&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;character&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;hoverDrag&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;speed&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;min&quot;:0.25,&quot;max&quot;:2,&quot;step&quot;:0.25,&quot;default&quot;:1,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;gearScale&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;min&quot;:0.5,&quot;max&quot;:1.3,&quot;step&quot;:0.05,&quot;default&quot;:1,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;options&quot;:[&quot;#E8483A&quot;,&quot;#3B7DE8&quot;,&quot;#F4B32B&quot;,&quot;#1FA463&quot;],&quot;default&quot;:&quot;#E8483A&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;shuffle&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Gears&quot;}}">
+const MODULE = 7;
+const BASE_MS = 21000;
+const GHOST_COLORS = ['#9AA6AD', '#A9B4BA', '#8F9BA3', '#B3BCC2'];
+const GHOST_KINDS = ['spokes', 'holes', 'pockets', 'ring', 'plain'];
+function segCross(p1, p2, p3, p4) {
+  const s = (a, b, c) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+  return s(p1, p2, p3) * s(p1, p2, p4) < 0 && s(p3, p4, p1) * s(p3, p4, p2) < 0;
+}
+function segDist(p, a, b) {
+  const vx = b.x - a.x, vy = b.y - a.y, L = vx * vx + vy * vy;
+  let t = L ? ((p.x - a.x) * vx + (p.y - a.y) * vy) / L : 0;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(p.x - (a.x + t * vx), p.y - (a.y + t * vy));
+}
+const ENDS_APART = 90; /* extra push between the first and last wheel of the visible run */
+const CLEARANCE = 13; /* px kept between the tip circles of wheels that are not meshed */
+
+/* The gear train. Each entry meshes with the one before it:
+   teeth  — tooth count (sets size and speed)
+   angle  — bearing in degrees from the previous gear's centre
+   slug   — icon/link to seat on this gear's hub (omit for a plain idler)
+   metal  — 'steel' | 'brass'
+   Add or remove an entry and the whole train re-solves: spacing, direction, ratio. */
+/* Seven site wheels of near-equal size, each with its own web design.
+   `link: 'chain'` drives the next wheel by roller chain instead of tooth mesh. */
+/* One directly-meshed train: every wheel drives its neighbour, so spacing is fixed by
+   the pitch radii and only the bearing varies — a gentle serpentine, no slack to fold. */
+const TRAIN = [
+  { teeth: 17, angle: 0, color: '#4A90E2', slug: 'linkedin', kind: 'spokes', arms: 5, prof: { add: 1.0, tip: 0.36, rim: 1.7, web: 3.2, hub: 0.2, arm: 0.15 } },
+  { teeth: 15, angle: 20, color: '#17A05C', slug: 'github', kind: 'holes', arms: 6, prof: { add: 0.92, tip: 0.38, rim: 1.6, web: 2.9, hub: 0.23, hole: 0.12 } },
+  { teeth: 18, angle: -24, color: '#8CB8F2', slug: 'mastodon', kind: 'pockets', arms: 6, prof: { add: 0.96, tip: 0.34, rim: 2.0, web: 3.1, hub: 0.22 } },
+  { teeth: 14, angle: 22, color: '#E8615A', slug: 'instagram', kind: 'ring', prof: { add: 1.05, tip: 0.31, rim: 1.4, web: 2.7, hub: 0.26 } },
+  { teeth: 17, angle: -20, color: '#6ECFA6', slug: 'threads', kind: 'spokes', arms: 4, prof: { add: 0.88, tip: 0.34, rim: 1.7, web: 3.0, hub: 0.26, arm: 0.2 } },
+  { teeth: 15, angle: 24, color: '#F2C14E', slug: 'bluesky', kind: 'holes', arms: 8, prof: { add: 1.0, tip: 0.35, rim: 1.9, web: 3.2, hub: 0.2, hole: 0.085 } },
+  { teeth: 18, angle: -18, color: '#9B8CE0', slug: 'mail', kind: 'plain', prof: { add: 0.9, tip: 0.4, rim: 1.6, web: 2.6, hub: 0.3 } }
+];
+
+/* Depth of the engraving band, in modules — uniform on every wheel. */
+const BAND_DEPTH = 2.1;
+
+/* Sibling services sit on neighbouring wheels of the train. */
+const PAIR_SLOTS = [[0, 1], [3, 4]];
+const PAIRS = [['linkedin', 'github'], ['instagram', 'threads']];
+const SINGLES = ['mastodon', 'bluesky', 'mail'];
+
+const BRAND = {
+  linkedin: '#0A66C2', github: '#24292F', mastodon: '#6364FF',
+  instagram: '#E1306C', threads: '#101010', bluesky: '#0285FF', mail: '#E8615A'
+};
+
+function shades(hex, soft) {
+  const n = parseInt(hex.slice(1), 16);
+  const c = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  const mix = (t, target) => '#' + c.map(v => Math.round(v + (target - v) * t).toString(16).padStart(2, '0')).join('');
+  /* Light mode gets a gentler spread so the wheels sit into the page instead of shouting. */
+  return soft
+    ? [mix(0.5, 255), mix(0.24, 255), mix(0.12, 0), mix(0.3, 0)]
+    : [mix(0.55, 255), mix(0.14, 255), mix(0.2, 0), mix(0.42, 0)];
+}
+
+const SITES = {
+  linkedin: { label: 'LinkedIn', path: '/in/csmarshall', href: 'http://www.linkedin.com/in/csmarshall' },
+  github: { label: 'GitHub', path: '/csmarshall', href: 'https://github.com/csmarshall/' },
+  mastodon: { label: 'Mastodon', path: '/@cs_marshall', href: 'http://macaw.social/@cs_marshall' },
+  instagram: { label: 'Instagram', path: '/cs_marshall', href: 'http://www.instagram.com/cs_marshall/' },
+  threads: { label: 'Threads', path: '/csmarshall', href: 'https://www.threads.com/csmarshall' },
+  bluesky: { label: 'Bluesky', path: '/charles.wozi.com', href: 'https://bsky.app/profile/charles.wozi.com' },
+  mail: { label: 'Mail', path: 'charles@wozi.com', href: 'mailto:charles@wozi.com' }
+};
+
+class Component extends DCLogic {
+  state = { theme: 'light', hover: null, icons: {}, ghosts: [] };
+  _spinEls = [];
+  _chainEls = [];
+  _ghostEls = [];
+  _colRef = React.createRef();
+  _stageRef = React.createRef();
+
+  /* Grab any wheel and push it: the whole train follows your hand, and if you push
+     against the way it was turning, it keeps running that way when you let go. */
+  onGrab(e) {
+    const stage = this._stageRef.current;
+    if (!stage || e.button > 0) return;
+    const solved = this.solve();
+    const rect = stage.getBoundingClientRect();
+    const gs = rect.width / solved.w;
+    const px = e.clientX - rect.left, py = e.clientY - rect.top;
+    let hit = null, best = Infinity;
+    solved.gears.forEach(g => {
+      const d = Math.hypot(px - g.cx * gs, py - g.cy * gs);
+      if (d < g.ro * gs && d < best) { best = d; hit = g; }
+    });
+    if (!hit) return;
+    e.preventDefault();
+    const cx = rect.left + hit.cx * gs, cy = rect.top + hit.cy * gs;
+    let p = { x: e.clientX, y: e.clientY };
+    const ang = () => Math.atan2(p.y - cy, p.x - cx) * 180 / Math.PI;
+    let last = ang(), lastT = performance.now(), moved = 0;
+    this._dragging = true;
+    this._v = 0;
+    stage.style.cursor = 'grabbing';
+
+    const move = (ev) => {
+      const pt = ev.touches ? ev.touches[0] : ev;
+      p = { x: pt.clientX, y: pt.clientY };
+      let a = ang(), delta = a - last;
+      while (delta > 180) delta -= 360;
+      while (delta < -180) delta += 360;
+      last = a;
+      const now = performance.now(), dt = Math.max(8, now - lastT);
+      lastT = now;
+      /* Convert the wheel you are holding into master (tooth) units. */
+      const dM = delta * hit.teeth * hit.dir;
+      moved += dM;
+      this._M += dM;
+      this._v = this._v * 0.6 + (dM / dt) * 0.4;
+      this.applyRotation();
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      this._dragging = false;
+      stage.style.cursor = 'grab';
+      /* A flick sets the flywheel spinning; friction pulls it back to idle speed.
+         Push against the train and it keeps running the new way. */
+      const flick = Math.max(-8, Math.min(8, this._v));
+      if (Math.abs(moved) > 30) this._dirSign = moved < 0 ? -1 : 1;
+      else if (Math.abs(flick) > 0.5) this._dirSign = flick < 0 ? -1 : 1;
+      this._v = Math.abs(flick) > 0.15 ? flick : this._dirSign * this.idleRate();
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
+
+  idleRate() { return (7200 / BASE_MS) * (this.props.speed ?? 1); }
+
+  /* Stable per-load randomness, so a resize re-seeds the same background machinery. */
+  rnd() {
+    this._seed = (this._seed || 20260729) * 1664525 + 1013904223 & 0x7fffffff;
+    return this._seed / 0x7fffffff;
+  }
+
+  /* Background machinery: extra wheels seeded off each edge, meshed onto the visible
+     train, dimmed and set behind it so they read as context rather than content. */
+  fitEscapes(fit) {
+    const stage = this._stageRef.current;
+    if (!stage) return;
+    const solved = this.solve();
+    const rect = stage.getBoundingClientRect();
+    const gs = fit * (this.props.gearScale ?? 1);
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const ghosts = [];
+    this._seed = 20260729;
+    const hosts = [solved.gears[0], solved.gears[solved.gears.length - 1]];
+    const usedEdge = [];
+    const taken = [];
+    const crosses = (p1, p2, p3, p4) => {
+      const s = (a, b, c) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+      return s(p1, p2, p3) * s(p1, p2, p4) < 0 && s(p3, p4, p1) * s(p3, p4, p2) < 0;
+    };
+    hosts.forEach((host, ei) => {
+      const sx = rect.left + host.cx * gs, sy = rect.top + host.cy * gs;
+      /* Nearest screen edge to this end of the train: never the same edge as the other
+         run, and never on a heading that would cross it. */
+      const near = [
+        { ang: 180, reach: sx }, { ang: 0, reach: vw - sx },
+        { ang: -90, reach: sy }, { ang: 90, reach: vh - sy }
+      ].sort((a, b) => a.reach - b.reach).filter(o => usedEdge.indexOf(o.ang) < 0);
+      let e = near[0];
+      for (let q = 0; q < near.length; q++) {
+        const o = near[q], oa = o.ang * Math.PI / 180;
+        const seg = [{ x: sx, y: sy }, { x: sx + (o.reach + 80) * Math.cos(oa), y: sy + (o.reach + 80) * Math.sin(oa) }];
+        if (!taken.some(t => crosses(seg[0], seg[1], t[0], t[1]))) { e = o; break; }
+      }
+      if (!e) return;
+      const ea = e.ang * Math.PI / 180;
+      taken.push([{ x: sx, y: sy }, { x: sx + (e.reach + 80) * Math.cos(ea), y: sy + (e.reach + 80) * Math.sin(ea) }]);
+      usedEdge.push(e.ang);
+      if (e.reach < 60) return;
+      const span = e.reach / gs;
+      let prev = { cx: host.cx, cy: host.cy, r: host.r, teeth: host.teeth, dir: host.dir, phase: host.phase };
+      let reached = 0, k = 0;
+      /* Keep adding wheels until the run is genuinely off the edge; they grow as they
+         go, so a tall screen does not need a long string of identical pinions. */
+      while (reached < span + 120 && k < 7) {
+        const teeth = Math.min(26, 11 + k * 2 + Math.floor(this.rnd() * 8));
+        const r = MODULE * teeth / 2;
+        const wobble = (this.rnd() * 2 - 1) * 20;
+        const ang = e.ang + wobble;
+        const a = ang * Math.PI / 180, d = prev.r + r;
+        const cx = prev.cx + d * Math.cos(a), cy = prev.cy + d * Math.sin(a);
+        const pPrev = 360 / prev.teeth, pThis = 360 / teeth;
+        let u = ((ang - prev.phase) / pPrev) % 1;
+        if (u < 0) u += 1;
+        const phase = ang + 180 - (0.5 - u) * pThis;
+        const g = { cx: cx, cy: cy, r: r, teeth: teeth, dir: -prev.dir, phase: phase,
+          color: GHOST_COLORS[Math.floor(this.rnd() * GHOST_COLORS.length)],
+          kind: GHOST_KINDS[Math.floor(this.rnd() * GHOST_KINDS.length)], arms: 3 + Math.floor(this.rnd() * 5),
+          prof: { add: 0.85 + this.rnd() * 0.25, tip: 0.3 + this.rnd() * 0.12, rim: 1.5 + this.rnd() * 0.8,
+            web: 2.4 + this.rnd() * 1.2, hub: 0.18 + this.rnd() * 0.14, hole: 0.09 + this.rnd() * 0.05, arm: 0.14 + this.rnd() * 0.08 },
+          ro: r + MODULE * 0.95, i: 'gh' + ei + k };
+        ghosts.push(g);
+        reached += d;
+        prev = g;
+        k++;
+      }
+    });
+    const key = ghosts.map(g => [g.cx | 0, g.cy | 0, g.teeth].join()).join('|');
+    if (key !== this._escKey) { this._escKey = key; this.setState({ ghosts: ghosts }); }
+  }
+
+  applyRotation() {
+    /* Skip frames where nothing moved enough to see. */
+    if (this._lastM !== undefined && Math.abs(this._M - this._lastM) < 0.05) return;
+    this._lastM = this._M;
+    const gears = this.solve().gears;
+    if (this._spinEls) {
+      for (let i = 0; i < gears.length; i++) {
+        const el = this._spinEls[i];
+        if (el) el.style.transform = 'rotate(' + (gears[i].phase + gears[i].dir * this._M / gears[i].teeth).toFixed(3) + 'deg)';
+      }
+    }
+    if (this._ghostEls) {
+      /* LAYER: parallax — the far plane runs a touch slower than the near one. */
+      const lag = this.props.parallax ? 0.78 : 1;
+      this._ghostEls.forEach(x => {
+        if (x.el) x.el.style.transform = 'rotate(' + (x.g.phase + x.g.dir * this._M * lag / x.g.teeth).toFixed(3) + 'deg)';
+      });
+    }
+    if (this._chainEls) {
+      const PITCH = Math.PI * MODULE;
+      this._chainEls.forEach(c => {
+        if (c.el) c.el.style.strokeDashoffset = (-this._M * PITCH / 360 * c.sign).toFixed(2) + 'px';
+      });
+    }
+  }
+
+  startPhysics() {
+    this._M = 0;
+    this._dirSign = 1;
+    /* LAYER: spin-up — start from rest and let the flywheel wind up to speed. */
+    this._v = this.props.spinUp === false ? this.idleRate() : 0;
+    let last = performance.now();
+    const step = (now) => {
+      /* Cap the update rate. Divisors of the display refresh judder least, which is why
+         30 beats 24 on a 60Hz panel: 60/30 = 2 whole frames, 60/24 = 2.5. */
+      const budget = 1000 / (this.props.frameRate ?? 30) - 1.5;
+      if (now - last < budget) { this._raf = requestAnimationFrame(step); return; }
+      const dt = Math.min(60, now - last);
+      last = now;
+      /* One expression decides whether to integrate — nothing can latch it asleep. */
+      const asleep = document.hidden || this._offscreen === true;
+      if (!this._dragging && !asleep) {
+        /* Flywheel: bleed back toward the train's natural pace. */
+        /* LAYER: hover drag — attention loads the machine and it slows a little. */
+        const load = (this.props.hoverDrag && (this.state.hover || this.state.overStage)) ? 0.4 : 1;
+        const target = this._dirSign * this.idleRate() * load;
+        this._v += (target - this._v) * (1 - Math.exp(-dt / 900));
+        this._M += this._v * dt;
+        this.applyRotation();
+      }
+      this._raf = requestAnimationFrame(step);
+    };
+    this._raf = requestAnimationFrame(step);
+
+    /* Stop integrating when the machine is scrolled out of view: no frames, no CPU.
+       Starts awake, and only ever sleeps on a real off-screen report for a laid-out
+       stage — a first callback on a zero-size box must not put it to sleep. */
+    if (window.IntersectionObserver && this._stageRef.current) {
+      this._io = new IntersectionObserver((entries) => {
+        entries.forEach(e => {
+          const box = e.boundingClientRect;
+          if (!box || box.width < 4 || box.height < 4) return;
+          this._offscreen = e.isIntersecting === false;
+        });
+      }, { rootMargin: '120px' });
+      this._io.observe(this._stageRef.current);
+    }
+  }
+
+  loadIcons() {
+    const slugs = TRAIN.filter(t => t.slug).map(t => t.slug);
+    Promise.all(slugs.map(s => fetch('assets/icons/' + s + '.svg').then(r => r.ok ? r.text() : '').catch(() => '')))
+      .then(texts => {
+        const icons = {};
+        slugs.forEach((s, i) => {
+          let t = texts[i] || '';
+          if (t) {
+            t = t.split('fill="#000"').join('fill="currentColor"');
+            t = t.replace('<svg ', '<svg width="100%" height="100%" ');
+          }
+          icons[s] = t;
+        });
+        this.setState({ icons: icons });
+      });
+  }
+
+  /* Lay the run along the viewport's long axis, so the belt spans open space instead of
+     doubling back on itself. Only the layout bearings rotate — badges stay upright. */
+  axisRot() { return window.innerHeight > window.innerWidth * 1.05 ? 90 : 0; }
+
+  fitStage() {
+    const rot = this.axisRot();
+    /* More room means longer drive runs: the strands get real straight spans instead of
+       being mostly wrap. Quantised so a resize does not re-solve on every pixel. */
+    /* Small screens pack the train tighter, so each wheel renders bigger on the glass;
+       roomy screens spread it out and let the drive runs stretch. */
+    const small = Math.min(window.innerWidth, window.innerHeight);
+    const boost = Math.round(Math.max(0.86, Math.min(1.15, small / 700)) * 20) / 20;
+    const tight = Math.round(Math.max(0.6, Math.min(1, small / 760)) * 20) / 20;
+    if (rot !== this._axisRot || boost !== this._spreadBoost || tight !== this._tight) {
+      this._axisRot = rot;
+      this._spreadBoost = boost;
+      this._tight = tight;
+      this._solved = null;
+      this._escKey = null;
+      this.forceUpdate();
+    }
+    const solved = this.solve();
+    const w = window.innerWidth, hgt = window.innerHeight;
+    const rowMode = w > 820 && w > hgt * 1.2;
+    const colH = this._colRef && this._colRef.current ? this._colRef.current.offsetHeight : 60;
+    const availW = w * (rowMode ? 0.86 : 0.92);
+    const availH = hgt - colH - (rowMode ? 90 : 110);
+    /* The artwork is vector, so on a large display the train should grow to fill the room
+       rather than sit small in the middle of it. The spread boost widens the solve, which
+       used to fight the old 1.15 ceiling and made big screens render SMALLER wheels. */
+    const fit = Math.max(0.28, Math.min(availW / solved.w, availH / solved.h, 1.55));
+    const root = document.documentElement.style;
+    root.setProperty('--gsfit', fit.toFixed(3));
+    this.fitEscapes(fit);
+    root.setProperty('--dir', rowMode ? 'row' : 'column');
+  }
+
+  componentDidMount() {
+    this.loadIcons();
+    this.startPhysics();
+    this.fitStage();
+    this.onResize = () => this.fitStage();
+    window.addEventListener('resize', this.onResize);
+    /* LAYER: parallax — the far plane drifts against pointer movement. */
+    this._onPointer = (e) => {
+      if (!this.props.parallax || !this._ghostLayer) return;
+      const dx = (e.clientX / window.innerWidth - 0.5) * 26, dy = (e.clientY / window.innerHeight - 0.5) * 18;
+      this._ghostLayer.style.transform = 'translate(' + (-dx).toFixed(1) + 'px,' + (-dy).toFixed(1) + 'px) scale(0.94)';
+    };
+    window.addEventListener('pointermove', this._onPointer, { passive: true });
+    let saved = null;
+    try { saved = localStorage.getItem('wozi-theme'); } catch (e) {}
+    this.mq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+    this.onSys = (e) => {
+      let stored = null;
+      try { stored = localStorage.getItem('wozi-theme'); } catch (err) {}
+      if (!stored) this.apply(e.matches ? 'dark' : 'light');
+    };
+    if (this.mq && this.mq.addEventListener) this.mq.addEventListener('change', this.onSys);
+    this.apply(saved || (this.mq && this.mq.matches ? 'dark' : 'light'));
+    this.syncVars();
+  }
+
+  componentDidUpdate() { this.syncVars(); this.fitStage(); }
+
+  componentWillUnmount() {
+    if (this.mq && this.mq.removeEventListener) this.mq.removeEventListener('change', this.onSys);
+    window.removeEventListener('resize', this.onResize);
+    if (this._onPointer) window.removeEventListener('pointermove', this._onPointer);
+    if (this._raf) cancelAnimationFrame(this._raf);
+    if (this._io) this._io.disconnect();
+  }
+
+  syncVars() {
+    const r = document.documentElement.style;
+    const speed = this.props.speed ?? 1;
+    r.setProperty('--s', String(speed > 0 ? 1 / speed : 1));
+    r.setProperty('--gsm', String(this.props.gearScale ?? 1));
+    if (this.props.accent) r.setProperty('--accent', this.props.accent);
+  }
+
+  apply(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    this.setState({ theme });
+  }
+
+  /* Solve the train: centre distances = sum of pitch radii, alternating spin,
+     angular speed inversely proportional to tooth count, tooth phase meshed. */
+  solve() {
+    if (this._axisRot === undefined) this._axisRot = this.axisRot();
+    if (this._solved) return this._solved;
+    /* Sites are dealt onto the wheels fresh each load, but sibling services stay
+       belted to each other: the two belt-linked slots always get a pair. */
+    const shuffle = (arr) => {
+      if (this.props.shuffle === false) return arr;
+      for (let k = arr.length - 1; k > 0; k--) {
+        const j = Math.floor(Math.random() * (k + 1));
+        const tmp = arr[k]; arr[k] = arr[j]; arr[j] = tmp;
+      }
+      return arr;
+    };
+    const pairSlots = PAIR_SLOTS, singleSlots = [];
+    TRAIN.forEach((t, i) => { if (!pairSlots.some(pr => pr.indexOf(i) >= 0)) singleSlots.push(i); });
+    const pairs = shuffle(PAIRS.map(pr => shuffle(pr.slice())));
+    const singles = shuffle(SINGLES.slice());
+    const slugFor = {};
+    pairSlots.forEach((pr, k) => { const pair = pairs[k % pairs.length]; slugFor[pr[0]] = pair[0]; slugFor[pr[1]] = pair[1]; });
+    singleSlots.forEach((s, k) => { slugFor[s] = singles[k % singles.length]; });
+    const g = [], strands = [];
+    let x = 0, y = 0, dir = 1, phase = 0;
+    TRAIN.forEach((t, i) => {
+      const prof = t.prof || {};
+      if (prof.add === undefined) prof.add = 0.95;
+      if (prof.tip === undefined) prof.tip = 0.36;
+      const r = MODULE * t.teeth / 2;
+      const ro = r + MODULE * prof.add;
+      let chainFrom = null;
+      if (i > 0) {
+        const prev = g[i - 1];
+        const linked = !!t.link;
+        /* Distance is fixed by the drive type; the bearing is nudged until this wheel
+           clears every wheel it is not meshed with by at least CLEARANCE. */
+        let d = linked ? (prev.r + r) * (t.spread || 2) * (this._spreadBoost || 1) : prev.r + r;
+        const base = t.angle + (this._axisRot || 0);
+        let ang = base, placed = false;
+        for (let pass = 0; pass < (linked ? 3 : 1) && !placed; pass++) {
+          for (let step = 0; step <= (linked ? 150 : 60) && !placed; step += 4) {
+            for (let sgn = 1; sgn >= -1 && !placed; sgn -= 2) {
+              const cand = base + sgn * step;
+              const a = cand * Math.PI / 180;
+              const px = prev.x + d * Math.cos(a), py = prev.y + d * Math.sin(a);
+              let clash = g.some((o, oi) => {
+                if (oi === i - 1) return false;
+                /* The two ends of the train repel each other, so the run reads as a
+                   line of machinery rather than a closed ring. */
+                const tight = this._tight || 1;
+                const need = o.ro + ro + CLEARANCE * tight + (oi === 0 && i === TRAIN.length - 1 ? ENDS_APART * tight : 0);
+                return Math.hypot(px - o.x, py - o.y) < need;
+              });
+              if (!clash && linked && g.length > 1) {
+                /* A drive run must head away from the wheels already placed, otherwise it
+                   folds back through the middle of the train. */
+                const mx = g.reduce((s, o) => s + o.x, 0) / g.length, my = g.reduce((s, o) => s + o.y, 0) / g.length;
+                const ox = prev.x - mx, oy = prev.y - my, oL = Math.hypot(ox, oy) || 1;
+                const vx = px - prev.x, vy = py - prev.y, vL = Math.hypot(vx, vy) || 1;
+                if ((ox / oL) * (vx / vL) + (oy / oL) * (vy / vL) < 0.15) clash = true;
+              }
+              if (!clash && linked) {
+                /* A chain or belt run may not cross another run, nor pass over a wheel. */
+                const s1 = { x: prev.x, y: prev.y }, s2 = { x: px, y: py };
+                clash = strands.some(st => segCross(s1, s2, st[0], st[1])) ||
+                  g.some((o, oi) => oi !== i - 1 && segDist({ x: o.x, y: o.y }, s1, s2) < o.ro + 10);
+              }
+              if (!clash) { ang = cand; x = px; y = py; placed = true; }
+              if (step === 0) break;
+            }
+          }
+          if (!placed) d *= 1.12;
+        }
+        if (!placed) { const a = base * Math.PI / 180; x = prev.x + d * Math.cos(a); y = prev.y + d * Math.sin(a); }
+        if (linked) {
+          dir = prev.dir;
+          phase = 0;
+          chainFrom = i - 1;
+          strands.push([{ x: prev.x, y: prev.y }, { x: x, y: y }]);
+        } else {
+          dir = -prev.dir;
+          /* Exact conjugate mesh: measure where the line of centres falls inside the
+             previous gear's tooth pitch, then place this gear so a gap sits opposite. */
+          const pPrev = 360 / prev.teeth, pThis = 360 / t.teeth;
+          let u = ((ang - prev.phase) / pPrev) % 1;
+          if (u < 0) u += 1;
+          phase = ang + 180 - (0.5 - u) * pThis;
+        }
+      }
+      g.push({ i: i, teeth: t.teeth, color: t.color, slug: slugFor[i] || null, belt: t.link || null, kind: t.kind || 'holes', arms: t.arms || 5, prof: prof, chainFrom: chainFrom,
+        r: r, ro: ro, x: x, y: y, dir: dir, phase: phase,
+        dur: (BASE_MS * t.teeth / 20).toFixed(2) });
+    });
+    const minX = Math.min.apply(null, g.map(k => k.x - k.ro)) - 6;
+    const minY = Math.min.apply(null, g.map(k => k.y - k.ro)) - 6;
+    const maxX = Math.max.apply(null, g.map(k => k.x + k.ro)) + 6;
+    const maxY = Math.max.apply(null, g.map(k => k.y + k.ro)) + 6;
+    g.forEach(k => { k.cx = k.x - minX; k.cy = k.y - minY; });
+    const chains = g.filter(k => k.chainFrom !== null && k.chainFrom !== undefined).map(k => ({ a: g[k.chainFrom], b: k }));
+    /* The wordmark hangs from the lowest wheel on two cords, clear of every gear. */
+    this._solved = { gears: g, chains: chains, w: maxX - minX, h: maxY - minY };
+    return this._solved;
+  }
+
+  /* Geometry for the two engraved lines. Font size is a fixed fraction of the band, so it
+     is identical on every wheel; the arc sweep is then derived from the actual text length
+     and the band's circumference, shrinking the type only if a long handle would not fit. */
+  engraving(g, r, m, bandOut) {
+    const site = g.slug ? SITES[g.slug] : null;
+    const raw = site ? site.path : '';
+    /* Just the handle: everything after the last slash. */
+    const handle = raw.indexOf('/') >= 0 ? raw.slice(raw.lastIndexOf('/') + 1) : raw;
+    const stamp = 'M' + MODULE + ' Z' + g.teeth;
+    const MAX = 168 * Math.PI / 180;
+    const fit = (txt, rr, base) => {
+      const per = 0.60, track = 0.10;
+      let f = base;
+      const width = (fs) => txt.length * fs * (per + track);
+      if (width(f) / rr > MAX) f = (MAX * rr) / (txt.length * (per + track));
+      return { f: f, sweep: (width(f) / rr) * 180 / Math.PI };
+    };
+    /* Both lines sit on one ring, centred in the band. */
+    const rT = bandOut - m * (BAND_DEPTH / 2), rB = rT;
+    const T = fit(handle, rT, m * 0.80), B = fit(stamp, rB, m * 0.60);
+    return { handle: handle, stamp: stamp, rT: rT, rB: rB, fT: T.f, fB: B.f, sT: T.sweep, sB: B.sweep };
+  }
+
+  teethPath(n, r, prof, chipIdx) {
+    const m = MODULE, add = prof.add, tip = prof.tip, fl = (0.5 - tip / 2) - 0.17;
+    const ro = r + m * add, rr = Math.max(4, r - m * 1.15), a = 2 * Math.PI / n;
+    const t0 = 0.5 - tip / 2, t1 = 0.5 + tip / 2, r0 = t0 - fl, r1 = t1 + fl;
+    const P = (rad, ang) => (rad * Math.cos(ang)).toFixed(2) + ',' + (rad * Math.sin(ang)).toFixed(2);
+    let d = '';
+    for (let i = 0; i < n; i++) {
+      const b = i * a - 0.5 * a;
+      if (i === 0) d += 'M' + P(rr, b) + ' ';
+      if (i === chipIdx) {
+        /* A chipped tooth: it is still there, but the top corner has fractured away
+           along a jagged face rather than vanishing cleanly. */
+        const H = ro - rr, lvl = (f) => rr + H * f;
+        d += 'A' + rr + ' ' + rr + ' 0 0 1 ' + P(rr, b + r0 * a) + ' ';
+        d += 'L' + P(ro, b + t0 * a) + ' ';
+        d += 'L' + P(lvl(0.93), b + (t0 + 0.06) * a) + ' ';
+        d += 'L' + P(lvl(0.52), b + (t0 + 0.11) * a) + ' ';
+        d += 'L' + P(lvl(0.66), b + 0.5 * a) + ' ';
+        d += 'L' + P(lvl(0.38), b + (t1 - 0.07) * a) + ' ';
+        d += 'L' + P(lvl(0.58), b + t1 * a) + ' ';
+        d += 'L' + P(rr, b + r1 * a) + ' ';
+        d += 'A' + rr + ' ' + rr + ' 0 0 1 ' + P(rr, b + a) + ' ';
+        continue;
+      }
+      d += 'A' + rr + ' ' + rr + ' 0 0 1 ' + P(rr, b + r0 * a) + ' ';
+      d += 'L' + P(ro, b + t0 * a) + ' ';
+      d += 'A' + ro + ' ' + ro + ' 0 0 1 ' + P(ro, b + t1 * a) + ' ';
+      d += 'L' + P(rr, b + r1 * a) + ' ';
+      d += 'A' + rr + ' ' + rr + ' 0 0 1 ' + P(rr, b + a) + ' ';
+    }
+    return d + 'Z';
+  }
+
+  arcD(rad, a0deg, a1deg) {
+    const a0 = a0deg * Math.PI / 180, a1 = a1deg * Math.PI / 180;
+    const large = (a1deg - a0deg) > 180 ? 1 : 0;
+    return 'M' + (rad * Math.cos(a0)).toFixed(2) + ',' + (rad * Math.sin(a0)).toFixed(2) +
+      ' A' + rad.toFixed(2) + ',' + rad.toFixed(2) + ' 0 ' + large + ' 1 ' + (rad * Math.cos(a1)).toFixed(2) + ',' + (rad * Math.sin(a1)).toFixed(2);
+  }
+
+  ringPath(rad) {
+    return 'M' + rad + ',0 A' + rad + ',' + rad + ' 0 1 0 ' + (-rad) + ',0 A' + rad + ',' + rad + ' 0 1 0 ' + rad + ',0 Z';
+  }
+
+  /* Cheap stand-in for the background wheels: body, web and hub, no masks or turning
+     marks — they are blurred and dim, so the detail would be wasted frames. */
+  ghostSvg(g) {
+    const h = React.createElement;
+    const p = shades(g.color || '#9AA6AD', this.state.theme !== 'dark');
+    const size = (g.ro + 4) * 2, r = g.r;
+    const path = this.teethPath(g.teeth, r, g.prof);
+    /* Softness comes from low-contrast fills, not a CSS blur: a filter on a rotating
+       element re-rasterises every frame, which is what made these stutter. */
+    return h('svg', { width: size, height: size, viewBox: (-size / 2) + ' ' + (-size / 2) + ' ' + size + ' ' + size, style: { position: 'absolute', left: (-size / 2) + 'px', top: (-size / 2) + 'px', overflow: 'visible' } },
+      h('path', { d: path, fill: p[2], fillOpacity: 0.9 }),
+      h('circle', { r: Math.max(6, r - MODULE * 1.9), fill: p[1], fillOpacity: 0.75 }),
+      h('circle', { r: Math.max(4, r - MODULE * 3.1), fill: p[3], fillOpacity: 0.6 }),
+      h('circle', { r: Math.max(7, r * 0.2), fill: p[1], fillOpacity: 0.8 })
+    );
+  }
+
+  gearSvg(g) {
+    const h = React.createElement;
+    const p = shades(g.color || '#C9D2D6', this.state.theme !== 'dark');
+    const id = 'gr' + g.i, size = (g.ro + 6) * 2, r = g.r, m = MODULE;
+    const prof = g.prof;
+    const path = this.teethPath(g.teeth, r, prof, this.props.character && g.i === 2 ? Math.max(1, Math.round(g.teeth * 0.3)) : -1);
+    /* Every wheel carries the same engraving band: a solid annulus one module deep just
+       inside the tooth roots. The web is held clear of it so nothing is ever cut through
+       the lettering, and because MODULE is shared the band is identical on all wheels. */
+    const marked = this.props.engravedRims || this.props.character;
+    const bandOut = r - m * 1.3, bandIn = bandOut - m * BAND_DEPTH;
+    const eng = this.engraving(g, r, m, bandOut);
+    /* The rim ledge that carries the engraving is the SAME on every wheel: the raised face
+       starts exactly where the band ends, so text always lands mid-band on identical metal
+       regardless of the wheel's diameter or web style. */
+    const faceR = marked ? Math.max(6, bandIn) : Math.max(6, r - m * (prof.rim || 1.75));
+    const wellR = Math.min(Math.max(4, r - m * (prof.web || 2.9)), marked ? bandIn - 2 : Infinity);
+    const hubR = Math.max(8, r * (prof.hub || 0.21));
+    const inner = [];
+    const kind = g.kind;
+
+    const turned = (key, r0, r1, n) => {
+      const out = [];
+      for (let k = 0; k < n; k++) {
+        const rr2 = r0 + (r1 - r0) * (k / (n - 1 || 1));
+        out.push(h('circle', { key: key + k, r: rr2.toFixed(2), fill: 'none', stroke: k % 2 ? 'var(--gloss)' : p[3], strokeOpacity: 0.13, strokeWidth: 1 }));
+      }
+      return out;
+    };
+
+    /* Openings are cut out of the blank itself: each one is appended to the body path
+       as a subpath and filled with even-odd, so the page shows through. No masks. */
+    const holes = [];
+    const PT = (rad, deg) => {
+      const a = deg * Math.PI / 180;
+      return (rad * Math.cos(a)).toFixed(2) + ',' + (rad * Math.sin(a)).toFixed(2);
+    };
+    /* Kidney lightening slots — the classic cast/machined gear web, arms left between them. */
+    const slots = (arms, rIn, rOut, armDeg, widthScale) => {
+      const gap = 360 / arms, mid = (rIn + rOut) / 2;
+      const wSlot = Math.min((rOut - rIn) * (widthScale || 0.94), (rOut - rIn) - 2, mid * 0.9), cap = wSlot / 2;
+      if (wSlot < 6) return;
+      const rO = mid + cap, rI = mid - cap;
+      const capDeg = cap / mid * 180 / Math.PI;
+      for (let k = 0; k < arms; k++) {
+        const a0 = k * gap + armDeg + capDeg, a1 = (k + 1) * gap - armDeg - capDeg;
+        if (a1 - a0 < 4) continue;
+        holes.push('M' + PT(rO, a0) +
+          ' A' + rO.toFixed(2) + ',' + rO.toFixed(2) + ' 0 0 1 ' + PT(rO, a1) +
+          ' A' + cap.toFixed(2) + ',' + cap.toFixed(2) + ' 0 0 1 ' + PT(rI, a1) +
+          ' A' + rI.toFixed(2) + ',' + rI.toFixed(2) + ' 0 0 0 ' + PT(rI, a0) +
+          ' A' + cap.toFixed(2) + ',' + cap.toFixed(2) + ' 0 0 1 ' + PT(rO, a0) + ' Z');
+        inner.push(h('path', { key: 'sl' + k, d: this.arcD(mid, a0, a1), fill: 'none', stroke: p[3], strokeOpacity: 0.55, strokeWidth: wSlot + 4, strokeLinecap: 'round' }));
+        inner.push(h('path', { key: 'sg' + k, d: this.arcD(mid, a0, a1), fill: 'none', stroke: 'var(--gloss)', strokeOpacity: 0.3, strokeWidth: wSlot + 2, strokeLinecap: 'round', transform: 'translate(-0.5,-1)' }));
+      }
+    };
+
+    if (kind === 'spokes') {
+      const arms = g.arms;
+      inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
+      inner.push(turned('t', hubR * 1.2, faceR - 3, 6));
+      inner.push(h('circle', { key: 'sh', r: wellR + 2, fill: 'none', stroke: p[3], strokeOpacity: 0.35, strokeWidth: 2.5 }));
+      slots(arms, hubR * 1.5, wellR, 9, 0.72);
+    } else if (kind === 'pockets') {
+      /* Cut clean through — a blind pocket reads as a failed hole at this scale. */
+      inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
+      inner.push(turned('t', hubR * 1.2, faceR - 3, 7));
+      inner.push(h('circle', { key: 'sh', r: wellR + 1, fill: 'none', stroke: p[3], strokeOpacity: 0.35, strokeWidth: 2 }));
+      slots(g.arms, hubR * 1.35, wellR, 8, 0.8);
+    } else if (kind === 'holes') {
+      const count = g.arms, hr = Math.max(5, r * (prof.hole || 0.13)), orbit = (wellR + hubR) / 2;
+      inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
+      inner.push(h('circle', { key: 'well', r: wellR, fill: 'url(#' + id + 'w)' }));
+      inner.push(turned('t', hubR * 1.3, wellR - 2, 5));
+      for (let k = 0; k < count; k++) {
+        const a = (k / count) * Math.PI * 2, cx = (orbit * Math.cos(a)).toFixed(2), cy = (orbit * Math.sin(a)).toFixed(2);
+        holes.push('M' + (+cx + hr) + ',' + cy + ' A' + hr + ',' + hr + ' 0 1 0 ' + (+cx - hr) + ',' + cy + ' A' + hr + ',' + hr + ' 0 1 0 ' + (+cx + hr) + ',' + cy + ' Z');
+        inner.push(h('circle', { key: 'cb' + k, cx: cx, cy: cy, r: hr * 1.42, fill: p[1], stroke: p[3], strokeWidth: 0.8, strokeOpacity: 0.4 }));
+        inner.push(h('circle', { key: 'h' + k, cx: cx, cy: cy, r: hr, fill: 'none', stroke: p[3], strokeWidth: 1.6, strokeOpacity: 0.65 }));
+        inner.push(h('path', { key: 'hg' + k, d: 'M' + (cx - hr * 0.6) + ',' + (+cy + hr * 0.55) + ' A' + hr + ',' + hr + ' 0 0 1 ' + (+cx + hr * 0.45) + ',' + (+cy - hr * 0.7), fill: 'none', stroke: 'var(--gloss)', strokeOpacity: 0.35, strokeWidth: 1.2 }));
+      }
+    } else if (kind === 'ring') {
+      inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
+      inner.push(h('circle', { key: 'well', r: wellR, fill: 'url(#' + id + 'w)' }));
+      inner.push(turned('t', hubR * 1.15, wellR - 1, 9));
+      inner.push(h('circle', { key: 'grv', r: (wellR + faceR) / 2, fill: 'none', stroke: p[3], strokeOpacity: 0.5, strokeWidth: 2 }));
+      inner.push(h('circle', { key: 'grv2', r: (wellR + faceR) / 2 - 1.4, fill: 'none', stroke: 'var(--gloss)', strokeOpacity: 0.4, strokeWidth: 1 }));
+      /* Drilled relief holes — round openings are unambiguous geometry, where a narrow
+         kidney slot can collapse on a thin web and stop punching. */
+      const count = 5, orbit = (wellR + hubR * 1.3) / 2;
+      const hr = Math.max(4.5, Math.min((wellR - hubR * 1.3) * 0.34, r * 0.12));
+      for (let k = 0; k < count; k++) {
+        const a = (k / count) * Math.PI * 2;
+        const cx = (orbit * Math.cos(a)).toFixed(2), cy = (orbit * Math.sin(a)).toFixed(2);
+        holes.push('M' + (+cx + hr) + ',' + cy + ' A' + hr + ',' + hr + ' 0 1 0 ' + (+cx - hr) + ',' + cy + ' A' + hr + ',' + hr + ' 0 1 0 ' + (+cx + hr) + ',' + cy + ' Z');
+        inner.push(h('circle', { key: 'rh' + k, cx: cx, cy: cy, r: hr + 1.6, fill: 'none', stroke: p[3], strokeOpacity: 0.55, strokeWidth: 2.4 }));
+      }
+    } else {
+      /* Plain web: concentric steps so the eye reads the true centre — a lit radial
+         gradient alone makes the hub look thrown off to one side. */
+      inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
+      inner.push(h('circle', { key: 'well', r: wellR, fill: 'url(#' + id + 'w)' }));
+      inner.push(h('circle', { key: 'wellR', r: wellR, fill: 'none', stroke: p[0], strokeOpacity: 0.35, strokeWidth: 1.4 }));
+      inner.push(turned('t', hubR * 1.1, wellR - 2, 5));
+      inner.push(h('circle', { key: 'boss', r: hubR * 1.5, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
+    }
+    const arc = (rad, from, to) => {
+      const a0 = from * Math.PI / 180, a1 = to * Math.PI / 180;
+      return 'M' + (rad * Math.cos(a0)).toFixed(2) + ',' + (rad * Math.sin(a0)).toFixed(2) +
+        ' A' + rad + ' ' + rad + ' 0 0 1 ' + (rad * Math.cos(a1)).toFixed(2) + ',' + (rad * Math.sin(a1)).toFixed(2);
+    };
+    return h('svg', { width: size, height: size, viewBox: (-size / 2) + ' ' + (-size / 2) + ' ' + size + ' ' + size, style: { position: 'absolute', left: (-size / 2) + 'px', top: (-size / 2) + 'px', overflow: 'visible' } },
+      h('defs', null,
+        /* All shading is symmetric about the vertical axis — lit from above, never from
+           a corner — so concentric webs and hubs read as centred. */
+        h('linearGradient', { id: id + 'f', x1: '50%', y1: '0%', x2: '50%', y2: '100%' },
+          h('stop', { offset: '0%', stopColor: p[0] }),
+          h('stop', { offset: '24%', stopColor: p[1] }),
+          h('stop', { offset: '48%', stopColor: p[2] }),
+          h('stop', { offset: '68%', stopColor: p[1] }),
+          h('stop', { offset: '100%', stopColor: p[3] })),
+        h('radialGradient', { id: id + 'w', cx: '50%', cy: '34%', r: '78%' },
+          h('stop', { offset: '0%', stopColor: p[2] }),
+          h('stop', { offset: '62%', stopColor: p[3] }),
+          h('stop', { offset: '100%', stopColor: p[2] })),
+        h('radialGradient', { id: id + 'u', cx: '50%', cy: '30%', r: '80%' },
+          h('stop', { offset: '0%', stopColor: p[0] }),
+          h('stop', { offset: '55%', stopColor: p[1] }),
+          h('stop', { offset: '100%', stopColor: p[3] })),
+        h('radialGradient', { id: id + 'd', cx: '50%', cy: '32%', r: '80%' },
+          h('stop', { offset: '0%', stopColor: p[3] }),
+          h('stop', { offset: '100%', stopColor: p[2] })),
+        /* Two reading arcs on the solid band: the handle across the top, the machining
+           stamp across the bottom, both running left-to-right and upright. */
+        marked ? (function () {
+          /* Two reading lines stacked in the band, each on an arc sized to its own text so
+             the lettering always sits centred across the top and never wraps onto itself. */
+          const at = (deg, rr) => {
+            const a = deg * Math.PI / 180;
+            return (rr * Math.cos(a)).toFixed(2) + ',' + (rr * Math.sin(a)).toFixed(2);
+          };
+          /* Handle across the top, machining stamp across the bottom — same ring, opposite
+             sides, each running left-to-right and upright on its own side. */
+          const line = (key, rr, sweep, mid, cw) => h('path', { key: key, id: id + key, fill: 'none',
+            d: 'M' + at(mid - (cw ? sweep / 2 : -sweep / 2), rr) + ' A' + rr.toFixed(2) + ',' +
+               rr.toFixed(2) + ' 0 0 ' + (cw ? 1 : 0) + ' ' + at(mid + (cw ? sweep / 2 : -sweep / 2), rr) });
+          return [line('ringT', eng.rT, eng.sT, 270, true), line('ringB', eng.rB, eng.sB, 90, false)];
+        })() : null,
+        holes.length ? h('clipPath', { id: id + 'c', clipPathUnits: 'userSpaceOnUse' },
+          h('path', { d: path + ' ' + holes.join(' '), clipRule: 'evenodd' })) : null),
+      h('g', holes.length ? { clipPath: 'url(#' + id + 'c)', clipRule: 'evenodd' } : null,
+        h('path', { d: path + ' ' + holes.join(' '), fillRule: 'evenodd', fill: p[3], opacity: 0.9, transform: 'translate(0,1)' }),
+        h('path', { d: path + ' ' + holes.join(' '), fillRule: 'evenodd', fill: 'url(#' + id + 'f)', stroke: 'var(--edge)', strokeWidth: 1, strokeLinejoin: 'round' }),
+        inner,
+        h('circle', { r: faceR, fill: 'none', stroke: 'var(--edge)', strokeWidth: 1, strokeOpacity: 0.4 })),
+      h('circle', { r: hubR, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2 }),
+      h('circle', { r: Math.max(3, hubR * 0.4), fill: p[3], opacity: 0.5 }),
+      /* LAYER: engraved rims — stamped into the solid band just inside the tooth roots,
+         cut shadow above and highlight below so it reads as struck metal, not overlaid text. */
+      this.props.engravedRims && eng.handle ? h('g', { key: 'eng' }, [
+        { dy: -0.6, col: p[3], op: 0.85 },
+        { dy: 0.6, col: p[0], op: 0.45 }
+      ].map((L, li) => h('text', {
+        key: li, transform: 'translate(0,' + L.dy + ')',
+        fontSize: eng.fT.toFixed(2), fill: L.col, fillOpacity: L.op, letterSpacing: '0.1em',
+        dominantBaseline: 'central',
+        style: { fontFamily: "'Manrope',system-ui,sans-serif", fontWeight: 700 }
+      }, h('textPath', { href: '#' + id + 'ringT', startOffset: '50%', textAnchor: 'middle' }, eng.handle)))) : null,
+      /* Specular arc goes under the stamps, or it washes the bottom engraving out. */
+      h('path', { d: arc(faceR - 2, 205, 335), fill: 'none', stroke: 'var(--gloss)', strokeWidth: Math.max(2, r * 0.05), strokeLinecap: 'round', opacity: 0.5 }),
+      /* LAYER: character — stamped module/tooth-count, as on a real blank. Same struck
+         treatment as the handle, so both sides of the band read alike. */
+      this.props.character ? h('g', { key: 'stamp' }, [
+        { dy: -0.5, col: p[3], op: 0.8 },
+        { dy: 0.5, col: p[0], op: 0.4 }
+      ].map((L, li) => h('text', {
+        key: li, transform: 'translate(0,' + L.dy + ')',
+        fontSize: eng.fB.toFixed(2), fill: L.col, fillOpacity: L.op, letterSpacing: '0.1em',
+        dominantBaseline: 'central',
+        style: { fontFamily: "'Manrope',system-ui,sans-serif", fontWeight: 700 }
+      }, h('textPath', { href: '#' + id + 'ringB', startOffset: '50%', textAnchor: 'middle' }, eng.stamp)))) : null
+    );
+  }
+
+  /* Roller chain wrapped around two sprockets: external tangents + wrap arcs. */
+  chainEl(key, a, b) {
+    const h = React.createElement;
+    /* Chain/belt pitch is the gears' own circular pitch (π × module), and the strand
+       wraps on the pitch circle — so every roller drops into a tooth space. */
+    const PITCH = Math.PI * MODULE;
+    const r1 = a.r, r2 = b.r;
+    const dx = b.cx - a.cx, dy = b.cy - a.cy, d = Math.hypot(dx, dy), th = Math.atan2(dy, dx);
+    const al = Math.acos(Math.max(-1, Math.min(1, (r1 - r2) / d)));
+    const P = (c, rad, ang) => (c.cx + rad * Math.cos(ang)).toFixed(2) + ',' + (c.cy + rad * Math.sin(ang)).toFixed(2);
+    const wrapB = 2 * al, wrapA = 2 * Math.PI - 2 * al;
+    const dPath = 'M' + P(a, r1, th + al) + ' L' + P(b, r2, th + al) +
+      ' A' + r2 + ',' + r2 + ' 0 ' + (wrapB > Math.PI ? 1 : 0) + ' 0 ' + P(b, r2, th - al) +
+      ' L' + P(a, r1, th - al) +
+      ' A' + r1 + ',' + r1 + ' 0 ' + (wrapA > Math.PI ? 1 : 0) + ' 0 ' + P(a, r1, th + al) + ' Z';
+    /* The strand is driven from the same master angle as the wheels. */
+    const sign = a.dir > 0 ? -1 : 1;
+    const track = (el) => { if (this._chainEls) this._chainEls.push({ el: el, sign: sign }); };
+    const run = { willChange: 'stroke-dashoffset' };
+    const pitchDash = (on) => on.toFixed(2) + ' ' + (PITCH - on).toFixed(2);
+    if (b.belt === 'belt') {
+      /* Toothed timing belt: one moulded tooth per gear tooth space. */
+      return h('g', { key: key },
+        h('path', { d: dPath, fill: 'none', stroke: 'rgba(8,16,20,.24)', strokeWidth: 13, transform: 'translate(1,2.5)' }),
+        h('path', { d: dPath, fill: 'none', stroke: '#3A4046', strokeWidth: 7, transform: 'translate(0,-3.4)' }),
+        h('path', { ref: track, d: dPath, fill: 'none', stroke: '#22272B', strokeWidth: 12, strokeDasharray: pitchDash(PITCH * 0.52), style: run }),
+        h('path', { d: dPath, fill: 'none', stroke: 'rgba(255,255,255,.18)', strokeWidth: 1.4, transform: 'translate(0,-6)' })
+      );
+    }
+    /* Roller chain: plate links between rollers seated in the tooth spaces. */
+    return h('g', { key: key },
+      h('path', { d: dPath, fill: 'none', stroke: 'rgba(8,16,20,.22)', strokeWidth: 12, transform: 'translate(1,2.5)' }),
+      h('path', { ref: track, d: dPath, fill: 'none', stroke: '#79838A', strokeWidth: 11, strokeDasharray: pitchDash(PITCH * 0.78), strokeLinecap: 'round', style: run }),
+      h('path', { ref: track, d: dPath, fill: 'none', stroke: '#4E575D', strokeWidth: 11, strokeDasharray: pitchDash(PITCH * 0.34), strokeLinecap: 'round', style: run }),
+      h('path', { ref: track, d: dPath, fill: 'none', stroke: '#E6EBED', strokeWidth: 3.4, strokeDasharray: pitchDash(3.4), strokeLinecap: 'round', style: run })
+    );
+  }
+
+  renderVals() {
+    const h = React.createElement;
+    const solved = this.solve();
+    const hov = this.state.hover;
+    /* Wordmark reads the domain it is served from, so the same page works on any site. */
+    let host = '';
+    try { host = (window.location.hostname || '').replace(/^www\./, '').toLowerCase(); } catch (e) {}
+    const looksLikeBrand = /^[a-z][a-z0-9]{1,14}\.[a-z.]{2,12}$/.test(host);
+    host = (this.props.domain || '').trim() || (looksLikeBrand ? host : 'wozi.com');
+    const dot = host.indexOf('.');
+    const brand = dot > 0 ? { name: host.slice(0, dot), tld: host.slice(dot + 1) } : { name: host, tld: '' };
+
+    this._chainEls = [];
+    this._ghostEls = [];
+    const ghosts = h('div', { key: 'ghosts', ref: (el) => { this._ghostLayer = el; },
+      style: { position: 'absolute', left: 0, top: 0, width: solved.w + 'px', height: solved.h + 'px',
+      transform: this.props.parallax ? 'scale(0.94)' : null, transformOrigin: 'center', opacity: this.state.theme === 'dark' ? 0.17 : 0.22, zIndex: 0, pointerEvents: 'none' } },
+      (this.state.ghosts || []).map(g => h('div', { key: g.i, style: { position: 'absolute', left: g.cx + 'px', top: g.cy + 'px', width: 0, height: 0 } },
+        h('div', { ref: (el) => { if (this._ghostEls) this._ghostEls.push({ el: el, g: g }); },
+          style: { transform: 'rotate(' + g.phase.toFixed(2) + 'deg)' } },
+          this.ghostSvg(g)))));
+    const gearArt = h('div', { style: { position: 'absolute', left: 0, top: 0, width: solved.w + 'px', height: solved.h + 'px', transform: 'scale(var(--gs))', transformOrigin: 'top left' } },
+      ghosts,
+      /* One cast-shadow layer behind every wheel, so a wheel's shadow can never fall
+         on top of the neighbour it meshes with. Static — never touched by the frame loop. */
+      h('div', { key: 'shadows', style: { position: 'absolute', left: 0, top: 0, width: solved.w + 'px', height: solved.h + 'px', zIndex: 0, pointerEvents: 'none' } },
+        solved.gears.map(g => h('div', { key: g.i, style: {
+          position: 'absolute', left: (g.cx - g.ro) + 'px', top: (g.cy - g.ro + 4) + 'px',
+          width: (g.ro * 2) + 'px', height: (g.ro * 2) + 'px', borderRadius: '50%',
+          boxShadow: '0 4px 14px rgba(10,20,26,.22)'
+        } }))),
+      h('svg', { key: 'chains', width: solved.w, height: solved.h, style: { position: 'absolute', left: 0, top: 0, overflow: 'visible' } },
+        solved.chains.map((c, ci) => this.chainEl('c' + ci, c.a, c.b))),
+      solved.gears.map(g => h('div', { key: g.i, style: { position: 'absolute', left: g.cx + 'px', top: g.cy + 'px', width: 0, height: 0 } },
+        h('div', { ref: (el) => { if (this._spinEls) this._spinEls[g.i] = el; },
+          style: {
+            transform: 'rotate(' + g.phase.toFixed(2) + 'deg)', willChange: 'transform'
+          } },
+          this.gearSvg(g)))))
+
+    const links = solved.gears.filter(g => g.slug).map(g => {
+      const site = SITES[g.slug];
+      const disc = Math.max(30, Math.min(60, Math.round(g.r * 0.72)));
+      const cap = Math.round(g.r * 1.15);
+      const size = 'min(calc(' + cap + 'px * var(--gs)), max(30px, calc(' + disc + 'px * var(--gs))))';
+      const on = hov === g.slug;
+      return {
+        label: site.label, path: site.path, href: site.href,
+        iconEl: h('span', {
+          style: { width: 'calc(' + size + ' * 0.56)', height: 'calc(' + size + ' * 0.56)', display: 'block', lineHeight: 0, color: on ? 'var(--accent)' : (BRAND[g.slug] || 'var(--ink)'), transition: 'color .2s ease' },
+          dangerouslySetInnerHTML: { __html: this.state.icons[g.slug] || '' }
+        }),
+        enter: () => this.setState({ hover: g.slug }),
+        leave: () => this.setState({ hover: null }),
+        discStyle: {
+          position: 'absolute',
+          left: 'calc(' + g.cx + 'px * var(--gs))', top: 'calc(' + g.cy + 'px * var(--gs))',
+          width: size, height: size, boxSizing: 'border-box',
+          borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: '#F8F9F8', color: on ? 'var(--accent)' : 'var(--ink)',
+          border: '1px solid rgba(20,30,35,.14)', boxShadow: '0 3px 10px rgba(8,16,20,.28)', zIndex: 5, cursor: 'pointer',
+          transform: 'translate(-50%,-50%) scale(' + (on ? 1.16 : 1) + ')',
+          transition: 'transform .22s cubic-bezier(.34,1.56,.64,1), color .2s ease'
+        }
+      };
+    });
+
+    return {
+      gearArt: gearArt,
+      links: links,
+      colRef: this._colRef,
+      stageRef: this._stageRef,
+      onGrab: (e) => this.onGrab(e),
+      onStageEnter: () => { if (this.props.hoverDrag) this.setState({ overStage: true }); },
+      onStageLeave: () => { if (this.state.overStage) this.setState({ overStage: false }); },
+      stageStyle: { position: 'relative', flex: '0 0 auto', width: 'calc(' + solved.w + 'px * var(--gs))', height: 'calc(' + solved.h + 'px * var(--gs))', cursor: 'grab', touchAction: 'none' },
+
+      themeLabel: this.state.theme === 'dark' ? 'Switch to light' : 'Switch to dark',
+      themeIcon: this.state.theme === 'dark'
+        ? h('svg', { width: 20, height: 20, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round' },
+            h('circle', { cx: 12, cy: 12, r: 4.4 }),
+            h('path', { d: 'M12 2.6v2.6M12 18.8v2.6M2.6 12h2.6M18.8 12h2.6M5.4 5.4l1.9 1.9M16.7 16.7l1.9 1.9M18.6 5.4l-1.9 1.9M7.3 16.7l-1.9 1.9' }))
+        : h('svg', { width: 20, height: 20, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinejoin: 'round' },
+            h('path', { d: 'M20.5 14.6A8.6 8.6 0 0 1 9.4 3.5a8.6 8.6 0 1 0 11.1 11.1Z' })),
+      toggleTheme: () => {
+        const next = this.state.theme === 'dark' ? 'light' : 'dark';
+        try { localStorage.setItem('wozi-theme', next); } catch (e) {}
+        this.apply(next);
+      },
+      brandName: brand.name,
+      brandTld: brand.tld
+    };
+  }
+}
+</script>
+</body>
+</html>
