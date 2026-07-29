@@ -517,7 +517,7 @@ class Component extends DCLogic {
     /* The artwork is vector, so on a large display the train should grow to fill the room
        rather than sit small in the middle of it. The spread boost widens the solve, which
        used to fight the old 1.15 ceiling and made big screens render SMALLER wheels. */
-    const fit = Math.max(0.28, Math.min(availW / solved.w, availH / solved.h, 1.55));
+    const fit = Math.max(0.28, Math.min(availW / solved.w, availH / solved.h, 2.0));
     const root = document.documentElement.style;
     root.setProperty('--gsfit', fit.toFixed(3));
     this.fitEscapes(fit);
