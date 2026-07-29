@@ -128,12 +128,20 @@ jobs:
           ATTEMPTS=6
           BACKOFF=10
 
+          # Substring tests use bash pattern matching, NOT `... | grep -q`.
+          # grep -q exits on first match and closes the pipe; on a body larger
+          # than the 64K pipe buffer the writer then dies with EPIPE, and
+          # `set -o pipefail` reports that as the pipeline's status. A
+          # successful match on a large page reads as a failure. index.html is
+          # 57K and matches on line 6, which is exactly that case.
+          contains() { case "$2" in *"$1"*) return 0 ;; *) return 1 ;; esac; }
+
           check() { # check <url> <expected-status> <expected-substring>
             local code body
             for i in $(seq 1 $ATTEMPTS); do
               body=$(curl -sS --max-time 20 -w '\n%{http_code}' "$1" || true)
-              code=$(printf '%s' "$body" | tail -1)
-              if [ "$code" = "$2" ] && { [ -z "$3" ] || printf '%s' "$body" | grep -q "$3"; }; then
+              code=${body##*$'\n'}
+              if [ "$code" = "$2" ] && { [ -z "$3" ] || contains "$3" "$body"; }; then
                 echo "  ok   $1 -> $code${3:+ (contains '$3')}"
                 return 0
               fi
@@ -142,10 +150,9 @@ jobs:
             echo "  FAIL $1 -> last status $code, wanted $2${3:+ containing '$3'} (gave up after $ATTEMPTS tries)"
             echo "  ---- diagnostics for $1 ----"
             curl -sSI --max-time 20 "$1" | tr -d '\r' | sed 's/^/    /'
-            echo "    bytes received: $(printf '%s' "$body" | wc -c)"
+            echo "    bytes received: ${#body}"
             echo "    first 300 bytes:"
-            printf '%s' "$body" | head -c 300 | sed 's/^/    | /'
-            echo ""
+            printf '    | %s\n' "${body:0:300}"
             echo "  ---- end diagnostics ----"
             fail=1
           }
