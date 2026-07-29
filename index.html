@@ -97,10 +97,17 @@ const MODULE = 7;
    depth. These values sit on a plateau (44-48% base and 0.34-0.36 tip all measure
    clean), so the result is not balanced on a knife edge. Raising the addendum to
    0.95 or the base to 52% brings contact straight back. */
-const TOOTH_ADD = 0.90;   /* addendum, in modules */
-const TOOTH_DED = 1.15;   /* dedendum, in modules */
-const TOOTH_TIP = 0.36;   /* tooth thickness at the tip, as a fraction of the pitch */
-const TOOTH_BASE = 0.48;  /* tooth thickness at the root, as a fraction of the pitch */
+const TOOTH_PA = 20;      /* pressure angle in degrees — 20 is the modern standard */
+const TOOTH_ADD = 1.00;   /* addendum, in modules — standard full-depth */
+const TOOTH_DED = 1.25;   /* dedendum, in modules — standard, leaves root clearance */
+const TOOTH_THICK = 0.495; /* tooth thickness at the pitch circle, as a fraction of the
+                              circular pitch. A real gear is 0.5 exactly and the shortfall
+                              is backlash. Measured at all six pairs: 0.495 gives zero
+                              interference with 0.11px between the flanks, so they read as
+                              touching without anti-aliasing ever fusing them. */
+const TOOTH_FILLET = 0.38; /* root fillet radius, in modules — the standard value that
+                              goes with 20-degree full depth. Without it the flank meets
+                              the root circle at a sharp corner, which no cut gear has. */
 
 const BASE_MS = 21000;
 const GHOST_COLORS = ['#9AA6AD', '#A9B4BA', '#8F9BA3', '#B3BCC2'];
@@ -726,36 +733,71 @@ class Component extends DCLogic {
     return { handle: handle, stamp: stamp, rT: rT, rB: rB, fT: T.f, fB: B.f, sT: T.sweep, sB: B.sweep };
   }
 
+  /* One gear blank, drawn with true involute flanks.
+     The working face of a real tooth is the involute of a base circle
+     rb = r·cos(pressure angle) — the curve a taut string traces as it unwinds
+     from that circle. It is the only profile with conjugate action, meaning the
+     velocity ratio holds through the whole sweep rather than only at the pitch
+     point, so mating teeth touch without ever interfering. Straight flanks
+     cannot do both, which is what forced #11 to trade contact for clearance.
+     Below the base circle no involute exists, so the flank runs radially down
+     into the root. */
   teethPath(n, r, prof, chipIdx) {
     const m = MODULE;
     const ro = r + m * TOOTH_ADD, rr = Math.max(4, r - m * TOOTH_DED), a = 2 * Math.PI / n;
-    const t0 = 0.5 - TOOTH_TIP / 2, t1 = 0.5 + TOOTH_TIP / 2;
-    const r0 = (1 - TOOTH_BASE) / 2, r1 = 1 - r0;
+    const phi = TOOTH_PA * Math.PI / 180, rb = r * Math.cos(phi);
+    const inv = (x) => Math.tan(x) - x;
+    /* Half the tooth's angular width at the pitch circle. TOOTH_THICK is the
+       fraction of the circular pitch the tooth occupies there — a hair under a
+       half, the rest being backlash. */
+    const psiP = TOOTH_THICK * Math.PI / n;
+    const half = (R) => psiP + inv(phi) - inv(Math.acos(Math.min(1, rb / R)));
+    const rStart = Math.max(rb, rr + 0.01);
+    const hRoot = half(rStart);
+    /* Fillet blend: how far up the flank and how far round the root it reaches. */
+    const fr = Math.min(m * TOOTH_FILLET, (rStart - rr) * 0.9 + 0.01);
+    const rFil = Math.min(rStart, rr + fr), fa = fr / rr;
     const P = (rad, ang) => (rad * Math.cos(ang)).toFixed(2) + ',' + (rad * Math.sin(ang)).toFixed(2);
-    let d = '';
+    const STEPS = 7;
+    const flank = [];
+    for (let s = 0; s <= STEPS; s++) flank.push(rStart + (ro - rStart) * (s / STEPS));
+
+    let d = 'M' + P(rr, -a / 2) + ' ';
     for (let i = 0; i < n; i++) {
-      const b = i * a - 0.5 * a;
-      if (i === 0) d += 'M' + P(rr, b) + ' ';
+      const c = i * a;
+      /* Root arc up to where this tooth's flank leaves the root circle, then the
+         fillet. A real fillet is a trochoid swept by the cutter tip; a quadratic
+         through the corner is indistinguishable at this scale. */
+      d += 'A' + rr + ' ' + rr + ' 0 0 1 ' + P(rr, c - hRoot - fa) + ' ';
+      d += 'Q' + P(rr, c - hRoot) + ' ' + P(rFil, c - hRoot) + ' ';
+      if (rStart > rFil) d += 'L' + P(rStart, c - hRoot) + ' ';
       if (i === chipIdx) {
-        /* A chipped tooth: it is still there, but the top corner has fractured away
-           along a jagged face rather than vanishing cleanly. */
-        const H = ro - rr, lvl = (f) => rr + H * f;
-        d += 'A' + rr + ' ' + rr + ' 0 0 1 ' + P(rr, b + r0 * a) + ' ';
-        d += 'L' + P(ro, b + t0 * a) + ' ';
-        d += 'L' + P(lvl(0.93), b + (t0 + 0.06) * a) + ' ';
-        d += 'L' + P(lvl(0.52), b + (t0 + 0.11) * a) + ' ';
-        d += 'L' + P(lvl(0.66), b + 0.5 * a) + ' ';
-        d += 'L' + P(lvl(0.38), b + (t1 - 0.07) * a) + ' ';
-        d += 'L' + P(lvl(0.58), b + t1 * a) + ' ';
-        d += 'L' + P(rr, b + r1 * a) + ' ';
-        d += 'A' + rr + ' ' + rr + ' 0 0 1 ' + P(rr, b + a) + ' ';
-        continue;
+        /* A chipped tooth: still there, but the crown has fractured away along a
+           jagged face rather than vanishing cleanly. */
+        const H = ro - rStart, lvl = (f) => rStart + H * f;
+        for (let s = 1; s <= STEPS; s++) {
+          const R = flank[s];
+          if (R > lvl(0.62)) break;
+          d += 'L' + P(R, c - half(R)) + ' ';
+        }
+        d += 'L' + P(lvl(0.93), c - half(lvl(0.93)) * 0.5) + ' ';
+        d += 'L' + P(lvl(0.52), c - half(lvl(0.52)) * 0.2) + ' ';
+        d += 'L' + P(lvl(0.70), c + half(lvl(0.70)) * 0.35) + ' ';
+        d += 'L' + P(lvl(0.44), c + half(lvl(0.44)) * 0.8) + ' ';
+        for (let s = STEPS; s >= 1; s--) {
+          const R = flank[s];
+          if (R > lvl(0.44)) continue;
+          d += 'L' + P(R, c + half(R)) + ' ';
+        }
+      } else {
+        for (let s = 1; s <= STEPS; s++) d += 'L' + P(flank[s], c - half(flank[s])) + ' ';
+        /* Tip land, following the tip circle. */
+        d += 'A' + ro.toFixed(2) + ' ' + ro.toFixed(2) + ' 0 0 1 ' + P(ro, c + half(ro)) + ' ';
+        for (let s = STEPS - 1; s >= 0; s--) d += 'L' + P(flank[s], c + half(flank[s])) + ' ';
       }
-      d += 'A' + rr + ' ' + rr + ' 0 0 1 ' + P(rr, b + r0 * a) + ' ';
-      d += 'L' + P(ro, b + t0 * a) + ' ';
-      d += 'A' + ro + ' ' + ro + ' 0 0 1 ' + P(ro, b + t1 * a) + ' ';
-      d += 'L' + P(rr, b + r1 * a) + ' ';
-      d += 'A' + rr + ' ' + rr + ' 0 0 1 ' + P(rr, b + a) + ' ';
+      if (rStart > rFil) d += 'L' + P(rFil, c + hRoot) + ' ';
+      d += 'Q' + P(rr, c + hRoot) + ' ' + P(rr, c + hRoot + fa) + ' ';
+      d += 'A' + rr + ' ' + rr + ' 0 0 1 ' + P(rr, c + a / 2) + ' ';
     }
     return d + 'Z';
   }
