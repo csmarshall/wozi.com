@@ -1,7 +1,25 @@
 # CLAUDE.md — wozi.com
 
-Static site, no build step. `index.html` is the entire page; `support.js` is the
-runtime it loads. Serve the folder; that is the deploy.
+Static site, no build step. `index.html` is the landing page; `support.js` is the
+runtime it loads. Serve the folder and you are looking at the site.
+
+This repo is the **source of truth** for `s3://wozi.com`, including the parts
+that predate the gear train. It is private, because `cards/` carries a real
+address and mobile number.
+
+## What deploys, and what does not
+
+The deploy **names the paths it publishes** rather than excluding the ones it
+does not — a whitelist, so a new file cannot reach the web by being forgotten.
+
+Published: `index.html`, `support.js`, `assets/`, `cards/`, `ssh_public_key`.
+
+Never published: `legacy/` (the archive of everything retired from the bucket),
+and every document in the repo root — `CLAUDE.md`, `README.md`, `CHANGELOG.md`,
+`PROMPT.md`, `SESSION-LOG.md`, `session-state.md`.
+
+If you add something that should be live, add it to the include list in
+`.github/workflows/deploy.yml`. Adding a file alone does not publish it.
 
 ## Do not
 

@@ -5,6 +5,21 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ## Unreleased
 
+### Added
+
+- **#21 — The repo is now the source of truth for the whole bucket.** Everything
+  in `s3://wozi.com` and `s3://www.wozi.com` was pulled in, and the repo made
+  private to hold it. Still served: the gear train, `cards/` and
+  `ssh_public_key`. Retired into `legacy/`: the 2023 landing page and its assets,
+  the Keybase proof, the 2014 resume, `Spacer.gif`, and the entire `www` bucket
+  (unreachable for years behind a redirect-all rule). Deploys publish an explicit
+  **whitelist** of paths, so nothing reaches the web by being forgotten.
+  **Melissa's contact card was removed from the site and deliberately kept out of
+  this repo entirely** — `cards/index.html` had been a byte-identical duplicate of
+  her card rather than an index, so trimming the URL to `/cards/` served her
+  address and mobile to anyone who tried it. It now serves Charles's card. Her
+  card lives only in `~/work/claude/qr_code_vcf`.
+
 ### Fixed
 
 - **#20 — Docs described a chain and a belt that render nowhere.** Every document
