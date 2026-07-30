@@ -295,6 +295,54 @@ function planetaryBore(teeth) {
    keep the best-fitting one per flavour that ALSO has metal to spare. Both
    members are checked, because Zr = Zs + 2*Zp means every tooth handed to the
    sun is taken from the planets — a big sun is exactly what starves them. */
+/* Two-row (Ravigneaux) sets: sun -> inner planet -> outer planet -> ring, all in
+   one plane, so both rows are visible from the front rather than stacked behind
+   each other. The rows COUNTER-ROTATE against one another, which is the whole
+   reason to build one -- inner at -Zr/Zp1, outer at +Zr/Zp2, and the sun now
+   co-rotates with the wheel instead of opposing it.
+
+   This list is MEASURED, not derived, and that distinction matters. The search
+   in tools/ravigneaux.js finds 131 sets whose geometry closes and whose planets
+   clear each other; 43 of those also assemble, meaning all N stations agree on
+   one sun clocking. But only these 26 survive tools/mesh_rav.js, which rolls
+   each one through a full turn at five carrier clockings and checks all five
+   relationships -- the three that must mesh, and the two that must NOT touch
+   (inner row against the ring, outer row against the sun).
+
+   The 17 that assemble but fail are involute interference: a larger gear's tooth
+   reaching past an eight-tooth pinion's base circle, where teethPath has only a
+   straight wall to offer. No closed-form assembly rule predicts that, which is
+   exactly why the approved list is the measured one. `blank` is the smallest
+   wheel that can hold the set at a legible module. */
+const RAVIGNEAUX_MENU = [
+  { pg2: [8, 8, 8, 29, 3], blank: 17 },
+  { pg2: [9, 8, 8, 30, 3], blank: 17 },
+  { pg2: [10, 8, 8, 31, 3], blank: 18 },
+  { pg2: [11, 8, 8, 32, 3], blank: 18 },
+  { pg2: [8, 8, 8, 32, 3], blank: 18 },
+  { pg2: [8, 8, 9, 32, 3], blank: 18 },
+  { pg2: [12, 8, 8, 33, 3], blank: 18 },
+  { pg2: [9, 8, 8, 33, 3], blank: 18 },
+  { pg2: [9, 8, 9, 33, 3], blank: 18 },
+  { pg2: [9, 9, 9, 33, 3], blank: 18 },
+  { pg2: [9, 10, 9, 33, 3], blank: 18 },
+  { pg2: [10, 8, 8, 34, 4], blank: 18 },
+  { pg2: [13, 8, 8, 34, 3], blank: 18 },
+  { pg2: [10, 8, 8, 34, 3], blank: 18 },
+  { pg2: [10, 8, 9, 34, 3], blank: 18 },
+  { pg2: [10, 9, 9, 34, 3], blank: 18 },
+  { pg2: [10, 10, 9, 34, 3], blank: 18 },
+  { pg2: [11, 8, 8, 35, 4], blank: 19 },
+  { pg2: [14, 8, 8, 35, 3], blank: 19 },
+  { pg2: [11, 8, 8, 35, 3], blank: 19 },
+  { pg2: [11, 8, 9, 35, 3], blank: 19 },
+  { pg2: [8, 8, 8, 35, 3], blank: 19 },
+  { pg2: [8, 8, 9, 35, 3], blank: 19 },
+  { pg2: [11, 9, 9, 35, 3], blank: 19 },
+  { pg2: [11, 10, 9, 35, 3], blank: 19 },
+  { pg2: [8, 8, 10, 35, 3], blank: 19 }
+];
+
 const PLANETARY_FLAVOURS = [[3, 'medium'], [3, 'large'], [4, 'medium'], [4, 'large'],
                             [5, 'small'], [5, 'medium'], [6, 'small']];
 const ROOT_MARGIN = 1.05;
@@ -337,14 +385,18 @@ function planetaryMenuFor(teeth) {
       nearest.push({ score: score, pg: [s.Zs, s.Zp, s.Zr, s.N] });
     }
   });
-  if (fits.length) return fits;
+  /* Two-row sets that this blank can hold, kept in their own pool: there are
+     far more of them than single-row sets, so merging the lists would make the
+     double row the usual case rather than the treat. */
+  const rav = RAVIGNEAUX_MENU.filter(function (v) { return v.blank <= teeth; });
+  if (fits.length || rav.length) return { one: fits, two: rav };
   /* Nothing fits — this blank is simply too small to hold an epicyclic, which is
      an honest answer and not a failure. Hand back the closest thing rather than a
      set whose teeth would be floored into stubs. Only reachable through
      ?kind=planetary, which forces every wheel; a dealt planetary is always seated
      on the largest blank in the train, and the tooth deal guarantees one. */
   nearest.sort(function (a, b) { return b.score - a.score; });
-  return [nearest.length ? { pg: nearest[0].pg } : { pg: [12, 9, 30, 3] }];
+  return { one: [nearest.length ? { pg: nearest[0].pg } : { pg: [12, 9, 30, 3] }], two: [] };
 }
 
 const CENTRE_FAMILIES = [
@@ -369,7 +421,7 @@ const CENTRE_FAMILIES = [
   { type: 'planetary', web: 2.6, hub: 0.1,
     /* Placeholder only: the real set is re-dealt per wheel in the TRAIN loop
        below, where the host blank's size is known. */
-    variants: planetaryMenuFor(TEETH_MAX) }
+    variants: planetaryMenuFor(TEETH_MAX).one }
 ];
 /* Debug affordance: ?kind=iris forces every wheel to one family, variants
    cycling — how the contact sheets for review are made. Harmless in production. */
@@ -427,7 +479,11 @@ TRAIN.forEach((t, i) => {
      the roomiest available is used rather than drawing a set that cannot work. */
   if (cd.type === 'planetary') {
     const menu = planetaryMenuFor(t.teeth);
-    t.cv = menu[Math.floor(Math.random() * menu.length)];
+    /* A coin weighted toward the single row: the double row is the showpiece and
+       stays one, rather than becoming the thing that always happens. */
+    const pool = (menu.two.length && (!menu.one.length || Math.random() < 0.4))
+      ? menu.two : menu.one;
+    t.cv = pool[Math.floor(Math.random() * pool.length)];
   }
   t.prof.web = cd.web; t.prof.hub = cd.hub;
   if (cd.v.hole !== undefined) t.prof.hole = cd.v.hole;
@@ -1391,8 +1447,11 @@ class Component extends DCLogic {
          a big 18-tooth sun -- both pass (Zs+Zr)%N==0 and adjacency. 4|18 fails,
          so the 4-planet set's phase constants STAGGER per station; the formula
          moved into the loop to carry the kP*A_k term that no longer vanishes. */
-      const PG = (g.cv && g.cv.pg) || [12, 9, 30, 3];
-      const Zs = PG[0], Zp = PG[1], Zr = PG[2], NP = PG[3];
+      const cvv = g.cv || {};
+      const TWO = !!cvv.pg2;
+      const PG = TWO ? cvv.pg2 : (cvv.pg || [12, 9, 30, 3]);
+      const Zs = PG[0], Zp1 = PG[1], Zp2 = TWO ? PG[2] : PG[1];
+      const Zp = Zp1, Zr = TWO ? PG[3] : PG[2], NP = TWO ? PG[4] : PG[3];
       /* Sized from the BORE inward so the ring keeps a real rim: the bore is the
          hole cut in the wheel, the ring root sits 0.75 m2 inside it, and the
          module follows from the ring's tooth count. Sized from Rr outward, as
@@ -1403,7 +1462,11 @@ class Component extends DCLogic {
          chosen for a wheel other than the one being drawn. */
       const bore = planetaryBore(g.teeth);
       const Rr = bore / (1 + 4 / Zr), m2 = 2 * Rr / Zr;
-      const Rs = m2 * Zs / 2, Rp = m2 * Zp / 2, Rc = Rs + Rp;
+      const Rs = m2 * Zs / 2, Rp = m2 * Zp1 / 2, Rp2r = m2 * Zp2 / 2;
+      /* Rc1 comes off the sun mesh, Rc2 off the ring mesh. On a single row the
+         two are the same number, since Zr = Zs + 2*Zp -- the two-row layout is
+         the general case and the single row its degenerate one. */
+      const Rc = Rs + Rp, Rc2 = Rr - Rp2r;
       holes.push('M' + bore.toFixed(2) + ',0 A' + bore.toFixed(2) + ',' + bore.toFixed(2) + ' 0 1 0 -' + bore.toFixed(2) + ',0 A' + bore.toFixed(2) + ',' + bore.toFixed(2) + ' 0 1 0 ' + bore.toFixed(2) + ',0 Z');
       /* The ring is cut as a REAL internal gear, not a ring of trapezoids: the
          same involute curve as every other wheel on the page, but its tooth
@@ -1447,8 +1510,12 @@ class Component extends DCLogic {
          all three stations because 3|Zs and 3|Zr (the strict condition, not
          just 3|(Zs+Zr)). */
       const kC = -1;
-      const kP = Zr / Zp;
-      const kS = -(1 + Zr / Zs);
+      const kP = TWO ? -Zr / Zp1 : Zr / Zp;
+      const kP2 = Zr / Zp2;
+      /* Single row: the sun opposes the wheel. Two rows: the opposition moves to
+         the planet rows, which counter-rotate against each other, and the sun
+         comes along with the wheel. */
+      const kS = TWO ? (Zr / Zs - 1) : -(1 + Zr / Zs);
       const pp = 360 / Zp, ps = 360 / Zs;
       /* R clocks the whole grounded carrier; substituting (phase - R) for phase
          in the derived constants keeps every mesh condition satisfied at any R,
@@ -1472,18 +1539,52 @@ class Component extends DCLogic {
          points a tooth or a gap inward depends on Zp alone. The per-station
          term drops out because (Zs+Zr) % N == 0, which is precisely the job the
          assembly condition is in the solver to do. */
-      const baseS = (((180 * Zp / Zs - Q * (Zs + Zr) / Zs) % ps) + ps) % ps;
+      /* TWO ROWS. The inner row is pinned by the sun, the outer by the ring, and
+         the pair closes a triangle (Rc, Rc2, Rp+Rp2) -- so the outer planet sits
+         at its station angle PLUS dTheta, at a different radius. That offset is
+         what lets a pair span an annulus neither row could reach across alone.
+
+         The phases come off the same technique the single row was finally
+         derived with, applied down the chain outermost first, because each link
+         pins the next: P2 against the ring fixes baseP2 from the station angle;
+         P1 against P2 fixes baseP1 (moving-to-moving, which the single row never
+         needed); the sun against P1 fixes baseS. Every station pins the sun
+         independently and there is only one sun -- so "do all N stations agree"
+         IS the assembly condition, and the sets in RAVIGNEAUX_MENU are the ones
+         that do, then measured to actually mesh. */
+      const d12 = Rp + Rp2r;
+      const dTheta = TWO ? Math.acos((Rc * Rc + Rc2 * Rc2 - d12 * d12) / (2 * Rc * Rc2)) * 180 / Math.PI : 0;
+      const psiT = TWO ? Math.atan2(Rc2 * Math.sin(dTheta * Math.PI / 180),
+                                    Rc2 * Math.cos(dTheta * Math.PI / 180) - Rc) * 180 / Math.PI : 0;
+      const a1 = 360 / Zp1, a2 = 360 / Zp2;
+      const wrapT = (x, per) => ((x % per) + per) % per;
+      const baseP2At = (A) => wrapT(a2 * (-0.5 + Zr * (Q - A - dTheta) / 360), a2);
+      const baseP1At = (A) => wrapT(psiT + a1 * ((psiT + 180 - dTheta - baseP2At(A)) * Zp2 / 360 - 0.5), a1);
+      const baseS = TWO
+        ? wrapT(baseC + ps * ((180 - baseP1At(0)) * Zp1 / 360 - 0.5), ps)
+        : (((180 * Zp / Zs - Q * (Zs + Zr) / Zs) % ps) + ps) % ps;
       const epi = (k3, base) => (el) => { if (el && this._epiEls) this._epiEls.push({ el: el, k: k3, base: base, g: g }); };
+      /* One station's planet: an arm out to the stud, the gear on it, the stud
+         end showing. Shared by both rows so the carrier reads the same either
+         way -- the load path is the arm, and it is drawn, not implied. */
+      const station = (key, rad, teeth, pitchR, kFac, base, fill) =>
+        h('g', { key: key, transform: 'rotate(' + rad.a.toFixed(3) + ')' },
+          h('path', { d: 'M0,0 L' + rad.r.toFixed(2) + ',0', stroke: ft.line, strokeWidth: 3, strokeOpacity: 0.85 }),
+          h('g', { transform: 'translate(' + rad.r.toFixed(2) + ',0)' },
+            h('g', { ref: epi(kFac, base), style: { transform: 'rotate(' + base.toFixed(2) + 'deg)' } },
+              h('path', { d: this.teethPath(teeth, pitchR, prof, -1, m2), fill: fill, stroke: ft.line, strokeWidth: 1 })),
+            h('circle', { r: 2.4, fill: ft.line })));
       const planets = [];
       for (let k2 = 0; k2 < NP; k2++) {
         const A = k2 * (360 / NP);
-        const baseP = basePAt(A);
-        planets.push(h('g', { key: 'pw' + k2, transform: 'rotate(' + A + ')' },
-          h('path', { d: 'M0,0 L' + Rc.toFixed(2) + ',0', stroke: ft.line, strokeWidth: 3, strokeOpacity: 0.85 }),
-          h('g', { transform: 'translate(' + Rc.toFixed(2) + ',0)' },
-            h('g', { ref: epi(kP, baseP), style: { transform: 'rotate(' + baseP.toFixed(2) + 'deg)' } },
-              h('path', { d: this.teethPath(Zp, Rp, prof, -1, m2), fill: ft.face, stroke: ft.line, strokeWidth: 1 })),
-            h('circle', { r: 2.4, fill: ft.line }))));
+        if (TWO) {
+          /* The two rows are painted differently on purpose: they turn opposite
+             ways, and identical fills would hide the one thing worth seeing. */
+          planets.push(station('i' + k2, { a: A, r: Rc }, Zp1, Rp, kP, baseP1At(A), ft.face));
+          planets.push(station('o' + k2, { a: A + dTheta, r: Rc2 }, Zp2, Rp2r, kP2, baseP2At(A), ft.well));
+        } else {
+          planets.push(station('pw' + k2, { a: A, r: Rc }, Zp, Rp, kP, basePAt(A), ft.face));
+        }
       }
       post.push(h('g', { key: 'epicarrier', ref: epi(kC, baseC), style: { transform: 'rotate(' + baseC.toFixed(2) + 'deg)' } }, planets));
       post.push(h('g', { key: 'episun', ref: epi(kS, baseS), style: { transform: 'rotate(' + baseS.toFixed(2) + 'deg)' } },
