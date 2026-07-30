@@ -524,11 +524,16 @@ const CENTRE_FAMILIES = [
   */
   { type: 'star', web: 3.0, hub: 0.22,
     variants: [{ arms: 5 }, { arms: 7 }, { arms: 9 }] },
+  /* retired with spiral and iris: the ring-course honeycomb, replaced by the
+     true lattice below. Cells in concentric courses never read as honeycomb,
+     because the walls between courses do not line up with the walls within one.
   { type: 'honeycomb', web: 3.1, hub: 0.2,
-    /* `cell` is the wanted cell size; the count per course is derived from it,
-       and the courses grow outward. Small cells give a fine core, large ones a
-       coarse one. */
     variants: [{ arms: 8, cell: 4.2 }, { arms: 8, cell: 5.6 }, { arms: 8, cell: 7.2 }] },
+  */
+  { type: 'hexcore', web: 3.1, hub: 0.2,
+    /* `cell` is the WANTED size; the web caps it and the lattice packs whatever
+       fits. Fine, medium, coarse. */
+    variants: [{ arms: 6, cell: 4.6 }, { arms: 6, cell: 6.4 }, { arms: 6, cell: 8.4 }] },
   /* retired with spiral and iris, above
   { type: 'labyrinth', web: 3.2, hub: 0.18,
     variants: [{ arms: 5 }, { arms: 6 }, { arms: 7 }] },
@@ -547,8 +552,9 @@ const CENTRE_FAMILIES = [
    where they are labelled as candidates. dealCentres() never picks from here.
    Promoting one is a cut-and-paste into CENTRE_FAMILIES above. */
 const CANDIDATE_FAMILIES = [
-  { type: 'hexcore', web: 3.1, hub: 0.2,
-    variants: [{ arms: 6, cell: 5.0 }, { arms: 6, cell: 6.5 }, { arms: 6, cell: 8.2 }] }
+  /* empty for now -- hexcore was promoted into CENTRE_FAMILIES above. New
+     designs land here first so they can be reviewed on the contact sheet
+     without ever being dealt. */
 ];
 const ALL_FAMILIES = CENTRE_FAMILIES.concat(CANDIDATE_FAMILIES);
 
@@ -1907,26 +1913,72 @@ class Component extends DCLogic {
       }
       inner.push(h('circle', { key: 'boss', r: hubR * 1.5, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
     } else if (kind === 'hexcore') {
-      /* A TRUE hexagonal lattice: one tiling laid across the web and then
-         clipped to whole cells, rather than cells arranged in rings. Every cell
-         shares each of its six walls with a neighbour, which is what makes a
-         honeycomb stiff and, just as much, what makes it read as one -- rings of
-         hexes never quite do, because the walls between courses do not line up
-         with the walls within them.
+      /* A TRUE hexagonal lattice: one tiling laid across the web, every cell
+         sharing each of its six walls with a neighbour. That shared-wall
+         condition is what makes a honeycomb stiff, and just as much what makes
+         it read as one -- cells arranged in rings never quite do, because the
+         walls between courses do not line up with the walls within them.
 
-         Pointy-top axial layout: centres sit sqrt(3)*R apart across a row and
-         1.5*R apart between rows, with every other row shifted half a step. The
-         wall thickness is added to R for spacing only, so the gap between two
-         cells is exactly WALL wherever they meet.
+         Pointy-top axial layout: centres sqrt(3)*R apart across a row, 1.5*R
+         between rows, every other row shifted half a step. Wall thickness is
+         added to R for spacing only, so the gap where two cells meet is exactly
+         WALL.
 
-         Only whole cells are cut. A partial hexagon at the rim would be a
-         notch rather than a cell, and it would take the continuous ring of metal
-         that the teeth are relying on. */
+         The lattice runs right out to the edge of the web rather than stopping
+         at the last whole cell. Cells that straddle the boundary are CLIPPED to
+         it, which is what a real core does where it meets a rim -- the alternative
+         leaves a bald ring of metal that makes the pattern look dropped in rather
+         than machined into the part. Clipping is Sutherland-Hodgman against the
+         disc taken as a fan of half-planes: both shapes are convex, so the result
+         is too, and a hexagon costs at most a few dozen edge tests.
+
+         A sliver is not a cell, though. Anything clipped below a third of a full
+         cell is dropped instead of cut, because an opening has to pay for its
+         machining -- a two-millimetre crescent at the rim is a chip, not a
+         lightening hole. */
       inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
-      const cellX = (g.cv && g.cv.cell) || 6.5;
-      const WALLX = 2.3, stepR = cellX + WALLX / 2;
+      const WALLX = 2.3, CELL_MIN = 2.6, CELL_MAX = 9.5;
+      const rInX = Math.max(hubR * 1.2, 7), rOutX = wellR - 1;
+      /* Cell size is a PREFERENCE, not a fixed dimension. The variant says how
+         coarse a core is wanted; the web says what will actually fit. Holding the
+         size fixed meant a small blank had no room for a single cell between the
+         boss and the rim and came out bare, which is exactly the failure the
+         planetary sizing had -- a number chosen for one wheel applied to all of
+         them. So the wanted size is capped by the depth available and floored at
+         the smallest cell worth machining: a tight web simply gets a finer core
+         with more cells in it. */
+      const wantX = (g.cv && g.cv.cell) || 6.5;
+      const cellX = Math.max(CELL_MIN,
+        Math.min(wantX, CELL_MAX, (rOutX - rInX - WALLX) / 2));
+      const stepR = cellX + WALLX / 2;
       const pitchX = Math.sqrt(3) * stepR, rowX = 1.5 * stepR;
-      const rInX = Math.max(hubR * 1.2, 7), rOutX = wellR - 2;
+      const SEG = 72;
+      const clipDisc = (poly) => {
+        let cur = poly;
+        for (let e = 0; e < SEG && cur.length; e++) {
+          const a = (e / SEG) * Math.PI * 2, nx = Math.cos(a), ny = Math.sin(a);
+          const inp = cur; cur = [];
+          for (let q = 0; q < inp.length; q++) {
+            const P = inp[q], Q2 = inp[(q + 1) % inp.length];
+            const dp = P[0] * nx + P[1] * ny - rOutX, dq = Q2[0] * nx + Q2[1] * ny - rOutX;
+            if (dp <= 0) cur.push(P);
+            if ((dp <= 0) !== (dq <= 0)) {
+              const t = dp / (dp - dq);
+              cur.push([P[0] + (Q2[0] - P[0]) * t, P[1] + (Q2[1] - P[1]) * t]);
+            }
+          }
+        }
+        return cur;
+      };
+      const areaOf = (poly) => {
+        let A = 0;
+        for (let q = 0; q < poly.length; q++) {
+          const P = poly[q], Q2 = poly[(q + 1) % poly.length];
+          A += P[0] * Q2[1] - Q2[0] * P[1];
+        }
+        return Math.abs(A) / 2;
+      };
+      const fullArea = 3 * Math.sqrt(3) / 2 * cellX * cellX;
       const nRow = Math.ceil(rOutX / rowX) + 1, nCol = Math.ceil(rOutX / pitchX) + 1;
       for (let ry = -nRow; ry <= nRow; ry++) {
         const cy = ry * rowX;
@@ -1934,12 +1986,20 @@ class Component extends DCLogic {
         for (let rx = -nCol; rx <= nCol; rx++) {
           const cx = rx * pitchX + xoff;
           const rad = Math.hypot(cx, cy);
-          if (rad + cellX > rOutX) continue;   /* whole cells only */
-          if (rad - cellX < rInX) continue;    /* clear of the boss */
-          let d2 = '';
+          if (rad - cellX < rInX) continue;      /* clear of the boss */
+          if (rad - cellX > rOutX) continue;     /* wholly outside the web */
+          let poly = [];
           for (let v = 0; v < 6; v++) {
             const va = (90 + 60 * v) * Math.PI / 180;
-            d2 += (v ? 'L' : 'M') + (cx + cellX * Math.cos(va)).toFixed(2) + ',' + (cy + cellX * Math.sin(va)).toFixed(2) + ' ';
+            poly.push([cx + cellX * Math.cos(va), cy + cellX * Math.sin(va)]);
+          }
+          if (rad + cellX > rOutX) {             /* straddles the edge -- clip it */
+            poly = clipDisc(poly);
+            if (poly.length < 3 || areaOf(poly) < fullArea * 0.34) continue;
+          }
+          let d2 = '';
+          for (let q = 0; q < poly.length; q++) {
+            d2 += (q ? 'L' : 'M') + poly[q][0].toFixed(2) + ',' + poly[q][1].toFixed(2) + ' ';
           }
           holes.push(d2 + 'Z');
         }
@@ -2360,7 +2420,7 @@ class Component extends DCLogic {
         const names = { spokes: 'Spoke slots', holes: 'Lightening drills', pockets: 'Kidney pockets',
           spiral: 'Curved spokes', iris: 'Iris blades', star: 'Star truss', honeycomb: 'Honeycomb',
           labyrinth: 'Labyrinth rotor', sunburst: 'Sunburst', planetary: 'Planetary (star gear)',
-          hexcore: 'Hex core (true lattice)' };
+          hexcore: 'Hex core' };
         const item = (key, label) => {
           const active = key ? FORCE_KIND === key : !FORCE_KIND;
           return {
