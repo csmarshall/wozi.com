@@ -1262,19 +1262,42 @@ class Component extends DCLogic {
          moved into the loop to carry the kP*A_k term that no longer vanishes. */
       const PG = (g.cv && g.cv.pg) || [12, 9, 30, 3];
       const Zs = PG[0], Zp = PG[1], Zr = PG[2], NP = PG[3];
-      const Rr = wellR * 0.88, m2 = 2 * Rr / Zr;
+      /* Sized from the BORE inward so the ring keeps a real rim: the bore is the
+         hole cut in the wheel, the ring root sits 0.75 m2 inside it, and the
+         module follows from the ring's tooth count. Sized from Rr outward, as
+         this was, the root landed exactly on the bore -- a ring gear with no
+         metal behind its teeth. */
+      const bore = wellR * 0.93;
+      const Rr = bore / (1 + 4 / Zr), m2 = 2 * Rr / Zr;
       const Rs = m2 * Zs / 2, Rp = m2 * Zp / 2, Rc = Rs + Rp;
-      const bore = Rr + m2 * 1.25;
       holes.push('M' + bore.toFixed(2) + ',0 A' + bore.toFixed(2) + ',' + bore.toFixed(2) + ' 0 1 0 -' + bore.toFixed(2) + ',0 A' + bore.toFixed(2) + ',' + bore.toFixed(2) + ' 0 1 0 ' + bore.toFixed(2) + ',0 Z');
-      /* Ring teeth cut to match the planets: tip 0.95 m2 inward of pitch, root
-         1.15 m2 outward, so planet tips clear the root by 0.15 m2 and ring tips
-         clear planet roots by 0.3 m2 -- the same clearance discipline as the
-         big train's involutes. */
-      let ringD = '';
+      /* The ring is cut as a REAL internal gear, not a ring of trapezoids: the
+         same involute curve as every other wheel on the page, but its tooth
+         occupies what an external gear leaves as space, so the thickness GROWS
+         with radius and the addendum points inward. Cut that way, a planet tooth
+         and a ring space are congruent by construction rather than by fitted
+         constants. The trapezoid was about a quarter of a module too fat at the
+         pitch line and fouled every planet flank it touched.
+
+         The addendum is a 0.70 m2 stub. Our planets run as few as five teeth,
+         and a full-depth ring tooth reaches below a planet that small's base
+         circle -- where teethPath has no involute left to give and the flank is
+         a straight wall. Measured in tools/mesh_epi.js: full depth fouls three
+         of the five dealt sets, 0.70 clears all five at every carrier clocking. */
+      const phiR = TOOTH_PA * Math.PI / 180, rbR = Rr * Math.cos(phiR);
+      const invR = (x) => Math.tan(x) - x;
+      const psiR = TOOTH_THICK * Math.PI / Zr;
+      const halfR = (R) => (psiR - invR(phiR) + invR(Math.acos(Math.min(1, rbR / R)))) * 180 / Math.PI;
+      const ringTip = Rr - m2 * 0.70, ringRoot = Rr + m2 * TOOTH_DED;
+      const aR = 360 / Zr, ST = 7;
+      let ringD = 'M' + PT(ringRoot, -aR / 2) + ' ';
       for (let k2 = 0; k2 < Zr; k2++) {
-        const a0 = (k2 / Zr) * 360, wt = (360 / Zr) * 0.24;
-        const tip = Rr - m2 * 0.95, root = Rr + m2 * 1.15;
-        ringD += (k2 ? 'L' : 'M') + PT(root, a0 - wt * 1.7) + ' L' + PT(tip, a0 - wt) + ' L' + PT(tip, a0 + wt) + ' L' + PT(root, a0 + wt * 1.7) + ' ';
+        const c = k2 * aR;
+        ringD += 'A' + ringRoot.toFixed(2) + ' ' + ringRoot.toFixed(2) + ' 0 0 1 ' + PT(ringRoot, c - halfR(ringRoot)) + ' ';
+        for (let s = ST - 1; s >= 0; s--) { const R = ringTip + (ringRoot - ringTip) * (s / ST); ringD += 'L' + PT(R, c - halfR(R)) + ' '; }
+        ringD += 'A' + ringTip.toFixed(2) + ' ' + ringTip.toFixed(2) + ' 0 0 1 ' + PT(ringTip, c + halfR(ringTip)) + ' ';
+        for (let s = 1; s <= ST; s++) { const R = ringTip + (ringRoot - ringTip) * (s / ST); ringD += 'L' + PT(R, c + halfR(R)) + ' '; }
+        ringD += 'A' + ringRoot.toFixed(2) + ' ' + ringRoot.toFixed(2) + ' 0 0 1 ' + PT(ringRoot, c + aR / 2) + ' ';
       }
       ringD += 'Z M' + bore.toFixed(2) + ',0 A' + bore.toFixed(2) + ',' + bore.toFixed(2) + ' 0 1 0 -' + bore.toFixed(2) + ',0 A' + bore.toFixed(2) + ',' + bore.toFixed(2) + ' 0 1 0 ' + bore.toFixed(2) + ',0 Z';
       post.push(h('path', { key: 'epiring', d: ringD, fillRule: 'evenodd', fill: ft.body, stroke: ft.line, strokeWidth: 1, strokeOpacity: 0.6 }));
@@ -1299,7 +1322,23 @@ class Component extends DCLogic {
       const Q = g.phase - (g.crot || 0);
       const baseC = -Q;
       const basePAt = (A) => (((kP * (Q - A) - pp / 2) % pp) + pp) % pp;
-      const baseS = (((180 * (1 - Zp / Zs) + Q * (Zr / Zs - 1)) % ps) + ps) % ps;
+      /* The sun's clocking is the one constant that was WRONG, and wrong in a
+         way a still frame hides: the sun would sit tooth-on-tooth with the
+         planets on any set where Zs and Zp are both odd, and drift out of mesh
+         at every carrier clocking but Q = 0.
+
+         Derived rather than guessed this time. The planet's phase is already
+         pinned by the ring mesh, so the sun's only job is to show a space where
+         the planet shows a tooth. Write each one's position at the line of
+         centres as a fraction of its OWN pitch; an external pair turns opposite
+         ways, so that pair of fractions sums to a constant as the set runs, and
+         setting the constant to the tooth-into-space value leaves
+             baseS = ps * (Zp/2 - Q*(Zs+Zr)/360).
+         Zs does not belong in the parity term at all -- whether the planet
+         points a tooth or a gap inward depends on Zp alone. The per-station
+         term drops out because (Zs+Zr) % N == 0, which is precisely the job the
+         assembly condition is in the solver to do. */
+      const baseS = (((180 * Zp / Zs - Q * (Zs + Zr) / Zs) % ps) + ps) % ps;
       const epi = (k3, base) => (el) => { if (el && this._epiEls) this._epiEls.push({ el: el, k: k3, base: base, g: g }); };
       const planets = [];
       for (let k2 = 0; k2 < NP; k2++) {
