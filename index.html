@@ -530,12 +530,17 @@ const CENTRE_FAMILIES = [
   { type: 'honeycomb', web: 3.1, hub: 0.2,
     variants: [{ arms: 8, cell: 4.2 }, { arms: 8, cell: 5.6 }, { arms: 8, cell: 7.2 }] },
   */
-  { type: 'hexcore', web: 3.1, hub: 0.2,
-    /* `cell` is the WANTED size, capped by CELL_MAX and by the web itself.
-       Deliberately small: many obvious hexagons, not a few big ones. The floor
-       is not lower than this on purpose -- past a point the cells stop reading
-       as hexagons and become a dot screen, which loses the whole idea. */
-    variants: [{ arms: 6, cell: 3.4 }, { arms: 6, cell: 4.0 }, { arms: 6, cell: 4.6 }] },
+  /* A small hub on purpose. The boss is drawn at 1.5x hubR and the core has to
+     clear it, so a fat boss eats the very rings that make this design work --
+     at hub 0.2 the web had room for barely two. */
+  { type: 'hexcore', web: 3.1, hub: 0.13,
+    /* `rings` is how many complete rings of cells the core should have. The cell
+       size follows from it -- the largest that still fits that many. Three rings
+       of big hexagons, or five of small ones. */
+    variants: [{ arms: 6, rings: 3 }, { arms: 6, rings: 4 }, { arms: 6, rings: 5 }] },
+  /* CELL_MIN is the real guard here: a ring target of five would happily grind
+     the cells down to specks to reach it, so the floor stops it and the search
+     falls back to the most rings a legible cell can manage. */
   /* retired with spiral and iris, above
   { type: 'labyrinth', web: 3.2, hub: 0.18,
     variants: [{ arms: 5 }, { arms: 6 }, { arms: 7 }] },
@@ -1937,8 +1942,13 @@ class Component extends DCLogic {
          Pointy-top axial coordinates: x = sqrt(3)*step*(q + r/2), y = 1.5*step*r,
          with step = cell + wall/2 so the gap where two cells meet is the wall. */
       inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
-      const WALLX = 1.25, CELL_MIN = 2.6, CELL_MAX = 4.6;
-      const rInX = Math.max(hubR * 1.1, 6), rOutX = wellR - 0.5;
+      const WALLX = 1.2, CELL_MIN = 3.1, CELL_MAX = 4.8;
+      /* Clear the BOSS, not the hub. The boss disc is drawn at hubR * 1.5 and
+         painted over the web, so a lattice that only cleared hubR * 1.1 ran its
+         innermost ring underneath it -- half-covered cells, and the ragged inner
+         edge the hex-ring boundary was supposed to have got rid of. Every other
+         family clears 1.5 or more for the same reason; this one did not. */
+      const rInX = Math.max(hubR * 1.5 + WALLX, 7), rOutX = wellR - 0.5;
       const DIRS = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
       const ringOf = (k) => {
         if (k === 0) return [[0, 0]];
@@ -1949,12 +1959,20 @@ class Component extends DCLogic {
         }
         return out;
       };
-      /* Try the wanted cell size, then finer, until a whole number of rings fits
-         between the boss and the rim. A smaller cell always fits more rings, so
-         walking down finds the coarsest core the web can actually hold. */
-      const wantX = (g.cv && g.cv.cell) || 3.8;
-      let cellX = 0, kMin = 0, kMax = -1;
-      for (let c = Math.min(wantX, CELL_MAX); c >= CELL_MIN; c -= 0.15) {
+      /* The cell size is searched against a RING TARGET, and the objective matters
+         more than it sounds. Taking the first size that fits gave two rings and
+         eighteen cells -- a necklace, not a core. Maximising the CELL COUNT
+         instead drove every wheel to the smallest cell allowed, because smaller
+         always packs more, and the hexagons stopped reading as hexagons at all.
+
+         So: walk down from the coarsest allowed and take the LARGEST cell that
+         still yields the wanted number of rings. That balances the two things in
+         tension -- obvious hexagons want big cells, a real core wants several
+         rings -- and it gives the variants something meaningful to vary: three
+         rings of large cells, or five of small ones. */
+      const wantRings = (g.cv && g.cv.rings) || 4;
+      let cellX = 0, kMin = 0, kMax = -1, bestRings = -1;
+      for (let c = CELL_MAX; c >= CELL_MIN; c -= 0.1) {
         const step = c + WALLX / 2, px = Math.sqrt(3) * step, ry2 = 1.5 * step;
         const at = (q, r) => [px * (q + r / 2), ry2 * r];
         let hi = -1;
@@ -1978,7 +1996,11 @@ class Component extends DCLogic {
           if (clear) { lo = k; break; }
           lo = k + 1;
         }
-        if (lo <= hi) { cellX = c; kMin = lo; kMax = hi; break; }
+        if (lo > hi) continue;
+        const rings = hi - lo + 1;
+        if (rings >= wantRings) { cellX = c; kMin = lo; kMax = hi; break; }
+        /* nothing reaches the target on this web -- keep the best it can do */
+        if (rings > bestRings) { bestRings = rings; cellX = c; kMin = lo; kMax = hi; }
       }
       if (cellX) {
         const step = cellX + WALLX / 2, px = Math.sqrt(3) * step, ry2 = 1.5 * step;
@@ -2061,7 +2083,10 @@ class Component extends DCLogic {
          nothing else. The windows also start closer in than they did, so the
          spokes converge on the boss rather than stopping short of it. */
       inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
-      const nR = g.arms || 10, rInR = Math.max(hubR * 1.22, 8), rOutR = wellR - 2;
+      /* Stops at the boss edge rather than under it: the spokes still converge on
+         the boss, which is what was wanted, without windows running beneath a
+         disc that is painted on top of them. */
+      const nR = g.arms || 10, rInR = Math.max(hubR * 1.5, 9), rOutR = wellR - 2;
       for (let k = 0; k < nR; k++) {
         const A = (k / nR) * 360;
         const wi = (360 / nR) * 0.16, wo = (360 / nR) * 0.34;
