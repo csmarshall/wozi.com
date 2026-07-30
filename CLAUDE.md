@@ -107,6 +107,20 @@ enforces all four; they are simply not exercised while no entry has a `link`.
 
 ## Verifying a change
 
+**Run `npm test` first.** It is the geometry suite (`tools/test.js`), and it
+reads its constants, the two-row menu and the sizing functions *out of
+`index.html`* rather than keeping copies — so it measures what actually ships.
+It asserts that every gear set the page can deal actually meshes, that every
+two-row set assembles and clears all five of its relationships, and that each
+one's stated minimum blank is honest. CI runs it before assuming any AWS
+credential, so a broken set cannot reach the bucket.
+
+This matters most for one class of edit: `MODULE`, any `TOOTH_*`, `BAND_*`,
+`RIM_UNDER_BAND`, `MIN_MODULE` or the deal bounds all feed the bore, and a
+bigger bore makes gear sets reachable that nothing has ever measured. Change one
+and re-run the suite before pushing.
+
+
 Never trust the screenshot alone — a static train looks fine in a still. Serve
 the page and check, ~700ms apart:
 

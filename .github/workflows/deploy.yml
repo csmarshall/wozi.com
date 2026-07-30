@@ -41,6 +41,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The geometry suite runs BEFORE any credential is assumed, so a broken
+      # gear set cannot reach the bucket. It reads its constants straight out of
+      # index.html rather than keeping copies, which is the only way a test of
+      # this page can be honest: change BAND_DEPTH or a tooth floor and gear sets
+      # nothing has measured become reachable, and this is what catches that.
+      - name: Verify the geometry before anything else
+        run: node tools/test.js
+
       - name: Assume the deploy role via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:

@@ -1,0 +1,8 @@
+{
+  "name": "wozi.com",
+  "private": true,
+  "description": "Static landing page for wozi.com. The geometry suite reads its constants out of index.html, so it tests what actually ships.",
+  "scripts": {
+    "test": "node tools/test.js"
+  }
+}

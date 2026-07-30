@@ -52,6 +52,35 @@ a:hover{color:var(--ink);}
    the site at all (#23). :focus-visible keeps the ring off mouse clicks; the
    outline follows each element's own border-radius, so it rings the discs. */
 a:focus-visible,button:focus-visible,[tabindex]:focus-visible{outline:3px solid var(--accent);outline-offset:3px;}
+/* ===========================================================================
+   WHAT YOU CAN EDIT WITHOUT DOING GEOMETRY
+
+   The file mixes two kinds of thing. This is a map of the first kind: content
+   and taste, safe to change on its own. Everything else derives from MODULE and
+   is checked by `npm test`, which reads its constants straight out of this file.
+
+     SITES            the link table -- where each wheel points, its label and
+                      the handle engraved on its rim. Add or retarget freely.
+     PAIRS / SINGLES  which handles are siblings (they get neighbouring wheels)
+                      and which stand alone. PAIR_SLOTS says which wheel indices
+                      count as neighbours.
+     BRAND / ACCENTS  per-service mark colour, and the accent each theme uses.
+     WHEEL_POOL       the colour pool wheels are dealt from -- the original
+                      template's seven plus three gap-fillers. Shuffled per load;
+                      the deal refuses neighbours closer than 40 degrees of hue.
+     CENTRE_FAMILIES  the kinds of gear centre, and the variants of each. Adding
+                      a family puts it in rotation and in the Table of Gears at
+                      once. Admission rule, Charles's: a wheel a machinist could
+                      make, a visible load path hub to rim, no floating metal,
+                      and not boring.
+     TRAIN            which handle sits on which wheel. Tooth counts and bearing
+                      angles in here are only SEEDS -- both are dealt per load.
+
+   Change any of these and the machine still works. Change MODULE, TOOTH_*,
+   BAND_*, RIM_UNDER_BAND, MIN_MODULE or the deal bounds and gear sets that
+   nothing has measured become reachable: run `npm test` before you push.
+   =========================================================================== */
+
 /* The train itself rests via the frame loop (#3) — this only stills the UI
    transitions: badge scale, tooltip fade, toggle colour. */
 @media (prefers-reduced-motion:reduce){*{transition:none !important}}
@@ -138,11 +167,11 @@ const TOOTH_THICK = 0.495; /* tooth thickness at the pitch circle, as a fraction
    wide on a 13-tooth blank as on a 19-tooth one.
 
    Sized to the TEXT it carries and not a pixel more: engraving() sets the handle
-   at 0.80 modules, so 1.2 leaves about a fifth of a module of margin above and
-   below and nothing else. It was 2.1 — two and a half times the height of its
+   at 0.80 modules, so 1.38 leaves a bit under a third of a module of margin above
+   and below and nothing else. It was 2.1 — two and a half times the height of its
    own lettering — and on a small blank that surplus was over half the radius,
    which is what squeezed the works into a coin in the middle of a lot of metal. */
-const BAND_DEPTH = 1.2;
+const BAND_DEPTH = 1.38;
 /* How far in from the tooth roots the engraving band starts, in modules. */
 const BAND_RISE = 1.3;
 /* The ring of metal left BELOW the band, in modules, before anything may be cut
@@ -234,7 +263,13 @@ const TEETH_MIN = 13, TEETH_MAX = 19, TEETH_SUM = 114, TEETH_SLACK = 4, TEETH_HO
      C2 assembly       (Zs+Zr) % N == 0 for equally spaced planets
      C3 adjacency      (Zs+Zp)*sin(pi/N) > Zp + 2 + margin (tip circles clear)
    Hunting-tooth and undercut are real-gearbox concerns flagged in the
-   reference copy; cosmetic here. */
+   reference copy; cosmetic here.
+
+   No code was copied from any of those projects -- what was taken is the set of
+   design conditions above, which are properties of the mechanism rather than
+   anybody's invention. CREDITS.md at the repo root records each source, its
+   licence, and that distinction.
+*/
 function enumeratePlanetaries(o) {
   const N = o.N, target = { small: 0.25, medium: 0.4, large: 0.6 }[o.sunBias || 'medium'];
   const ZrMin = o.ZrMin || 24, ZrMax = o.ZrMax || 60, minT = o.minTeeth || 6;
@@ -310,17 +345,17 @@ function planetaryBore(teeth) {
    exactly why the approved list is the measured one. `blank` is the smallest
    wheel that can hold the set at a legible module. */
 const RAVIGNEAUX_MENU = [
-  { pg2: [8, 8, 8, 29, 3], blank: 15 },
-  { pg2: [9, 8, 8, 30, 3], blank: 15 },
-  { pg2: [9, 8, 9, 33, 3], blank: 16 },
-  { pg2: [9, 9, 9, 33, 3], blank: 16 },
-  { pg2: [9, 10, 9, 33, 3], blank: 16 },
-  { pg2: [10, 8, 8, 34, 4], blank: 16 },
-  { pg2: [13, 8, 8, 34, 3], blank: 16 },
-  { pg2: [10, 8, 8, 34, 3], blank: 16 },
-  { pg2: [10, 8, 9, 34, 3], blank: 16 },
-  { pg2: [10, 9, 9, 34, 3], blank: 16 },
-  { pg2: [10, 10, 9, 34, 3], blank: 16 },
+  { pg2: [8, 8, 8, 29, 3], blank: 16 },
+  { pg2: [9, 8, 8, 30, 3], blank: 16 },
+  { pg2: [9, 8, 9, 33, 3], blank: 17 },
+  { pg2: [9, 9, 9, 33, 3], blank: 17 },
+  { pg2: [9, 10, 9, 33, 3], blank: 17 },
+  { pg2: [10, 8, 8, 34, 4], blank: 17 },
+  { pg2: [13, 8, 8, 34, 3], blank: 17 },
+  { pg2: [10, 8, 8, 34, 3], blank: 17 },
+  { pg2: [10, 8, 9, 34, 3], blank: 17 },
+  { pg2: [10, 9, 9, 34, 3], blank: 17 },
+  { pg2: [10, 10, 9, 34, 3], blank: 17 },
   { pg2: [12, 9, 8, 36, 3], blank: 17 },
   { pg2: [9, 8, 10, 36, 3], blank: 17 },
   { pg2: [9, 11, 9, 36, 3], blank: 17 },
@@ -329,26 +364,26 @@ const RAVIGNEAUX_MENU = [
   { pg2: [9, 8, 11, 36, 3], blank: 17 },
   { pg2: [9, 11, 10, 36, 3], blank: 17 },
   { pg2: [9, 9, 11, 36, 3], blank: 17 },
-  { pg2: [13, 8, 8, 37, 4], blank: 17 },
-  { pg2: [9, 8, 8, 37, 4], blank: 17 },
-  { pg2: [9, 8, 9, 37, 4], blank: 17 },
-  { pg2: [13, 8, 9, 37, 4], blank: 17 },
-  { pg2: [16, 8, 8, 37, 3], blank: 17 },
-  { pg2: [13, 8, 8, 37, 3], blank: 17 },
-  { pg2: [13, 8, 9, 37, 3], blank: 17 },
-  { pg2: [10, 8, 9, 37, 3], blank: 17 },
-  { pg2: [13, 9, 9, 37, 3], blank: 17 },
-  { pg2: [10, 9, 9, 37, 3], blank: 17 },
-  { pg2: [13, 10, 9, 37, 3], blank: 17 },
-  { pg2: [10, 10, 9, 37, 3], blank: 17 },
-  { pg2: [10, 8, 10, 37, 3], blank: 17 },
-  { pg2: [10, 11, 9, 37, 3], blank: 17 },
-  { pg2: [10, 9, 10, 37, 3], blank: 17 },
-  { pg2: [10, 10, 10, 37, 3], blank: 17 },
-  { pg2: [10, 8, 11, 37, 3], blank: 17 },
-  { pg2: [10, 11, 10, 37, 3], blank: 17 },
-  { pg2: [10, 9, 11, 37, 3], blank: 17 },
-  { pg2: [10, 10, 11, 37, 3], blank: 17 },
+  { pg2: [13, 8, 8, 37, 4], blank: 18 },
+  { pg2: [9, 8, 8, 37, 4], blank: 18 },
+  { pg2: [9, 8, 9, 37, 4], blank: 18 },
+  { pg2: [13, 8, 9, 37, 4], blank: 18 },
+  { pg2: [16, 8, 8, 37, 3], blank: 18 },
+  { pg2: [13, 8, 8, 37, 3], blank: 18 },
+  { pg2: [13, 8, 9, 37, 3], blank: 18 },
+  { pg2: [10, 8, 9, 37, 3], blank: 18 },
+  { pg2: [13, 9, 9, 37, 3], blank: 18 },
+  { pg2: [10, 9, 9, 37, 3], blank: 18 },
+  { pg2: [13, 10, 9, 37, 3], blank: 18 },
+  { pg2: [10, 10, 9, 37, 3], blank: 18 },
+  { pg2: [10, 8, 10, 37, 3], blank: 18 },
+  { pg2: [10, 11, 9, 37, 3], blank: 18 },
+  { pg2: [10, 9, 10, 37, 3], blank: 18 },
+  { pg2: [10, 10, 10, 37, 3], blank: 18 },
+  { pg2: [10, 8, 11, 37, 3], blank: 18 },
+  { pg2: [10, 11, 10, 37, 3], blank: 18 },
+  { pg2: [10, 9, 11, 37, 3], blank: 18 },
+  { pg2: [10, 10, 11, 37, 3], blank: 18 },
   { pg2: [9, 12, 8, 39, 3], blank: 18 },
   { pg2: [9, 12, 9, 39, 3], blank: 18 },
   { pg2: [9, 13, 9, 39, 3], blank: 18 },

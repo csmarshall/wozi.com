@@ -198,103 +198,110 @@ function audit(PG, opt, Q, dS, dP, steps) {
   return res;
 }
 
-const SHIPPED = { widthFrac: 0.24, rootFactor: 1.7, addIn: 0.95, dedOut: 1.15 };
+module.exports = { audit, involuteProfile, ringVoidProfile, profileFromPoints };
 
-function menu() {
-  const flavours = [[3, 'medium'], [3, 'large'], [4, 'medium'], [4, 'large'], [5, 'small'], [5, 'medium']];
-  const seen = {}, out = [];
-  flavours.forEach((c) => {
-    const r = enumeratePlanetaries({ N: c[0], sunBias: c[1], ZrMin: 24, ZrMax: 33,
-      minTeeth: +(process.env.MIN_TEETH || 5) })[0];
-    if (!r) return;
-    const key = [r.Zs, r.Zp, r.Zr, r.N].join('.');
-    if (seen[key]) return;
-    seen[key] = 1;
-    out.push([r.Zs, r.Zp, r.Zr, r.N]);
-  });
-  return out;
-}
+/* Everything below is the command line. Required as a module, this file is just
+   the measurement functions -- which is what tools/test.js consumes, so the
+   suite and the CLI can never drift apart. */
+if (require.main === module) {
+  const SHIPPED = { widthFrac: 0.24, rootFactor: 1.7, addIn: 0.95, dedOut: 1.15 };
 
-/* SETS_JSON lets the page's own derived menu be checked verbatim, e.g.
-   SETS_JSON='[[12,9,30,3],[17,7,31,3]]' node tools/mesh_epi.js */
-const SETS = process.env.SETS_JSON ? JSON.parse(process.env.SETS_JSON) : menu();
-/* The carrier is clocked at random per load, so the phase constants have to
-   hold at every clocking, not one convenient one. */
-const QS = [0, 17, 37, 68, 111, 154, 203, 249, 298, 331];
-
-function report(label, opt) {
-  console.log('\n' + label);
-  console.log('  set (Zs,Zp,Zr)xN   sun <-> planet        planet <-> ring');
-  for (const PG of SETS) {
-    let rp = 0, rg = Infinity, sp = 0, sg = Infinity;
-    for (const Q of QS) {
-      const r = audit(PG, opt, Q);
-      rp = Math.max(rp, r.ringPen); rg = Math.min(rg, r.ringGap);
-      sp = Math.max(sp, r.sunPen); sg = Math.min(sg, r.sunGap);
-    }
-    const tag = `(${PG[0]},${PG[1]},${PG[2]})x${PG[3]}`.padEnd(14);
-    console.log(`  ${tag} pen ${sp.toFixed(3)}m gap ${sg.toFixed(3)}m   pen ${rp.toFixed(3)}m gap ${rg.toFixed(3)}m`);
+  function menu() {
+    const flavours = [[3, 'medium'], [3, 'large'], [4, 'medium'], [4, 'large'], [5, 'small'], [5, 'medium']];
+    const seen = {}, out = [];
+    flavours.forEach((c) => {
+      const r = enumeratePlanetaries({ N: c[0], sunBias: c[1], ZrMin: 24, ZrMax: 33,
+        minTeeth: +(process.env.MIN_TEETH || 5) })[0];
+      if (!r) return;
+      const key = [r.Zs, r.Zp, r.Zr, r.N].join('.');
+      if (seen[key]) return;
+      seen[key] = 1;
+      out.push([r.Zs, r.Zp, r.Zr, r.N]);
+    });
+    return out;
   }
-}
 
-if (process.argv.includes('--solve')) {
-  /* Is the DERIVATION wrong, or only the clearance? Walk the sun phase across a
-     whole tooth pitch and the planet phase across one of its own, and find where
-     the metal actually clears. A minimum at offset 0 exonerates the formula. */
-  for (const PG of SETS) {
-    const [Zs, Zp] = PG;
-    const ps = 360 / Zs, pp = 360 / Zp;
-    console.log(`\n(${PG[0]},${PG[1]},${PG[2]})x${PG[3]}  sun pitch ${ps.toFixed(1)} deg, planet pitch ${pp.toFixed(1)} deg`);
-    let bestS = null, bestP = null;
-    for (let i = 0; i < 36; i++) {
-      const dS = (i / 36) * ps;
-      const r = audit(PG, SHIPPED, 0, dS, 0, 12);
-      if (!bestS || r.sunPen < bestS.pen) bestS = { d: dS, pen: r.sunPen, gap: r.sunGap };
-      const dP = (i / 36) * pp;
-      const r2 = audit(PG, SHIPPED, 0, 0, dP, 12);
-      if (!bestP || r2.ringPen < bestP.pen) bestP = { d: dP, pen: r2.ringPen, gap: r2.ringGap };
-    }
-    const at0 = audit(PG, SHIPPED, 0, 0, 0, 12);
-    console.log(`  sun : derived -> pen ${at0.sunPen.toFixed(3)}m | best at ${bestS.d.toFixed(2)} deg = ${(bestS.d / ps).toFixed(3)} pitch -> pen ${bestS.pen.toFixed(3)}m`);
-    console.log(`  ring: derived -> pen ${at0.ringPen.toFixed(3)}m | best at ${bestP.d.toFixed(2)} deg = ${(bestP.d / pp).toFixed(3)} pitch -> pen ${bestP.pen.toFixed(3)}m`);
-  }
-} else if (process.argv.includes('--sweep')) {
-  for (const wf of [0.24, 0.21, 0.19, 0.17, 0.15]) {
-    for (const rf of [1.7, 1.5, 1.3]) {
-      report(`widthFrac ${wf}  rootFactor ${rf}`, { widthFrac: wf, rootFactor: rf, addIn: 0.95, dedOut: 1.15 });
-    }
-  }
-} else {
-  report('SHIPPED: trapezoid ring teeth, shipped sun phase', SHIPPED);
-  report('FIX 1 only: shipped ring teeth, corrected sun phase',
-    { ...SHIPPED, sunPhase: 'fixed' });
-  report('FIX 1 + 2: true internal involute ring, corrected sun phase',
-    { kind: 'involute', sunPhase: 'fixed' });
-  report('PROPOSED: internal involute, 0.70m stub addendum, corrected sun phase',
-    { kind: 'involute', sunPhase: 'fixed', addI: 0.70 });
-}
+  /* SETS_JSON lets the page's own derived menu be checked verbatim, e.g.
+     SETS_JSON='[[12,9,30,3],[17,7,31,3]]' node tools/mesh_epi.js */
+  const SETS = process.env.SETS_JSON ? JSON.parse(process.env.SETS_JSON) : menu();
+  /* The carrier is clocked at random per load, so the phase constants have to
+     hold at every clocking, not one convenient one. */
+  const QS = [0, 17, 37, 68, 111, 154, 203, 249, 298, 331];
 
-console.log('\npen = deepest metal into metal, radially, in modules. 0.000 is the only pass.');
-console.log('gap = tightest air at the mesh; near 0 means flanks kissing, which is the target.');
-
-/* Where does the ring bite, and does a shorter ring tooth clear it? Reports the
-   radius on the PLANET at which the deepest interference happens, against that
-   planet's base circle -- below the base circle teethPath has no involute left
-   to give, so a ring tooth reaching past it is interfering with a wall. */
-if (process.argv.includes('--ring')) {
-  for (const addI of [1.00, 0.90, 0.85, 0.80, 0.75, 0.70]) {
-    console.log(`\nring addendum ${addI.toFixed(2)}m inward, true internal involute`);
+  function report(label, opt) {
+    console.log('\n' + label);
+    console.log('  set (Zs,Zp,Zr)xN   sun <-> planet        planet <-> ring');
     for (const PG of SETS) {
-      let worst = null;
+      let rp = 0, rg = Infinity, sp = 0, sg = Infinity;
       for (const Q of QS) {
-        const r = audit(PG, { kind: 'involute', sunPhase: 'fixed', addI }, Q);
-        if (!worst || r.ringPen > worst.ringPen) worst = r;
+        const r = audit(PG, opt, Q);
+        rp = Math.max(rp, r.ringPen); rg = Math.min(rg, r.ringGap);
+        sp = Math.max(sp, r.sunPen); sg = Math.min(sg, r.sunGap);
       }
       const tag = `(${PG[0]},${PG[1]},${PG[2]})x${PG[3]}`.padEnd(14);
-      const where = worst.ringPen > 0
-        ? `bites at R=${worst.ringAt.toFixed(2)} (base circle ${worst.rb.toFixed(2)}, root ${worst.rr.toFixed(2)})`
-        : 'clear';
-      console.log(`  ${tag} pen ${worst.ringPen.toFixed(3)}m gap ${worst.ringGap.toFixed(3)}m  ${where}`);
+      console.log(`  ${tag} pen ${sp.toFixed(3)}m gap ${sg.toFixed(3)}m   pen ${rp.toFixed(3)}m gap ${rg.toFixed(3)}m`);
+    }
+  }
+
+  if (process.argv.includes('--solve')) {
+    /* Is the DERIVATION wrong, or only the clearance? Walk the sun phase across a
+       whole tooth pitch and the planet phase across one of its own, and find where
+       the metal actually clears. A minimum at offset 0 exonerates the formula. */
+    for (const PG of SETS) {
+      const [Zs, Zp] = PG;
+      const ps = 360 / Zs, pp = 360 / Zp;
+      console.log(`\n(${PG[0]},${PG[1]},${PG[2]})x${PG[3]}  sun pitch ${ps.toFixed(1)} deg, planet pitch ${pp.toFixed(1)} deg`);
+      let bestS = null, bestP = null;
+      for (let i = 0; i < 36; i++) {
+        const dS = (i / 36) * ps;
+        const r = audit(PG, SHIPPED, 0, dS, 0, 12);
+        if (!bestS || r.sunPen < bestS.pen) bestS = { d: dS, pen: r.sunPen, gap: r.sunGap };
+        const dP = (i / 36) * pp;
+        const r2 = audit(PG, SHIPPED, 0, 0, dP, 12);
+        if (!bestP || r2.ringPen < bestP.pen) bestP = { d: dP, pen: r2.ringPen, gap: r2.ringGap };
+      }
+      const at0 = audit(PG, SHIPPED, 0, 0, 0, 12);
+      console.log(`  sun : derived -> pen ${at0.sunPen.toFixed(3)}m | best at ${bestS.d.toFixed(2)} deg = ${(bestS.d / ps).toFixed(3)} pitch -> pen ${bestS.pen.toFixed(3)}m`);
+      console.log(`  ring: derived -> pen ${at0.ringPen.toFixed(3)}m | best at ${bestP.d.toFixed(2)} deg = ${(bestP.d / pp).toFixed(3)} pitch -> pen ${bestP.pen.toFixed(3)}m`);
+    }
+  } else if (process.argv.includes('--sweep')) {
+    for (const wf of [0.24, 0.21, 0.19, 0.17, 0.15]) {
+      for (const rf of [1.7, 1.5, 1.3]) {
+        report(`widthFrac ${wf}  rootFactor ${rf}`, { widthFrac: wf, rootFactor: rf, addIn: 0.95, dedOut: 1.15 });
+      }
+    }
+  } else {
+    report('SHIPPED: trapezoid ring teeth, shipped sun phase', SHIPPED);
+    report('FIX 1 only: shipped ring teeth, corrected sun phase',
+      { ...SHIPPED, sunPhase: 'fixed' });
+    report('FIX 1 + 2: true internal involute ring, corrected sun phase',
+      { kind: 'involute', sunPhase: 'fixed' });
+    report('PROPOSED: internal involute, 0.70m stub addendum, corrected sun phase',
+      { kind: 'involute', sunPhase: 'fixed', addI: 0.70 });
+  }
+
+  console.log('\npen = deepest metal into metal, radially, in modules. 0.000 is the only pass.');
+  console.log('gap = tightest air at the mesh; near 0 means flanks kissing, which is the target.');
+
+  /* Where does the ring bite, and does a shorter ring tooth clear it? Reports the
+     radius on the PLANET at which the deepest interference happens, against that
+     planet's base circle -- below the base circle teethPath has no involute left
+     to give, so a ring tooth reaching past it is interfering with a wall. */
+  if (process.argv.includes('--ring')) {
+    for (const addI of [1.00, 0.90, 0.85, 0.80, 0.75, 0.70]) {
+      console.log(`\nring addendum ${addI.toFixed(2)}m inward, true internal involute`);
+      for (const PG of SETS) {
+        let worst = null;
+        for (const Q of QS) {
+          const r = audit(PG, { kind: 'involute', sunPhase: 'fixed', addI }, Q);
+          if (!worst || r.ringPen > worst.ringPen) worst = r;
+        }
+        const tag = `(${PG[0]},${PG[1]},${PG[2]})x${PG[3]}`.padEnd(14);
+        const where = worst.ringPen > 0
+          ? `bites at R=${worst.ringAt.toFixed(2)} (base circle ${worst.rb.toFixed(2)}, root ${worst.rr.toFixed(2)})`
+          : 'clear';
+        console.log(`  ${tag} pen ${worst.ringPen.toFixed(3)}m gap ${worst.ringGap.toFixed(3)}m  ${where}`);
+      }
     }
   }
 }

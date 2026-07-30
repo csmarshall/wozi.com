@@ -162,11 +162,9 @@ function audit(set, Q, steps) {
   return res;
 }
 
-const file = process.argv[2] || '/tmp/rav.json';
-const sets = JSON.parse(require('fs').readFileSync(file, 'utf8'));
-const QS = [0, 41, 137, 263, 311];
-
-/* the sun clocking each set demands, from station 0 */
+/* sunPhase and audit are what tools/test.js consumes; the CLI below is a
+   convenience wrapper around the same functions, so the suite and the command
+   line can never measure different things. */
 function sunPhase(set, Q) {
   const [Zs, Zp1, Zp2, Zr] = set.pg2;
   const Rs = Zs / 2, Rp1 = Zp1 / 2, Rp2 = Zp2 / 2, Rr = Zr / 2;
@@ -179,54 +177,96 @@ function sunPhase(set, Q) {
   return wrap(-Q + as * ((180 - baseP1) * Zp1 / 360 - 0.5), as);
 }
 
-console.log(`${sets.length} assemblable two-row sets, five relationships each, ${QS.length} clockings, full turn\n`);
-console.log('set (sun,P1,P2,ring)xN   P2<->ring        P1<->P2          sun<->P1        strays');
-let bad = 0;
-for (const set of sets) {
-  const r = { ringPen: 0, ringGap: Infinity, p12Pen: 0, p12Gap: Infinity,
-              sunPen: 0, sunGap: Infinity, strayP1: 0, strayP2: 0 };
-  for (const Q of QS) {
-    set._baseS = sunPhase(set, Q);
-    const a = audit(set, Q, 90);
-    r.ringPen = Math.max(r.ringPen, a.ringPen); r.ringGap = Math.min(r.ringGap, a.ringGap);
-    r.p12Pen = Math.max(r.p12Pen, a.p12Pen); r.p12Gap = Math.min(r.p12Gap, a.p12Gap);
-    r.sunPen = Math.max(r.sunPen, a.sunPen); r.sunGap = Math.min(r.sunGap, a.sunGap);
-    r.strayP1 = Math.max(r.strayP1, a.strayP1); r.strayP2 = Math.max(r.strayP2, a.strayP2);
+/* Do all N stations demand the same sun clocking? That IS the assembly
+   condition for a two-row set -- there is only one sun. */
+function sunSpread(set, Q) {
+  const [Zs, Zp1, Zp2, Zr, N] = set.pg2;
+  const Rs = Zs / 2, Rp1 = Zp1 / 2, Rp2 = Zp2 / 2, Rr = Zr / 2;
+  const Rc1 = Rs + Rp1, Rc2 = Rr - Rp2, d12 = Rp1 + Rp2;
+  const dTheta = Math.acos((Rc1 * Rc1 + Rc2 * Rc2 - d12 * d12) / (2 * Rc1 * Rc2)) / D2R;
+  const psi = Math.atan2(Rc2 * Math.sin(dTheta * D2R), Rc2 * Math.cos(dTheta * D2R) - Rc1) / D2R;
+  const a1 = 360 / Zp1, a2 = 360 / Zp2, as = 360 / Zs;
+  const suns = [];
+  for (let k = 0; k < N; k++) {
+    const A = k * 360 / N;
+    const baseP2 = wrap(a2 * (-0.5 + Zr * (Q - A - dTheta) / 360), a2);
+    const baseP1 = wrap(psi + a1 * ((psi + 180 - dTheta - baseP2) * Zp2 / 360 - 0.5), a1);
+    suns.push(wrap((-Q + A) + as * ((180 - baseP1) * Zp1 / 360 - 0.5), as));
   }
-  const p = set.pg2;
-  const fail = r.ringPen > 0.001 || r.p12Pen > 0.001 || r.sunPen > 0.001
-            || r.strayP1 > 0.001 || r.strayP2 > 0.001;
-  if (fail) bad++;
-  console.log(`(${p[0]},${p[1]},${p[2]},${p[3]})x${p[4]}`.padEnd(22)
-    + ` ${r.ringPen.toFixed(3)}/${r.ringGap.toFixed(3)}`.padEnd(16)
-    + ` ${r.p12Pen.toFixed(3)}/${r.p12Gap.toFixed(3)}`.padEnd(16)
-    + ` ${r.sunPen.toFixed(3)}/${r.sunGap.toFixed(3)}`.padEnd(15)
-    + ` ${r.strayP1.toFixed(3)}/${r.strayP2.toFixed(3)}` + (fail ? '   <-- FAIL' : ''));
+  let spread = 0;
+  for (const v of suns) spread = Math.max(spread, Math.abs(wrap(v - suns[0] + as / 2, as) - as / 2));
+  return spread;
 }
-console.log(`\n${sets.length - bad} of ${sets.length} clear every relationship. pen/gap in modules; pen 0.000 is the only pass.`);
 
-/* --pass writes the sets that cleared every relationship, as the literal the
-   page carries. The solver proposes, the measurement disposes: the failures are
-   involute interference (a larger gear's tooth reaching past an 8-tooth pinion's
-   base circle, where teethPath has only a straight wall), which no closed-form
-   assembly rule predicts -- so the approved list is measured, not derived. */
-if (process.argv.includes('--pass')) {
-  const clean = [];
+module.exports = { audit, sunPhase, sunSpread };
+
+if (require.main === module) {
+  const file = process.argv[2] || '/tmp/rav.json';
+  const sets = JSON.parse(require('fs').readFileSync(file, 'utf8'));
+  const QS = [0, 41, 137, 263, 311];
+
+  /* (sunPhase now lives above, shared with the test suite) */
+  function _unusedSunPhase(set, Q) {
+    const [Zs, Zp1, Zp2, Zr] = set.pg2;
+    const Rs = Zs / 2, Rp1 = Zp1 / 2, Rp2 = Zp2 / 2, Rr = Zr / 2;
+    const Rc1 = Rs + Rp1, Rc2 = Rr - Rp2, d12 = Rp1 + Rp2;
+    const dTheta = Math.acos((Rc1 * Rc1 + Rc2 * Rc2 - d12 * d12) / (2 * Rc1 * Rc2)) / D2R;
+    const psi = Math.atan2(Rc2 * Math.sin(dTheta * D2R), Rc2 * Math.cos(dTheta * D2R) - Rc1) / D2R;
+    const a1 = 360 / Zp1, a2 = 360 / Zp2, as = 360 / Zs;
+    const baseP2 = wrap(a2 * (-0.5 + Zr * (Q - 0 - dTheta) / 360), a2);
+    const baseP1 = wrap(psi + a1 * ((psi + 180 - dTheta - baseP2) * Zp2 / 360 - 0.5), a1);
+    return wrap(-Q + as * ((180 - baseP1) * Zp1 / 360 - 0.5), as);
+  }
+
+  console.log(`${sets.length} assemblable two-row sets, five relationships each, ${QS.length} clockings, full turn\n`);
+  console.log('set (sun,P1,P2,ring)xN   P2<->ring        P1<->P2          sun<->P1        strays');
+  let bad = 0;
   for (const set of sets) {
-    const r = { ringPen: 0, p12Pen: 0, sunPen: 0, strayP1: 0, strayP2: 0 };
+    const r = { ringPen: 0, ringGap: Infinity, p12Pen: 0, p12Gap: Infinity,
+                sunPen: 0, sunGap: Infinity, strayP1: 0, strayP2: 0 };
     for (const Q of QS) {
       set._baseS = sunPhase(set, Q);
       const a = audit(set, Q, 90);
-      r.ringPen = Math.max(r.ringPen, a.ringPen); r.p12Pen = Math.max(r.p12Pen, a.p12Pen);
-      r.sunPen = Math.max(r.sunPen, a.sunPen);
+      r.ringPen = Math.max(r.ringPen, a.ringPen); r.ringGap = Math.min(r.ringGap, a.ringGap);
+      r.p12Pen = Math.max(r.p12Pen, a.p12Pen); r.p12Gap = Math.min(r.p12Gap, a.p12Gap);
+      r.sunPen = Math.max(r.sunPen, a.sunPen); r.sunGap = Math.min(r.sunGap, a.sunGap);
       r.strayP1 = Math.max(r.strayP1, a.strayP1); r.strayP2 = Math.max(r.strayP2, a.strayP2);
     }
-    if (r.ringPen > 0.001 || r.p12Pen > 0.001 || r.sunPen > 0.001
-     || r.strayP1 > 0.001 || r.strayP2 > 0.001) continue;
-    clean.push({ pg2: set.pg2, blank: set.blank });
+    const p = set.pg2;
+    const fail = r.ringPen > 0.001 || r.p12Pen > 0.001 || r.sunPen > 0.001
+              || r.strayP1 > 0.001 || r.strayP2 > 0.001;
+    if (fail) bad++;
+    console.log(`(${p[0]},${p[1]},${p[2]},${p[3]})x${p[4]}`.padEnd(22)
+      + ` ${r.ringPen.toFixed(3)}/${r.ringGap.toFixed(3)}`.padEnd(16)
+      + ` ${r.p12Pen.toFixed(3)}/${r.p12Gap.toFixed(3)}`.padEnd(16)
+      + ` ${r.sunPen.toFixed(3)}/${r.sunGap.toFixed(3)}`.padEnd(15)
+      + ` ${r.strayP1.toFixed(3)}/${r.strayP2.toFixed(3)}` + (fail ? '   <-- FAIL' : ''));
   }
-  clean.sort((a, b) => a.blank - b.blank || a.pg2[3] - b.pg2[3]);
-  const lines = clean.map(c => `  { pg2: [${c.pg2.join(', ')}], blank: ${c.blank} }`);
-  require('fs').writeFileSync('/tmp/rav_pass.js', lines.join(',\n'));
-  console.error(`\n${clean.length} clean sets written to /tmp/rav_pass.js`);
+  console.log(`\n${sets.length - bad} of ${sets.length} clear every relationship. pen/gap in modules; pen 0.000 is the only pass.`);
+
+  /* --pass writes the sets that cleared every relationship, as the literal the
+     page carries. The solver proposes, the measurement disposes: the failures are
+     involute interference (a larger gear's tooth reaching past an 8-tooth pinion's
+     base circle, where teethPath has only a straight wall), which no closed-form
+     assembly rule predicts -- so the approved list is measured, not derived. */
+  if (process.argv.includes('--pass')) {
+    const clean = [];
+    for (const set of sets) {
+      const r = { ringPen: 0, p12Pen: 0, sunPen: 0, strayP1: 0, strayP2: 0 };
+      for (const Q of QS) {
+        set._baseS = sunPhase(set, Q);
+        const a = audit(set, Q, 90);
+        r.ringPen = Math.max(r.ringPen, a.ringPen); r.p12Pen = Math.max(r.p12Pen, a.p12Pen);
+        r.sunPen = Math.max(r.sunPen, a.sunPen);
+        r.strayP1 = Math.max(r.strayP1, a.strayP1); r.strayP2 = Math.max(r.strayP2, a.strayP2);
+      }
+      if (r.ringPen > 0.001 || r.p12Pen > 0.001 || r.sunPen > 0.001
+       || r.strayP1 > 0.001 || r.strayP2 > 0.001) continue;
+      clean.push({ pg2: set.pg2, blank: set.blank });
+    }
+    clean.sort((a, b) => a.blank - b.blank || a.pg2[3] - b.pg2[3]);
+    const lines = clean.map(c => `  { pg2: [${c.pg2.join(', ')}], blank: ${c.blank} }`);
+    require('fs').writeFileSync('/tmp/rav_pass.js', lines.join(',\n'));
+    console.error(`\n${clean.length} clean sets written to /tmp/rav_pass.js`);
+  }
 }
