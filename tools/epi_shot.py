@@ -95,6 +95,49 @@ async def main():
             await send("Runtime.evaluate", {"expression":
                 "document.querySelectorAll('a[href]').forEach(a=>a.style.visibility='hidden')"})
             await asyncio.sleep(0.2)
+        if "--pull" in sys.argv:
+            # Drag the hub cap off its axle and hold it there, so the shot shows
+            # what is underneath: the sun.
+            grab = json.loads((await send("Runtime.evaluate", {"expression": r"""
+              (() => {
+                const svgs=[...document.querySelectorAll('svg')];
+                let host=null,bn=0;
+                for(const s of svgs){const n=[...s.querySelectorAll('g')].filter(g=>(g.style.transform||'').indexOf('rotate')===0).length; if(n>bn){bn=n;host=s;}}
+                const hr=host.getBoundingClientRect();
+                const hc=[hr.left+hr.width/2, hr.top+hr.height/2];
+                let best=null,bd=1e9;
+                document.querySelectorAll('a[href]').forEach(a=>{
+                  const r=a.getBoundingClientRect();
+                  const d=Math.hypot(r.left+r.width/2-hc[0], r.top+r.height/2-hc[1]);
+                  if(d<bd){bd=d;best={x:r.left+r.width/2,y:r.top+r.height/2};}
+                });
+                return JSON.stringify(best);
+              })()""", "returnByValue": True}))["result"]["value"])
+            gx, gy = grab["x"], grab["y"]
+            for kind, btn, bmask, px, py in [("mouseMoved", "none", 0, gx, gy),
+                                             ("mousePressed", "left", 1, gx, gy)]:
+                await send("Input.dispatchMouseEvent", {"type": kind, "x": px, "y": py,
+                           "button": btn, "buttons": bmask, "clickCount": 1,
+                           "pointerType": "mouse"})
+            await asyncio.sleep(0.2)          # let frames pass, as a hand does
+            for i in range(1, 15):
+                await send("Input.dispatchMouseEvent", {"type": "mouseMoved",
+                           "x": gx + i * 6, "y": gy - i * 5, "button": "left",
+                           "buttons": 1, "pointerType": "mouse"})
+                await asyncio.sleep(0.02)
+            await asyncio.sleep(0.1)
+        if "--hub" in sys.argv:
+            # Just the bore, where the epicyclic set lives.
+            f = 0.42
+            cx, cy = box["x"] + box["w"] / 2, box["y"] + box["h"] / 2
+            clip = {"x": cx - box["w"] * f / 2, "y": cy - box["h"] * f / 2,
+                    "width": box["w"] * f, "height": box["h"] * f, "scale": 8}
+            shot = await send("Page.captureScreenshot", {"format": "png", "clip": clip})
+            with open(OUT, "wb") as f2:
+                f2.write(base64.b64decode(shot["data"]))
+            proc.kill()
+            print(f"wrote {OUT}  (hub close-up at 8x)")
+            return 0
         pad = 6
         clip = {"x": max(0, box["x"] - pad), "y": max(0, box["y"] - pad),
                 "width": box["w"] + pad * 2, "height": box["h"] + pad * 2, "scale": 4}

@@ -225,7 +225,11 @@ const PLANETARY_MENU = (function () {
   const flavours = [[3, 'medium'], [3, 'large'], [4, 'medium'], [4, 'large'], [5, 'small'], [5, 'medium']];
   const seen = {}, out = [];
   flavours.forEach(function (c) {
-    const r = enumeratePlanetaries({ N: c[0], sunBias: c[1], ZrMin: 24, ZrMax: 33, minTeeth: 5 })[0];
+    /* minTeeth 6, not 5: a five-tooth pinion at 20 degrees reads as a Maltese
+       cross rather than a gear, and would be severely undercut in metal. Six is
+       the floor that keeps the big 18-tooth sun in the deal (tools/mesh_epi.js
+       confirms every set it yields clears at both meshes). */
+    const r = enumeratePlanetaries({ N: c[0], sunBias: c[1], ZrMin: 24, ZrMax: 33, minTeeth: 6 })[0];
     if (!r) return;
     const key = r.Zs + '.' + r.Zp + '.' + r.Zr + '.' + r.N;
     if (seen[key]) return;
@@ -541,6 +545,19 @@ class Component extends DCLogic {
        capture on the anchor swallowed the move stream under some pointers. */
     const off = this._badgeOff[slug] = this._badgeOff[slug] || { x: 0, y: 0, vx: 0, vy: 0 };
     this._badgeEl[slug] = el;
+    /* Claim the drag HERE, on the press, not on the first move.
+       The spring loop deletes any entry that is settled and not being dragged.
+       A brand new entry is exactly that -- zero offset, zero velocity -- so the
+       very next frame deleted it, and every pointermove after that mutated an
+       object no longer in the map. Nothing was left to write a transform, so
+       the cap never moved; on release the render put back a plain transform and
+       it shrank, which is precisely what a real hand saw.
+       A hand always lets at least one frame pass between pressing and moving.
+       Synthesized input dispatches press and move in the same task, before any
+       frame runs, so the entry survived and the harness passed a dead feature
+       -- the third time that gap has hidden a pointer bug. tools/cap_drag.py
+       now waits frames between the two, the way a person does. */
+    this._badgeDragging = slug;
     const sx = e.clientX, sy = e.clientY, ox0 = off.x, oy0 = off.y;
     let moved = false;
     const move = (ev) => {
@@ -1718,6 +1735,9 @@ class Component extends DCLogic {
          counter-rotating member that is the whole show. */
       const discF = g.kind === 'planetary' ? 0.38 : 0.72;
       const capF = g.kind === 'planetary' ? 0.55 : 1.15;
+      /* The cap covers the sun completely on the planetary wheel. Shrinking it
+         was one answer; pulling it off is the better one -- that is what the
+         magnetic cap is FOR, and it keeps the icon at a comfortable size. */
       const disc = Math.max(30, Math.min(60, Math.round(g.r * discF)));
       const cap = Math.round(g.r * capF);
       const size = 'min(calc(' + cap + 'px * var(--gs)), max(30px, calc(' + disc + 'px * var(--gs))))';

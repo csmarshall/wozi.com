@@ -204,7 +204,8 @@ function menu() {
   const flavours = [[3, 'medium'], [3, 'large'], [4, 'medium'], [4, 'large'], [5, 'small'], [5, 'medium']];
   const seen = {}, out = [];
   flavours.forEach((c) => {
-    const r = enumeratePlanetaries({ N: c[0], sunBias: c[1], ZrMin: 24, ZrMax: 33, minTeeth: 5 })[0];
+    const r = enumeratePlanetaries({ N: c[0], sunBias: c[1], ZrMin: 24, ZrMax: 33,
+      minTeeth: +(process.env.MIN_TEETH || 5) })[0];
     if (!r) return;
     const key = [r.Zs, r.Zp, r.Zr, r.N].join('.');
     if (seen[key]) return;
