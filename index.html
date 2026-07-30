@@ -193,7 +193,7 @@ const CENTRE_FAMILIES = [
     variants: [{ arms: 5 }, { arms: 7 }, { arms: 9 }] },
   { type: 'honeycomb', web: 3.1, hub: 0.2,
     variants: [{ arms: 6 }, { arms: 9 }, { arms: 12 }] },
-  { type: 'labyrinth', web: 3.2, hub: 0.24,
+  { type: 'labyrinth', web: 3.2, hub: 0.18,
     variants: [{ arms: 5 }, { arms: 6 }, { arms: 7 }] },
   { type: 'sunburst', web: 3.1, hub: 0.2,
     variants: [{ arms: 10 }, { arms: 14 }, { arms: 18 }] },
@@ -1315,7 +1315,13 @@ class Component extends DCLogic {
          the load path: every slot's ends land on solid metal in the other ring. */
       inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
       const nL = g.arms || 5, rInL = Math.max(hubR * 1.55, 10), rOutL = wellR - 2;
-      const wL = Math.min(6, (rOutL - rInL) * 0.22);
+      /* Ring count adapts to the annulus: three staggered rows where the depth
+         allows (the big wheels), two where it does not -- Charles spotted that
+         three fit and asked why they were not there. Slot width scales down as
+         rows go up so every row keeps solid metal beside it. */
+      const depthL = rOutL - rInL;
+      const rowsL = depthL > 24 ? 3 : 2;
+      const wL = Math.min(6, depthL * (rowsL === 3 ? 0.15 : 0.22));
       const ring = (rr, nn, off, fill2) => {
         for (let k = 0; k < nn; k++) {
           const a0 = off + (k / nn) * 360, sw = (360 / nn) * 0.62;
@@ -1331,8 +1337,14 @@ class Component extends DCLogic {
           holes.push(d2 + 'Z');
         }
       };
-      ring(rInL + (rOutL - rInL) * 0.3, nL, 0);
-      ring(rInL + (rOutL - rInL) * 0.72, nL + 3, 360 / (nL + 3) / 2);
+      if (rowsL === 3) {
+        ring(rInL + depthL * 0.2, nL, 0);
+        ring(rInL + depthL * 0.52, nL + 2, 360 / (nL + 2) / 2);
+        ring(rInL + depthL * 0.84, nL + 5, 0);
+      } else {
+        ring(rInL + depthL * 0.3, nL, 0);
+        ring(rInL + depthL * 0.72, nL + 3, 360 / (nL + 3) / 2);
+      }
       inner.push(h('circle', { key: 'boss', r: hubR * 1.5, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
     } else if (kind === 'geneva') {
       /* Geneva-plate slots: radial stadium cuts with an end drill, leaving a
