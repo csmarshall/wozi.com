@@ -206,18 +206,7 @@ const TRAIN = [
    the planetary goes to the biggest blank available and a cramped one has
    nothing worth seeing inside it. */
 const TEETH_MIN = 13, TEETH_MAX = 19, TEETH_SUM = 114, TEETH_SLACK = 4, TEETH_HOST = 18;
-(function dealTeeth() {
-  for (let tries = 0; tries < 400; tries++) {
-    const cut = TRAIN.map(() => TEETH_MIN + Math.floor(Math.random() * (TEETH_MAX - TEETH_MIN + 1)));
-    if (Math.abs(cut.reduce((a, b) => a + b, 0) - TEETH_SUM) > TEETH_SLACK) continue;
-    if (Math.max.apply(null, cut) < TEETH_HOST) continue;
-    let twins = false;
-    for (let i = 1; i < cut.length; i++) if (cut[i] === cut[i - 1]) twins = true;
-    if (twins) continue;
-    TRAIN.forEach((t, i) => { t.teeth = cut[i]; });
-    return;
-  }
-})();
+/* dealt further down, once the planetary's sizing rules exist to consult */
 
 /* Centre designs: two-level deal for maximum per-visit variety. FAMILIES are
    the major types; each family carries the web/hub proportions it needs plus a
@@ -389,14 +378,14 @@ function planetaryMenuFor(teeth) {
      far more of them than single-row sets, so merging the lists would make the
      double row the usual case rather than the treat. */
   const rav = RAVIGNEAUX_MENU.filter(function (v) { return v.blank <= teeth; });
-  if (fits.length || rav.length) return { one: fits, two: rav };
+  if (fits.length || rav.length) return { one: fits, two: rav, fallback: false };
   /* Nothing fits — this blank is simply too small to hold an epicyclic, which is
      an honest answer and not a failure. Hand back the closest thing rather than a
      set whose teeth would be floored into stubs. Only reachable through
      ?kind=planetary, which forces every wheel; a dealt planetary is always seated
      on the largest blank in the train, and the tooth deal guarantees one. */
   nearest.sort(function (a, b) { return b.score - a.score; });
-  return { one: [nearest.length ? { pg: nearest[0].pg } : { pg: [12, 9, 30, 3] }], two: [] };
+  return { one: [nearest.length ? { pg: nearest[0].pg } : { pg: [12, 9, 30, 3] }], two: [], fallback: true };
 }
 
 const CENTRE_FAMILIES = [
@@ -428,9 +417,14 @@ const CENTRE_FAMILIES = [
 const FORCE_KIND = (function () {
   try { return (location.search.match(/[?&]kind=([a-z]+)/) || [])[1] || null; } catch (e) { return null; }
 })();
+/* ?kind=ravigneaux is not a family of its own -- it is the two-row half of the
+   planetary's menu. So it forces that family and then narrows the pool, which
+   is also why it needs a bigger blank than the single row does. */
+const FORCE_TWO = FORCE_KIND === 'ravigneaux';
+const FORCE_FAMILY = FORCE_TWO ? 'planetary' : FORCE_KIND;
 function dealCentres(n) {
-  const fam = FORCE_KIND && CENTRE_FAMILIES.some(f => f.type === FORCE_KIND)
-    ? CENTRE_FAMILIES.filter(f => f.type === FORCE_KIND)
+  const fam = FORCE_FAMILY && CENTRE_FAMILIES.some(f => f.type === FORCE_FAMILY)
+    ? CENTRE_FAMILIES.filter(f => f.type === FORCE_FAMILY)
     : CENTRE_FAMILIES;
   const idx = fam.map((f, i) => i);
   for (let i = idx.length - 1; i > 0; i--) {
@@ -440,18 +434,103 @@ function dealCentres(n) {
   const out = [];
   for (let i = 0; i < n; i++) {
     const f = fam[idx[i % idx.length]];
-    const v = FORCE_KIND ? f.variants[i % f.variants.length]
+    const v = FORCE_FAMILY ? f.variants[i % f.variants.length]
       : f.variants[Math.floor(Math.random() * f.variants.length)];
     out.push({ type: f.type, web: f.web, hub: f.hub, v: v });
   }
   /* The planetary is the showpiece: every load carries exactly one, unless a
      family is being forced for review. */
-  if (!FORCE_KIND && !out.some(c => c.type === 'planetary')) {
+  if (!FORCE_FAMILY && !out.some(c => c.type === 'planetary')) {
     const f = CENTRE_FAMILIES.filter(x => x.type === 'planetary')[0];
     out[Math.floor(Math.random() * out.length)] = { type: f.type, web: f.web, hub: f.hub, v: f.variants[0] };
   }
   return out;
 }
+/* The smallest blank that can actually hold what is being forced. Probed rather
+   than hardcoded, so it stays true if the menus or the floors ever move. */
+function smallestBlankHolding(wantTwo) {
+  for (let t = TEETH_MIN; t <= TEETH_MAX; t++) {
+    const m = planetaryMenuFor(t);
+    if (wantTwo ? m.two.length : (!m.fallback && m.one.length)) return t;
+  }
+  return TEETH_MAX;
+}
+
+/* Tooth counts are dealt per load, so the machine has a different silhouette
+   every visit rather than the same illustration in new paint. Everything
+   downstream survives it by construction -- centre distances are the sum of two
+   pitch radii, so a re-sized train still meshes, and the band is module-based,
+   so it stays exactly as wide on a small blank as on a large one.
+
+   The deal is constrained, not free. The total sets the train's overall length,
+   so it is held near the original 114 and the layout keeps its proportions. No
+   two neighbours share a count, because two identical wheels side by side read
+   as a mistake rather than a choice. And one blank is kept large enough to host
+   an epicyclic worth looking at.
+
+   When a family is being FORCED onto every wheel, the floor rises to whatever
+   that family needs. Only ?kind= does this, and it is the honest fix for the
+   forced view: rather than draw an epicyclic on a blank too small to hold one
+   -- which is what made the small wheels look cramped -- deal blanks that fit.
+   The default page is untouched and keeps its full range of sizes. */
+(function dealTeeth() {
+  const floor = (FORCE_FAMILY === 'planetary') ? smallestBlankHolding(FORCE_TWO) : TEETH_MIN;
+  const host = Math.max(TEETH_HOST, floor);
+  const span = TEETH_MAX - floor + 1;
+  for (let tries = 0; tries < 600; tries++) {
+    const cut = TRAIN.map(() => floor + Math.floor(Math.random() * span));
+    if (Math.abs(cut.reduce((a, b) => a + b, 0) - TEETH_SUM) > TEETH_SLACK && floor === TEETH_MIN) continue;
+    if (Math.max.apply(null, cut) < host) continue;
+    let twins = false;
+    for (let i = 1; i < cut.length; i++) if (cut[i] === cut[i - 1]) twins = true;
+    if (twins && span > 1) continue;
+    TRAIN.forEach((t, i) => { t.teeth = cut[i]; });
+    return;
+  }
+  /* Range too tight to satisfy every preference -- take the floor plus a host. */
+  TRAIN.forEach((t, i) => { t.teeth = (i % 2 && span > 1) ? floor + 1 : floor; });
+  TRAIN[0].teeth = Math.max(host, TEETH_MAX);
+})();
+
+/* The bearings are dealt too, which is what actually varies the SHAPE. Tooth
+   counts alone change how big each wheel is; these change where the next one
+   sits, so the serpentine itself is different every load rather than the same
+   S-curve in new sizes.
+
+   Bounded on purpose, and the bounds are the whole design:
+     - signs alternate, so the train snakes instead of curling into an arc, and
+       the FIRST sign is dealt too, so it may start upward or downward
+     - each bearing is 14 to 30 degrees off the axis: below that the train reads
+       as a straight rack, above it the wheels stack diagonally
+     - the vertical band the centres occupy is capped, and so is the end-to-end
+       drift, so the machine stays a horizontal line of gears rather than
+       wandering off one corner of the frame
+
+   Collisions are NOT checked here: solve() already nudges each bearing until the
+   wheel clears everything it is not meshed with, so this only has to propose a
+   shape worth looking at. */
+const ANG_MIN = 14, ANG_MAX = 30, BAND_MAX = 62, ENDS_MAX = 26;
+(function dealAngles() {
+  const rOf = (t) => MODULE * t.teeth / 2;
+  const first = Math.random() < 0.5 ? 1 : -1;
+  for (let tries = 0; tries < 500; tries++) {
+    const ang = [0];
+    for (let i = 1; i < TRAIN.length; i++) {
+      ang.push(first * (i % 2 ? 1 : -1) * (ANG_MIN + Math.random() * (ANG_MAX - ANG_MIN)));
+    }
+    let y = 0, lo = 0, hi = 0;
+    for (let i = 1; i < TRAIN.length; i++) {
+      y += (rOf(TRAIN[i - 1]) + rOf(TRAIN[i])) * Math.sin(ang[i] * Math.PI / 180);
+      if (y < lo) lo = y;
+      if (y > hi) hi = y;
+    }
+    if (hi - lo > BAND_MAX) continue;
+    if (Math.abs(y) > ENDS_MAX) continue;
+    TRAIN.forEach((t, i) => { t.angle = +ang[i].toFixed(2); });
+    return;
+  }
+})();
+
 const CENTRE_DEAL = dealCentres(TRAIN.length);
 /* The planetary needs room: on the 14- and 15-tooth wheels the hub badge covers
    most of the bore and the works vanish behind it. Swap it onto the largest
@@ -459,7 +538,11 @@ const CENTRE_DEAL = dealCentres(TRAIN.length);
 (function () {
   const pi = CENTRE_DEAL.findIndex(c => c.type === 'planetary');
   if (pi < 0) return;
-  if (TRAIN[pi] && TRAIN[pi].teeth >= 17) return;
+  const holds = (teeth) => {
+    const m = planetaryMenuFor(teeth);
+    return FORCE_TWO ? m.two.length > 0 : !m.fallback;
+  };
+  if (TRAIN[pi] && holds(TRAIN[pi].teeth)) return;
   let big = -1, bt = 0;
   TRAIN.forEach((t, i) => { if (t.teeth > bt) { bt = t.teeth; big = i; } });
   if (big >= 0) { const tmp = CENTRE_DEAL[pi]; CENTRE_DEAL[pi] = CENTRE_DEAL[big]; CENTRE_DEAL[big] = tmp; }
@@ -481,8 +564,9 @@ TRAIN.forEach((t, i) => {
     const menu = planetaryMenuFor(t.teeth);
     /* A coin weighted toward the single row: the double row is the showpiece and
        stays one, rather than becoming the thing that always happens. */
-    const pool = (menu.two.length && (!menu.one.length || Math.random() < 0.4))
-      ? menu.two : menu.one;
+    const pool = FORCE_TWO
+      ? (menu.two.length ? menu.two : menu.one)
+      : ((menu.two.length && (!menu.one.length || Math.random() < 0.4)) ? menu.two : menu.one);
     t.cv = pool[Math.floor(Math.random() * pool.length)];
   }
   t.prof.web = cd.web; t.prof.hub = cd.hub;
@@ -2071,7 +2155,12 @@ class Component extends DCLogic {
           };
         };
         const out = [item(null, 'Mixed deal (default)')];
-        CENTRE_FAMILIES.forEach(f => out.push(item(f.type, names[f.type] || f.type)));
+        CENTRE_FAMILIES.forEach(f => {
+          out.push(item(f.type, names[f.type] || f.type));
+          /* The double row rides directly under the single, since it is the same
+             family seen through a narrower pool rather than a family of its own. */
+          if (f.type === 'planetary') out.push(item('ravigneaux', 'Ravigneaux (double row)'));
+        });
         return out;
       })(),
       toggleMotion: () => {
