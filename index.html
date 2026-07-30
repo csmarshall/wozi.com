@@ -1915,87 +1915,83 @@ class Component extends DCLogic {
       }
       inner.push(h('circle', { key: 'boss', r: hubR * 1.5, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
     } else if (kind === 'hexcore') {
-      /* A TRUE hexagonal lattice: one tiling laid across the web, every cell
-         sharing each of its six walls with a neighbour. That shared-wall
-         condition is what makes a honeycomb stiff, and just as much what makes
-         it read as one -- cells arranged in rings never quite do, because the
-         walls between courses do not line up with the walls within them.
+      /* A hexagonal patch of hexagons, not a circular crop of them.
 
-         Whole cells only. Clipping the ones that overhang was tried and is
-         wrong: a partial hexagon is not a hexagon, and a ring of crescents round
-         the rim reads as a pattern that ran out rather than a core. The way to
-         fill the web is to place the lattice well and keep the cells small
-         enough that little is left over.
+         The lattice was always uniform -- measured, spacing held to 0.01 across
+         every cell. What read as wrong was the OUTLINE: keeping whole cells
+         wherever the grid happened to fall inside a circle leaves a scalloped,
+         accidental-looking boundary, and the eye reads that lumpiness as the
+         pattern being irregular even though it is not.
 
-         So the cells are SMALL by design -- a cap well under what the web could
-         hold -- because a lot of obvious hexagons is the point, and few large
-         ones reads as a plate with holes in it.
+         So the field is bounded by the lattice's own geometry instead of by the
+         wheel's. Cells are kept by HEX DISTANCE from the centre -- a whole number
+         of rings -- which gives a patch with six straight edges and six-fold
+         symmetry, matching the cells it is made of. The inner boundary is a ring
+         count too, so the hole around the boss is hexagonal rather than a circle
+         chewed out of a grid. Both edges end up deliberate.
 
-         And where the lattice sits is searched rather than assumed. The tiling
-         is rigid but its origin and rotation are free, so a handful of offsets
-         and rotations are tried and whichever seats the most whole cells wins.
-         Pointy-top axial layout: centres sqrt(3)*R apart across a row, 1.5*R
-         between rows, alternate rows shifted half a step, and the wall is added
-         to R for spacing only so the gap where two cells meet is exactly WALL.
+         The cost is corners: a hexagonal patch inside a round web leaves six
+         gaps at its flats. Charles's call, and the right one -- the alternative
+         is a ragged edge, and a hexagon of hexagons is plainly a made thing.
 
-         WALL is the number that decides whether this reads as a core or as a
-         plate somebody drilled. Measured on the first attempt: cells touch at
-         sqrt(3)*R = 5.89 and sat 7.79 apart, so the metal between them was a
-         THIRD of a cell's width and every cell looked marooned. Real hex core is
-         thin-walled and this has to be too, or the hexagons stop being the
-         subject.
-
-         Building outside-in was tried, on the reasoning that pinning the outer
-         rank against the rim would fill the boundary exactly. It cannot work,
-         and the reason is worth keeping: fixed-size hexagons tile the PLANE, not
-         concentric rings. Every rank has a different circumference, so a whole
-         number of same-size cells almost never fits one -- you would have to
-         stretch the cells rank by rank, which is exactly what made the retired
-         ring version read as rings of holes instead of a core. A ragged rim is
-         the price of real hexagons, and small cells keep the price to about one
-         cell's depth. */
+         Pointy-top axial coordinates: x = sqrt(3)*step*(q + r/2), y = 1.5*step*r,
+         with step = cell + wall/2 so the gap where two cells meet is the wall. */
       inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
-      const WALLX = 1.25, CELL_MIN = 2.8, CELL_MAX = 4.6;
+      const WALLX = 1.25, CELL_MIN = 2.6, CELL_MAX = 4.6;
       const rInX = Math.max(hubR * 1.1, 6), rOutX = wellR - 0.5;
-      /* Cell size is a preference capped by the web: a tight one gets a finer
-         core rather than nothing at all, which is what a fixed size gave it. */
-      const wantX = (g.cv && g.cv.cell) || 3.8;
-      const cellX = Math.max(CELL_MIN,
-        Math.min(wantX, CELL_MAX, (rOutX - rInX - WALLX) / 2));
-      const stepR = cellX + WALLX / 2;
-      const pitchX = Math.sqrt(3) * stepR, rowX = 1.5 * stepR;
-      const nRow = Math.ceil(rOutX / rowX) + 2, nCol = Math.ceil(rOutX / pitchX) + 2;
-      let bestX = null;
-      for (let rot = 0; rot < 30; rot += 7.5) {
-        const ca = Math.cos(rot * Math.PI / 180), sa = Math.sin(rot * Math.PI / 180);
-        for (let ox = 0; ox < 3; ox++) {
-          for (let oy = 0; oy < 3; oy++) {
-            const dx = (ox / 3) * pitchX, dy = (oy / 3) * rowX;
-            const cells = [];
-            for (let ry = -nRow; ry <= nRow; ry++) {
-              const ly = ry * rowX + dy;
-              const xo = (((ry % 2) + 2) % 2) ? pitchX / 2 : 0;
-              for (let rx = -nCol; rx <= nCol; rx++) {
-                const lx = rx * pitchX + xo + dx;
-                const cx = lx * ca - ly * sa, cy = lx * sa + ly * ca;
-                const rad = Math.hypot(cx, cy);
-                if (rad - cellX < rInX) continue;   /* clear of the boss */
-                if (rad + cellX > rOutX) continue;  /* whole cells only */
-                cells.push([cx, cy]);
-              }
-            }
-            if (!bestX || cells.length > bestX.cells.length) bestX = { cells: cells, rot: rot };
-          }
+      const DIRS = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
+      const ringOf = (k) => {
+        if (k === 0) return [[0, 0]];
+        const out = [];
+        let q = DIRS[4][0] * k, r = DIRS[4][1] * k;
+        for (let i2 = 0; i2 < 6; i2++) {
+          for (let j2 = 0; j2 < k; j2++) { out.push([q, r]); q += DIRS[i2][0]; r += DIRS[i2][1]; }
         }
-      }
-      if (bestX) {
-        for (const c of bestX.cells) {
-          let d2 = '';
-          for (let v = 0; v < 6; v++) {
-            const va = (90 + 60 * v + bestX.rot) * Math.PI / 180;
-            d2 += (v ? 'L' : 'M') + (c[0] + cellX * Math.cos(va)).toFixed(2) + ',' + (c[1] + cellX * Math.sin(va)).toFixed(2) + ' ';
+        return out;
+      };
+      /* Try the wanted cell size, then finer, until a whole number of rings fits
+         between the boss and the rim. A smaller cell always fits more rings, so
+         walking down finds the coarsest core the web can actually hold. */
+      const wantX = (g.cv && g.cv.cell) || 3.8;
+      let cellX = 0, kMin = 0, kMax = -1;
+      for (let c = Math.min(wantX, CELL_MAX); c >= CELL_MIN; c -= 0.15) {
+        const step = c + WALLX / 2, px = Math.sqrt(3) * step, ry2 = 1.5 * step;
+        const at = (q, r) => [px * (q + r / 2), ry2 * r];
+        let hi = -1;
+        for (let k = 0; k <= 14; k++) {
+          let fits = true;
+          for (const [q, r] of ringOf(k)) {
+            const P = at(q, r);
+            if (Math.hypot(P[0], P[1]) + c > rOutX) { fits = false; break; }
           }
-          holes.push(d2 + 'Z');
+          if (!fits) break;
+          hi = k;
+        }
+        if (hi < 0) continue;
+        let lo = 0;
+        for (let k = 0; k <= hi; k++) {
+          let clear = true;
+          for (const [q, r] of ringOf(k)) {
+            const P = at(q, r);
+            if (Math.hypot(P[0], P[1]) - c < rInX) { clear = false; break; }
+          }
+          if (clear) { lo = k; break; }
+          lo = k + 1;
+        }
+        if (lo <= hi) { cellX = c; kMin = lo; kMax = hi; break; }
+      }
+      if (cellX) {
+        const step = cellX + WALLX / 2, px = Math.sqrt(3) * step, ry2 = 1.5 * step;
+        for (let k = kMin; k <= kMax; k++) {
+          for (const [q, r] of ringOf(k)) {
+            const cx = px * (q + r / 2), cy = ry2 * r;
+            let d2 = '';
+            for (let v = 0; v < 6; v++) {
+              const va = (90 + 60 * v) * Math.PI / 180;
+              d2 += (v ? 'L' : 'M') + (cx + cellX * Math.cos(va)).toFixed(2) + ',' + (cy + cellX * Math.sin(va)).toFixed(2) + ' ';
+            }
+            holes.push(d2 + 'Z');
+          }
         }
       }
       inner.push(h('circle', { key: 'boss', r: hubR * 1.5, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
