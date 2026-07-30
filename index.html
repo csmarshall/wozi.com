@@ -210,7 +210,14 @@ function levelled(h, s, target) {
    between visits. Computed once at module load and never on resize, so the
    wheels cannot change colour under the pointer — the same reason the background
    machinery seeds from a fixed constant. */
-const WHEEL_SAT = 88, WHEEL_LUM = 0.30, WHEEL_JITTER = 0.4;
+/* One palette cannot serve both themes. A wheel at 0.30 luminance sits 5.3:1
+   against the dark page and only 2.5:1 against the light one, so light mode was
+   always going to look washed no matter what the shading did -- which is why
+   #13, #16, #19 and #20 each moved the problem rather than removing it. Each
+   theme now gets its own target: darker wheels for a bright page, lighter for a
+   dark one. Same hues, same saturation, same spacing and collision guarantees
+   from #12 -- only the value moves. */
+const WHEEL_SAT = 88, WHEEL_LUM_DARK = 0.32, WHEEL_LUM_LIGHT = 0.14, WHEEL_JITTER = 0.4;
 /* Which stride is used is itself shuffled per load. Every value 1..6 is coprime
    with 7 so all of them visit each hue exactly once, but 1 and 6 seat
    neighbouring hues side by side — the thing the stride exists to prevent. The
@@ -223,7 +230,10 @@ TRAIN.forEach((t, i) => {
   const slot = (i * WHEEL_STRIDE) % TRAIN.length;
   const jitter = (Math.random() - 0.5) * gap * WHEEL_JITTER;
   const sat = WHEEL_SAT + (Math.random() - 0.5) * 14;
-  t.color = levelled(WHEEL_HUE0 + gap * slot + jitter, sat, WHEEL_LUM);
+  const hue = WHEEL_HUE0 + gap * slot + jitter;
+  t.colorD = levelled(hue, sat, WHEEL_LUM_DARK);
+  t.colorL = levelled(hue, sat, WHEEL_LUM_LIGHT);
+  t.color = t.colorD;
 });
 
 /* Depth of the engraving band, in modules — uniform on every wheel. */
@@ -718,7 +728,7 @@ class Component extends DCLogic {
           phase = ang + 180 - (0.5 - u) * pThis;
         }
       }
-      g.push({ i: i, teeth: t.teeth, color: t.color, slug: slugFor[i] || null, belt: t.link || null, kind: t.kind || 'holes', arms: t.arms || 5, prof: prof, chainFrom: chainFrom,
+      g.push({ i: i, teeth: t.teeth, color: t.color, colorL: t.colorL, colorD: t.colorD, slug: slugFor[i] || null, belt: t.link || null, kind: t.kind || 'holes', arms: t.arms || 5, prof: prof, chainFrom: chainFrom,
         r: r, ro: ro, x: x, y: y, dir: dir, phase: phase,
         dur: (BASE_MS * t.teeth / 20).toFixed(2) });
     });
@@ -855,7 +865,8 @@ class Component extends DCLogic {
 
   gearSvg(g) {
     const h = React.createElement;
-    const p = shades(g.color || '#C9D2D6', this.state.theme !== 'dark');
+    const dark = this.state.theme === 'dark';
+    const p = shades((dark ? g.colorD : g.colorL) || g.color || '#C9D2D6', !dark);
     const id = 'gr' + g.i, size = (g.ro + 6) * 2, r = g.r, m = MODULE;
     const prof = g.prof;
     /* LAYER: character — the flag is all-or-nothing across the train, so it reads
