@@ -167,45 +167,69 @@ const TRAIN = [
   { teeth: 18, angle: -18, slug: 'mail', prof: { rim: 1.6 } }
 ];
 
-/* Centre designs are dealt per load, like the colours: each is a complete
-   package — the kind plus the web/hub proportions it needs to read well (the
-   spiral, for one, is broken concentric rings unless the hub is small). The
-   deal rejects arrangements seating the same kind on neighbouring wheels.
-   New designs from the research pool join this list and are in play at once. */
-const CENTRE_DESIGNS = [
-  { kind: 'spokes', arms: 5, web: 3.2, hub: 0.2, arm: 0.15 },
-  { kind: 'holes', arms: 6, web: 2.9, hub: 0.23, hole: 0.12 },
-  { kind: 'pockets', arms: 6, web: 3.1, hub: 0.22 },
-  { kind: 'ring', web: 2.7, hub: 0.26 },
-  { kind: 'spokes', arms: 4, web: 3.0, hub: 0.26, arm: 0.2 },
-  { kind: 'holes', arms: 8, web: 3.2, hub: 0.2, hole: 0.085 },
-  { kind: 'spiral', arms: 5, web: 2.6, hub: 0.14 }
+/* Centre designs: two-level deal for maximum per-visit variety. FAMILIES are
+   the major types; each family carries the web/hub proportions it needs plus a
+   few authored VARIANTS. A load picks 7 DISTINCT families at random, then one
+   variant of each — so both which designs appear and how each is built change
+   per reload.
+
+   Admission rule, per Charles (whose father spent decades in gearing): every
+   design must be a wheel a machinist could actually make. A visible load path
+   from hub to rim, no floating metal, no invisible couplings, nothing boring.
+   The old plain 'ring' is out of the pool (boring); research designs whose
+   petals or lobes left the hub disconnected from the rim were rejected. */
+const CENTRE_FAMILIES = [
+  { type: 'spokes', web: 3.2, hub: 0.2,
+    variants: [{ arms: 4, arm: 0.2 }, { arms: 5, arm: 0.15 }, { arms: 6, arm: 0.13 }] },
+  { type: 'holes', web: 2.9, hub: 0.23,
+    variants: [{ arms: 6, hole: 0.12 }, { arms: 8, hole: 0.085 }, { arms: 5, hole: 0.14 }] },
+  { type: 'pockets', web: 3.1, hub: 0.22,
+    variants: [{ arms: 6 }, { arms: 5 }, { arms: 4 }] },
+  { type: 'spiral', web: 2.6, hub: 0.14,
+    variants: [{ arms: 5, sweep: 0.3 }, { arms: 6, sweep: 0.22 }, { arms: 4, sweep: 0.38 }] },
+  { type: 'iris', web: 2.9, hub: 0.2,
+    variants: [{ arms: 6 }, { arms: 8 }] },
+  { type: 'star', web: 3.0, hub: 0.22,
+    variants: [{ arms: 5 }, { arms: 7 }] },
+  { type: 'honeycomb', web: 3.1, hub: 0.2,
+    variants: [{ arms: 6 }, { arms: 9 }] },
+  { type: 'labyrinth', web: 3.2, hub: 0.24,
+    variants: [{ arms: 5 }, { arms: 6 }] },
+  { type: 'sunburst', web: 3.1, hub: 0.2,
+    variants: [{ arms: 10 }, { arms: 14 }] }
 ];
+/* Debug affordance: ?kind=iris forces every wheel to one family, variants
+   cycling — how the contact sheets for review are made. Harmless in production. */
+const FORCE_KIND = (function () {
+  try { return (location.search.match(/[?&]kind=([a-z]+)/) || [])[1] || null; } catch (e) { return null; }
+})();
 function dealCentres(n) {
-  let best = null, bestBad = 1e9;
-  for (let tries = 0; tries < 80; tries++) {
-    const idx = CENTRE_DESIGNS.map((c, i) => i);
-    for (let i = idx.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      const t = idx[i]; idx[i] = idx[j]; idx[j] = t;
-    }
-    const pick = idx.slice(0, Math.min(n, idx.length));
-    let bad = 0;
-    for (let i = 1; i < pick.length; i++)
-      if (CENTRE_DESIGNS[pick[i - 1]].kind === CENTRE_DESIGNS[pick[i]].kind) bad++;
-    if (bad < bestBad) { bestBad = bad; best = pick; }
-    if (bad === 0) break;
+  const fam = FORCE_KIND && CENTRE_FAMILIES.some(f => f.type === FORCE_KIND)
+    ? CENTRE_FAMILIES.filter(f => f.type === FORCE_KIND)
+    : CENTRE_FAMILIES;
+  const idx = fam.map((f, i) => i);
+  for (let i = idx.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const t = idx[i]; idx[i] = idx[j]; idx[j] = t;
   }
-  return best.map(i => CENTRE_DESIGNS[i]);
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const f = fam[idx[i % idx.length]];
+    const v = FORCE_KIND ? f.variants[i % f.variants.length]
+      : f.variants[Math.floor(Math.random() * f.variants.length)];
+    out.push({ type: f.type, web: f.web, hub: f.hub, v: v });
+  }
+  return out;
 }
 const CENTRE_DEAL = dealCentres(TRAIN.length);
 TRAIN.forEach((t, i) => {
   const cd = CENTRE_DEAL[i % CENTRE_DEAL.length];
-  t.kind = cd.kind;
-  t.arms = cd.arms;
+  t.kind = cd.type;
+  t.arms = cd.v.arms;
+  t.cv = cd.v;
   t.prof.web = cd.web; t.prof.hub = cd.hub;
-  if (cd.hole !== undefined) t.prof.hole = cd.hole;
-  if (cd.arm !== undefined) t.prof.arm = cd.arm;
+  if (cd.v.hole !== undefined) t.prof.hole = cd.v.hole;
+  if (cd.v.arm !== undefined) t.prof.arm = cd.v.arm;
 });
 
 /* Wheel colours are derived, never picked. Seven hand-chosen ones had drifted
@@ -789,7 +813,7 @@ class Component extends DCLogic {
           phase = ang + 180 - (0.5 - u) * pThis;
         }
       }
-      g.push({ i: i, teeth: t.teeth, color: t.color, slug: slugFor[i] || null, belt: t.link || null, kind: t.kind || 'holes', arms: t.arms || 5, prof: prof, chainFrom: chainFrom,
+      g.push({ i: i, teeth: t.teeth, color: t.color, cv: t.cv || null, slug: slugFor[i] || null, belt: t.link || null, kind: t.kind || 'holes', arms: t.arms || 5, prof: prof, chainFrom: chainFrom,
         r: r, ro: ro, x: x, y: y, dir: dir, phase: phase,
         dur: (BASE_MS * t.teeth / 20).toFixed(2) });
     });
@@ -1040,6 +1064,122 @@ class Component extends DCLogic {
         holes.push('M' + (+cx + hr) + ',' + cy + ' A' + hr + ',' + hr + ' 0 1 0 ' + (+cx - hr) + ',' + cy + ' A' + hr + ',' + hr + ' 0 1 0 ' + (+cx + hr) + ',' + cy + ' Z');
         inner.push(h('circle', { key: 'rh' + k, cx: cx, cy: cy, r: hr + 1.6, fill: 'none', stroke: p[3], strokeOpacity: 0.55, strokeWidth: 2.4 }));
       }
+    } else if (kind === 'iris') {
+      /* Aperture blades: tangential crescents, pointed at both ends. The metal
+         between blades is a full-depth curved spoke — nothing floats. */
+      inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
+      const nB = g.arms || 6, rInI = Math.max(hubR * 1.6, 10), rOutI = wellR - 2;
+      const rmI = (rInI + rOutI) / 2, hd = (rOutI - rInI) / 2;
+      for (let k = 0; k < nB; k++) {
+        const a0 = (k / nB) * 360, sw = (360 / nB) * 0.7, ST = 8;
+        let d2 = '';
+        for (let q = 0; q <= ST; q++) {
+          const t = q / ST, aa = (a0 + (t - 0.5) * sw) * Math.PI / 180;
+          const rr = rmI + hd * Math.sin(Math.PI * t) * 0.95;
+          d2 += (q ? 'L' : 'M') + (rr * Math.cos(aa)).toFixed(2) + ',' + (rr * Math.sin(aa)).toFixed(2) + ' ';
+        }
+        for (let q = ST; q >= 0; q--) {
+          const t = q / ST, aa = (a0 + (t - 0.5) * sw) * Math.PI / 180;
+          const rr = rmI + hd * Math.sin(Math.PI * t) * 0.35;
+          d2 += 'L' + (rr * Math.cos(aa)).toFixed(2) + ',' + (rr * Math.sin(aa)).toFixed(2) + ' ';
+        }
+        holes.push(d2 + 'Z');
+      }
+      inner.push(h('circle', { key: 'boss', r: hubR * 1.5, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
+    } else if (kind === 'star') {
+      /* A star truss: arc-topped windows with straight sides — the first
+         straight edges anywhere on the page, welded-plate rather than cast. */
+      inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
+      const nS = g.arms || 5, rInS = Math.max(hubR * 1.55, 10), rOutS = wellR - 2;
+      const stepS = 360 / nS, gA = stepS * 0.14, gB = stepS * 0.30;
+      for (let k = 0; k < nS; k++) {
+        const a0 = k * stepS;
+        let d2 = '';
+        for (let q = 0; q <= 5; q++) {
+          const aa = (a0 + gA + (stepS - 2 * gA) * (q / 5)) * Math.PI / 180;
+          d2 += (q ? 'L' : 'M') + (rOutS * Math.cos(aa)).toFixed(2) + ',' + (rOutS * Math.sin(aa)).toFixed(2) + ' ';
+        }
+        d2 += 'L' + PT(rInS, a0 + stepS - gB) + ' L' + PT(rInS, a0 + gB) + ' ';
+        holes.push(d2 + 'Z');
+      }
+      inner.push(h('circle', { key: 'boss', r: hubR * 1.5, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
+    } else if (kind === 'honeycomb') {
+      /* One orbit of hex ports — the first polygons in the pool. Webs between
+         hexes carry hub to rim like a drilled lightening pattern. */
+      inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
+      const nH = g.arms || 6, rInH = Math.max(hubR * 1.55, 10), rOutH = wellR - 2;
+      const orbit = (rInH + rOutH) / 2;
+      const hr2 = Math.min((rOutH - rInH) * 0.48, orbit * Math.PI / nH * 0.62);
+      for (let k = 0; k < nH; k++) {
+        const A = (k / nH) * 360;
+        const cx = orbit * Math.cos(A * Math.PI / 180), cy = orbit * Math.sin(A * Math.PI / 180);
+        let d2 = '';
+        for (let v = 0; v < 6; v++) {
+          const va = (A + 30 + 60 * v) * Math.PI / 180;
+          d2 += (v ? 'L' : 'M') + (cx + hr2 * Math.cos(va)).toFixed(2) + ',' + (cy + hr2 * Math.sin(va)).toFixed(2) + ' ';
+        }
+        holes.push(d2 + 'Z');
+      }
+      inner.push(h('circle', { key: 'boss', r: hubR * 1.5, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
+    } else if (kind === 'labyrinth') {
+      /* Two staggered rings of arc slots, brake-rotor fashion. The stagger is
+         the load path: every slot's ends land on solid metal in the other ring. */
+      inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
+      const nL = g.arms || 5, rInL = Math.max(hubR * 1.55, 10), rOutL = wellR - 2;
+      const wL = Math.min(6, (rOutL - rInL) * 0.22);
+      const ring = (rr, nn, off, fill2) => {
+        for (let k = 0; k < nn; k++) {
+          const a0 = off + (k / nn) * 360, sw = (360 / nn) * 0.62;
+          let d2 = '';
+          for (let q = 0; q <= 5; q++) {
+            const aa = (a0 + sw * (q / 5)) * Math.PI / 180;
+            d2 += (q ? 'L' : 'M') + ((rr + wL / 2) * Math.cos(aa)).toFixed(2) + ',' + ((rr + wL / 2) * Math.sin(aa)).toFixed(2) + ' ';
+          }
+          for (let q = 5; q >= 0; q--) {
+            const aa = (a0 + sw * (q / 5)) * Math.PI / 180;
+            d2 += 'L' + ((rr - wL / 2) * Math.cos(aa)).toFixed(2) + ',' + ((rr - wL / 2) * Math.sin(aa)).toFixed(2) + ' ';
+          }
+          holes.push(d2 + 'Z');
+        }
+      };
+      ring(rInL + (rOutL - rInL) * 0.3, nL, 0);
+      ring(rInL + (rOutL - rInL) * 0.72, nL + 3, 360 / (nL + 3) / 2);
+      inner.push(h('circle', { key: 'boss', r: hubR * 1.5, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
+    } else if (kind === 'geneva') {
+      /* Geneva-plate slots: radial stadium cuts with an end drill, leaving a
+         Maltese cross of metal. The drill is real practice — it stops cracks. */
+      inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
+      const nG = g.arms || 4, rInG = Math.max(hubR * 1.6, 10), rOutG = wellR - 2;
+      /* First cut was needle-thin and read as scratches. A geneva slot is a
+         broad machined channel — width comparable to its end drill. */
+      const er = Math.min(7, (rOutG - rInG) * 0.26), wG = er * 1.35;
+      for (let k = 0; k < nG; k++) {
+        const A = (k / nG) * 360 * Math.PI / 180 + Math.PI / nG;
+        const dx = Math.cos(A), dy = Math.sin(A), nx = -dy, ny = dx;
+        const rs = rInG, re = rOutG - er * 2;
+        const pts = [
+          [rs * dx + wG * nx, rs * dy + wG * ny], [re * dx + wG * nx, re * dy + wG * ny],
+          [re * dx - wG * nx, re * dy - wG * ny], [rs * dx - wG * nx, rs * dy - wG * ny]
+        ];
+        holes.push('M' + pts.map(q => q[0].toFixed(2) + ',' + q[1].toFixed(2)).join(' L') + ' Z');
+        const ex = (rOutG - er) * dx, ey = (rOutG - er) * dy;
+        holes.push('M' + (ex + er).toFixed(2) + ',' + ey.toFixed(2) +
+          ' A' + er + ',' + er + ' 0 1 0 ' + (ex - er).toFixed(2) + ',' + ey.toFixed(2) +
+          ' A' + er + ',' + er + ' 0 1 0 ' + (ex + er).toFixed(2) + ',' + ey.toFixed(2) + ' Z');
+      }
+      inner.push(h('circle', { key: 'boss', r: hubR * 1.5, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
+    } else if (kind === 'sunburst') {
+      /* Deco sunburst: tapered wedge windows, long and short alternating. The
+         metal between is a fan of tapered spokes — cast-plate territory. */
+      inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
+      const nR = g.arms || 10, rInR = Math.max(hubR * 1.55, 10), rOutR = wellR - 2;
+      for (let k = 0; k < nR; k++) {
+        const A = (k / nR) * 360;
+        const ro2 = (k % 2 === 0) ? rOutR : rInR + (rOutR - rInR) * 0.62;
+        const wi = (360 / nR) * 0.16, wo = (360 / nR) * 0.34;
+        holes.push('M' + PT(rInR, A - wi) + ' L' + PT(ro2, A - wo) + ' L' + PT(ro2, A + wo) + ' L' + PT(rInR, A + wi) + ' Z');
+      }
+      inner.push(h('circle', { key: 'boss', r: hubR * 1.5, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
     } else {
       /* Spiral web (was the plain wheel): slots wound like a lathe's scroll
          chuck, each converging from the well onto the hub. Cut clean through
@@ -1052,7 +1192,7 @@ class Component extends DCLogic {
          (1.15 turns was tried) leaves rim and hub joined by nothing but a thin
          ribbon — no real wheel could hold, and it reads that way (#14's ethos:
          the machine has to be possible). */
-      const armsN = g.arms || 3, spTurns = 0.3;
+      const armsN = g.arms || 3, spTurns = (g.cv && g.cv.sweep) || 0.3;
       const spW = Math.max(4, m * 0.55);
       const spOut = wellR - spW * 0.8, spIn = hubR * 1.55;
       for (let k = 0; k < armsN; k++) {
