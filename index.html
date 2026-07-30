@@ -119,7 +119,16 @@ const TOOTH_FILLET = 0.38; /* root fillet radius, in modules — the standard va
                               the root circle at a sharp corner, which no cut gear has. */
 
 const BASE_MS = 21000;
-const GHOST_COLORS = ['#9AA6AD', '#A9B4BA', '#8F9BA3', '#B3BCC2'];
+/* Neutral. The old set was blue-cast (#9AA6AD, #8F9BA3), and at low contrast a
+   blue-grey reads as washed-out colour rather than as distance (#22). These are
+   only used to pick which step of the ghost scale a wheel lands on; the theme
+   decides the actual value. */
+const GHOST_COLORS = ['#A8A8A8', '#B4B4B4', '#9C9C9C', '#C0C0C0'];
+/* The scale each theme actually paints with. Light needs genuinely darker greys:
+   at 0.38 alpha over #E8EAE5 a pale grey lands within a few percent of the page. */
+const GHOST_LIGHT = ['#6E7270', '#7C807E', '#636765', '#8A8E8C'];
+const GHOST_DARK  = ['#A8A8A8', '#B4B4B4', '#9C9C9C', '#C0C0C0'];
+
 const GHOST_KINDS = ['spokes', 'holes', 'pockets', 'ring', 'plain'];
 function segCross(p1, p2, p3, p4) {
   const s = (a, b, c) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
@@ -850,13 +859,22 @@ class Component extends DCLogic {
      marks — they are blurred and dim, so the detail would be wasted frames. */
   ghostSvg(g) {
     const h = React.createElement;
-    const p = shades(g.color || '#9AA6AD', this.state.theme !== 'dark');
+    const dark = this.state.theme === 'dark';
+    /* Background machinery is toned per theme, not left to opacity alone. Pale grey
+       at low alpha over a near-white page is close to nothing; these greys are
+       chosen against the page they sit on so the runs read as distant metal (#22). */
+    const step = GHOST_COLORS.indexOf(g.color || GHOST_COLORS[0]);
+    const tone = (dark ? GHOST_DARK : GHOST_LIGHT)[step < 0 ? 0 : step];
+    const p = shades(tone, !dark);
     const size = (g.ro + 4) * 2, r = g.r;
     const path = this.teethPath(g.teeth, r, g.prof);
     /* Softness comes from low-contrast fills, not a CSS blur: a filter on a rotating
        element re-rasterises every frame, which is what made these stutter. */
     return h('svg', { width: size, height: size, viewBox: (-size / 2) + ' ' + (-size / 2) + ' ' + size + ' ' + size, style: { position: 'absolute', left: (-size / 2) + 'px', top: (-size / 2) + 'px', overflow: 'visible' } },
-      h('path', { d: path, fill: p[2], fillOpacity: 0.9 }),
+      /* An outline is what separates "far away" from "out of focus". Without one
+         these read as blurred, which is the complaint in #22 -- there is no blur
+         anywhere in this file. */
+      h('path', { d: path, fill: p[2], fillOpacity: 0.95, stroke: p[3], strokeWidth: 1, strokeOpacity: 0.5, strokeLinejoin: 'round' }),
       h('circle', { r: Math.max(6, r - MODULE * 1.9), fill: p[1], fillOpacity: 0.75 }),
       h('circle', { r: Math.max(4, r - MODULE * 3.1), fill: p[3], fillOpacity: 0.6 }),
       h('circle', { r: Math.max(7, r * 0.2), fill: p[1], fillOpacity: 0.8 })
@@ -1146,7 +1164,12 @@ class Component extends DCLogic {
         solved.gears.map(g => h('div', { key: g.i, style: {
           position: 'absolute', left: (g.cx - g.ro * 1.12) + 'px', top: (g.cy - g.ro * 1.12 + 5) + 'px',
           width: (g.ro * 2.24) + 'px', height: (g.ro * 2.24) + 'px',
-          background: 'radial-gradient(closest-side, rgba(10,20,26,.26) 0%, rgba(10,20,26,.20) 58%, rgba(10,20,26,.08) 80%, rgba(10,20,26,0) 100%)'
+          /* Softer in daylight. A light environment throws a weaker, more diffuse
+             shadow; the same alpha that reads as contact on a dark page pools
+             into a grey puddle on a pale one. */
+          background: this.state.theme === 'dark'
+            ? 'radial-gradient(closest-side, rgba(10,20,26,.26) 0%, rgba(10,20,26,.20) 58%, rgba(10,20,26,.08) 80%, rgba(10,20,26,0) 100%)'
+            : 'radial-gradient(closest-side, rgba(24,34,30,.15) 0%, rgba(24,34,30,.11) 58%, rgba(24,34,30,.04) 80%, rgba(24,34,30,0) 100%)'
         } }))),
       h('svg', { key: 'chains', width: solved.w, height: solved.h, style: { position: 'absolute', left: 0, top: 0, overflow: 'visible' } },
         solved.chains.map((c, ci) => this.chainEl('c' + ci, c.a, c.b))),
@@ -1195,7 +1218,12 @@ class Component extends DCLogic {
           left: 'calc(' + g.cx + 'px * var(--gs))', top: 'calc(' + g.cy + 'px * var(--gs))',
           width: size, height: size, boxSizing: 'border-box',
           borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-          background: '#F8F9F8', color: on ? 'var(--accent)' : 'var(--ink)',
+          /* Was a hardcoded #F8F9F8 in both themes, which glared on the softened
+             light page and was the brightest thing on screen in dark. Toned per
+             theme, but kept light in BOTH: several brand marks are near-black
+             (GitHub, Threads) and need a pale disc under them (#22). */
+          background: this.state.theme === 'dark' ? '#DFE2DE' : '#EDEFEA',
+          color: on ? 'var(--accent)' : 'var(--ink)',
           border: '1px solid rgba(20,30,35,.14)', boxShadow: '0 3px 10px rgba(8,16,20,.28)', zIndex: 5, cursor: 'pointer',
           transform: 'translate(-50%,-50%) scale(' + (on ? 1.16 : 1) + ')',
           transition: 'transform .22s cubic-bezier(.34,1.56,.64,1), color .2s ease'
