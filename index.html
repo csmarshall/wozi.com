@@ -266,6 +266,19 @@ const ACCENTS = {
   '#5F686E': '#AEB8BF'   /* steel  */
 };
 
+/* LIGHT MODE IS FLAT (#choice, 2026-07-30): the authored colour as a solid
+   body, a thin darker outline, plain dark lettering — a machinist's drawing.
+   Dark mode keeps the modelled treatment. Charles's verdict after a full night
+   of gradient tuning: the shading itself is what made light mode ugly, and dark
+   was passable — so the disputed axis is deleted only where it is disputed. */
+function flatTones(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  const c = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  const mix = (t, target) => '#' + c.map(v => Math.round(v + (target - v) * t).toString(16).padStart(2, '0')).join('');
+  return { body: mix(0, 255), face: mix(0.20, 255), well: mix(0.13, 0), line: mix(0.40, 0) };
+}
+const FLAT_INK = '#243033';
+
 function shades(hex, soft) {
   const n = parseInt(hex.slice(1), 16);
   const c = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
@@ -854,7 +867,9 @@ class Component extends DCLogic {
      marks — they are blurred and dim, so the detail would be wasted frames. */
   ghostSvg(g) {
     const h = React.createElement;
-    const p = shades(g.color || '#9AA6AD', this.state.theme !== 'dark');
+    const flat = this.state.theme !== 'dark';
+    const p = shades(g.color || '#9AA6AD', flat);
+    const ft = flatTones(g.color || '#9AA6AD');
     const size = (g.ro + 4) * 2, r = g.r;
     const path = this.teethPath(g.teeth, r, g.prof);
     /* Softness comes from low-contrast fills, not a CSS blur: a filter on a rotating
@@ -863,16 +878,18 @@ class Component extends DCLogic {
       /* An outline is what separates "far away" from "out of focus". Without one
          these read as blurred, which is the complaint in #22 -- there is no blur
          anywhere in this file. */
-      h('path', { d: path, fill: p[2], fillOpacity: 0.95, stroke: p[3], strokeWidth: 1, strokeOpacity: 0.5, strokeLinejoin: 'round' }),
-      h('circle', { r: Math.max(6, r - MODULE * 1.9), fill: p[1], fillOpacity: 0.75 }),
-      h('circle', { r: Math.max(4, r - MODULE * 3.1), fill: p[3], fillOpacity: 0.6 }),
-      h('circle', { r: Math.max(7, r * 0.2), fill: p[1], fillOpacity: 0.8 })
+      h('path', { d: path, fill: flat ? ft.body : p[2], fillOpacity: flat ? 1 : 0.95, stroke: flat ? ft.line : p[3], strokeWidth: 1, strokeOpacity: flat ? 0.65 : 0.5, strokeLinejoin: 'round' }),
+      h('circle', { r: Math.max(6, r - MODULE * 1.9), fill: flat ? ft.face : p[1], fillOpacity: flat ? 1 : 0.75 }),
+      h('circle', { r: Math.max(4, r - MODULE * 3.1), fill: flat ? ft.well : p[3], fillOpacity: flat ? 1 : 0.6 }),
+      h('circle', { r: Math.max(7, r * 0.2), fill: flat ? ft.face : p[1], fillOpacity: flat ? 1 : 0.8 })
     );
   }
 
   gearSvg(g) {
     const h = React.createElement;
-    const p = shades(g.color || '#C9D2D6', this.state.theme !== 'dark');
+    const flat = this.state.theme !== 'dark';
+    const p = shades(g.color || '#C9D2D6', flat);
+    const ft = flatTones(g.color || '#C9D2D6');
     const id = 'gr' + g.i, size = (g.ro + 6) * 2, r = g.r, m = MODULE;
     const prof = g.prof;
     /* LAYER: character — the flag is all-or-nothing across the train, so it reads
@@ -899,6 +916,7 @@ class Component extends DCLogic {
     const kind = g.kind;
 
     const turned = (key, r0, r1, n) => {
+      if (flat) return null;   /* a turned-metal finish has no meaning on a flat face */
       const out = [];
       for (let k = 0; k < n; k++) {
         const rr2 = r0 + (r1 - r0) * (k / (n - 1 || 1));
@@ -930,7 +948,7 @@ class Component extends DCLogic {
           ' A' + rI.toFixed(2) + ',' + rI.toFixed(2) + ' 0 0 0 ' + PT(rI, a0) +
           ' A' + cap.toFixed(2) + ',' + cap.toFixed(2) + ' 0 0 1 ' + PT(rO, a0) + ' Z');
         inner.push(h('path', { key: 'sl' + k, d: this.arcD(mid, a0, a1), fill: 'none', stroke: p[3], strokeOpacity: 0.55, strokeWidth: wSlot + 4, strokeLinecap: 'round' }));
-        inner.push(h('path', { key: 'sg' + k, d: this.arcD(mid, a0, a1), fill: 'none', stroke: 'var(--gloss)', strokeOpacity: 0.3, strokeWidth: wSlot + 2, strokeLinecap: 'round', transform: 'translate(-0.5,-1)' }));
+        inner.push(h('path', { key: 'sg' + k, d: this.arcD(mid, a0, a1), fill: 'none', stroke: flat ? 'none' : 'var(--gloss)', strokeOpacity: 0.3, strokeWidth: wSlot + 2, strokeLinecap: 'round', transform: 'translate(-0.5,-1)' }));
       }
     };
 
@@ -956,14 +974,14 @@ class Component extends DCLogic {
         holes.push('M' + (+cx + hr) + ',' + cy + ' A' + hr + ',' + hr + ' 0 1 0 ' + (+cx - hr) + ',' + cy + ' A' + hr + ',' + hr + ' 0 1 0 ' + (+cx + hr) + ',' + cy + ' Z');
         inner.push(h('circle', { key: 'cb' + k, cx: cx, cy: cy, r: hr * 1.42, fill: p[1], stroke: p[3], strokeWidth: 0.8, strokeOpacity: 0.4 }));
         inner.push(h('circle', { key: 'h' + k, cx: cx, cy: cy, r: hr, fill: 'none', stroke: p[3], strokeWidth: 1.6, strokeOpacity: 0.65 }));
-        inner.push(h('path', { key: 'hg' + k, d: 'M' + (cx - hr * 0.6) + ',' + (+cy + hr * 0.55) + ' A' + hr + ',' + hr + ' 0 0 1 ' + (+cx + hr * 0.45) + ',' + (+cy - hr * 0.7), fill: 'none', stroke: 'var(--gloss)', strokeOpacity: 0.35, strokeWidth: 1.2 }));
+        inner.push(h('path', { key: 'hg' + k, d: 'M' + (cx - hr * 0.6) + ',' + (+cy + hr * 0.55) + ' A' + hr + ',' + hr + ' 0 0 1 ' + (+cx + hr * 0.45) + ',' + (+cy - hr * 0.7), fill: 'none', stroke: flat ? 'none' : 'var(--gloss)', strokeOpacity: 0.35, strokeWidth: 1.2 }));
       }
     } else if (kind === 'ring') {
       inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
       inner.push(h('circle', { key: 'well', r: wellR, fill: 'url(#' + id + 'w)' }));
       inner.push(turned('t', hubR * 1.15, wellR - 1, 9));
       inner.push(h('circle', { key: 'grv', r: (wellR + faceR) / 2, fill: 'none', stroke: p[3], strokeOpacity: 0.5, strokeWidth: 2 }));
-      inner.push(h('circle', { key: 'grv2', r: (wellR + faceR) / 2 - 1.4, fill: 'none', stroke: 'var(--gloss)', strokeOpacity: 0.4, strokeWidth: 1 }));
+      inner.push(h('circle', { key: 'grv2', r: (wellR + faceR) / 2 - 1.4, fill: 'none', stroke: flat ? 'none' : 'var(--gloss)', strokeOpacity: 0.4, strokeWidth: 1 }));
       /* Drilled relief holes — round openings are unambiguous geometry, where a narrow
          kidney slot can collapse on a thin web and stop punching. */
       const count = 5, orbit = (wellR + hubR * 1.3) / 2;
@@ -993,19 +1011,26 @@ class Component extends DCLogic {
         /* All shading is symmetric about the vertical axis — lit from above, never from
            a corner — so concentric webs and hubs read as centred. */
         h('linearGradient', { id: id + 'f', x1: '50%', y1: '0%', x2: '50%', y2: '100%' },
+          flat ? h('stop', { offset: '0%', stopColor: ft.body }) :
           h('stop', { offset: '0%', stopColor: p[0] }),
-          h('stop', { offset: '24%', stopColor: p[1] }),
-          h('stop', { offset: '48%', stopColor: p[2] }),
-          h('stop', { offset: '68%', stopColor: p[1] }),
-          h('stop', { offset: '100%', stopColor: p[3] })),
+          h('stop', { offset: '24%', stopColor: flat ? ft.body : p[1] }),
+          h('stop', { offset: '48%', stopColor: flat ? ft.body : p[2] }),
+          h('stop', { offset: '68%', stopColor: flat ? ft.body : p[1] }),
+          h('stop', { offset: '100%', stopColor: flat ? ft.body : p[3] })),
         h('radialGradient', { id: id + 'w', cx: '50%', cy: '34%', r: '78%' },
-          h('stop', { offset: '0%', stopColor: p[2] }),
-          h('stop', { offset: '62%', stopColor: p[3] }),
-          h('stop', { offset: '100%', stopColor: p[2] })),
+          flat
+            ? [h('stop', { key: 'a', offset: '0%', stopColor: ft.well }),
+               h('stop', { key: 'b', offset: '100%', stopColor: ft.well })]
+            : [h('stop', { key: 'a', offset: '0%', stopColor: p[2] }),
+               h('stop', { key: 'b', offset: '62%', stopColor: p[3] }),
+               h('stop', { key: 'c', offset: '100%', stopColor: p[2] })]),
         h('radialGradient', { id: id + 'u', cx: '50%', cy: '30%', r: '80%' },
-          h('stop', { offset: '0%', stopColor: p[0] }),
-          h('stop', { offset: '55%', stopColor: p[1] }),
-          h('stop', { offset: '100%', stopColor: p[3] })),
+          flat
+            ? [h('stop', { key: 'a', offset: '0%', stopColor: ft.face }),
+               h('stop', { key: 'b', offset: '100%', stopColor: ft.face })]
+            : [h('stop', { key: 'a', offset: '0%', stopColor: p[0] }),
+               h('stop', { key: 'b', offset: '55%', stopColor: p[1] }),
+               h('stop', { key: 'c', offset: '100%', stopColor: p[3] })]),
         h('radialGradient', { id: id + 'd', cx: '50%', cy: '32%', r: '80%' },
           h('stop', { offset: '0%', stopColor: p[3] }),
           h('stop', { offset: '100%', stopColor: p[2] })),
@@ -1028,31 +1053,33 @@ class Component extends DCLogic {
         holes.length ? h('clipPath', { id: id + 'c', clipPathUnits: 'userSpaceOnUse' },
           h('path', { d: path + ' ' + holes.join(' '), clipRule: 'evenodd' })) : null),
       h('g', holes.length ? { clipPath: 'url(#' + id + 'c)', clipRule: 'evenodd' } : null,
-        h('path', { d: path + ' ' + holes.join(' '), fillRule: 'evenodd', fill: p[3], opacity: 0.9, transform: 'translate(0,1)' }),
-        h('path', { d: path + ' ' + holes.join(' '), fillRule: 'evenodd', fill: 'url(#' + id + 'f)', stroke: 'var(--edge)', strokeWidth: 1, strokeLinejoin: 'round' }),
+        flat ? null : h('path', { d: path + ' ' + holes.join(' '), fillRule: 'evenodd', fill: p[3], opacity: 0.9, transform: 'translate(0,1)' }),
+        h('path', { d: path + ' ' + holes.join(' '), fillRule: 'evenodd', fill: 'url(#' + id + 'f)', stroke: flat ? ft.line : 'var(--edge)', strokeWidth: flat ? 1.6 : 1, strokeLinejoin: 'round' }),
         inner,
         h('circle', { r: faceR, fill: 'none', stroke: 'var(--edge)', strokeWidth: 1, strokeOpacity: 0.4 })),
       h('circle', { r: hubR, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2 }),
       h('circle', { r: Math.max(3, hubR * 0.4), fill: p[3], opacity: 0.5 }),
       /* LAYER: engraved rims — stamped into the solid band just inside the tooth roots,
          cut shadow above and highlight below so it reads as struck metal, not overlaid text. */
-      this.props.engravedRims && eng.handle ? h('g', { key: 'eng' }, [
-        { dy: -0.6, col: p[3], op: 0.85 },
-        { dy: 0.6, col: p[0], op: 0.45 }
-      ].map((L, li) => h('text', {
+      this.props.engravedRims && eng.handle ? h('g', { key: 'eng' }, (flat
+        ? [{ dy: 0, col: FLAT_INK, op: 0.72 }]
+        : [{ dy: -0.6, col: p[3], op: 0.85 },
+           { dy: 0.6, col: p[0], op: 0.45 }]
+      ).map((L, li) => h('text', {
         key: li, transform: 'translate(0,' + L.dy + ')',
         fontSize: eng.fT.toFixed(2), fill: L.col, fillOpacity: L.op, letterSpacing: '0.1em',
         dominantBaseline: 'central',
         style: { fontFamily: "'Manrope',system-ui,sans-serif", fontWeight: 700 }
       }, h('textPath', { href: '#' + id + 'ringT', startOffset: '50%', textAnchor: 'middle' }, eng.handle)))) : null,
       /* Specular arc goes under the stamps, or it washes the bottom engraving out. */
-      h('path', { d: arc(faceR - 2, 205, 335), fill: 'none', stroke: 'var(--gloss)', strokeWidth: Math.max(2, r * 0.05), strokeLinecap: 'round', opacity: 0.5 }),
+      h('path', { d: arc(faceR - 2, 205, 335), fill: 'none', stroke: flat ? 'none' : 'var(--gloss)', strokeWidth: Math.max(2, r * 0.05), strokeLinecap: 'round', opacity: 0.5 }),
       /* LAYER: character — stamped module/tooth-count, as on a real blank. Same struck
          treatment as the handle, so both sides of the band read alike. */
-      this.props.character ? h('g', { key: 'stamp' }, [
-        { dy: -0.5, col: p[3], op: 0.8 },
-        { dy: 0.5, col: p[0], op: 0.4 }
-      ].map((L, li) => h('text', {
+      this.props.character ? h('g', { key: 'stamp' }, (flat
+        ? [{ dy: 0, col: FLAT_INK, op: 0.66 }]
+        : [{ dy: -0.5, col: p[3], op: 0.8 },
+           { dy: 0.5, col: p[0], op: 0.4 }]
+      ).map((L, li) => h('text', {
         key: li, transform: 'translate(0,' + L.dy + ')',
         fontSize: eng.fB.toFixed(2), fill: L.col, fillOpacity: L.op, letterSpacing: '0.1em',
         dominantBaseline: 'central',
