@@ -158,14 +158,55 @@ const CLEARANCE = 13; /* px kept between the tip circles of wheels that are not 
 /* One directly-meshed train: every wheel drives its neighbour, so spacing is fixed by
    the pitch radii and only the bearing varies — a gentle serpentine, no slack to fold. */
 const TRAIN = [
-  { teeth: 17, angle: 0, slug: 'linkedin', kind: 'spokes', arms: 5, prof: { rim: 1.7, web: 3.2, hub: 0.2, arm: 0.15 } },
-  { teeth: 15, angle: 20, slug: 'github', kind: 'holes', arms: 6, prof: { rim: 1.6, web: 2.9, hub: 0.23, hole: 0.12 } },
-  { teeth: 18, angle: -24, slug: 'mastodon', kind: 'pockets', arms: 6, prof: { rim: 2.0, web: 3.1, hub: 0.22 } },
-  { teeth: 14, angle: 22, slug: 'instagram', kind: 'ring', prof: { rim: 1.4, web: 2.7, hub: 0.26 } },
-  { teeth: 17, angle: -20, slug: 'threads', kind: 'spokes', arms: 4, prof: { rim: 1.7, web: 3.0, hub: 0.26, arm: 0.2 } },
-  { teeth: 15, angle: 24, slug: 'bluesky', kind: 'holes', arms: 8, prof: { rim: 1.9, web: 3.2, hub: 0.2, hole: 0.085 } },
-  { teeth: 18, angle: -18, slug: 'mail', kind: 'spiral', arms: 4, prof: { rim: 1.6, web: 2.6, hub: 0.14 } }
+  { teeth: 17, angle: 0, slug: 'linkedin', prof: { rim: 1.7 } },
+  { teeth: 15, angle: 20, slug: 'github', prof: { rim: 1.6 } },
+  { teeth: 18, angle: -24, slug: 'mastodon', prof: { rim: 2.0 } },
+  { teeth: 14, angle: 22, slug: 'instagram', prof: { rim: 1.4 } },
+  { teeth: 17, angle: -20, slug: 'threads', prof: { rim: 1.7 } },
+  { teeth: 15, angle: 24, slug: 'bluesky', prof: { rim: 1.9 } },
+  { teeth: 18, angle: -18, slug: 'mail', prof: { rim: 1.6 } }
 ];
+
+/* Centre designs are dealt per load, like the colours: each is a complete
+   package — the kind plus the web/hub proportions it needs to read well (the
+   spiral, for one, is broken concentric rings unless the hub is small). The
+   deal rejects arrangements seating the same kind on neighbouring wheels.
+   New designs from the research pool join this list and are in play at once. */
+const CENTRE_DESIGNS = [
+  { kind: 'spokes', arms: 5, web: 3.2, hub: 0.2, arm: 0.15 },
+  { kind: 'holes', arms: 6, web: 2.9, hub: 0.23, hole: 0.12 },
+  { kind: 'pockets', arms: 6, web: 3.1, hub: 0.22 },
+  { kind: 'ring', web: 2.7, hub: 0.26 },
+  { kind: 'spokes', arms: 4, web: 3.0, hub: 0.26, arm: 0.2 },
+  { kind: 'holes', arms: 8, web: 3.2, hub: 0.2, hole: 0.085 },
+  { kind: 'spiral', arms: 4, web: 2.6, hub: 0.14 }
+];
+function dealCentres(n) {
+  let best = null, bestBad = 1e9;
+  for (let tries = 0; tries < 80; tries++) {
+    const idx = CENTRE_DESIGNS.map((c, i) => i);
+    for (let i = idx.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const t = idx[i]; idx[i] = idx[j]; idx[j] = t;
+    }
+    const pick = idx.slice(0, Math.min(n, idx.length));
+    let bad = 0;
+    for (let i = 1; i < pick.length; i++)
+      if (CENTRE_DESIGNS[pick[i - 1]].kind === CENTRE_DESIGNS[pick[i]].kind) bad++;
+    if (bad < bestBad) { bestBad = bad; best = pick; }
+    if (bad === 0) break;
+  }
+  return best.map(i => CENTRE_DESIGNS[i]);
+}
+const CENTRE_DEAL = dealCentres(TRAIN.length);
+TRAIN.forEach((t, i) => {
+  const cd = CENTRE_DEAL[i % CENTRE_DEAL.length];
+  t.kind = cd.kind;
+  t.arms = cd.arms;
+  t.prof.web = cd.web; t.prof.hub = cd.hub;
+  if (cd.hole !== undefined) t.prof.hole = cd.hole;
+  if (cd.arm !== undefined) t.prof.arm = cd.arm;
+});
 
 /* Wheel colours are derived, never picked. Seven hand-chosen ones had drifted
    into two blues and two greens (#12) — the same failure as the per-wheel `rim`
