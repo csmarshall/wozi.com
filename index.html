@@ -68,6 +68,9 @@ a:focus-visible,button:focus-visible,[tabindex]:focus-visible{outline:3px solid 
 
 <main style="min-height:100vh;box-sizing:border-box;display:flex;flex-direction:var(--dir);align-items:center;justify-content:center;gap:var(--gap);padding:var(--pad);background:var(--bg);overflow:hidden;">
 
+  <button onClick="{{ toggleMotion }}" title="{{ motionLabel }}" aria-label="{{ motionLabel }}" aria-pressed="{{ motionPressed }}" style="position:fixed;top:var(--btnoff);right:calc(var(--btnoff) + var(--btn) + 6px);z-index:20;display:flex;align-items:center;justify-content:center;width:var(--btn);height:var(--btn);padding:0;border:0;border-radius:999px;background:transparent;color:var(--muted);cursor:pointer;transition:color .18s ease;" style-hover="color:var(--ink);">
+    {{ motionIcon }}
+  </button>
   <button onClick="{{ toggleTheme }}" title="{{ themeLabel }}" aria-label="{{ themeLabel }}" style="position:fixed;top:var(--btnoff);right:var(--btnoff);z-index:20;display:flex;align-items:center;justify-content:center;width:var(--btn);height:var(--btn);padding:0;border:0;border-radius:999px;background:transparent;color:var(--muted);cursor:pointer;transition:color .18s ease;" style-hover="color:var(--ink);">
     {{ themeIcon }}
   </button>
@@ -284,7 +287,7 @@ const SITES = {
 };
 
 class Component extends DCLogic {
-  state = { theme: 'light', hover: null, icons: {}, ghosts: [] };
+  state = { theme: 'light', hover: null, icons: {}, ghosts: [], motion: null };
   _spinEls = [];
   _chainEls = [];
   _ghostEls = [];
@@ -348,6 +351,17 @@ class Component extends DCLogic {
   }
 
   idleRate() { return (7200 / BASE_MS) * (this.props.speed ?? 1); }
+
+  /* Whether the train should run right now. The stored override wins in either
+     direction; otherwise follow prefers-reduced-motion. A person who chose
+     motion gets motion, whatever their OS setting says -- user-initiated motion
+     is the user's choice (#3), and the same control is a pause button for
+     everyone else. */
+  motionActive() {
+    if (this.state.motion === 'run') return true;
+    if (this.state.motion === 'rest') return false;
+    return !(this._rmq && this._rmq.matches);
+  }
 
   /* Stable per-load randomness, so a resize re-seeds the same background machinery. */
   rnd() {
@@ -479,8 +493,12 @@ class Component extends DCLogic {
        A deliberate drag or key press still spins it -- user-initiated motion is
        the user's choice -- and friction then returns it to rest. */
     this._rmq = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
-    const startReduced = !!(this._rmq && this._rmq.matches);
-    this._v = (this.props.spinUp === false && !startReduced) ? this.idleRate() : 0;
+    let savedMotion = null;
+    try { savedMotion = localStorage.getItem('wozi-motion'); } catch (e) {}
+    if (savedMotion === 'run' || savedMotion === 'rest') this.state.motion = savedMotion;
+    const startRunning = savedMotion === 'run' ? true
+      : savedMotion === 'rest' ? false : !(this._rmq && this._rmq.matches);
+    this._v = (this.props.spinUp === false && startRunning) ? this.idleRate() : 0;
     let last = performance.now();
     const step = (now) => {
       /* Cap the update rate. Divisors of the display refresh judder least, which is why
@@ -495,8 +513,7 @@ class Component extends DCLogic {
         /* Flywheel: bleed back toward the train's natural pace. */
         /* LAYER: hover drag — attention loads the machine and it slows a little. */
         const load = (this.props.hoverDrag && (this.state.hover || this.state.overStage)) ? 0.4 : 1;
-        const reduced = !!(this._rmq && this._rmq.matches);
-        const target = reduced ? 0 : this._dirSign * this.idleRate() * load;
+        const target = this.motionActive() ? this._dirSign * this.idleRate() * load : 0;
         this._v += (target - this._v) * (1 - Math.exp(-dt / 900));
         this._M += this._v * dt;
         this.applyRotation();
@@ -1224,6 +1241,18 @@ class Component extends DCLogic {
       stageStyle: { position: 'relative', flex: '0 0 auto', width: 'calc(' + solved.w + 'px * var(--gs))', height: 'calc(' + solved.h + 'px * var(--gs))', cursor: 'grab', touchAction: 'none' },
 
       themeLabel: this.state.theme === 'dark' ? 'Switch to light' : 'Switch to dark',
+      toggleMotion: () => {
+        const next = this.motionActive() ? 'rest' : 'run';
+        try { localStorage.setItem('wozi-motion', next); } catch (e) {}
+        this.setState({ motion: next });
+      },
+      motionLabel: this.motionActive() ? 'Pause the machine' : 'Run the machine',
+      motionPressed: this.motionActive() ? 'true' : 'false',
+      motionIcon: this.motionActive()
+        ? h('svg', { 'aria-hidden': 'true', focusable: 'false', width: 20, height: 20, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round' },
+            h('path', { d: 'M9 5v14M15 5v14' }))
+        : h('svg', { 'aria-hidden': 'true', focusable: 'false', width: 20, height: 20, viewBox: '0 0 24 24', fill: 'currentColor', stroke: 'currentColor', strokeWidth: 1.4, strokeLinejoin: 'round' },
+            h('path', { d: 'M8 5.5v13l11-6.5z' })),
       themeIcon: this.state.theme === 'dark'
         ? h('svg', { 'aria-hidden': 'true', focusable: 'false', width: 20, height: 20, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round' },
             h('circle', { cx: 12, cy: 12, r: 4.4 }),
