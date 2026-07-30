@@ -119,15 +119,7 @@ const TOOTH_FILLET = 0.38; /* root fillet radius, in modules — the standard va
                               the root circle at a sharp corner, which no cut gear has. */
 
 const BASE_MS = 21000;
-/* Neutral. The old set was blue-cast (#9AA6AD, #8F9BA3), and at low contrast a
-   blue-grey reads as washed-out colour rather than as distance (#22). These are
-   only used to pick which step of the ghost scale a wheel lands on; the theme
-   decides the actual value. */
-const GHOST_COLORS = ['#A8A8A8', '#B4B4B4', '#9C9C9C', '#C0C0C0'];
-/* The scale each theme actually paints with. Light needs genuinely darker greys:
-   at 0.38 alpha over #E8EAE5 a pale grey lands within a few percent of the page. */
-const GHOST_LIGHT = ['#6E7270', '#7C807E', '#636765', '#8A8E8C'];
-const GHOST_DARK  = ['#A8A8A8', '#B4B4B4', '#9C9C9C', '#C0C0C0'];
+const GHOST_COLORS = ['#9AA6AD', '#A9B4BA', '#8F9BA3', '#B3BCC2'];
 
 const GHOST_KINDS = ['spokes', 'holes', 'pockets', 'ring', 'plain'];
 function segCross(p1, p2, p3, p4) {
@@ -165,36 +157,6 @@ const TRAIN = [
   { teeth: 18, angle: -18, slug: 'mail', kind: 'plain', prof: { rim: 1.6, web: 2.6, hub: 0.3 } }
 ];
 
-function hslHex(h, s, l) {
-  h = ((h % 360) + 360) % 360; s /= 100; l /= 100;
-  const a = s * Math.min(l, 1 - l);
-  const k = (n) => (n + h / 30) % 12;
-  const f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1));
-  const hex = (v) => Math.round(v * 255).toString(16).padStart(2, '0');
-  return '#' + hex(f(0)) + hex(f(8)) + hex(f(4));
-}
-
-function relLum(hex) {
-  const c = [1, 3, 5].map(i => parseInt(hex.substr(i, 2), 16) / 255)
-    .map(v => v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
-  return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
-}
-
-/* Solve for the lightness that puts a hue on a given relative luminance.
-   Equal HSL lightness is NOT equal perceived brightness: green carries a 0.72
-   luminance coefficient against blue's 0.07, so an evenly-spaced palette at
-   constant L has one wheel nearly three times brighter than another, and that
-   wheel jumps out of the train. Searching for the lightness directly levels
-   them exactly — measured spread falls from 0.356 to 0.004. */
-function levelled(h, s, target) {
-  let lo = 8, hi = 94;
-  for (let i = 0; i < 24; i++) {
-    const m = (lo + hi) / 2;
-    if (relLum(hslHex(h, s, m)) < target) lo = m; else hi = m;
-  }
-  return hslHex(h, s, (lo + hi) / 2);
-}
-
 /* Wheel colours are derived, never picked. Seven hand-chosen ones had drifted
    into two blues and two greens (#12) — the same failure as the per-wheel `rim`
    values in #15: a set maintained by judgement stops being consistent the moment
@@ -226,64 +188,24 @@ function levelled(h, s, target) {
    theme now gets its own target: darker wheels for a bright page, lighter for a
    dark one. Same hues, same saturation, same spacing and collision guarantees
    from #12 -- only the value moves. */
-/* A curated palette, and the reasoning is worth keeping because both obvious
-   alternatives were tried and are worse.
-
-   The original template's seven colours are well chosen but contain two blues
-   (8 degrees apart) and two greens — the collision reported in #12.
-
-   Generating hues at even angles removes the collision but lands on arbitrary
-   points of the wheel, which means mauve, dusty rose, olive and sage. Those read
-   as muddy no matter what their luminance or chroma measures, and matching the
-   original's mean luminance and chroma exactly produced a palette that measured
-   the same and looked considerably worse. What made the original good was WHICH
-   hues it used, not their averages.
-
-   So: seven hues chosen deliberately, spread with at least 27 degrees between
-   any two, avoiding the muddy quadrants entirely. Each keeps its own natural
-   luminance rather than being flattened to a common target — real palettes vary,
-   and forcing them level is what made the generated set read as synthetic.
-   Only the assignment to wheels is random. */
-const WHEEL_PALETTE = [
-  '#D63C6A',  /* raspberry */
-  '#DF5F24',  /* orange    */
-  '#E0A52C',  /* amber     */
-  '#35A853',  /* green     */
-  '#0E9E92',  /* teal      */
-  '#2F6FDB',  /* blue      */
-  '#7C5CD9'   /* violet    */
+/* The colour pool starts with the seven the original template shipped — used
+   verbatim, in both themes, exactly as the template did (the per-theme
+   difference comes from shades(), not from separate base sets). Three more are
+   authored in the same idiom to cover the gaps in its rainbow: orange, teal,
+   magenta. Assignment is the only random part: shuffle the pool per load and
+   deal one colour to each wheel, so adding wheels later just deals more from
+   the pool — up to ten stay distinct, past that it wraps. */
+const WHEEL_COLORS = [
+  '#4A90E2', '#17A05C', '#8CB8F2', '#E8615A', '#6ECFA6', '#F2C14E', '#9B8CE0',  /* the template's seven */
+  '#EC8C4E', '#54BFB6', '#DB79B8'                                               /* gap fill: orange, teal, magenta */
 ];
-
-/* Light mode takes the same hues a touch deeper so they hold against a pale
-   page; hue and saturation are untouched, so a wheel stays recognisably itself
-   across a theme toggle. */
-const WHEEL_LIGHT_SCALE = 0.72;
-
-function revalue(hex, target) {
-  const n = parseInt(hex.slice(1), 16);
-  const c = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map(v => v / 255);
-  const mx = Math.max.apply(null, c), mn = Math.min.apply(null, c);
-  const l = (mx + mn) / 2, d = mx - mn;
-  const sat = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
-  let hue = 0;
-  if (d !== 0) {
-    if (mx === c[0]) hue = 60 * (((c[1] - c[2]) / d) % 6);
-    else if (mx === c[1]) hue = 60 * ((c[2] - c[0]) / d + 2);
-    else hue = 60 * ((c[0] - c[1]) / d + 4);
-  }
-  return levelled(hue, Math.min(100, sat * 100), target);
-}
-
-const WHEEL_ORDER = WHEEL_PALETTE.map((c, i) => i);
+const WHEEL_ORDER = WHEEL_COLORS.map((c, i) => i);
 for (let i = WHEEL_ORDER.length - 1; i > 0; i--) {
   const j = Math.floor(Math.random() * (i + 1));
   const tmp = WHEEL_ORDER[i]; WHEEL_ORDER[i] = WHEEL_ORDER[j]; WHEEL_ORDER[j] = tmp;
 }
 TRAIN.forEach((t, i) => {
-  const src = WHEEL_PALETTE[WHEEL_ORDER[i % WHEEL_PALETTE.length]];
-  t.colorD = src;
-  t.colorL = revalue(src, relLum(src) * WHEEL_LIGHT_SCALE);
-  t.color = t.colorD;
+  t.color = WHEEL_COLORS[WHEEL_ORDER[i % WHEEL_COLORS.length]];
 });
 
 /* Depth of the engraving band, in modules — uniform on every wheel. */
@@ -318,36 +240,10 @@ function shades(hex, soft) {
   const n = parseInt(hex.slice(1), 16);
   const c = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
   const mix = (t, target) => '#' + c.map(v => Math.round(v + (target - v) * t).toString(16).padStart(2, '0')).join('');
-  /* The top stop is a specular highlight, not a lighter version of the object.
-     Light mode sits on a #F1F2F0 page, so a highlight mixed far toward white lands
-     within a few percent of the background and the wheel loses its top edge
-     entirely — it reads as frosted rather than solid (#13). The lit face therefore
-     stays a clear tint of the hue, and the contrast is carried by the lower stops
-     instead. Dark mode can afford a brighter highlight because it reads against
-     #1E2226, where light means lit. */
-  /* Five stops, brightest first: highlight, upper body, lower body, darkest, and a
-     bounce-light lift for the very bottom edge (#19). The bounce is deliberately
-     kept darker than the mid tone so it can never rival the top highlight — light
-     thrown back off whatever the wheel sits on, not a second source. */
-  /* The two themes light the same metal differently, and should look it.
-     Light mode is daylight: a bright specular top, a light upper body, and the
-     tone falling away underneath — a wide range, high on the scale. Dark mode is
-     a spotlit machine: a cooler highlight and far deeper shadow, a wide range
-     sitting low on the scale.
-
-     Both stay monotonic top to bottom apart from the final bounce (#19). The
-     silhouette in light mode is carried by the --edge stroke and the cast shadow,
-     not by making the whole wheel dark, which is what flattened the two themes
-     into each other. */
-  /* Mixing toward white IS desaturation. The original template mixed the light
-     body stop 24% toward white and got away with it because its colours were
-     already pastel (#8CB8F2, #6ECFA6); against vivid ones the same treatment
-     visibly greys them — measured, 24% toward white costs 24% of the chroma.
-     Light mode therefore models with TONE, darkening within the hue, and keeps
-     the white mix small enough to read as a highlight rather than a wash. */
+  /* Light mode gets a gentler spread so the wheels sit into the page instead of shouting. */
   return soft
-    ? [mix(0.26, 255), mix(0.05, 255), mix(0.17, 0), mix(0.42, 0), mix(0.28, 0)]
-    : [mix(0.38, 255), mix(0.04, 255), mix(0.26, 0), mix(0.50, 0), mix(0.38, 0)];
+    ? [mix(0.5, 255), mix(0.24, 255), mix(0.12, 0), mix(0.3, 0)]
+    : [mix(0.55, 255), mix(0.14, 255), mix(0.2, 0), mix(0.42, 0)];
 }
 
 const SITES = {
@@ -784,7 +680,7 @@ class Component extends DCLogic {
           phase = ang + 180 - (0.5 - u) * pThis;
         }
       }
-      g.push({ i: i, teeth: t.teeth, color: t.color, colorL: t.colorL, colorD: t.colorD, slug: slugFor[i] || null, belt: t.link || null, kind: t.kind || 'holes', arms: t.arms || 5, prof: prof, chainFrom: chainFrom,
+      g.push({ i: i, teeth: t.teeth, color: t.color, slug: slugFor[i] || null, belt: t.link || null, kind: t.kind || 'holes', arms: t.arms || 5, prof: prof, chainFrom: chainFrom,
         r: r, ro: ro, x: x, y: y, dir: dir, phase: phase,
         dur: (BASE_MS * t.teeth / 20).toFixed(2) });
     });
@@ -906,13 +802,7 @@ class Component extends DCLogic {
      marks — they are blurred and dim, so the detail would be wasted frames. */
   ghostSvg(g) {
     const h = React.createElement;
-    const dark = this.state.theme === 'dark';
-    /* Background machinery is toned per theme, not left to opacity alone. Pale grey
-       at low alpha over a near-white page is close to nothing; these greys are
-       chosen against the page they sit on so the runs read as distant metal (#22). */
-    const step = GHOST_COLORS.indexOf(g.color || GHOST_COLORS[0]);
-    const tone = (dark ? GHOST_DARK : GHOST_LIGHT)[step < 0 ? 0 : step];
-    const p = shades(tone, !dark);
+    const p = shades(g.color || '#9AA6AD', this.state.theme !== 'dark');
     const size = (g.ro + 4) * 2, r = g.r;
     const path = this.teethPath(g.teeth, r, g.prof);
     /* Softness comes from low-contrast fills, not a CSS blur: a filter on a rotating
@@ -930,8 +820,7 @@ class Component extends DCLogic {
 
   gearSvg(g) {
     const h = React.createElement;
-    const dark = this.state.theme === 'dark';
-    const p = shades((dark ? g.colorD : g.colorL) || g.color || '#C9D2D6', !dark);
+    const p = shades(g.color || '#C9D2D6', this.state.theme !== 'dark');
     const id = 'gr' + g.i, size = (g.ro + 6) * 2, r = g.r, m = MODULE;
     const prof = g.prof;
     /* LAYER: character — the flag is all-or-nothing across the train, so it reads
@@ -1051,18 +940,12 @@ class Component extends DCLogic {
       h('defs', null,
         /* All shading is symmetric about the vertical axis — lit from above, never from
            a corner — so concentric webs and hubs read as centred. */
-        /* One light, above. The stops descend from the highlight to the darkest
-           point and only lift in the last tenth, where bounce light off the
-           surface below genuinely reaches. The previous profile went
-           light-base-dark-BASE-darkest, which put a second highlight below centre
-           and made every wheel read as lit from underneath — measurably so, top
-           half darker than bottom at all eight pinned rotations (#19). */
         h('linearGradient', { id: id + 'f', x1: '50%', y1: '0%', x2: '50%', y2: '100%' },
           h('stop', { offset: '0%', stopColor: p[0] }),
-          h('stop', { offset: '20%', stopColor: p[1] }),
-          h('stop', { offset: '56%', stopColor: p[2] }),
-          h('stop', { offset: '90%', stopColor: p[3] }),
-          h('stop', { offset: '100%', stopColor: p[4] })),
+          h('stop', { offset: '24%', stopColor: p[1] }),
+          h('stop', { offset: '48%', stopColor: p[2] }),
+          h('stop', { offset: '68%', stopColor: p[1] }),
+          h('stop', { offset: '100%', stopColor: p[3] })),
         h('radialGradient', { id: id + 'w', cx: '50%', cy: '34%', r: '78%' },
           h('stop', { offset: '0%', stopColor: p[2] }),
           h('stop', { offset: '62%', stopColor: p[3] }),
