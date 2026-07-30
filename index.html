@@ -198,7 +198,7 @@ const CENTRE_FAMILIES = [
   { type: 'sunburst', web: 3.1, hub: 0.2,
     variants: [{ arms: 10 }, { arms: 14 }, { arms: 18 }] },
   { type: 'planetary', web: 2.6, hub: 0.1,
-    variants: [{}] }
+    variants: [{ pg: [12, 9, 30, 3] }, { pg: [18, 6, 30, 4] }] }
 ];
 /* Debug affordance: ?kind=iris forces every wheel to one family, variants
    cycling — how the contact sheets for review are made. Harmless in production. */
@@ -1194,7 +1194,12 @@ class Component extends DCLogic {
          both modulo their pitch. First cut used guessed offsets and a sign
          error on the carrier base -- visibly out of mesh, as Charles spotted. */
       inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
-      const Zs = 12, Zp = 9, Zr = 30, NP = 3;
+      /* Two dealt gear sets: 3 planets with 9-tooth pinions, or 4 planets with
+         a big 18-tooth sun -- both pass (Zs+Zr)%N==0 and adjacency. 4|18 fails,
+         so the 4-planet set's phase constants STAGGER per station; the formula
+         moved into the loop to carry the kP*A_k term that no longer vanishes. */
+      const PG = (g.cv && g.cv.pg) || [12, 9, 30, 3];
+      const Zs = PG[0], Zp = PG[1], Zr = PG[2], NP = PG[3];
       const Rr = wellR * 0.88, m2 = 2 * Rr / Zr;
       const Rs = m2 * Zs / 2, Rp = m2 * Zp / 2, Rc = Rs + Rp;
       const bore = Rr + m2 * 1.25;
@@ -1231,12 +1236,13 @@ class Component extends DCLogic {
          because the per-station terms vanish under 3|Zs and 3|Zr. */
       const Q = g.phase - (g.crot || 0);
       const baseC = -Q;
-      const baseP = ((kP * Q - pp / 2) % pp + pp) % pp;
+      const basePAt = (A) => (((kP * (Q - A) - pp / 2) % pp) + pp) % pp;
       const baseS = (((180 * (1 - Zp / Zs) + Q * (Zr / Zs - 1)) % ps) + ps) % ps;
       const epi = (k3, base) => (el) => { if (el && this._epiEls) this._epiEls.push({ el: el, k: k3, base: base, g: g }); };
       const planets = [];
       for (let k2 = 0; k2 < NP; k2++) {
         const A = k2 * (360 / NP);
+        const baseP = basePAt(A);
         planets.push(h('g', { key: 'pw' + k2, transform: 'rotate(' + A + ')' },
           h('path', { d: 'M0,0 L' + Rc.toFixed(2) + ',0', stroke: ft.line, strokeWidth: 3, strokeOpacity: 0.85 }),
           h('g', { transform: 'translate(' + Rc.toFixed(2) + ',0)' },
