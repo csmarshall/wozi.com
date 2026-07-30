@@ -78,7 +78,7 @@ a:focus-visible,button:focus-visible,[tabindex]:focus-visible{outline:3px solid 
   <div ref="{{ stageRef }}" tabindex="0" role="application" aria-label="Animated gear machine. Press the left or right arrow key to spin it." onKeyDown="{{ onStageKey }}" onPointerDown="{{ onGrab }}" onPointerEnter="{{ onStageEnter }}" onPointerLeave="{{ onStageLeave }}" style="{{ stageStyle }}">
     {{ gearArt }}
     <sc-for list="{{ links }}" as="link" hint-placeholder-count="7">
-      <a href="{{ link.href }}" aria-label="{{ link.label }}" onPointerDown="{{ link.badgeDown }}" onClick="{{ link.clickGuard }}" onMouseEnter="{{ link.enter }}" onMouseLeave="{{ link.leave }}" onFocus="{{ link.enter }}" onBlur="{{ link.leave }}" style="{{ link.discStyle }}">
+      <a href="{{ link.href }}" draggable="false" aria-label="{{ link.label }}" onPointerDown="{{ link.badgeDown }}" onDragStart="{{ link.noDrag }}" onClick="{{ link.clickGuard }}" onMouseEnter="{{ link.enter }}" onMouseLeave="{{ link.leave }}" onFocus="{{ link.enter }}" onBlur="{{ link.leave }}" style="{{ link.discStyle }}">
         {{ link.iconEl }}
         {{ link.tipEl }}
       </a>
@@ -468,6 +468,12 @@ class Component extends DCLogic {
   badgeGrab(e, slug) {
     if (e.button > 0) return;
     e.stopPropagation();
+    /* preventDefault here kills the browser's native link-drag, which otherwise
+       hijacks the pointer stream -- on a real mouse it made the cap need a
+       long-press before it would move at all. Synthesized test events never
+       trigger native drag, which is why the harness missed it. Click activation
+       is unaffected: click fires regardless of pointerdown's default. */
+    e.preventDefault();
     const el = e.currentTarget;
     /* No pointer capture: window listeners, exactly like the train's own drag —
        capture on the anchor swallowed the move stream under some pointers. */
@@ -478,7 +484,10 @@ class Component extends DCLogic {
     const move = (ev) => {
       const dx = ev.clientX - sx + ox0, dy = ev.clientY - sy + oy0;
       const d = Math.hypot(dx, dy) || 1;
-      const max = el.offsetWidth * 1.6;
+      /* Tether reach ~3 cap-widths: enough to pull the disc clear of the whole
+         centre works. 1.6 stopped at roughly the well radius, which read as a
+         wall rather than a stretch. */
+      const max = el.offsetWidth * 3.2;
       const lim = max * Math.tanh(d / max);
       off.x = dx / d * lim; off.y = dy / d * lim;
       off.vx = 0; off.vy = 0;
@@ -1590,6 +1599,7 @@ class Component extends DCLogic {
       return {
         label: site.label, path: site.path, href: site.href,
         badgeDown: (e) => this.badgeGrab(e, g.slug),
+        noDrag: (e) => e.preventDefault(),
         clickGuard: (e) => { if (this._badgeMoved === g.slug) { e.preventDefault(); this._badgeMoved = null; } },
         iconEl: h('span', {
           style: { width: 'calc(' + size + ' * 0.56)', height: 'calc(' + size + ' * 0.56)', display: 'block', lineHeight: 0, color: on ? 'var(--accent)' : (BRAND[g.slug] || 'var(--ink)'), transition: 'color .2s ease' },
@@ -1621,6 +1631,7 @@ class Component extends DCLogic {
           left: 'calc(' + g.cx + 'px * var(--gs))', top: 'calc(' + g.cy + 'px * var(--gs))',
           width: size, height: size, boxSizing: 'border-box',
           borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          touchAction: 'none', userSelect: 'none', WebkitUserDrag: 'none',
           /* Was a hardcoded #F8F9F8 in both themes, which glared on the softened
              light page and was the brightest thing on screen in dark. Toned per
              theme, but kept light in BOTH: several brand marks are near-black
