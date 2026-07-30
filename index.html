@@ -188,15 +188,17 @@ const CENTRE_FAMILIES = [
   { type: 'spiral', web: 2.6, hub: 0.14,
     variants: [{ arms: 5, sweep: 0.3 }, { arms: 6, sweep: 0.22 }, { arms: 4, sweep: 0.38 }] },
   { type: 'iris', web: 2.9, hub: 0.2,
-    variants: [{ arms: 6 }, { arms: 8 }] },
+    variants: [{ arms: 6 }, { arms: 8 }, { arms: 10 }] },
   { type: 'star', web: 3.0, hub: 0.22,
-    variants: [{ arms: 5 }, { arms: 7 }] },
+    variants: [{ arms: 5 }, { arms: 7 }, { arms: 9 }] },
   { type: 'honeycomb', web: 3.1, hub: 0.2,
-    variants: [{ arms: 6 }, { arms: 9 }] },
+    variants: [{ arms: 6 }, { arms: 9 }, { arms: 12 }] },
   { type: 'labyrinth', web: 3.2, hub: 0.24,
-    variants: [{ arms: 5 }, { arms: 6 }] },
+    variants: [{ arms: 5 }, { arms: 6 }, { arms: 7 }] },
   { type: 'sunburst', web: 3.1, hub: 0.2,
-    variants: [{ arms: 10 }, { arms: 14 }] }
+    variants: [{ arms: 10 }, { arms: 14 }, { arms: 18 }] },
+  { type: 'planetary', web: 2.6, hub: 0.1,
+    variants: [{}] }
 ];
 /* Debug affordance: ?kind=iris forces every wheel to one family, variants
    cycling — how the contact sheets for review are made. Harmless in production. */
@@ -219,9 +221,26 @@ function dealCentres(n) {
       : f.variants[Math.floor(Math.random() * f.variants.length)];
     out.push({ type: f.type, web: f.web, hub: f.hub, v: v });
   }
+  /* The planetary is the showpiece: every load carries exactly one, unless a
+     family is being forced for review. */
+  if (!FORCE_KIND && !out.some(c => c.type === 'planetary')) {
+    const f = CENTRE_FAMILIES.filter(x => x.type === 'planetary')[0];
+    out[Math.floor(Math.random() * out.length)] = { type: f.type, web: f.web, hub: f.hub, v: f.variants[0] };
+  }
   return out;
 }
 const CENTRE_DEAL = dealCentres(TRAIN.length);
+/* The planetary needs room: on the 14- and 15-tooth wheels the hub badge covers
+   most of the bore and the works vanish behind it. Swap it onto the largest
+   wheel available if the deal put it somewhere cramped. */
+(function () {
+  const pi = CENTRE_DEAL.findIndex(c => c.type === 'planetary');
+  if (pi < 0) return;
+  if (TRAIN[pi] && TRAIN[pi].teeth >= 17) return;
+  let big = -1, bt = 0;
+  TRAIN.forEach((t, i) => { if (t.teeth > bt) { bt = t.teeth; big = i; } });
+  if (big >= 0) { const tmp = CENTRE_DEAL[pi]; CENTRE_DEAL[pi] = CENTRE_DEAL[big]; CENTRE_DEAL[big] = tmp; }
+})();
 TRAIN.forEach((t, i) => {
   const cd = CENTRE_DEAL[i % CENTRE_DEAL.length];
   t.kind = cd.type;
@@ -562,6 +581,17 @@ class Component extends DCLogic {
         if (c.el) c.el.style.strokeDashoffset = (-this._M * PITCH / 360 * c.sign).toFixed(2) + 'px';
       });
     }
+    /* Planetary internals: sun, carrier and planet spins are all fixed multiples
+       of their host wheel's angle -- one clock, several ratios. k is the factor
+       RELATIVE to the wheel (the svg lives inside the rotating wheel div):
+       sun -1 (stationary in page frame), carrier -Zs/(Zs+Zr), planet spin
+       +ZrZs/(Zp(Zr+Zs)). */
+    if (this._epiEls) {
+      for (let i = 0; i < this._epiEls.length; i++) {
+        const e = this._epiEls[i];
+        if (e.el) e.el.style.transform = 'rotate(' + (e.base + e.k * (e.g.dir * this._M / e.g.teeth)).toFixed(3) + 'deg)';
+      }
+    }
   }
 
   startPhysics() {
@@ -860,8 +890,8 @@ class Component extends DCLogic {
      cannot do both, which is what forced #11 to trade contact for clearance.
      Below the base circle no involute exists, so the flank runs radially down
      into the root. */
-  teethPath(n, r, prof, chipIdx) {
-    const m = MODULE;
+  teethPath(n, r, prof, chipIdx, mod) {
+    const m = mod || MODULE;
     const ro = r + m * TOOTH_ADD, rr = Math.max(4, r - m * TOOTH_DED), a = 2 * Math.PI / n;
     const phi = TOOTH_PA * Math.PI / 180, rb = r * Math.cos(phi);
     const inv = (x) => Math.tan(x) - x;
@@ -985,6 +1015,9 @@ class Component extends DCLogic {
     const wellR = Math.min(Math.max(4, r - m * (prof.web || 2.9)), marked ? bandIn - 2 : Infinity);
     const hubR = Math.max(8, r * (prof.hub || 0.21));
     const inner = [];
+    const post = [];   /* rendered AFTER the clipped group: cut-outs clip their
+                          interiors, so anything living inside an opening -- the
+                          planetary's moving parts -- draws here instead */
     const kind = g.kind;
 
     const turned = (key, r0, r1, n) => {
@@ -1064,6 +1097,48 @@ class Component extends DCLogic {
         holes.push('M' + (+cx + hr) + ',' + cy + ' A' + hr + ',' + hr + ' 0 1 0 ' + (+cx - hr) + ',' + cy + ' A' + hr + ',' + hr + ' 0 1 0 ' + (+cx + hr) + ',' + cy + ' Z');
         inner.push(h('circle', { key: 'rh' + k, cx: cx, cy: cy, r: hr + 1.6, fill: 'none', stroke: p[3], strokeOpacity: 0.55, strokeWidth: 2.4 }));
       }
+    } else if (kind === 'planetary') {
+      /* An epicyclic set inside the wheel, and the kinematics are honest. The
+         hub badge is the end of the STATIONARY axle; the sun is keyed to it;
+         the ring gear is the wheel itself. With the sun fixed and the ring at
+         wheel speed, the carrier runs at Zr/(Zr+Zs) of the wheel and each
+         planet spins at ZrZs/(Zp(Zr+Zs)) relative to its carrier -- real
+         ratios, checkable by anyone who has set up a gear train. Everything
+         derives from the one master angle via applyRotation.
+         Zs=12 Zp=6 Zr=24: Zs+2Zp=Zr and (Zs+Zr)/3 is an integer, so three
+         planets assemble at 120 degrees -- the standard feasibility checks. */
+      inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
+      const Zs = 12, Zp = 6, Zr = 24, NP = 3;
+      const Rr = wellR * 0.88, m2 = 2 * Rr / Zr;
+      const Rs = m2 * Zs / 2, Rp = m2 * Zp / 2, Rc = Rs + Rp;
+      const bore = Rr + m2 * 0.75;
+      /* the bore is genuinely open -- page shows through behind the works */
+      holes.push('M' + bore.toFixed(2) + ',0 A' + bore.toFixed(2) + ',' + bore.toFixed(2) + ' 0 1 0 -' + bore.toFixed(2) + ',0 A' + bore.toFixed(2) + ',' + bore.toFixed(2) + ' 0 1 0 ' + bore.toFixed(2) + ',0 Z');
+      /* ring gear: internal teeth, part of the wheel, drawn back over the cut */
+      let ringD = '';
+      for (let k2 = 0; k2 < Zr; k2++) {
+        const a0 = (k2 / Zr) * 360, wt = (360 / Zr) * 0.24;
+        const tip = Rr - m2 * 0.9, root = Rr + m2 * 0.6;
+        ringD += (k2 ? 'L' : 'M') + PT(root, a0 - wt * 1.6) + ' L' + PT(tip, a0 - wt) + ' L' + PT(tip, a0 + wt) + ' L' + PT(root, a0 + wt * 1.6) + ' ';
+      }
+      ringD += 'Z M' + bore.toFixed(2) + ',0 A' + bore.toFixed(2) + ',' + bore.toFixed(2) + ' 0 1 0 -' + bore.toFixed(2) + ',0 A' + bore.toFixed(2) + ',' + bore.toFixed(2) + ' 0 1 0 ' + bore.toFixed(2) + ',0 Z';
+      post.push(h('path', { key: 'epiring', d: ringD, fillRule: 'evenodd', fill: ft.body, stroke: ft.line, strokeWidth: 1, strokeOpacity: 0.6 }));
+      const kC = -Zs / (Zs + Zr);                 /* carrier, relative to wheel */
+      const kP = (Zr * Zs) / (Zp * (Zs + Zr));    /* planet spin, relative to carrier */
+      const epi = (k3, base) => (el) => { if (el && this._epiEls) this._epiEls.push({ el: el, k: k3, base: base, g: g }); };
+      const planets = [];
+      for (let k2 = 0; k2 < NP; k2++) {
+        const A = k2 * (360 / NP);
+        planets.push(h('g', { key: 'pw' + k2, transform: 'rotate(' + A + ')' },
+          h('path', { d: 'M0,0 L' + Rc.toFixed(2) + ',0', stroke: ft.line, strokeWidth: 3, strokeOpacity: 0.85 }),
+          h('g', { transform: 'translate(' + Rc.toFixed(2) + ',0)' },
+            h('g', { ref: epi(kP, -kP * g.phase + (k2 % 2) * (180 / Zp)), style: { transform: 'rotate(0deg)' } },
+              h('path', { d: this.teethPath(Zp, Rp, prof, -1, m2), fill: ft.face, stroke: ft.line, strokeWidth: 1 })),
+            h('circle', { r: 2.4, fill: ft.line }))));
+      }
+      post.push(h('g', { key: 'epicarrier', ref: epi(kC, -kC * g.phase), style: { transform: 'rotate(0deg)' } }, planets));
+      post.push(h('g', { key: 'episun', ref: epi(-1, g.phase * 1 * -1), style: { transform: 'rotate(0deg)' } },
+        h('path', { d: this.teethPath(Zs, Rs, prof, -1, m2), fill: ft.well, stroke: ft.line, strokeWidth: 1 })));
     } else if (kind === 'iris') {
       /* Aperture blades: tangential crescents, pointed at both ends. The metal
          between blades is a full-depth curved spoke — nothing floats. */
@@ -1270,6 +1345,7 @@ class Component extends DCLogic {
         h('path', { d: path + ' ' + holes.join(' '), fillRule: 'evenodd', fill: 'url(#' + id + 'f)', stroke: flat ? ft.line : 'var(--edge)', strokeWidth: flat ? 1.6 : 1, strokeLinejoin: 'round' }),
         inner,
         h('circle', { r: faceR, fill: 'none', stroke: 'var(--edge)', strokeWidth: 1, strokeOpacity: 0.4 })),
+      post,
       h('circle', { r: hubR, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2 }),
       h('circle', { r: Math.max(3, hubR * 0.4), fill: p[3], opacity: 0.5 }),
       /* LAYER: engraved rims — stamped into the solid band just inside the tooth roots,
@@ -1356,6 +1432,7 @@ class Component extends DCLogic {
 
     this._chainEls = [];
     this._ghostEls = [];
+    this._epiEls = [];
     const ghosts = h('div', { key: 'ghosts', ref: (el) => { this._ghostLayer = el; },
       style: { position: 'absolute', left: 0, top: 0, width: solved.w + 'px', height: solved.h + 'px',
       /* Light mode carries the outriggers harder: pale grey at 0.22 over a near-white
