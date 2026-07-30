@@ -181,8 +181,8 @@ const TRAIN = [
 const CENTRE_FAMILIES = [
   { type: 'spokes', web: 3.2, hub: 0.2,
     variants: [{ arms: 4, arm: 0.2 }, { arms: 5, arm: 0.15 }, { arms: 6, arm: 0.13 }] },
-  { type: 'holes', web: 2.9, hub: 0.23,
-    variants: [{ arms: 6, hole: 0.12 }, { arms: 8, hole: 0.085 }, { arms: 5, hole: 0.14 }] },
+  { type: 'holes', web: 2.9, hub: 0.17,
+    variants: [{ arms: 4 }, { arms: 5 }, { arms: 6 }] },
   { type: 'pockets', web: 3.1, hub: 0.22,
     variants: [{ arms: 6 }, { arms: 5 }, { arms: 4 }] },
   { type: 'spiral', web: 2.6, hub: 0.14,
@@ -1142,16 +1142,24 @@ class Component extends DCLogic {
       inner.push(h('circle', { key: 'sh', r: wellR + 1, fill: 'none', stroke: p[3], strokeOpacity: 0.35, strokeWidth: 2 }));
       slots(g.arms, hubR * 1.35, wellR, 8, 0.8);
     } else if (kind === 'holes') {
-      const count = g.arms, hr = Math.max(5, r * (prof.hole || 0.13)), orbit = (wellR + hubR) / 2;
+      /* Lightening drills, per Charles's rule: an opening must pay for its
+         machining -- cuts exist to REMOVE material. The old version drilled
+         6-8 small holes hugging the hub with filled counterbores, which read as
+         more work than leaving the web solid. Now few and LARGE, as big as the
+         spacing allows, seated in the outer web where removed mass actually
+         counts -- the bike-chainring / flywheel drilling pattern. */
+      const count = g.arms;
+      const rInD = Math.max(hubR * 1.5, 9), rOutD = wellR - 2;
+      const orbit = rInD + (rOutD - rInD) * 0.58;
+      const hr = Math.min((rOutD - rInD) * 0.46, orbit * Math.sin(Math.PI / count) * 0.82);
       inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
       inner.push(h('circle', { key: 'well', r: wellR, fill: 'url(#' + id + 'w)' }));
       inner.push(turned('t', hubR * 1.3, wellR - 2, 5));
       for (let k = 0; k < count; k++) {
         const a = (k / count) * Math.PI * 2, cx = (orbit * Math.cos(a)).toFixed(2), cy = (orbit * Math.sin(a)).toFixed(2);
         holes.push('M' + (+cx + hr) + ',' + cy + ' A' + hr + ',' + hr + ' 0 1 0 ' + (+cx - hr) + ',' + cy + ' A' + hr + ',' + hr + ' 0 1 0 ' + (+cx + hr) + ',' + cy + ' Z');
-        inner.push(h('circle', { key: 'cb' + k, cx: cx, cy: cy, r: hr * 1.42, fill: p[1], stroke: p[3], strokeWidth: 0.8, strokeOpacity: 0.4 }));
-        inner.push(h('circle', { key: 'h' + k, cx: cx, cy: cy, r: hr, fill: 'none', stroke: p[3], strokeWidth: 1.6, strokeOpacity: 0.65 }));
-        inner.push(h('path', { key: 'hg' + k, d: 'M' + (cx - hr * 0.6) + ',' + (+cy + hr * 0.55) + ' A' + hr + ',' + hr + ' 0 0 1 ' + (+cx + hr * 0.45) + ',' + (+cy - hr * 0.7), fill: 'none', stroke: flat ? 'none' : 'var(--gloss)', strokeOpacity: 0.35, strokeWidth: 1.2 }));
+        /* a thin chamfer ring only -- the machining witness, not decoration */
+        inner.push(h('circle', { key: 'h' + k, cx: cx, cy: cy, r: hr + 1.2, fill: 'none', stroke: p[3], strokeWidth: 1.4, strokeOpacity: 0.55 }));
       }
     } else if (kind === 'ring') {
       inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
