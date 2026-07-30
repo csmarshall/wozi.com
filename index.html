@@ -72,7 +72,7 @@ a:focus-visible,button:focus-visible,[tabindex]:focus-visible{outline:3px solid 
     {{ themeIcon }}
   </button>
 
-  <div ref="{{ stageRef }}" onPointerDown="{{ onGrab }}" onPointerEnter="{{ onStageEnter }}" onPointerLeave="{{ onStageLeave }}" style="{{ stageStyle }}">
+  <div ref="{{ stageRef }}" tabindex="0" role="application" aria-label="Animated gear machine. Press the left or right arrow key to spin it." onKeyDown="{{ onStageKey }}" onPointerDown="{{ onGrab }}" onPointerEnter="{{ onStageEnter }}" onPointerLeave="{{ onStageLeave }}" style="{{ stageStyle }}">
     {{ gearArt }}
     <sc-for list="{{ links }}" as="link" hint-placeholder-count="7">
       <a href="{{ link.href }}" aria-label="{{ link.label }}" onMouseEnter="{{ link.enter }}" onMouseLeave="{{ link.leave }}" onFocus="{{ link.enter }}" onBlur="{{ link.leave }}" style="{{ link.discStyle }}">
@@ -1187,6 +1187,18 @@ class Component extends DCLogic {
       colRef: this._colRef,
       stageRef: this._stageRef,
       onGrab: (e) => this.onGrab(e),
+      /* Keyboard drive (#25): each arrow press is an impulse into the same
+         flywheel the pointer drag feeds — the physics does everything else,
+         including reversing the train when driven against its direction. Works
+         under prefers-reduced-motion too: a key press is a deliberate act, and
+         friction returns the machine to rest afterwards (#3). */
+      onStageKey: (e) => {
+        if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+        e.preventDefault();
+        const dir = e.key === 'ArrowRight' ? 1 : -1;
+        this._dirSign = dir;
+        this._v = Math.max(-8, Math.min(8, this._v + dir * 1.6));
+      },
       onStageEnter: () => { if (this.props.hoverDrag) this.setState({ overStage: true }); },
       onStageLeave: () => { if (this.state.overStage) this.setState({ overStage: false }); },
       stageStyle: { position: 'relative', flex: '0 0 auto', width: 'calc(' + solved.w + 'px * var(--gs))', height: 'calc(' + solved.h + 'px * var(--gs))', cursor: 'grab', touchAction: 'none' },
