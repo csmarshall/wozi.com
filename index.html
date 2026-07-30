@@ -306,8 +306,14 @@ function shades(hex, soft) {
      silhouette in light mode is carried by the --edge stroke and the cast shadow,
      not by making the whole wheel dark, which is what flattened the two themes
      into each other. */
+  /* Mixing toward white IS desaturation. The original template mixed the light
+     body stop 24% toward white and got away with it because its colours were
+     already pastel (#8CB8F2, #6ECFA6); against vivid ones the same treatment
+     visibly greys them — measured, 24% toward white costs 24% of the chroma.
+     Light mode therefore models with TONE, darkening within the hue, and keeps
+     the white mix small enough to read as a highlight rather than a wash. */
   return soft
-    ? [mix(0.52, 255), mix(0.22, 255), mix(0.10, 0), mix(0.34, 0), mix(0.22, 0)]
+    ? [mix(0.26, 255), mix(0.05, 255), mix(0.17, 0), mix(0.42, 0), mix(0.28, 0)]
     : [mix(0.38, 255), mix(0.04, 255), mix(0.26, 0), mix(0.50, 0), mix(0.38, 0)];
 }
 
