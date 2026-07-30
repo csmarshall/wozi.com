@@ -1716,9 +1716,14 @@ class Component extends DCLogic {
       toggleTog: () => this.setState({ tog: !this.state.tog }),
       togLabel: this.state.tog ? 'Close the table of gears' : 'Browse the table of gears',
       togExpanded: this.state.tog ? 'true' : 'false',
-      togIcon: h('svg', { 'aria-hidden': 'true', focusable: 'false', width: 20, height: 20, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.7, strokeLinecap: 'round' },
-        h('circle', { cx: 12, cy: 12, r: 4.6 }),
-        h('path', { d: 'M12 3.2v3M12 17.8v3M3.2 12h3M17.8 12h3M5.8 5.8l2.1 2.1M16.1 16.1l2.1 2.1M18.2 5.8l-2.1 2.1M7.9 16.1l-2.1 2.1' })),
+      /* A cogwheel, not a sun: the first draft was circle-plus-rays, which sat
+         two buttons from the light-theme sun and read as its twin (Charles).
+         Now an annulus with a hub hole and six WIDE tooth stubs butting the
+         ring -- thin long rays say sun, fat short teeth say gear. */
+      togIcon: h('svg', { 'aria-hidden': 'true', focusable: 'false', width: 20, height: 20, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeLinecap: 'butt' },
+        h('circle', { cx: 12, cy: 12, r: 6.1, strokeWidth: 1.7 }),
+        h('circle', { cx: 12, cy: 12, r: 2.4, strokeWidth: 1.5 }),
+        h('path', { strokeWidth: 3, d: 'M12 5.9V3.4M12 18.1v2.5M6.72 8.95l-2.17-1.25M19.45 16.3l-2.17-1.25M6.72 15.05l-2.17 1.25M19.45 7.7l-2.17 1.25' })),
       togPanelStyle: {
         display: this.state.tog ? 'flex' : 'none', flexDirection: 'column', gap: '2px',
         position: 'fixed', left: 'var(--btnoff)', top: '50%', transform: 'translateY(-50%)',
