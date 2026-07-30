@@ -226,7 +226,15 @@ function levelled(h, s, target) {
    theme now gets its own target: darker wheels for a bright page, lighter for a
    dark one. Same hues, same saturation, same spacing and collision guarantees
    from #12 -- only the value moves. */
-const WHEEL_SAT = 88, WHEEL_LUM_DARK = 0.32, WHEEL_LUM_LIGHT = 0.14, WHEEL_JITTER = 0.4;
+const WHEEL_SAT_DARK = 88, WHEEL_SAT_LIGHT = 98;
+const WHEEL_LUM_DARK = 0.32, WHEEL_LUM_LIGHT = 0.24, WHEEL_JITTER = 0.4;
+/* Luminance and chroma trade against each other: forcing a colour dark squeezes
+   the colour out of it. Measured mean chroma across the seven hues against the
+   light page — 0.14 luminance gave 4.56:1 contrast but only 0.616 chroma, while
+   0.24 at higher saturation gives ~0.73, the peak, at ~3.0:1. The first pass at
+   this chased contrast alone and landed well down the colour slope, which is why
+   light mode had presence but no pop. 3:1 is ample for shapes this large, and
+   the outline and cast shadow carry the silhouette regardless. */
 /* Which stride is used is itself shuffled per load. Every value 1..6 is coprime
    with 7 so all of them visit each hue exactly once, but 1 and 6 seat
    neighbouring hues side by side — the thing the stride exists to prevent. The
@@ -238,10 +246,10 @@ TRAIN.forEach((t, i) => {
   const gap = 360 / TRAIN.length;
   const slot = (i * WHEEL_STRIDE) % TRAIN.length;
   const jitter = (Math.random() - 0.5) * gap * WHEEL_JITTER;
-  const sat = WHEEL_SAT + (Math.random() - 0.5) * 14;
+  const wob = (Math.random() - 0.5) * 14;
   const hue = WHEEL_HUE0 + gap * slot + jitter;
-  t.colorD = levelled(hue, sat, WHEEL_LUM_DARK);
-  t.colorL = levelled(hue, sat, WHEEL_LUM_LIGHT);
+  t.colorD = levelled(hue, WHEEL_SAT_DARK + wob, WHEEL_LUM_DARK);
+  t.colorL = levelled(hue, Math.min(100, WHEEL_SAT_LIGHT + wob * 0.4), WHEEL_LUM_LIGHT);
   t.color = t.colorD;
 });
 
