@@ -244,6 +244,11 @@ const CENTRE_DEAL = dealCentres(TRAIN.length);
 TRAIN.forEach((t, i) => {
   const cd = CENTRE_DEAL[i % CENTRE_DEAL.length];
   t.kind = cd.type;
+  /* The planetary's assembly pose is dealt too: the grounded carrier is bolted
+     on at a random clocking per load, so the three stations land differently
+     each visit. Decided here (module load, once) so a theme toggle re-render
+     cannot re-pose it. */
+  t.crot = cd.type === 'planetary' ? Math.random() * 360 : 0;
   t.arms = cd.v.arms;
   t.cv = cd.v;
   t.prof.web = cd.web; t.prof.hub = cd.hub;
@@ -843,7 +848,7 @@ class Component extends DCLogic {
           phase = ang + 180 - (0.5 - u) * pThis;
         }
       }
-      g.push({ i: i, teeth: t.teeth, color: t.color, cv: t.cv || null, slug: slugFor[i] || null, belt: t.link || null, kind: t.kind || 'holes', arms: t.arms || 5, prof: prof, chainFrom: chainFrom,
+      g.push({ i: i, teeth: t.teeth, color: t.color, cv: t.cv || null, crot: t.crot || 0, slug: slugFor[i] || null, belt: t.link || null, kind: t.kind || 'holes', arms: t.arms || 5, prof: prof, chainFrom: chainFrom,
         r: r, ro: ro, x: x, y: y, dir: dir, phase: phase,
         dur: (BASE_MS * t.teeth / 20).toFixed(2) });
     });
@@ -1098,33 +1103,61 @@ class Component extends DCLogic {
         inner.push(h('circle', { key: 'rh' + k, cx: cx, cy: cy, r: hr + 1.6, fill: 'none', stroke: p[3], strokeOpacity: 0.55, strokeWidth: 2.4 }));
       }
     } else if (kind === 'planetary') {
-      /* An epicyclic set inside the wheel, and the kinematics are honest. The
-         hub badge is the end of the STATIONARY axle; the sun is keyed to it;
-         the ring gear is the wheel itself. With the sun fixed and the ring at
-         wheel speed, the carrier runs at Zr/(Zr+Zs) of the wheel and each
-         planet spins at ZrZs/(Zp(Zr+Zs)) relative to its carrier -- real
-         ratios, checkable by anyone who has set up a gear train. Everything
-         derives from the one master angle via applyRotation.
-         Zs=12 Zp=6 Zr=24: Zs+2Zp=Zr and (Zs+Zr)/3 is an integer, so three
-         planets assemble at 120 degrees -- the standard feasibility checks. */
+      /* An epicyclic set inside the wheel, kinematics and MESH both honest.
+         Story on the page: the hub badge is the end of the STATIONARY axle, the
+         sun is keyed to it, the ring gear is the wheel itself. Sun fixed, ring
+         at wheel speed: carrier at Zr/(Zr+Zs), planet spin ZrZs/(Zp(Zr+Zs))
+         relative to carrier. Zs=6 Zp=9 Zr=24: Zs+2Zp=Zr and (Zs+Zr)/3 integer,
+         so three planets assemble at 120 degrees; the same integer check is why
+         one phase constant below serves all three stations.
+
+         Tooth phases are DERIVED, not nudged. Interleave condition (planet
+         tooth centred on ring space at each station) gives, in wheel-relative
+         element bases with P = the wheel's phase:
+           carrier base  = kC*P
+           planet  base  = kP*P - pp/2   (pp = planet pitch = 360/Zp)
+         both modulo their pitch. First cut used guessed offsets and a sign
+         error on the carrier base -- visibly out of mesh, as Charles spotted. */
       inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
-      const Zs = 12, Zp = 6, Zr = 24, NP = 3;
+      const Zs = 12, Zp = 9, Zr = 30, NP = 3;
       const Rr = wellR * 0.88, m2 = 2 * Rr / Zr;
       const Rs = m2 * Zs / 2, Rp = m2 * Zp / 2, Rc = Rs + Rp;
-      const bore = Rr + m2 * 0.75;
-      /* the bore is genuinely open -- page shows through behind the works */
+      const bore = Rr + m2 * 1.25;
       holes.push('M' + bore.toFixed(2) + ',0 A' + bore.toFixed(2) + ',' + bore.toFixed(2) + ' 0 1 0 -' + bore.toFixed(2) + ',0 A' + bore.toFixed(2) + ',' + bore.toFixed(2) + ' 0 1 0 ' + bore.toFixed(2) + ',0 Z');
-      /* ring gear: internal teeth, part of the wheel, drawn back over the cut */
+      /* Ring teeth cut to match the planets: tip 0.95 m2 inward of pitch, root
+         1.15 m2 outward, so planet tips clear the root by 0.15 m2 and ring tips
+         clear planet roots by 0.3 m2 -- the same clearance discipline as the
+         big train's involutes. */
       let ringD = '';
       for (let k2 = 0; k2 < Zr; k2++) {
         const a0 = (k2 / Zr) * 360, wt = (360 / Zr) * 0.24;
-        const tip = Rr - m2 * 0.9, root = Rr + m2 * 0.6;
-        ringD += (k2 ? 'L' : 'M') + PT(root, a0 - wt * 1.6) + ' L' + PT(tip, a0 - wt) + ' L' + PT(tip, a0 + wt) + ' L' + PT(root, a0 + wt * 1.6) + ' ';
+        const tip = Rr - m2 * 0.95, root = Rr + m2 * 1.15;
+        ringD += (k2 ? 'L' : 'M') + PT(root, a0 - wt * 1.7) + ' L' + PT(tip, a0 - wt) + ' L' + PT(tip, a0 + wt) + ' L' + PT(root, a0 + wt * 1.7) + ' ';
       }
       ringD += 'Z M' + bore.toFixed(2) + ',0 A' + bore.toFixed(2) + ',' + bore.toFixed(2) + ' 0 1 0 -' + bore.toFixed(2) + ',0 A' + bore.toFixed(2) + ',' + bore.toFixed(2) + ' 0 1 0 ' + bore.toFixed(2) + ',0 Z';
       post.push(h('path', { key: 'epiring', d: ringD, fillRule: 'evenodd', fill: ft.body, stroke: ft.line, strokeWidth: 1, strokeOpacity: 0.6 }));
-      const kC = -Zs / (Zs + Zr);                 /* carrier, relative to wheel */
-      const kP = (Zr * Zs) / (Zp * (Zs + Zr));    /* planet spin, relative to carrier */
+      /* STAR ARRANGEMENT -- the carrier is grounded to the axle, per the
+         physics verification (scratchpad/planetary-physics.md: Willis +
+         tabulation, cross-checked; precedent ALF 502 turbofan star box,
+         automatics braking the carrier for reverse). Page-frame speeds:
+         carrier 0, planets +Zr/Zp = +3.33x spinning IN PLACE on stationary
+         studs, sun -Zr/Zs = -2.5x COUNTER-ROTATING -- chosen over sun-grounded
+         because there every member co-rotates in a 1.7x band and, in Charles's
+         words, the planets move so little. k-factors are relative to the host
+         wheel; phase constants are the derived interleave conditions, valid at
+         all three stations because 3|Zs and 3|Zr (the strict condition, not
+         just 3|(Zs+Zr)). */
+      const kC = -1;
+      const kP = Zr / Zp;
+      const kS = -(1 + Zr / Zs);
+      const pp = 360 / Zp, ps = 360 / Zs;
+      /* R clocks the whole grounded carrier; substituting (phase - R) for phase
+         in the derived constants keeps every mesh condition satisfied at any R,
+         because the per-station terms vanish under 3|Zs and 3|Zr. */
+      const Q = g.phase - (g.crot || 0);
+      const baseC = -Q;
+      const baseP = ((kP * Q - pp / 2) % pp + pp) % pp;
+      const baseS = (((180 * (1 - Zp / Zs) + Q * (Zr / Zs - 1)) % ps) + ps) % ps;
       const epi = (k3, base) => (el) => { if (el && this._epiEls) this._epiEls.push({ el: el, k: k3, base: base, g: g }); };
       const planets = [];
       for (let k2 = 0; k2 < NP; k2++) {
@@ -1132,12 +1165,12 @@ class Component extends DCLogic {
         planets.push(h('g', { key: 'pw' + k2, transform: 'rotate(' + A + ')' },
           h('path', { d: 'M0,0 L' + Rc.toFixed(2) + ',0', stroke: ft.line, strokeWidth: 3, strokeOpacity: 0.85 }),
           h('g', { transform: 'translate(' + Rc.toFixed(2) + ',0)' },
-            h('g', { ref: epi(kP, -kP * g.phase + (k2 % 2) * (180 / Zp)), style: { transform: 'rotate(0deg)' } },
+            h('g', { ref: epi(kP, baseP), style: { transform: 'rotate(' + baseP.toFixed(2) + 'deg)' } },
               h('path', { d: this.teethPath(Zp, Rp, prof, -1, m2), fill: ft.face, stroke: ft.line, strokeWidth: 1 })),
             h('circle', { r: 2.4, fill: ft.line }))));
       }
-      post.push(h('g', { key: 'epicarrier', ref: epi(kC, -kC * g.phase), style: { transform: 'rotate(0deg)' } }, planets));
-      post.push(h('g', { key: 'episun', ref: epi(-1, g.phase * 1 * -1), style: { transform: 'rotate(0deg)' } },
+      post.push(h('g', { key: 'epicarrier', ref: epi(kC, baseC), style: { transform: 'rotate(' + baseC.toFixed(2) + 'deg)' } }, planets));
+      post.push(h('g', { key: 'episun', ref: epi(kS, baseS), style: { transform: 'rotate(' + baseS.toFixed(2) + 'deg)' } },
         h('path', { d: this.teethPath(Zs, Rs, prof, -1, m2), fill: ft.well, stroke: ft.line, strokeWidth: 1 })));
     } else if (kind === 'iris') {
       /* Aperture blades: tangential crescents, pointed at both ends. The metal
@@ -1486,8 +1519,13 @@ class Component extends DCLogic {
 
     const links = solved.gears.filter(g => g.slug).map(g => {
       const site = SITES[g.slug];
-      const disc = Math.max(30, Math.min(60, Math.round(g.r * 0.72)));
-      const cap = Math.round(g.r * 1.15);
+      /* The planetary wheel gets a smaller axle cap: the badge is the grounded
+         carrier's end plate, and shrinking it uncovers the sun -- the
+         counter-rotating member that is the whole show. */
+      const discF = g.kind === 'planetary' ? 0.38 : 0.72;
+      const capF = g.kind === 'planetary' ? 0.55 : 1.15;
+      const disc = Math.max(30, Math.min(60, Math.round(g.r * discF)));
+      const cap = Math.round(g.r * capF);
       const size = 'min(calc(' + cap + 'px * var(--gs)), max(30px, calc(' + disc + 'px * var(--gs))))';
       const on = hov === g.slug;
       return {
