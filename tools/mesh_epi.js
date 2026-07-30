@@ -215,7 +215,9 @@ function menu() {
   return out;
 }
 
-const SETS = menu();
+/* SETS_JSON lets the page's own derived menu be checked verbatim, e.g.
+   SETS_JSON='[[12,9,30,3],[17,7,31,3]]' node tools/mesh_epi.js */
+const SETS = process.env.SETS_JSON ? JSON.parse(process.env.SETS_JSON) : menu();
 /* The carrier is clocked at random per load, so the phase constants have to
    hold at every clocking, not one convenient one. */
 const QS = [0, 17, 37, 68, 111, 154, 203, 249, 298, 331];
