@@ -48,6 +48,10 @@
 html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:'Manrope',system-ui,sans-serif;-webkit-font-smoothing:antialiased;}
 a{color:var(--accent);text-decoration:none;}
 a:hover{color:var(--ink);}
+/* The links ARE the content, so a keyboard user who cannot see focus cannot use
+   the site at all (#23). :focus-visible keeps the ring off mouse clicks; the
+   outline follows each element's own border-radius, so it rings the discs. */
+a:focus-visible,button:focus-visible,[tabindex]:focus-visible{outline:3px solid var(--accent);outline-offset:3px;}
 @media (max-width:1080px){:root{--gap:2rem;--pad:6vw;}}
 @media (max-width:760px){:root{--pad:28px;--colw:100%;}}
 @media (max-width:430px){:root{--gap:1.25rem;}}
