@@ -510,16 +510,29 @@ const CENTRE_FAMILIES = [
     variants: [{ arms: 4 }, { arms: 5 }, { arms: 6 }] },
   { type: 'pockets', web: 3.1, hub: 0.22,
     variants: [{ arms: 6 }, { arms: 5 }, { arms: 4 }] },
+  /* RETIRED, not deleted -- Charles does not like how these three read, and the
+     renderers stay intact behind them the way the chain and belt do. Put an
+     entry back in this list and it returns to the deal and to the Table of
+     Gears at once; nothing else needs wiring.
+       spiral    curved spokes
+       iris      iris blades
+       labyrinth labyrinth rotor  (its entry is further down, also commented)
   { type: 'spiral', web: 2.6, hub: 0.14,
     variants: [{ arms: 5, sweep: 0.3 }, { arms: 6, sweep: 0.22 }, { arms: 4, sweep: 0.38 }] },
   { type: 'iris', web: 2.9, hub: 0.2,
     variants: [{ arms: 6 }, { arms: 8 }, { arms: 10 }] },
+  */
   { type: 'star', web: 3.0, hub: 0.22,
     variants: [{ arms: 5 }, { arms: 7 }, { arms: 9 }] },
   { type: 'honeycomb', web: 3.1, hub: 0.2,
-    variants: [{ arms: 6 }, { arms: 9 }, { arms: 12 }] },
+    /* `cell` is the wanted cell size; the count per course is derived from it,
+       and the courses grow outward. Small cells give a fine core, large ones a
+       coarse one. */
+    variants: [{ arms: 8, cell: 4.2 }, { arms: 8, cell: 5.6 }, { arms: 8, cell: 7.2 }] },
+  /* retired with spiral and iris, above
   { type: 'labyrinth', web: 3.2, hub: 0.18,
     variants: [{ arms: 5 }, { arms: 6 }, { arms: 7 }] },
+  */
   { type: 'sunburst', web: 3.1, hub: 0.2,
     variants: [{ arms: 10 }, { arms: 14 }, { arms: 18 }] },
   { type: 'planetary', web: 2.6, hub: 0.1,
@@ -1828,21 +1841,56 @@ class Component extends DCLogic {
       }
       inner.push(h('circle', { key: 'boss', r: hubR * 1.5, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
     } else if (kind === 'honeycomb') {
-      /* One orbit of hex ports — the first polygons in the pool. Webs between
-         hexes carry hub to rim like a drilled lightening pattern. */
+      /* A hex CORE, the kind that stiffens a rover deck or a robot chassis --
+         not one polite orbit of six hexes, which is what this used to be.
+
+         Cells sit in concentric courses, and each course is offset half a cell
+         against the one under it, so the walls interlock instead of lining up
+         into a radial seam. That stagger is also the load path: every wall meets
+         solid metal in the course beside it, and the web runs unbroken hub to
+         rim, which is the admission rule.
+
+         Cell SIZE varies by course, and it varies for a reason rather than for
+         effect. A course further out has more circumference to spend, so it
+         takes more cells only until they would stop being machinable; past that
+         it keeps the count and the cells simply grow. Hence an upper bound on
+         cells per course, a floor under cell size, and a wall thickness that is
+         never negotiated -- a course that cannot hold a real cell is not cut at
+         all, so a small blank gets one course and a large one gets three. */
       inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
-      const nH = g.arms || 6, rInH = Math.max(hubR * 1.55, 10), rOutH = wellR - 2;
-      const orbit = (rInH + rOutH) / 2;
-      const hr2 = Math.min((rOutH - rInH) * 0.48, orbit * Math.PI / nH * 0.62);
-      for (let k = 0; k < nH; k++) {
-        const A = (k / nH) * 360;
-        const cx = orbit * Math.cos(A * Math.PI / 180), cy = orbit * Math.sin(A * Math.PI / 180);
-        let d2 = '';
-        for (let v = 0; v < 6; v++) {
-          const va = (A + 30 + 60 * v) * Math.PI / 180;
-          d2 += (v ? 'L' : 'M') + (cx + hr2 * Math.cos(va)).toFixed(2) + ',' + (cy + hr2 * Math.sin(va)).toFixed(2) + ' ';
+      const target = (g.cv && g.cv.cell) || 5.4;
+      const rInH = Math.max(hubR * 1.32, 9), rOutH = wellR - 2;
+      const WALL = 2.3, CELL_MIN = 2.8;
+      /* Courses are as many as the depth can hold at the wanted cell size. */
+      const courses = Math.max(1, Math.min(4,
+        Math.floor((rOutH - rInH) / (2 * target + WALL))));
+      /* Course boundaries step GEOMETRICALLY, not evenly, so each course is
+         taller than the one inside it and its cells come out larger. That is
+         where the range of sizes comes from, and it comes from the part rather
+         than from taste: a course further out has more room, so it gets bigger
+         cells, exactly as a hex core on a round part does. */
+      const edge = (b) => rInH * Math.pow(rOutH / rInH, b / courses);
+      for (let b = 0; b < courses; b++) {
+        const r0 = edge(b), r1 = edge(b + 1), rm = (r0 + r1) / 2;
+        /* A vertex-out hexagon spans 2*cell radially and sqrt(3)*cell across the
+           flats. So the course depth fixes the cell, and the flats then decide
+           how many fit -- deriving the count this way is what makes them touch.
+           Capping the count instead leaves every cell short of its neighbour and
+           the result reads as scattered drillings rather than a core. */
+        const cell = (r1 - r0 - WALL) / 2;
+        if (cell < CELL_MIN) continue;
+        const cols = Math.max(5, Math.floor(2 * Math.PI * rm / (Math.sqrt(3) * cell + WALL)));
+        const off = (b % 2) ? 180 / cols : 0;   /* the interlock */
+        for (let k = 0; k < cols; k++) {
+          const A = off + (k / cols) * 360;
+          const cx = rm * Math.cos(A * Math.PI / 180), cy = rm * Math.sin(A * Math.PI / 180);
+          let d2 = '';
+          for (let v = 0; v < 6; v++) {
+            const va = (A + 60 * v) * Math.PI / 180;
+            d2 += (v ? 'L' : 'M') + (cx + cell * Math.cos(va)).toFixed(2) + ',' + (cy + cell * Math.sin(va)).toFixed(2) + ' ';
+          }
+          holes.push(d2 + 'Z');
         }
-        holes.push(d2 + 'Z');
       }
       inner.push(h('circle', { key: 'boss', r: hubR * 1.5, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
     } else if (kind === 'labyrinth') {
@@ -1905,15 +1953,17 @@ class Component extends DCLogic {
       }
       inner.push(h('circle', { key: 'boss', r: hubR * 1.5, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
     } else if (kind === 'sunburst') {
-      /* Deco sunburst: tapered wedge windows, long and short alternating. The
-         metal between is a fan of tapered spokes — cast-plate territory. */
+      /* Every window cut to the SAME depth, per Charles. Alternating long and
+         short read as decoration applied to a wheel; one depth leaves the metal
+         plainly what it is -- a fan of tapered spokes running hub to rim, and
+         nothing else. The windows also start closer in than they did, so the
+         spokes converge on the boss rather than stopping short of it. */
       inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
-      const nR = g.arms || 10, rInR = Math.max(hubR * 1.55, 10), rOutR = wellR - 2;
+      const nR = g.arms || 10, rInR = Math.max(hubR * 1.22, 8), rOutR = wellR - 2;
       for (let k = 0; k < nR; k++) {
         const A = (k / nR) * 360;
-        const ro2 = (k % 2 === 0) ? rOutR : rInR + (rOutR - rInR) * 0.62;
         const wi = (360 / nR) * 0.16, wo = (360 / nR) * 0.34;
-        holes.push('M' + PT(rInR, A - wi) + ' L' + PT(ro2, A - wo) + ' L' + PT(ro2, A + wo) + ' L' + PT(rInR, A + wi) + ' Z');
+        holes.push('M' + PT(rInR, A - wi) + ' L' + PT(rOutR, A - wo) + ' L' + PT(rOutR, A + wo) + ' L' + PT(rInR, A + wi) + ' Z');
       }
       inner.push(h('circle', { key: 'boss', r: hubR * 1.5, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
     } else {
