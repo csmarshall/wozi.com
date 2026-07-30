@@ -376,7 +376,12 @@ function flatTones(hex) {
   /* The face is a HINT lighter, not a pale disc: at 20% toward white it read as
      a glow ringing the hub on the pale page — in a flat drawing the raised face
      is told by its outline, not by a tonal jump. */
-  return { body: mix(0, 255), face: mix(0.07, 255), well: mix(0.13, 0), line: mix(0.40, 0) };
+  /* line: the working contour for interior details. edge: the blank's outline
+     in LIGHT mode -- barely darker than the body, an edge-shading whisper. The
+     40% ink line around every wheel is what made light mode read as stickers
+     rather than machined parts (Charles's diagnosis); dark keeps the strong
+     contour, where it reads as rim light against the dark page. */
+  return { body: mix(0, 255), face: mix(0.07, 255), well: mix(0.13, 0), line: mix(0.40, 0), edge: mix(0.16, 0) };
 }
 const FLAT_INK = '#243033';
 
@@ -1477,7 +1482,7 @@ class Component extends DCLogic {
           h('path', { d: path + ' ' + holes.join(' '), clipRule: 'evenodd' })) : null),
       h('g', holes.length ? { clipPath: 'url(#' + id + 'c)', clipRule: 'evenodd' } : null,
         flat ? null : h('path', { d: path + ' ' + holes.join(' '), fillRule: 'evenodd', fill: p[3], opacity: 0.9, transform: 'translate(0,1)' }),
-        h('path', { d: path + ' ' + holes.join(' '), fillRule: 'evenodd', fill: 'url(#' + id + 'f)', stroke: flat ? ft.line : 'var(--edge)', strokeWidth: flat ? 1.6 : 1, strokeLinejoin: 'round' }),
+        h('path', { d: path + ' ' + holes.join(' '), fillRule: 'evenodd', fill: 'url(#' + id + 'f)', stroke: this.state.theme === 'dark' ? ft.line : ft.edge, strokeWidth: this.state.theme === 'dark' ? 1.6 : 1.1, strokeLinejoin: 'round' }),
         inner,
         h('circle', { r: faceR, fill: 'none', stroke: 'var(--edge)', strokeWidth: 1, strokeOpacity: 0.4 })),
       post,
