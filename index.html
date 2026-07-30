@@ -531,9 +531,11 @@ const CENTRE_FAMILIES = [
     variants: [{ arms: 8, cell: 4.2 }, { arms: 8, cell: 5.6 }, { arms: 8, cell: 7.2 }] },
   */
   { type: 'hexcore', web: 3.1, hub: 0.2,
-    /* `cell` is the WANTED size; the web caps it and the lattice packs whatever
-       fits. Fine, medium, coarse. */
-    variants: [{ arms: 6, cell: 4.6 }, { arms: 6, cell: 6.4 }, { arms: 6, cell: 8.4 }] },
+    /* `cell` is the WANTED size, capped by CELL_MAX and by the web itself.
+       Deliberately small: many obvious hexagons, not a few big ones. The floor
+       is not lower than this on purpose -- past a point the cells stop reading
+       as hexagons and become a dot screen, which loses the whole idea. */
+    variants: [{ arms: 6, cell: 3.4 }, { arms: 6, cell: 4.0 }, { arms: 6, cell: 4.6 }] },
   /* retired with spiral and iris, above
   { type: 'labyrinth', web: 3.2, hub: 0.18,
     variants: [{ arms: 5 }, { arms: 6 }, { arms: 7 }] },
@@ -1919,87 +1921,62 @@ class Component extends DCLogic {
          it read as one -- cells arranged in rings never quite do, because the
          walls between courses do not line up with the walls within them.
 
+         Whole cells only. Clipping the ones that overhang was tried and is
+         wrong: a partial hexagon is not a hexagon, and a ring of crescents round
+         the rim reads as a pattern that ran out rather than a core. The way to
+         fill the web is to place the lattice well and keep the cells small
+         enough that little is left over.
+
+         So the cells are SMALL by design -- a cap well under what the web could
+         hold -- because a lot of obvious hexagons is the point, and few large
+         ones reads as a plate with holes in it.
+
+         And where the lattice sits is searched rather than assumed. The tiling
+         is rigid but its origin and rotation are free, so a handful of offsets
+         and rotations are tried and whichever seats the most whole cells wins.
          Pointy-top axial layout: centres sqrt(3)*R apart across a row, 1.5*R
-         between rows, every other row shifted half a step. Wall thickness is
-         added to R for spacing only, so the gap where two cells meet is exactly
-         WALL.
-
-         The lattice runs right out to the edge of the web rather than stopping
-         at the last whole cell. Cells that straddle the boundary are CLIPPED to
-         it, which is what a real core does where it meets a rim -- the alternative
-         leaves a bald ring of metal that makes the pattern look dropped in rather
-         than machined into the part. Clipping is Sutherland-Hodgman against the
-         disc taken as a fan of half-planes: both shapes are convex, so the result
-         is too, and a hexagon costs at most a few dozen edge tests.
-
-         A sliver is not a cell, though. Anything clipped below a third of a full
-         cell is dropped instead of cut, because an opening has to pay for its
-         machining -- a two-millimetre crescent at the rim is a chip, not a
-         lightening hole. */
+         between rows, alternate rows shifted half a step, and the wall is added
+         to R for spacing only so the gap where two cells meet is exactly WALL. */
       inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
-      const WALLX = 2.3, CELL_MIN = 2.6, CELL_MAX = 9.5;
-      const rInX = Math.max(hubR * 1.2, 7), rOutX = wellR - 1;
-      /* Cell size is a PREFERENCE, not a fixed dimension. The variant says how
-         coarse a core is wanted; the web says what will actually fit. Holding the
-         size fixed meant a small blank had no room for a single cell between the
-         boss and the rim and came out bare, which is exactly the failure the
-         planetary sizing had -- a number chosen for one wheel applied to all of
-         them. So the wanted size is capped by the depth available and floored at
-         the smallest cell worth machining: a tight web simply gets a finer core
-         with more cells in it. */
-      const wantX = (g.cv && g.cv.cell) || 6.5;
+      const WALLX = 2.2, CELL_MIN = 2.8, CELL_MAX = 4.6;
+      const rInX = Math.max(hubR * 1.15, 6.5), rOutX = wellR - 1;
+      /* Cell size is a preference capped by the web: a tight one gets a finer
+         core rather than nothing at all, which is what a fixed size gave it. */
+      const wantX = (g.cv && g.cv.cell) || 3.8;
       const cellX = Math.max(CELL_MIN,
         Math.min(wantX, CELL_MAX, (rOutX - rInX - WALLX) / 2));
       const stepR = cellX + WALLX / 2;
       const pitchX = Math.sqrt(3) * stepR, rowX = 1.5 * stepR;
-      const SEG = 72;
-      const clipDisc = (poly) => {
-        let cur = poly;
-        for (let e = 0; e < SEG && cur.length; e++) {
-          const a = (e / SEG) * Math.PI * 2, nx = Math.cos(a), ny = Math.sin(a);
-          const inp = cur; cur = [];
-          for (let q = 0; q < inp.length; q++) {
-            const P = inp[q], Q2 = inp[(q + 1) % inp.length];
-            const dp = P[0] * nx + P[1] * ny - rOutX, dq = Q2[0] * nx + Q2[1] * ny - rOutX;
-            if (dp <= 0) cur.push(P);
-            if ((dp <= 0) !== (dq <= 0)) {
-              const t = dp / (dp - dq);
-              cur.push([P[0] + (Q2[0] - P[0]) * t, P[1] + (Q2[1] - P[1]) * t]);
+      const nRow = Math.ceil(rOutX / rowX) + 2, nCol = Math.ceil(rOutX / pitchX) + 2;
+      let bestX = null;
+      for (let rot = 0; rot < 30; rot += 7.5) {
+        const ca = Math.cos(rot * Math.PI / 180), sa = Math.sin(rot * Math.PI / 180);
+        for (let ox = 0; ox < 3; ox++) {
+          for (let oy = 0; oy < 3; oy++) {
+            const dx = (ox / 3) * pitchX, dy = (oy / 3) * rowX;
+            const cells = [];
+            for (let ry = -nRow; ry <= nRow; ry++) {
+              const ly = ry * rowX + dy;
+              const xo = (((ry % 2) + 2) % 2) ? pitchX / 2 : 0;
+              for (let rx = -nCol; rx <= nCol; rx++) {
+                const lx = rx * pitchX + xo + dx;
+                const cx = lx * ca - ly * sa, cy = lx * sa + ly * ca;
+                const rad = Math.hypot(cx, cy);
+                if (rad - cellX < rInX) continue;   /* clear of the boss */
+                if (rad + cellX > rOutX) continue;  /* whole cells only */
+                cells.push([cx, cy]);
+              }
             }
+            if (!bestX || cells.length > bestX.cells.length) bestX = { cells: cells, rot: rot };
           }
         }
-        return cur;
-      };
-      const areaOf = (poly) => {
-        let A = 0;
-        for (let q = 0; q < poly.length; q++) {
-          const P = poly[q], Q2 = poly[(q + 1) % poly.length];
-          A += P[0] * Q2[1] - Q2[0] * P[1];
-        }
-        return Math.abs(A) / 2;
-      };
-      const fullArea = 3 * Math.sqrt(3) / 2 * cellX * cellX;
-      const nRow = Math.ceil(rOutX / rowX) + 1, nCol = Math.ceil(rOutX / pitchX) + 1;
-      for (let ry = -nRow; ry <= nRow; ry++) {
-        const cy = ry * rowX;
-        const xoff = (((ry % 2) + 2) % 2) ? pitchX / 2 : 0;
-        for (let rx = -nCol; rx <= nCol; rx++) {
-          const cx = rx * pitchX + xoff;
-          const rad = Math.hypot(cx, cy);
-          if (rad - cellX < rInX) continue;      /* clear of the boss */
-          if (rad - cellX > rOutX) continue;     /* wholly outside the web */
-          let poly = [];
-          for (let v = 0; v < 6; v++) {
-            const va = (90 + 60 * v) * Math.PI / 180;
-            poly.push([cx + cellX * Math.cos(va), cy + cellX * Math.sin(va)]);
-          }
-          if (rad + cellX > rOutX) {             /* straddles the edge -- clip it */
-            poly = clipDisc(poly);
-            if (poly.length < 3 || areaOf(poly) < fullArea * 0.34) continue;
-          }
+      }
+      if (bestX) {
+        for (const c of bestX.cells) {
           let d2 = '';
-          for (let q = 0; q < poly.length; q++) {
-            d2 += (q ? 'L' : 'M') + poly[q][0].toFixed(2) + ',' + poly[q][1].toFixed(2) + ' ';
+          for (let v = 0; v < 6; v++) {
+            const va = (90 + 60 * v + bestX.rot) * Math.PI / 180;
+            d2 += (v ? 'L' : 'M') + (c[0] + cellX * Math.cos(va)).toFixed(2) + ',' + (c[1] + cellX * Math.sin(va)).toFixed(2) + ' ';
           }
           holes.push(d2 + 'Z');
         }
