@@ -1936,10 +1936,27 @@ class Component extends DCLogic {
          and rotations are tried and whichever seats the most whole cells wins.
          Pointy-top axial layout: centres sqrt(3)*R apart across a row, 1.5*R
          between rows, alternate rows shifted half a step, and the wall is added
-         to R for spacing only so the gap where two cells meet is exactly WALL. */
+         to R for spacing only so the gap where two cells meet is exactly WALL.
+
+         WALL is the number that decides whether this reads as a core or as a
+         plate somebody drilled. Measured on the first attempt: cells touch at
+         sqrt(3)*R = 5.89 and sat 7.79 apart, so the metal between them was a
+         THIRD of a cell's width and every cell looked marooned. Real hex core is
+         thin-walled and this has to be too, or the hexagons stop being the
+         subject.
+
+         Building outside-in was tried, on the reasoning that pinning the outer
+         rank against the rim would fill the boundary exactly. It cannot work,
+         and the reason is worth keeping: fixed-size hexagons tile the PLANE, not
+         concentric rings. Every rank has a different circumference, so a whole
+         number of same-size cells almost never fits one -- you would have to
+         stretch the cells rank by rank, which is exactly what made the retired
+         ring version read as rings of holes instead of a core. A ragged rim is
+         the price of real hexagons, and small cells keep the price to about one
+         cell's depth. */
       inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
-      const WALLX = 2.2, CELL_MIN = 2.8, CELL_MAX = 4.6;
-      const rInX = Math.max(hubR * 1.15, 6.5), rOutX = wellR - 1;
+      const WALLX = 1.25, CELL_MIN = 2.8, CELL_MAX = 4.6;
+      const rInX = Math.max(hubR * 1.1, 6), rOutX = wellR - 0.5;
       /* Cell size is a preference capped by the web: a tight one gets a finer
          core rather than nothing at all, which is what a fixed size gave it. */
       const wantX = (g.cv && g.cv.cell) || 3.8;
