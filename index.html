@@ -195,24 +195,44 @@ const TRAIN = [
    theme now gets its own target: darker wheels for a bright page, lighter for a
    dark one. Same hues, same saturation, same spacing and collision guarantees
    from #12 -- only the value moves. */
-/* The colour pool starts with the seven the original template shipped — used
-   verbatim, in both themes, exactly as the template did (the per-theme
-   difference comes from shades(), not from separate base sets). Three more are
-   authored in the same idiom to cover the gaps in its rainbow: orange, teal,
-   magenta. Assignment is the only random part: shuffle the pool per load and
-   deal one colour to each wheel, so adding wheels later just deals more from
-   the pool — up to ten stay distinct, past that it wraps. */
-const WHEEL_COLORS = [
-  '#4A90E2', '#17A05C', '#8CB8F2', '#E8615A', '#6ECFA6', '#F2C14E', '#9B8CE0',  /* the template's seven */
-  '#EC8C4E', '#54BFB6', '#DB79B8'                                               /* gap fill: orange, teal, magenta */
+/* The colour pool is the seven the original template shipped — verbatim, one
+   set for both themes, exactly as the template did (the per-theme difference is
+   shades(), not separate palettes) — plus three authored in the same idiom to
+   cover its gaps: orange, teal, magenta. The hue numbers are labels for the
+   adjacency check below, not inputs to any colour math.
+
+   Assignment is the only random part, and it is a constrained deal, not a bare
+   shuffle: the template's two blues sit 2 degrees apart in hue and its two
+   greens 5, and hand placement is what kept them separated in the original. A
+   bare shuffle can seat them side by side, where they read as the same wheel
+   (#12) — so a deal is rejected while any two NEIGHBOURING wheels are within
+   40 degrees, bounded retries, best deal kept. */
+const WHEEL_POOL = [
+  { c: '#4A90E2', h: 212 }, { c: '#17A05C', h: 150 }, { c: '#8CB8F2', h: 214 },
+  { c: '#E8615A', h: 3 },   { c: '#6ECFA6', h: 155 }, { c: '#F2C14E', h: 42 },
+  { c: '#9B8CE0', h: 251 },                                     /* the template's seven */
+  { c: '#EC8C4E', h: 24 },  { c: '#54BFB6', h: 175 }, { c: '#DB79B8', h: 322 }  /* gap fill */
 ];
-const WHEEL_ORDER = WHEEL_COLORS.map((c, i) => i);
-for (let i = WHEEL_ORDER.length - 1; i > 0; i--) {
-  const j = Math.floor(Math.random() * (i + 1));
-  const tmp = WHEEL_ORDER[i]; WHEEL_ORDER[i] = WHEEL_ORDER[j]; WHEEL_ORDER[j] = tmp;
+function dealColours(n) {
+  const dist = (a, b) => Math.min(Math.abs(a - b), 360 - Math.abs(a - b));
+  let best = null, bestScore = -1;
+  for (let tries = 0; tries < 80; tries++) {
+    const idx = WHEEL_POOL.map((c, i) => i);
+    for (let i = idx.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const t = idx[i]; idx[i] = idx[j]; idx[j] = t;
+    }
+    const pick = idx.slice(0, Math.min(n, idx.length));
+    let score = 360;
+    for (let i = 1; i < pick.length; i++) score = Math.min(score, dist(WHEEL_POOL[pick[i - 1]].h, WHEEL_POOL[pick[i]].h));
+    if (score > bestScore) { bestScore = score; best = pick; }
+    if (score >= 40) break;
+  }
+  return best.map(i => WHEEL_POOL[i].c);
 }
+const WHEEL_DEAL = dealColours(TRAIN.length);
 TRAIN.forEach((t, i) => {
-  t.color = WHEEL_COLORS[WHEEL_ORDER[i % WHEEL_COLORS.length]];
+  t.color = WHEEL_DEAL[i % WHEEL_DEAL.length];
 });
 
 /* Depth of the engraving band, in modules — uniform on every wheel. */
