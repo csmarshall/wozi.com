@@ -867,7 +867,7 @@ class Component extends DCLogic {
      marks — they are blurred and dim, so the detail would be wasted frames. */
   ghostSvg(g) {
     const h = React.createElement;
-    const flat = this.state.theme !== 'dark';
+    const flat = true;  /* both themes are flat — Charles's call, 2026-07-30, after a side-by-side against the modelled dark */
     const p = shades(g.color || '#9AA6AD', flat);
     /* The linkless background wheels read too faint on the pale page, so their
        flat tones run ~22% darker than the palette greys suggest — depth by tone,
@@ -891,7 +891,7 @@ class Component extends DCLogic {
 
   gearSvg(g) {
     const h = React.createElement;
-    const flat = this.state.theme !== 'dark';
+    const flat = true;  /* both themes are flat — Charles's call, 2026-07-30, after a side-by-side against the modelled dark */
     const p = shades(g.color || '#C9D2D6', flat);
     const ft = flatTones(g.color || '#C9D2D6');
     const id = 'gr' + g.i, size = (g.ro + 6) * 2, r = g.r, m = MODULE;
