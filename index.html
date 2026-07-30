@@ -179,7 +179,7 @@ const CENTRE_DESIGNS = [
   { kind: 'ring', web: 2.7, hub: 0.26 },
   { kind: 'spokes', arms: 4, web: 3.0, hub: 0.26, arm: 0.2 },
   { kind: 'holes', arms: 8, web: 3.2, hub: 0.2, hole: 0.085 },
-  { kind: 'spiral', arms: 4, web: 2.6, hub: 0.14 }
+  { kind: 'spiral', arms: 5, web: 2.6, hub: 0.14 }
 ];
 function dealCentres(n) {
   let best = null, bestBad = 1e9;
@@ -316,7 +316,10 @@ function flatTones(hex) {
   const n = parseInt(hex.slice(1), 16);
   const c = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
   const mix = (t, target) => '#' + c.map(v => Math.round(v + (target - v) * t).toString(16).padStart(2, '0')).join('');
-  return { body: mix(0, 255), face: mix(0.20, 255), well: mix(0.13, 0), line: mix(0.40, 0) };
+  /* The face is a HINT lighter, not a pale disc: at 20% toward white it read as
+     a glow ringing the hub on the pale page — in a flat drawing the raised face
+     is told by its outline, not by a tonal jump. */
+  return { body: mix(0, 255), face: mix(0.07, 255), well: mix(0.13, 0), line: mix(0.40, 0) };
 }
 const FLAT_INK = '#243033';
 
@@ -1044,7 +1047,12 @@ class Component extends DCLogic {
          reads as a failed punch. The arms never meet: at any radius they sit a
          full 360/arms apart, so the even-odd fill cannot self-intersect. */
       inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
-      const armsN = g.arms || 3, spTurns = 1.15;
+      /* A believable curved-spoke wheel, not a coil: each slot sweeps ~0.3 of a
+         turn from hub to well, like a cast handwheel's arms. Winding further
+         (1.15 turns was tried) leaves rim and hub joined by nothing but a thin
+         ribbon — no real wheel could hold, and it reads that way (#14's ethos:
+         the machine has to be possible). */
+      const armsN = g.arms || 3, spTurns = 0.3;
       const spW = Math.max(4, m * 0.55);
       const spOut = wellR - spW * 0.8, spIn = hubR * 1.55;
       for (let k = 0; k < armsN; k++) {
