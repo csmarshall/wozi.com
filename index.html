@@ -187,6 +187,54 @@ const TRAIN = [
    from hub to rim, no floating metal, no invisible couplings, nothing boring.
    The old plain 'ring' is out of the pool (boring); research designs whose
    petals or lobes left the hub disconnected from the rim were rejected. */
+/* Planetary tooth-count enumerator, distilled from real generator source --
+   chrisspen/gears, hyperair/planetary-gears, Emmett Lalish's Gear Bearing,
+   BOSL2 gears.scad, and the KHK technical reference (full derivations and
+   links: docs/research/planetary-solver.md; reference copy with tests:
+   tools/enumerate-planetaries.js). Constraints:
+     C1 concentricity  Zr = Zs + 2*Zp (parity makes Zp an integer)
+     C2 assembly       (Zs+Zr) % N == 0 for equally spaced planets
+     C3 adjacency      (Zs+Zp)*sin(pi/N) > Zp + 2 + margin (tip circles clear)
+   Hunting-tooth and undercut are real-gearbox concerns flagged in the
+   reference copy; cosmetic here. */
+function enumeratePlanetaries(o) {
+  const N = o.N, target = { small: 0.25, medium: 0.4, large: 0.6 }[o.sunBias || 'medium'];
+  const ZrMin = o.ZrMin || 24, ZrMax = o.ZrMax || 60, minT = o.minTeeth || 6;
+  const sinHalf = Math.sin(Math.PI / N), out = [];
+  for (let Zr = ZrMin; Zr <= ZrMax; Zr++) {
+    for (let Zs = minT; Zs <= Zr - 2 * minT; Zs++) {
+      if ((Zr - Zs) % 2 !== 0) continue;
+      const Zp = (Zr - Zs) / 2;
+      if (Zp < minT) continue;
+      if ((Zs + Zr) % N !== 0) continue;
+      if ((Zs + Zp) * sinHalf <= Zp + 2.5) continue;
+      out.push({ Zs: Zs, Zp: Zp, Zr: Zr, N: N, ratio: Zs / Zr });
+    }
+  }
+  out.sort(function (a, b) {
+    const d = Math.abs(a.ratio - target) - Math.abs(b.ratio - target);
+    return d !== 0 ? d : a.Zr - b.Zr;
+  });
+  return out;
+}
+
+/* The planetary's variant menu is GENERATED: one best-fit gear set per
+   (planet count, sun size) flavour, deduped. Adding a flavour is one line;
+   the solver guarantees whatever comes out assembles and clears. */
+const PLANETARY_MENU = (function () {
+  const flavours = [[3, 'medium'], [3, 'large'], [4, 'medium'], [4, 'large'], [5, 'small'], [5, 'medium']];
+  const seen = {}, out = [];
+  flavours.forEach(function (c) {
+    const r = enumeratePlanetaries({ N: c[0], sunBias: c[1], ZrMin: 24, ZrMax: 33, minTeeth: 5 })[0];
+    if (!r) return;
+    const key = r.Zs + '.' + r.Zp + '.' + r.Zr + '.' + r.N;
+    if (seen[key]) return;
+    seen[key] = 1;
+    out.push({ pg: [r.Zs, r.Zp, r.Zr, r.N] });
+  });
+  return out.length ? out : [{ pg: [12, 9, 30, 3] }];
+})();
+
 const CENTRE_FAMILIES = [
   { type: 'spokes', web: 3.2, hub: 0.2,
     variants: [{ arms: 4, arm: 0.2 }, { arms: 5, arm: 0.15 }, { arms: 6, arm: 0.13 }] },
@@ -207,7 +255,7 @@ const CENTRE_FAMILIES = [
   { type: 'sunburst', web: 3.1, hub: 0.2,
     variants: [{ arms: 10 }, { arms: 14 }, { arms: 18 }] },
   { type: 'planetary', web: 2.6, hub: 0.1,
-    variants: [{ pg: [12, 9, 30, 3] }, { pg: [18, 6, 30, 4] }] }
+    variants: PLANETARY_MENU }
 ];
 /* Debug affordance: ?kind=iris forces every wheel to one family, variants
    cycling — how the contact sheets for review are made. Harmless in production. */
