@@ -78,7 +78,7 @@ a:focus-visible,button:focus-visible,[tabindex]:focus-visible{outline:3px solid 
   <div ref="{{ stageRef }}" tabindex="0" role="application" aria-label="Animated gear machine. Press the left or right arrow key to spin it." onKeyDown="{{ onStageKey }}" onPointerDown="{{ onGrab }}" onPointerEnter="{{ onStageEnter }}" onPointerLeave="{{ onStageLeave }}" style="{{ stageStyle }}">
     {{ gearArt }}
     <sc-for list="{{ links }}" as="link" hint-placeholder-count="7">
-      <a href="{{ link.href }}" aria-label="{{ link.label }}" onMouseEnter="{{ link.enter }}" onMouseLeave="{{ link.leave }}" onFocus="{{ link.enter }}" onBlur="{{ link.leave }}" style="{{ link.discStyle }}">
+      <a href="{{ link.href }}" aria-label="{{ link.label }}" onPointerDown="{{ link.badgeDown }}" onClick="{{ link.clickGuard }}" onMouseEnter="{{ link.enter }}" onMouseLeave="{{ link.leave }}" onFocus="{{ link.enter }}" onBlur="{{ link.leave }}" style="{{ link.discStyle }}">
         {{ link.iconEl }}
         {{ link.tipEl }}
       </a>
@@ -393,6 +393,8 @@ const SITES = {
 
 class Component extends DCLogic {
   state = { theme: 'light', hover: null, icons: {}, ghosts: [], motion: null };
+  _badgeOff = {};   /* per-slug {x,y,vx,vy} spring state for the magnetic hub caps */
+  _badgeEl = {};
   _spinEls = [];
   _chainEls = [];
   _ghostEls = [];
@@ -456,6 +458,42 @@ class Component extends DCLogic {
   }
 
   idleRate() { return (7200 / BASE_MS) * (this.props.speed ?? 1); }
+
+  /* The hub cap is a magnet on the axle: click-hold-drag pulls it off against a
+     rubber-band tether (tanh, so it strains harder the further out it gets) to
+     reveal the works behind it; release and the spring in step() flies it home.
+     stopPropagation keeps a cap drag from also grabbing the train, and a >6px
+     move suppresses the link click on release -- a plain click still navigates,
+     and keyboard activation never touches any of this. */
+  badgeGrab(e, slug) {
+    if (e.button > 0) return;
+    e.stopPropagation();
+    const el = e.currentTarget;
+    /* No pointer capture: window listeners, exactly like the train's own drag —
+       capture on the anchor swallowed the move stream under some pointers. */
+    const off = this._badgeOff[slug] = this._badgeOff[slug] || { x: 0, y: 0, vx: 0, vy: 0 };
+    this._badgeEl[slug] = el;
+    const sx = e.clientX, sy = e.clientY, ox0 = off.x, oy0 = off.y;
+    let moved = false;
+    const move = (ev) => {
+      const dx = ev.clientX - sx + ox0, dy = ev.clientY - sy + oy0;
+      const d = Math.hypot(dx, dy) || 1;
+      const max = el.offsetWidth * 1.6;
+      const lim = max * Math.tanh(d / max);
+      off.x = dx / d * lim; off.y = dy / d * lim;
+      off.vx = 0; off.vy = 0;
+      if (Math.hypot(ev.clientX - sx, ev.clientY - sy) > 6) moved = true;
+      this._badgeDragging = slug;
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      this._badgeDragging = null;
+      if (moved) this._badgeMoved = slug;
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
 
   /* Whether the train should run right now. The stored override wins in either
      direction; otherwise follow prefers-reduced-motion. A person who chose
@@ -633,6 +671,26 @@ class Component extends DCLogic {
         this._v += (target - this._v) * (1 - Math.exp(-dt / 900));
         this._M += this._v * dt;
         this.applyRotation();
+      }
+      /* Magnetic hub caps: underdamped spring (zeta ~0.5) so a released cap
+         overshoots a touch and lands back on the axle. Same clock as the train;
+         entries delete themselves once settled, so the loop is normally empty. */
+      const dts = Math.min(dt, 60) / 1000;
+      for (const slug in this._badgeOff) {
+        const o = this._badgeOff[slug], el = this._badgeEl[slug];
+        if (!el) { delete this._badgeOff[slug]; continue; }
+        if (this._badgeDragging !== slug) {
+          const K = 180, C = 13;
+          o.vx += (-K * o.x - C * o.vx) * dts;
+          o.vy += (-K * o.y - C * o.vy) * dts;
+          o.x += o.vx * dts; o.y += o.vy * dts;
+          if (Math.abs(o.x) < 0.4 && Math.abs(o.y) < 0.4 && Math.abs(o.vx) < 8 && Math.abs(o.vy) < 8) {
+            el.style.transform = 'translate(-50%,-50%) scale(' + (this.state.hover === slug ? 1.16 : 1) + ')';
+            delete this._badgeOff[slug];
+            continue;
+          }
+        }
+        el.style.transform = 'translate(-50%,-50%) translate(' + o.x.toFixed(1) + 'px,' + o.y.toFixed(1) + 'px) scale(' + (this.state.hover === slug ? 1.16 : 1) + ')';
       }
       this._raf = requestAnimationFrame(step);
     };
@@ -1528,8 +1586,11 @@ class Component extends DCLogic {
       const cap = Math.round(g.r * capF);
       const size = 'min(calc(' + cap + 'px * var(--gs)), max(30px, calc(' + disc + 'px * var(--gs))))';
       const on = hov === g.slug;
+      const bo = this._badgeOff[g.slug];
       return {
         label: site.label, path: site.path, href: site.href,
+        badgeDown: (e) => this.badgeGrab(e, g.slug),
+        clickGuard: (e) => { if (this._badgeMoved === g.slug) { e.preventDefault(); this._badgeMoved = null; } },
         iconEl: h('span', {
           style: { width: 'calc(' + size + ' * 0.56)', height: 'calc(' + size + ' * 0.56)', display: 'block', lineHeight: 0, color: on ? 'var(--accent)' : (BRAND[g.slug] || 'var(--ink)'), transition: 'color .2s ease' },
           dangerouslySetInnerHTML: { __html: this.state.icons[g.slug] || '' }
@@ -1567,7 +1628,7 @@ class Component extends DCLogic {
           background: this.state.theme === 'dark' ? '#DFE2DE' : '#EDEFEA',
           color: on ? 'var(--accent)' : 'var(--ink)',
           border: '1px solid rgba(20,30,35,.14)', boxShadow: '0 3px 10px rgba(8,16,20,.28)', zIndex: 5, cursor: 'pointer',
-          transform: 'translate(-50%,-50%) scale(' + (on ? 1.16 : 1) + ')',
+          transform: 'translate(-50%,-50%)' + (bo ? ' translate(' + bo.x.toFixed(1) + 'px,' + bo.y.toFixed(1) + 'px)' : '') + ' scale(' + (on ? 1.16 : 1) + ')',
           transition: 'transform .22s cubic-bezier(.34,1.56,.64,1), color .2s ease'
         }
       };
