@@ -498,7 +498,7 @@ class Component extends DCLogic {
           let t = texts[i] || '';
           if (t) {
             t = t.split('fill="#000"').join('fill="currentColor"');
-            t = t.replace('<svg ', '<svg width="100%" height="100%" ');
+            t = t.replace('<svg ', '<svg aria-hidden="true" focusable="false" width="100%" height="100%" ');
           }
           icons[s] = t;
         });
@@ -1080,7 +1080,12 @@ class Component extends DCLogic {
         h('div', { ref: (el) => { if (this._ghostEls) this._ghostEls.push({ el: el, g: g }); },
           style: { transform: 'rotate(' + g.phase.toFixed(2) + 'deg)' } },
           this.ghostSvg(g)))));
-    const gearArt = h('div', { style: { position: 'absolute', left: 0, top: 0, width: solved.w + 'px', height: solved.h + 'px', transform: 'scale(var(--gs))', transformOrigin: 'top left' } },
+    /* The artwork is decoration: the meaning is carried by the labelled <a>
+       badges, which are siblings of this container, not children. One
+       aria-hidden here removes all of it from the accessibility tree -- most
+       importantly the rim engravings, which screen readers were announcing
+       twice each (the struck effect stacks two text layers) (#24). */
+    const gearArt = h('div', { 'aria-hidden': 'true', style: { position: 'absolute', left: 0, top: 0, width: solved.w + 'px', height: solved.h + 'px', transform: 'scale(var(--gs))', transformOrigin: 'top left' } },
       ghosts,
       /* One cast-shadow layer behind every wheel, so a wheel's shadow can never fall
          on top of the neighbour it meshes with (#18). Static — never touched by the
@@ -1177,10 +1182,10 @@ class Component extends DCLogic {
 
       themeLabel: this.state.theme === 'dark' ? 'Switch to light' : 'Switch to dark',
       themeIcon: this.state.theme === 'dark'
-        ? h('svg', { width: 20, height: 20, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round' },
+        ? h('svg', { 'aria-hidden': 'true', focusable: 'false', width: 20, height: 20, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round' },
             h('circle', { cx: 12, cy: 12, r: 4.4 }),
             h('path', { d: 'M12 2.6v2.6M12 18.8v2.6M2.6 12h2.6M18.8 12h2.6M5.4 5.4l1.9 1.9M16.7 16.7l1.9 1.9M18.6 5.4l-1.9 1.9M7.3 16.7l-1.9 1.9' }))
-        : h('svg', { width: 20, height: 20, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinejoin: 'round' },
+        : h('svg', { 'aria-hidden': 'true', focusable: 'false', width: 20, height: 20, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinejoin: 'round' },
             h('path', { d: 'M20.5 14.6A8.6 8.6 0 0 1 9.4 3.5a8.6 8.6 0 1 0 11.1 11.1Z' })),
       toggleTheme: () => {
         const next = this.state.theme === 'dark' ? 'light' : 'dark';
