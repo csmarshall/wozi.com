@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -59,7 +59,7 @@ a:hover{color:var(--ink);}
 </style>
 </helmet>
 
-<div style="min-height:100vh;box-sizing:border-box;display:flex;flex-direction:var(--dir);align-items:center;justify-content:center;gap:var(--gap);padding:var(--pad);background:var(--bg);overflow:hidden;">
+<main style="min-height:100vh;box-sizing:border-box;display:flex;flex-direction:var(--dir);align-items:center;justify-content:center;gap:var(--gap);padding:var(--pad);background:var(--bg);overflow:hidden;">
 
   <button onClick="{{ toggleTheme }}" title="{{ themeLabel }}" aria-label="{{ themeLabel }}" style="position:fixed;top:var(--btnoff);right:var(--btnoff);z-index:20;display:flex;align-items:center;justify-content:center;width:var(--btn);height:var(--btn);padding:0;border:0;border-radius:999px;background:transparent;color:var(--muted);cursor:pointer;transition:color .18s ease;" style-hover="color:var(--ink);">
     {{ themeIcon }}
@@ -77,13 +77,13 @@ a:hover{color:var(--ink);}
   </div>
 
   <div ref="{{ colRef }}" style="position:fixed;left:var(--btnoff);bottom:var(--btnoff);z-index:15;">
-    <div style="display:flex;align-items:baseline;gap:2px;font-weight:800;font-size:clamp(30px,4.6vw,54px);letter-spacing:-0.045em;line-height:1;color:var(--ink);">
+    <h1 style="margin:0;display:flex;align-items:baseline;gap:2px;font-weight:800;font-size:clamp(30px,4.6vw,54px);letter-spacing:-0.045em;line-height:1;color:var(--ink);">
       <span>{{ brandName }}</span>
       <span style="width:.16em;height:.16em;border-radius:50%;background:var(--accent);align-self:flex-end;margin-bottom:.14em;"></span>
       <span style="color:var(--muted);font-weight:600;">{{ brandTld }}</span>
-    </div>
+    </h1>
   </div>
-</div>
+</main>
 
 </x-dc>
 <script type="text/x-dc" data-dc-script data-props="{&quot;domain&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Wordmark&quot;},&quot;frameRate&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[60,30,24,20],&quot;default&quot;:30,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;spinUp&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;engravedRims&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;parallax&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;character&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;hoverDrag&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;speed&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;min&quot;:0.25,&quot;max&quot;:2,&quot;step&quot;:0.25,&quot;default&quot;:1,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;gearScale&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;min&quot;:0.5,&quot;max&quot;:1.3,&quot;step&quot;:0.05,&quot;default&quot;:1,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;options&quot;:[&quot;#5F686E&quot;,&quot;#E8483A&quot;,&quot;#3B7DE8&quot;,&quot;#F4B32B&quot;,&quot;#1FA463&quot;],&quot;default&quot;:&quot;#5F686E&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;shuffle&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Gears&quot;}}">
