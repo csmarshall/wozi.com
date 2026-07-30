@@ -869,7 +869,11 @@ class Component extends DCLogic {
     const h = React.createElement;
     const flat = this.state.theme !== 'dark';
     const p = shades(g.color || '#9AA6AD', flat);
-    const ft = flatTones(g.color || '#9AA6AD');
+    /* The linkless background wheels read too faint on the pale page, so their
+       flat tones run ~22% darker than the palette greys suggest — depth by tone,
+       not by fading (#21's lesson). */
+    const dim = (hex) => { const n = parseInt(hex.slice(1), 16); const c = [(n >> 16) & 255, (n >> 8) & 255, n & 255]; return '#' + c.map(v => Math.round(v * 0.78).toString(16).padStart(2, '0')).join(''); };
+    const ft = flatTones(dim(g.color || '#9AA6AD'));
     const size = (g.ro + 4) * 2, r = g.r;
     const path = this.teethPath(g.teeth, r, g.prof);
     /* Softness comes from low-contrast fills, not a CSS blur: a filter on a rotating
@@ -1150,7 +1154,7 @@ class Component extends DCLogic {
          out to both edges rather than trailing off a corner. Still well behind the
          train — they imply the machine continues, they do not compete with it. Dark
          mode is unchanged; the same greys read correctly against #1E2226. */
-      transform: this.props.parallax ? 'scale(0.94)' : null, transformOrigin: 'center', opacity: this.state.theme === 'dark' ? 0.17 : 0.38, zIndex: 0, pointerEvents: 'none' } },
+      transform: this.props.parallax ? 'scale(0.94)' : null, transformOrigin: 'center', opacity: this.state.theme === 'dark' ? 0.17 : 0.46, zIndex: 0, pointerEvents: 'none' } },
       (this.state.ghosts || []).map(g => h('div', { key: g.i, style: { position: 'absolute', left: g.cx + 'px', top: g.cy + 'px', width: 0, height: 0 } },
         h('div', { ref: (el) => { if (this._ghostEls) this._ghostEls.push({ el: el, g: g }); },
           style: { transform: 'rotate(' + g.phase.toFixed(2) + 'deg)' } },
