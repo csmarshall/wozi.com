@@ -226,30 +226,63 @@ function levelled(h, s, target) {
    theme now gets its own target: darker wheels for a bright page, lighter for a
    dark one. Same hues, same saturation, same spacing and collision guarantees
    from #12 -- only the value moves. */
-const WHEEL_SAT_DARK = 88, WHEEL_SAT_LIGHT = 98;
-const WHEEL_LUM_DARK = 0.32, WHEEL_LUM_LIGHT = 0.24, WHEEL_JITTER = 0.4;
-/* Luminance and chroma trade against each other: forcing a colour dark squeezes
-   the colour out of it. Measured mean chroma across the seven hues against the
-   light page — 0.14 luminance gave 4.56:1 contrast but only 0.616 chroma, while
-   0.24 at higher saturation gives ~0.73, the peak, at ~3.0:1. The first pass at
-   this chased contrast alone and landed well down the colour slope, which is why
-   light mode had presence but no pop. 3:1 is ample for shapes this large, and
-   the outline and cast shadow carry the silhouette regardless. */
-/* Which stride is used is itself shuffled per load. Every value 1..6 is coprime
-   with 7 so all of them visit each hue exactly once, but 1 and 6 seat
-   neighbouring hues side by side — the thing the stride exists to prevent. The
-   surviving set keeps at least 2 x 51° between any two neighbouring wheels. */
-const WHEEL_STRIDES = [2, 3, 4, 5];
-const WHEEL_STRIDE = WHEEL_STRIDES[Math.floor(Math.random() * WHEEL_STRIDES.length)];
-const WHEEL_HUE0 = Math.random() * 360;
+/* A curated palette, and the reasoning is worth keeping because both obvious
+   alternatives were tried and are worse.
+
+   The original template's seven colours are well chosen but contain two blues
+   (8 degrees apart) and two greens — the collision reported in #12.
+
+   Generating hues at even angles removes the collision but lands on arbitrary
+   points of the wheel, which means mauve, dusty rose, olive and sage. Those read
+   as muddy no matter what their luminance or chroma measures, and matching the
+   original's mean luminance and chroma exactly produced a palette that measured
+   the same and looked considerably worse. What made the original good was WHICH
+   hues it used, not their averages.
+
+   So: seven hues chosen deliberately, spread with at least 27 degrees between
+   any two, avoiding the muddy quadrants entirely. Each keeps its own natural
+   luminance rather than being flattened to a common target — real palettes vary,
+   and forcing them level is what made the generated set read as synthetic.
+   Only the assignment to wheels is random. */
+const WHEEL_PALETTE = [
+  '#D63C6A',  /* raspberry */
+  '#DF5F24',  /* orange    */
+  '#E0A52C',  /* amber     */
+  '#35A853',  /* green     */
+  '#0E9E92',  /* teal      */
+  '#2F6FDB',  /* blue      */
+  '#7C5CD9'   /* violet    */
+];
+
+/* Light mode takes the same hues a touch deeper so they hold against a pale
+   page; hue and saturation are untouched, so a wheel stays recognisably itself
+   across a theme toggle. */
+const WHEEL_LIGHT_SCALE = 0.72;
+
+function revalue(hex, target) {
+  const n = parseInt(hex.slice(1), 16);
+  const c = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map(v => v / 255);
+  const mx = Math.max.apply(null, c), mn = Math.min.apply(null, c);
+  const l = (mx + mn) / 2, d = mx - mn;
+  const sat = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
+  let hue = 0;
+  if (d !== 0) {
+    if (mx === c[0]) hue = 60 * (((c[1] - c[2]) / d) % 6);
+    else if (mx === c[1]) hue = 60 * ((c[2] - c[0]) / d + 2);
+    else hue = 60 * ((c[0] - c[1]) / d + 4);
+  }
+  return levelled(hue, Math.min(100, sat * 100), target);
+}
+
+const WHEEL_ORDER = WHEEL_PALETTE.map((c, i) => i);
+for (let i = WHEEL_ORDER.length - 1; i > 0; i--) {
+  const j = Math.floor(Math.random() * (i + 1));
+  const tmp = WHEEL_ORDER[i]; WHEEL_ORDER[i] = WHEEL_ORDER[j]; WHEEL_ORDER[j] = tmp;
+}
 TRAIN.forEach((t, i) => {
-  const gap = 360 / TRAIN.length;
-  const slot = (i * WHEEL_STRIDE) % TRAIN.length;
-  const jitter = (Math.random() - 0.5) * gap * WHEEL_JITTER;
-  const wob = (Math.random() - 0.5) * 14;
-  const hue = WHEEL_HUE0 + gap * slot + jitter;
-  t.colorD = levelled(hue, WHEEL_SAT_DARK + wob, WHEEL_LUM_DARK);
-  t.colorL = levelled(hue, Math.min(100, WHEEL_SAT_LIGHT + wob * 0.4), WHEEL_LUM_LIGHT);
+  const src = WHEEL_PALETTE[WHEEL_ORDER[i % WHEEL_PALETTE.length]];
+  t.colorD = src;
+  t.colorL = revalue(src, relLum(src) * WHEEL_LIGHT_SCALE);
   t.color = t.colorD;
 });
 
