@@ -131,7 +131,7 @@ const TOOTH_FILLET = 0.38; /* root fillet radius, in modules — the standard va
 const BASE_MS = 21000;
 const GHOST_COLORS = ['#9AA6AD', '#A9B4BA', '#8F9BA3', '#B3BCC2'];
 
-const GHOST_KINDS = ['spokes', 'holes', 'pockets', 'ring', 'plain'];
+const GHOST_KINDS = ['spokes', 'holes', 'pockets', 'ring', 'spiral'];
 function segCross(p1, p2, p3, p4) {
   const s = (a, b, c) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
   return s(p1, p2, p3) * s(p1, p2, p4) < 0 && s(p3, p4, p1) * s(p3, p4, p2) < 0;
@@ -164,7 +164,7 @@ const TRAIN = [
   { teeth: 14, angle: 22, slug: 'instagram', kind: 'ring', prof: { rim: 1.4, web: 2.7, hub: 0.26 } },
   { teeth: 17, angle: -20, slug: 'threads', kind: 'spokes', arms: 4, prof: { rim: 1.7, web: 3.0, hub: 0.26, arm: 0.2 } },
   { teeth: 15, angle: 24, slug: 'bluesky', kind: 'holes', arms: 8, prof: { rim: 1.9, web: 3.2, hub: 0.2, hole: 0.085 } },
-  { teeth: 18, angle: -18, slug: 'mail', kind: 'plain', prof: { rim: 1.6, web: 2.6, hub: 0.3 } }
+  { teeth: 18, angle: -18, slug: 'mail', kind: 'spiral', arms: 4, prof: { rim: 1.6, web: 2.6, hub: 0.14 } }
 ];
 
 /* Wheel colours are derived, never picked. Seven hand-chosen ones had drifted
@@ -997,12 +997,32 @@ class Component extends DCLogic {
         inner.push(h('circle', { key: 'rh' + k, cx: cx, cy: cy, r: hr + 1.6, fill: 'none', stroke: p[3], strokeOpacity: 0.55, strokeWidth: 2.4 }));
       }
     } else {
-      /* Plain web: concentric steps so the eye reads the true centre — a lit radial
-         gradient alone makes the hub look thrown off to one side. */
+      /* Spiral web (was the plain wheel): slots wound like a lathe's scroll
+         chuck, each converging from the well onto the hub. Cut clean through
+         like every other opening — #14's rule, a milled pocket at this scale
+         reads as a failed punch. The arms never meet: at any radius they sit a
+         full 360/arms apart, so the even-odd fill cannot self-intersect. */
       inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
-      inner.push(h('circle', { key: 'well', r: wellR, fill: 'url(#' + id + 'w)' }));
-      inner.push(h('circle', { key: 'wellR', r: wellR, fill: 'none', stroke: p[0], strokeOpacity: 0.35, strokeWidth: 1.4 }));
-      inner.push(turned('t', hubR * 1.1, wellR - 2, 5));
+      const armsN = g.arms || 3, spTurns = 1.15;
+      const spW = Math.max(4, m * 0.55);
+      const spOut = wellR - spW * 0.8, spIn = hubR * 1.55;
+      for (let k = 0; k < armsN; k++) {
+        const base = (k / armsN) * 360;
+        const STEPS = 26;
+        const spt = (f, off) => {
+          const rr = spIn + (spOut - spIn) * f + off;
+          const aa = (base + f * spTurns * 360) * Math.PI / 180;
+          return (rr * Math.cos(aa)).toFixed(2) + ',' + (rr * Math.sin(aa)).toFixed(2);
+        };
+        let sd = 'M' + spt(0, -spW / 2) + ' ';
+        for (let q = 1; q <= STEPS; q++) sd += 'L' + spt(q / STEPS, -spW / 2) + ' ';
+        for (let q = STEPS; q >= 0; q--) sd += 'L' + spt(q / STEPS, spW / 2) + ' ';
+        holes.push(sd + 'Z');
+        /* A struck edge on each slot so the cut reads as machined, not clip art. */
+        let se = 'M' + spt(0, -spW / 2 - 1.3) + ' ';
+        for (let q = 1; q <= STEPS; q++) se += 'L' + spt(q / STEPS, -spW / 2 - 1.3) + ' ';
+        inner.push(h('path', { key: 'spe' + k, d: se, fill: 'none', stroke: flat ? ft.line : p[3], strokeOpacity: 0.5, strokeWidth: 1.4 }));
+      }
       inner.push(h('circle', { key: 'boss', r: hubR * 1.5, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
     }
     const arc = (rad, from, to) => {
