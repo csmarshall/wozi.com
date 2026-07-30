@@ -70,7 +70,7 @@ function feasible(Zs, Zp1, Zp2, Zr, N) {
 /* Room, exactly as index.html derives it: blank, less band, less the ring under
    the band. m2 = 2*bore/(Zr+4). A set is only useful if its smallest member
    still has a real root circle and its teeth are big enough to read. */
-const MODULE = 7, BAND_RISE = 1.3, BAND_DEPTH = 2.1, RIM_UNDER_BAND = 0.6;
+const MODULE = 7, BAND_RISE = 1.3, BAND_DEPTH = 1.2, RIM_UNDER_BAND = 0.6;
 const TOOTH_ROOT_MIN = 4, ROOT_MARGIN = 1.05, MIN_MODULE = 1.8;
 const boreOf = (teeth) => MODULE * teeth / 2 - MODULE * (BAND_RISE + BAND_DEPTH) - MODULE * RIM_UNDER_BAND;
 
