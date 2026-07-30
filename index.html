@@ -52,6 +52,9 @@ a:hover{color:var(--ink);}
    the site at all (#23). :focus-visible keeps the ring off mouse clicks; the
    outline follows each element's own border-radius, so it rings the discs. */
 a:focus-visible,button:focus-visible,[tabindex]:focus-visible{outline:3px solid var(--accent);outline-offset:3px;}
+/* The train itself rests via the frame loop (#3) — this only stills the UI
+   transitions: badge scale, tooltip fade, toggle colour. */
+@media (prefers-reduced-motion:reduce){*{transition:none !important}}
 @media (max-width:1080px){:root{--gap:2rem;--pad:6vw;}}
 @media (max-width:760px){:root{--pad:28px;--colw:100%;}}
 @media (max-width:430px){:root{--gap:1.25rem;}}
@@ -449,8 +452,15 @@ class Component extends DCLogic {
   startPhysics() {
     this._M = 0;
     this._dirSign = 1;
-    /* LAYER: spin-up — start from rest and let the flywheel wind up to speed. */
-    this._v = this.props.spinUp === false ? this.idleRate() : 0;
+    /* prefers-reduced-motion (#3): the machine comes to REST through this same
+       loop -- the idle target becomes zero, and the flywheel physics settles it
+       gently instead of freezing it mid-tooth. The flag is read fresh every
+       tick, mirroring the sleep gate: #7 is what happens when a flag can latch.
+       A deliberate drag or key press still spins it -- user-initiated motion is
+       the user's choice -- and friction then returns it to rest. */
+    this._rmq = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+    const startReduced = !!(this._rmq && this._rmq.matches);
+    this._v = (this.props.spinUp === false && !startReduced) ? this.idleRate() : 0;
     let last = performance.now();
     const step = (now) => {
       /* Cap the update rate. Divisors of the display refresh judder least, which is why
@@ -465,7 +475,8 @@ class Component extends DCLogic {
         /* Flywheel: bleed back toward the train's natural pace. */
         /* LAYER: hover drag — attention loads the machine and it slows a little. */
         const load = (this.props.hoverDrag && (this.state.hover || this.state.overStage)) ? 0.4 : 1;
-        const target = this._dirSign * this.idleRate() * load;
+        const reduced = !!(this._rmq && this._rmq.matches);
+        const target = reduced ? 0 : this._dirSign * this.idleRate() * load;
         this._v += (target - this._v) * (1 - Math.exp(-dt / 900));
         this._M += this._v * dt;
         this.applyRotation();
