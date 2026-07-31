@@ -593,6 +593,14 @@ const CENTRE_FAMILIES = [
   */
   { type: 'sunburst', web: 3.1, hub: 0.2,
     variants: [{ arms: 10 }, { arms: 14 }, { arms: 18 }] },
+  /* The two epicyclics are separate FAMILIES, not variants of one. They are
+     different mechanisms -- a star gear whose sun opposes the wheel, and a
+     Ravigneaux whose two planet rows turn against each other -- and splitting
+     them is also what takes the pool to eight designs for eight wheels, so no
+     wheel has to repeat another. */
+  { type: 'ravigneaux', web: 2.6, hub: 0.1,
+    variants: (planetaryMenuFor(TEETH_MAX).two.length
+      ? planetaryMenuFor(TEETH_MAX).two : planetaryMenuFor(TEETH_MAX).one) },
   { type: 'planetary', web: 2.6, hub: 0.1,
     /* Placeholder only: the real set is re-dealt per wheel in the TRAIN loop
        below, where the host blank's size is known. */
@@ -616,11 +624,10 @@ const ALL_FAMILIES = CENTRE_FAMILIES.concat(CANDIDATE_FAMILIES);
 const FORCE_KIND = (function () {
   try { return (location.search.match(/[?&]kind=([a-z]+)/) || [])[1] || null; } catch (e) { return null; }
 })();
-/* ?kind=ravigneaux is not a family of its own -- it is the two-row half of the
-   planetary's menu. So it forces that family and then narrows the pool, which
-   is also why it needs a bigger blank than the single row does. */
+/* Both epicyclics are families in their own right now, so a forced view names
+   one directly and needs no special case. */
 const FORCE_TWO = FORCE_KIND === 'ravigneaux';
-const FORCE_FAMILY = FORCE_TWO ? 'planetary' : FORCE_KIND;
+const FORCE_FAMILY = FORCE_KIND;
 function dealCentres(n) {
   /* A forced view may name a candidate; the deal itself never sees them. */
   const fam = FORCE_FAMILY && ALL_FAMILIES.some(f => f.type === FORCE_FAMILY)
@@ -674,7 +681,8 @@ function smallestBlankHolding(wantTwo) {
    -- which is what made the small wheels look cramped -- deal blanks that fit.
    The default page is untouched and keeps its full range of sizes. */
 (function dealTeeth() {
-  const floor = (FORCE_FAMILY === 'planetary') ? smallestBlankHolding(FORCE_TWO) : TEETH_MIN;
+  const floor = (FORCE_FAMILY === 'planetary' || FORCE_FAMILY === 'ravigneaux')
+    ? smallestBlankHolding(FORCE_FAMILY === 'ravigneaux') : TEETH_MIN;
   const host = Math.max(TEETH_HOST, floor);
   const span = TEETH_MAX - floor + 1;
   for (let tries = 0; tries < 600; tries++) {
@@ -736,16 +744,26 @@ const CENTRE_DEAL = dealCentres(TRAIN.length);
    most of the bore and the works vanish behind it. Swap it onto the largest
    wheel available if the deal put it somewhere cramped. */
 (function () {
-  const pi = CENTRE_DEAL.findIndex(c => c.type === 'planetary');
-  if (pi < 0) return;
-  const holds = (teeth) => {
+  /* Both epicyclics need room, and there are two of them now, so the roomiest
+     blanks are handed out in order of appetite -- the double row first, since it
+     needs the bigger bore. Each is swapped onto the largest wheel that can still
+     hold it and is not already spoken for. */
+  const holds = (teeth, two) => {
     const m = planetaryMenuFor(teeth);
-    return FORCE_TWO ? m.two.length > 0 : !m.fallback;
+    return two ? m.two.length > 0 : !m.fallback;
   };
-  if (TRAIN[pi] && holds(TRAIN[pi].teeth)) return;
-  let big = -1, bt = 0;
-  TRAIN.forEach((t, i) => { if (t.teeth > bt) { bt = t.teeth; big = i; } });
-  if (big >= 0) { const tmp = CENTRE_DEAL[pi]; CENTRE_DEAL[pi] = CENTRE_DEAL[big]; CENTRE_DEAL[big] = tmp; }
+  const order = TRAIN.map((t, i) => i).sort((a, b) => TRAIN[b].teeth - TRAIN[a].teeth);
+  const claimed = {};
+  [['ravigneaux', true], ['planetary', false]].forEach(function (pair) {
+    const type = pair[0], two = pair[1];
+    const pi = CENTRE_DEAL.findIndex(c => c.type === type);
+    if (pi < 0) return;
+    if (!claimed[pi] && TRAIN[pi] && holds(TRAIN[pi].teeth, two)) { claimed[pi] = 1; return; }
+    const big = order.find(i => !claimed[i] && holds(TRAIN[i].teeth, two));
+    if (big === undefined) { claimed[pi] = 1; return; }
+    const tmp = CENTRE_DEAL[pi]; CENTRE_DEAL[pi] = CENTRE_DEAL[big]; CENTRE_DEAL[big] = tmp;
+    claimed[big] = 1;
+  });
 })();
 TRAIN.forEach((t, i) => {
   const cd = CENTRE_DEAL[i % CENTRE_DEAL.length];
@@ -760,13 +778,11 @@ TRAIN.forEach((t, i) => {
   /* The gear set is chosen HERE, not in the deal, because only here is the host
      blank's size known. Re-dealt from the sets that fit this wheel; if none do,
      the roomiest available is used rather than drawing a set that cannot work. */
-  if (cd.type === 'planetary') {
+  if (cd.type === 'planetary' || cd.type === 'ravigneaux') {
     const menu = planetaryMenuFor(t.teeth);
-    /* A coin weighted toward the single row: the double row is the showpiece and
-       stays one, rather than becoming the thing that always happens. */
-    const pool = FORCE_TWO
-      ? (menu.two.length ? menu.two : menu.one)
-      : ((menu.two.length && (!menu.one.length || Math.random() < 0.4)) ? menu.two : menu.one);
+    /* The family decides the pool now -- no coin, and no forcing special case. */
+    const want = cd.type === 'ravigneaux' ? menu.two : menu.one;
+    const pool = want.length ? want : (menu.one.length ? menu.one : menu.two);
     t.cv = pool[Math.floor(Math.random() * pool.length)];
   }
   t.prof.web = cd.web; t.prof.hub = cd.hub;
@@ -857,6 +873,35 @@ const SINGLES = ['mastodon', 'bluesky', 'mail', 'reddit'];
    no Simple Icons row to check against (they removed it on request), so #0A66C2
    is taken from LinkedIn's own brand site and is the least independently
    verified value here. */
+/* The pill's lettering. Kept in one place so the measurement and the render
+   cannot disagree about what is being drawn -- the opening width is a
+   transition target, so a mismatch would clip the name.
+
+   Each service names its OWN typeface first, so the wordmark is set in the
+   brand's face for anyone who has it, and falls back through a close relative
+   to the site's own Manrope for everyone else. This costs nothing: no webfont
+   is fetched, nothing blocks paint, and the measurement adapts because it is
+   handed the same stack the pill renders in.
+
+   What it deliberately does NOT do is ship the real faces. Most of them --
+   Instagram Sans, Meta's family, LinkedIn's Brandon Text -- are proprietary and
+   not ours to serve, and eight webfonts on a page with no build step would cost
+   more than the fidelity is worth. So this is partial by design: a nicety when
+   the font happens to be installed, and never a regression when it is not. */
+const PILL_STACK = {
+  github: "'Mona Sans', 'Segoe UI'",                    /* GitHub's own, OFL */
+  linkedin: "'Brandon Text', 'Source Sans 3', 'Source Sans Pro'",
+  instagram: "'Instagram Sans', 'Segoe UI'",
+  threads: "'Instagram Sans', 'Segoe UI'",              /* same house as Instagram */
+  bluesky: "Inter",                                     /* Bluesky's UI face, OFL */
+  mastodon: "Roboto",                                   /* Mastodon's UI face, Apache */
+  reddit: "'Reddit Sans', 'IBM Plex Sans'",
+  mail: ""                                              /* not a brand: the site's own */
+};
+const pillFont = (slug) => {
+  const own = PILL_STACK[slug];
+  return "650 13px " + (own ? own + ", " : "") + "Manrope, system-ui, sans-serif";
+};
 const BRAND = {
   linkedin: '#0A66C2', github: '#181717', mastodon: '#6364FF',
   instagram: '#FF0069', threads: '#000000', bluesky: '#1185FE', mail: '#E8615A',
@@ -1295,6 +1340,23 @@ class Component extends DCLogic {
       }, { rootMargin: '120px' });
       this._io.observe(this._stageRef.current);
     }
+  }
+
+  /* Canvas text measurement, memoised. Cheap, synchronous, and exact for the
+     font actually being used -- which matters because the pill's opening width
+     is a transition target and cannot be `max-content`. */
+  textWidth(text, font) {
+    if (!this._tw) this._tw = {};
+    const key = font + '|' + text;
+    if (this._tw[key] !== undefined) return this._tw[key];
+    if (!this._measureCtx) {
+      const c = document.createElement('canvas');
+      this._measureCtx = c.getContext('2d');
+    }
+    this._measureCtx.font = font;
+    const w = Math.ceil(this._measureCtx.measureText(text).width);
+    this._tw[key] = w;
+    return w;
   }
 
   loadIcons() {
@@ -1840,7 +1902,7 @@ class Component extends DCLogic {
         holes.push('M' + (+cx + hr) + ',' + cy + ' A' + hr + ',' + hr + ' 0 1 0 ' + (+cx - hr) + ',' + cy + ' A' + hr + ',' + hr + ' 0 1 0 ' + (+cx + hr) + ',' + cy + ' Z');
         inner.push(h('circle', { key: 'rh' + k, cx: cx, cy: cy, r: hr + 1.6, fill: 'none', stroke: p[3], strokeOpacity: 0.55, strokeWidth: 2.4 }));
       }
-    } else if (kind === 'planetary') {
+    } else if (kind === 'planetary' || kind === 'ravigneaux') {
       /* An epicyclic set inside the wheel, kinematics and MESH both honest.
          Story on the page: the hub badge is the end of the STATIONARY axle, the
          sun is keyed to it, the ring gear is the wheel itself. Sun fixed, ring
@@ -2518,14 +2580,22 @@ class Component extends DCLogic {
       /* The planetary wheel gets a smaller axle cap: the badge is the grounded
          carrier's end plate, and shrinking it uncovers the sun -- the
          counter-rotating member that is the whole show. */
-      const discF = g.kind === 'planetary' ? 0.38 : 0.72;
-      const capF = g.kind === 'planetary' ? 0.55 : 1.15;
+      const epicyclic = g.kind === 'planetary' || g.kind === 'ravigneaux';
+      const discF = epicyclic ? 0.38 : 0.72;
+      const capF = epicyclic ? 0.55 : 1.15;
       /* The cap covers the sun completely on the planetary wheel. Shrinking it
          was one answer; pulling it off is the better one -- that is what the
          magnetic cap is FOR, and it keeps the icon at a comfortable size. */
       const disc = Math.max(30, Math.min(60, Math.round(g.r * discF)));
       const cap = Math.round(g.r * capF);
       const size = 'min(calc(' + cap + 'px * var(--gs)), max(30px, calc(' + disc + 'px * var(--gs))))';
+      /* How wide the name needs. The pill has to know its target width BEFORE it
+         opens, because `max-content` cannot be transitioned -- so the label is
+         MEASURED rather than estimated. A per-character guess clipped "Mastodon"
+         on the first try, which is what estimating glyph widths gets you. */
+      const label = SITES[g.slug] ? SITES[g.slug].label : '';
+      const pillType = pillFont(g.slug);
+      const labelW = this.textWidth(label, pillType) + 4;
       const on = hov === g.slug;
       const bo = this._badgeOff[g.slug];
       return {
@@ -2534,7 +2604,7 @@ class Component extends DCLogic {
         noDrag: (e) => e.preventDefault(),
         clickGuard: (e) => { if (this._badgeMoved === g.slug) { e.preventDefault(); this._badgeMoved = null; } },
         iconEl: h('span', {
-          style: { width: 'calc(' + size + ' * 0.56)', height: 'calc(' + size + ' * 0.56)', display: 'block', lineHeight: 0, color: on ? 'var(--accent)' : (BRAND[g.slug] || 'var(--ink)'), transition: 'color .2s ease' },
+          style: { width: 'calc(' + size + ' * 0.56)', height: 'calc(' + size + ' * 0.56)', display: 'block', lineHeight: 0, color: BRAND[g.slug] || 'var(--ink)', transition: 'color .2s ease' },
           dangerouslySetInnerHTML: { __html: this.state.icons[g.slug] || '' }
         }),
         enter: () => this.setState({ hover: g.slug }),
@@ -2545,24 +2615,49 @@ class Component extends DCLogic {
            already drives the badge. The badges do not rotate, only the gear SVGs
            do, so a transition here does not touch the one-clock invariant. The
            counter-scale holds the text still while the badge grows to 1.16. */
+        /* THE PLATE MORPHS INTO A PILL. The label used to float above the badge
+           in its own bubble; now the plate itself grows sideways and the name
+           appears inside it, so one object changes shape rather than a second
+           object appearing next to the first.
+
+           The name is aria-hidden because the anchor already carries the same
+           string as its aria-label -- visible text plus the label would
+           announce the service twice. */
         tipEl: h('span', {
+          'aria-hidden': 'true',
           style: {
-            position: 'absolute', bottom: 'calc(100% + 9px)', left: '50%',
-            transform: 'translateX(-50%) scale(' + (on ? 1 / 1.16 : 1) + ')',
-            transformOrigin: 'bottom center',
-            padding: '3px 8px', borderRadius: '7px',
-            background: 'var(--ink)', color: 'var(--bg)',
-            font: '600 12px/1.45 Manrope, system-ui, sans-serif', letterSpacing: '.01em',
-            whiteSpace: 'nowrap', pointerEvents: 'none', zIndex: 30,
+            display: 'block', overflow: 'hidden', whiteSpace: 'nowrap',
+            maxWidth: on ? labelW + 'px' : '0px',
             opacity: on ? 1 : 0,
-            transition: 'opacity .09s ease'
+            marginLeft: on ? '7px' : '0px',
+            font: pillType.replace('13px', '13px/1'), letterSpacing: '.005em',
+            /* A FIXED dark ink, not var(--ink). The label sits ON the plate, and
+               the plate is deliberately pale in BOTH themes -- so the themed ink
+               is near-white in dark mode and the name vanished into its own
+               background. What the text needs to contrast with is the plate,
+               which does not change, so neither should this. */
+            color: '#1B2126', pointerEvents: 'none',
+            /* the width leads and the ink follows, so the pill opens and the
+               name arrives in it rather than with it */
+            transition: 'max-width .26s cubic-bezier(.22,1,.36,1), opacity .16s ease .06s, margin-left .26s cubic-bezier(.22,1,.36,1)'
           }
         }, SITES[g.slug] ? SITES[g.slug].label : ''),
         discStyle: {
           position: 'absolute',
-          left: 'calc(' + g.cx + 'px * var(--gs))', top: 'calc(' + g.cy + 'px * var(--gs))',
-          width: size, height: size, boxSizing: 'border-box',
-          borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          /* Grows RIGHTWARD. The element is centred on the hub by
+             translate(-50%,-50%), so widening it alone would push the icon left
+             off the axle; shifting `left` by half the growth at the same time
+             pins the left edge and keeps the mark exactly where it was. `left`
+             is used by nothing else -- crucially not by the magnetic drag, which
+             owns `transform` -- so the two never fight. */
+          left: 'calc(' + g.cx + 'px * var(--gs)' + (on ? ' + ' + (labelW + 7) / 2 + 'px' : '') + ')',
+          top: 'calc(' + g.cy + 'px * var(--gs))',
+          width: on ? 'calc(' + size + ' + ' + (labelW + 7) + 'px)' : size,
+          height: size, boxSizing: 'border-box',
+          paddingRight: on ? '2px' : '0px',
+          /* 999px, not 50%: a circle at rest, a pill the moment it is wider than
+             it is tall, with the same end radius throughout the morph. */
+          borderRadius: '999px', display: 'flex', alignItems: 'center', justifyContent: 'center',
           touchAction: 'none', userSelect: 'none', WebkitUserDrag: 'none',
           /* Was a hardcoded #F8F9F8 in both themes, which glared on the softened
              light page and was the brightest thing on screen in dark. Toned per
@@ -2571,8 +2666,9 @@ class Component extends DCLogic {
           background: this.state.theme === 'dark' ? '#DFE2DE' : '#EDEFEA',
           color: on ? 'var(--accent)' : 'var(--ink)',
           border: '1px solid rgba(20,30,35,.14)', boxShadow: '0 3px 10px rgba(8,16,20,.28)', zIndex: 5, cursor: 'pointer',
-          transform: 'translate(-50%,-50%)' + (bo ? ' translate(' + bo.x.toFixed(1) + 'px,' + bo.y.toFixed(1) + 'px)' : '') + ' scale(' + (on ? 1.16 : 1) + ')',
-          transition: 'transform .22s cubic-bezier(.34,1.56,.64,1), color .2s ease'
+          transform: 'translate(-50%,-50%)' + (bo ? ' translate(' + bo.x.toFixed(1) + 'px,' + bo.y.toFixed(1) + 'px)' : '') + ' scale(' + (on ? 1.06 : 1) + ')',
+          transition: 'transform .22s cubic-bezier(.34,1.56,.64,1), color .2s ease, '
+            + 'width .26s cubic-bezier(.22,1,.36,1), left .26s cubic-bezier(.22,1,.36,1)'
         }
       };
     });
@@ -2626,7 +2722,7 @@ class Component extends DCLogic {
         const names = { spokes: 'Spoke slots', holes: 'Lightening drills', pockets: 'Kidney pockets',
           spiral: 'Curved spokes', iris: 'Iris blades', star: 'Star truss', honeycomb: 'Honeycomb',
           labyrinth: 'Labyrinth rotor', sunburst: 'Sunburst', planetary: 'Planetary (star gear)',
-          hexcore: 'Hex core' };
+          hexcore: 'Hex core', ravigneaux: 'Ravigneaux (double row)' };
         const item = (key, label) => {
           const active = key ? FORCE_KIND === key : !FORCE_KIND;
           return {
@@ -2643,7 +2739,6 @@ class Component extends DCLogic {
           out.push(item(f.type, names[f.type] || f.type));
           /* The double row rides directly under the single, since it is the same
              family seen through a narrower pool rather than a family of its own. */
-          if (f.type === 'planetary') out.push(item('ravigneaux', 'Ravigneaux (double row)'));
         });
         /* Candidates last, marked, so the menu doubles as the review sheet. */
         CANDIDATE_FAMILIES.forEach(f => out.push(item(f.type, (names[f.type] || f.type) + '  · candidate')));
