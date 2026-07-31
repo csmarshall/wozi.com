@@ -72,6 +72,32 @@ DEVICES = [
     # desktop Safari maximised: the case where the old 1.75 ceiling bit
     ("MacBook Safari full",  1440,  900, 2, IOS_UA,      90,  90),
     ("Ultrawide",            2560, 1080, 1, IOS_UA,      90,  90),
+    # #2: "train may sit right of centre at very large widths" -- pushing the
+    # long axis up past where anyone reported the bug, to check whether the
+    # LINK_SHARE rework (fitStage, index.html) actually killed it or just
+    # moved the threshold out of reach of the old device list.
+    #
+    # 5120 (Super ultrawide) is deliberately NOT in this list. It was tried
+    # here during the #2 investigation and reproducibly fails a DIFFERENT
+    # check -- "stops short" of the physical edges, a coverage gap, not a
+    # centring one -- on the very first navigation of a fresh session, so it
+    # is real and not test-harness noise. But it is not #2's fault (which is
+    # about centring, and is fixed -- see solve() in index.html), and closing
+    # it means deciding how many more outrigger wheels 5120px of empty edge
+    # is worth against the per-SVG frame cost #6 already fought to remove.
+    # That is a call for Charles, not a silent fix bundled into this commit --
+    # this tool gates CI (deploy.yml), so a device row with no agreed fix
+    # would block every future deploy over an open question. Re-add it once
+    # that call is made.
+    # 3440 is left out for the SAME reason as 5120, and it was measured before
+    # being dropped: four consecutive runs against this tree, all four failing
+    # portrait 3440x1350 by 20px, 28px and 35px -- and passing everything else,
+    # including every centring check. So it is not flaky and it is not #2; it is
+    # the coverage gap of #41 showing up at a second width, milder (99% covered)
+    # but just as real. Tracked there. Re-add both widths together once the
+    # outrigger-count question in #41 is settled.
+    #   ("Ultrawide 3440",     3440, 1440, 1, IOS_UA,      90,  90),
+    ("QHD wide",             2560, 1440, 1, IOS_UA,      90,  90),
 ]
 
 # (label, portrait w, portrait h, dpr, ua, orientation, chrome, (top, right, bottom, left))
@@ -222,6 +248,35 @@ async def main():
                 if msg.get("id") == my:
                     return msg.get("result", {})
 
+        # SETTLE-POLL, NOT A FIXED SLEEP. Chasing #2, some FAILs at large widths
+        # looked at first like an artifact of running ~30 navigations back to back
+        # in one Chrome tab without ever restarting the renderer -- a fixed 2.3s
+        # wait reading badges before fitStage's resize settle had finished. That
+        # turned out not to be the actual mechanism (the FAILs were real, and
+        # #2's fix in index.html's solve() is what cleared them), so this is not
+        # load-bearing for #2 the way it first looked. It is still a genuine
+        # improvement over a fixed sleep on its own merits: poll until two
+        # consecutive reads of the measured geometry agree, so the verdict
+        # reflects the settled layout rather than a guessed wait, whatever is
+        # loading the renderer at the time.
+        async def measure_settled(expr, max_wait=6.0, poll=0.3, tol=0.5):
+            keys = ("linkX0", "linkX1", "linkY0", "linkY1", "allX0", "allX1", "allY0", "allY1")
+            prev = None
+            waited = 0.0
+            last = None
+            while waited < max_wait:
+                r = await send("Runtime.evaluate", {"expression": expr, "returnByValue": True})
+                m = json.loads(r["result"]["value"])
+                last = m
+                if "error" in m:
+                    return m
+                if prev is not None and all(abs(m[k] - prev[k]) <= tol for k in keys):
+                    return m
+                prev = m
+                await asyncio.sleep(poll)
+                waited += poll
+            return last  # never settled inside the budget -- report the last read anyway
+
         for label, pw, ph, dpr, ua, pchrome, lchrome in DEVICES:
             for orient in ("portrait", "landscape"):
                 w, h = (pw, ph) if orient == "portrait" else (ph, pw)
@@ -235,8 +290,7 @@ async def main():
                 await send("Emulation.setTouchEmulationEnabled", {"enabled": True, "maxTouchPoints": 5})
                 await send("Page.navigate", {"url": URL + ("&" if "?" in URL else "?") + f"d={w}x{h}"})
                 await asyncio.sleep(2.3)
-                r = await send("Runtime.evaluate", {"expression": MEASURE, "returnByValue": True})
-                m = json.loads(r["result"]["value"])
+                m = await measure_settled(MEASURE)
                 if "error" in m:
                     print(f"{label:22} {orient:10} {w}x{h:<7} {m['error']}")
                     bad += 1
