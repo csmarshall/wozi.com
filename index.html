@@ -978,6 +978,22 @@ function flatTones(hex, soft) {
   return { body: mix(0, 255), face: mix(0.07, 255), well: mix(0.13, 0), line: mix(0.40, 0), edge: mix(0.16, 0) };
 }
 const FLAT_INK = '#243033';
+/* The handle ring's ink is a hairline problem, not a space problem (#36): BAND_DEPTH
+   already grew 36% to give the lettering more clear metal, and the text never moved.
+   Measured on an offscreen canvas at the engraving's own fontSize/weight/fillOpacity
+   (~5.6px, 700, 0.72), rasterisation itself is what's eating the underscore -- every
+   glyph loses some coverage to anti-aliasing at this size, but the underscore, being
+   a stroke rather than a full glyph, loses far more of it: effective opacity lands
+   near 63% of nominal (0.72 asked, ~0.45 rendered -- 2.16:1 against the band) where an
+   ordinary letter like c or s keeps 79-83% (2.7-2.9:1). Raising fillOpacity would fix
+   it by darkening every glyph equally, which is the loud fix Charles didn't want.
+   A thin stroke matched to the fill colour and opacity instead fattens edges only --
+   it costs a hairline like `_` a much bigger share of its coverage than it costs a
+   letter that already has body to spare. At this fraction of the font size the
+   underscore's effective opacity recovers to ~80% of nominal (2.74:1), while c/s move
+   only about a tenth as much -- the letters were never the problem, so they barely
+   change. */
+const ENGRAVE_STROKE = 0.035;
 
 function shades(hex, soft) {
   const n = parseInt(hex.slice(1), 16);
@@ -2449,6 +2465,12 @@ class Component extends DCLogic {
       ).map((L, li) => h('text', {
         key: li, transform: 'translate(0,' + L.dy + ')',
         fontSize: eng.fT.toFixed(2), fill: L.col, fillOpacity: L.op, letterSpacing: '0.1em',
+        /* Same ink as the fill, matched in opacity, just fattening every edge by a
+           hairline (#36) -- see ENGRAVE_STROKE. A full letter has body to spare and
+           barely moves; a stroke-only glyph like the underscore in a handle has
+           nothing BUT edge, so the same width buys it most of its opacity back. */
+        stroke: L.col, strokeWidth: (eng.fT * ENGRAVE_STROKE).toFixed(3), strokeOpacity: L.op,
+        strokeLinejoin: 'round',
         /* Alphabetic on purpose: engraving() has already put the ring where the
            lettering's own middle lands mid-band, so the engine is only asked for
            the one baseline it cannot get wrong (#26). */
@@ -2670,8 +2692,23 @@ class Component extends DCLogic {
           /* Was a hardcoded #F8F9F8 in both themes, which glared on the softened
              light page and was the brightest thing on screen in dark. Toned per
              theme, but kept light in BOTH: several brand marks are near-black
-             (GitHub, Threads) and need a pale disc under them (#22). */
-          background: this.state.theme === 'dark' ? '#DFE2DE' : '#EDEFEA',
+             (GitHub, Threads) and need a pale disc under them (#22).
+
+             The light value drifted stale (#35): it was #FFFFFF when the comment
+             here claimed 1.21:1 against the page, then got toned down to #EDEFEA
+             for the glare complaint above -- which quietly landed it at 1.05:1,
+             barely separable from --bg (#E8EAE5), without anyone updating the
+             number. Measured, not guessed, this time: going back toward white
+             would just re-open the glare complaint that #EDEFEA was fixing, so
+             the disc instead moved the OTHER way, toned a shade darker rather
+             than brighter. #CCCEC9 is the same hue scaled down, and clears
+             1.31:1 against the page while still reading as a pale field -- it
+             still clears 11.3:1 against GitHub's near-black mark and 13.2:1
+             against Threads' pure black, so the brand marks keep their
+             contrast. Dark mode's #DFE2DE is untouched: it already clears
+             12.2:1 against #1E2226, and the complaint in #35 was about light
+             mode specifically. */
+          background: this.state.theme === 'dark' ? '#DFE2DE' : '#CCCEC9',
           color: on ? 'var(--accent)' : 'var(--ink)',
           border: '1px solid rgba(20,30,35,.14)', boxShadow: '0 3px 10px rgba(8,16,20,.28)', zIndex: 5, cursor: 'pointer',
           transform: 'translate(-50%,-50%)' + (bo ? ' translate(' + bo.x.toFixed(1) + 'px,' + bo.y.toFixed(1) + 'px)' : '') + ' scale(' + (on ? 1.06 : 1) + ')',
