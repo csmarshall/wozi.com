@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <script src="./support.js"></script>
 </head>
 <body>
@@ -31,12 +31,37 @@
      the same as the icon it sits next to. The button is larger than its icon and
      centres it, so the button box is pulled in by half that difference — derived
      rather than hardcoded, so changing either size keeps the icon on the mark.
-     The wordmark sits on --btnoff, the same offset as the button's box, so the
-     two bottom/top corners are inset by the same amount rather than one being
-     measured to a box and the other to a glyph. */
+     The wordmark sits on --btnoff too, the same offset as the button's box, so
+     the two bottom/top corners are inset by the same amount rather than one
+     being measured to a box and the other to a glyph. Neither reads --btnoff
+     directly any more: both go through the --off* tokens below, which add the
+     safe-area inset for the edge each one is pinned to. */
   --icon:20px; --btn:44px;
   --corner:var(--icon);
   --btnoff:calc(var(--corner) - (var(--btn) - var(--icon)) / 2);
+  /* THE STAGE BLEEDS, THE CONTROLS DO NOT. `viewport-fit=cover` hands the page
+     the whole display on iOS/iPadOS — under the notch, under the home
+     indicator, behind Safari's translucent toolbars — so the machine reads as a
+     window onto a running train rather than a picture inside a box. The four
+     fixed controls are the one thing that must stay out of those regions: a
+     button under the home indicator is hard to tap and can be impossible.
+
+     So each fixed corner offset is --btnoff PLUS that edge's inset, and the
+     insets are held in their own tokens rather than written into the offsets.
+     Two reasons. A bare env() inside a calc() is invalid on a browser that has
+     never heard of env(), and an invalid `top`/`right` does not fall back to
+     --btnoff, it falls back to auto — the buttons would lose their corner
+     entirely. And a plain custom property can be given a value at runtime,
+     which is how tools/devices.py exercises this without a notched phone. */
+  --safe-t:0px; --safe-r:0px; --safe-b:0px; --safe-l:0px;
+  --offtop:calc(var(--btnoff) + var(--safe-t));
+  --offright:calc(var(--btnoff) + var(--safe-r));
+  --offbot:calc(var(--btnoff) + var(--safe-b));
+  --offleft:calc(var(--btnoff) + var(--safe-l));
+}
+@supports (top:env(safe-area-inset-top)){
+  :root{--safe-t:env(safe-area-inset-top,0px);--safe-r:env(safe-area-inset-right,0px);
+        --safe-b:env(safe-area-inset-bottom,0px);--safe-l:env(safe-area-inset-left,0px);}
 }
 :root[data-theme="dark"]{
   --bg:#1E2226; --ink:#EEF1F0; --muted:#93A5A3; --hair:#373E3D; --chip:#2A3034;
@@ -97,13 +122,13 @@ a:focus-visible,button:focus-visible,[tabindex]:focus-visible{outline:3px solid 
 
 <main style="min-height:100vh;box-sizing:border-box;display:flex;flex-direction:var(--dir);align-items:center;justify-content:center;gap:var(--gap);padding:var(--pad);background:var(--bg);overflow:hidden;">
 
-  <button onClick="{{ toggleTog }}" title="{{ togLabel }}" aria-label="{{ togLabel }}" aria-expanded="{{ togExpanded }}" style="position:fixed;top:var(--btnoff);right:calc(var(--btnoff) + (var(--btn) + 6px) * 2);z-index:20;display:flex;align-items:center;justify-content:center;width:var(--btn);height:var(--btn);padding:0;border:0;border-radius:999px;background:transparent;color:var(--muted);cursor:pointer;transition:color .18s ease;" style-hover="color:var(--ink);">
+  <button onClick="{{ toggleTog }}" title="{{ togLabel }}" aria-label="{{ togLabel }}" aria-expanded="{{ togExpanded }}" style="position:fixed;top:var(--offtop);right:calc(var(--offright) + (var(--btn) + 6px) * 2);z-index:20;display:flex;align-items:center;justify-content:center;width:var(--btn);height:var(--btn);padding:0;border:0;border-radius:999px;background:transparent;color:var(--muted);cursor:pointer;transition:color .18s ease;" style-hover="color:var(--ink);">
     {{ togIcon }}
   </button>
-  <button onClick="{{ toggleMotion }}" title="{{ motionLabel }}" aria-label="{{ motionLabel }}" aria-pressed="{{ motionPressed }}" style="position:fixed;top:var(--btnoff);right:calc(var(--btnoff) + var(--btn) + 6px);z-index:20;display:flex;align-items:center;justify-content:center;width:var(--btn);height:var(--btn);padding:0;border:0;border-radius:999px;background:transparent;color:var(--muted);cursor:pointer;transition:color .18s ease;" style-hover="color:var(--ink);">
+  <button onClick="{{ toggleMotion }}" title="{{ motionLabel }}" aria-label="{{ motionLabel }}" aria-pressed="{{ motionPressed }}" style="position:fixed;top:var(--offtop);right:calc(var(--offright) + var(--btn) + 6px);z-index:20;display:flex;align-items:center;justify-content:center;width:var(--btn);height:var(--btn);padding:0;border:0;border-radius:999px;background:transparent;color:var(--muted);cursor:pointer;transition:color .18s ease;" style-hover="color:var(--ink);">
     {{ motionIcon }}
   </button>
-  <button onClick="{{ toggleTheme }}" title="{{ themeLabel }}" aria-label="{{ themeLabel }}" style="position:fixed;top:var(--btnoff);right:var(--btnoff);z-index:20;display:flex;align-items:center;justify-content:center;width:var(--btn);height:var(--btn);padding:0;border:0;border-radius:999px;background:transparent;color:var(--muted);cursor:pointer;transition:color .18s ease;" style-hover="color:var(--ink);">
+  <button onClick="{{ toggleTheme }}" title="{{ themeLabel }}" aria-label="{{ themeLabel }}" style="position:fixed;top:var(--offtop);right:var(--offright);z-index:20;display:flex;align-items:center;justify-content:center;width:var(--btn);height:var(--btn);padding:0;border:0;border-radius:999px;background:transparent;color:var(--muted);cursor:pointer;transition:color .18s ease;" style-hover="color:var(--ink);">
     {{ themeIcon }}
   </button>
 
@@ -124,7 +149,7 @@ a:focus-visible,button:focus-visible,[tabindex]:focus-visible{outline:3px solid 
 
   </div>
 
-  <div ref="{{ colRef }}" style="position:fixed;left:var(--btnoff);bottom:var(--btnoff);z-index:15;">
+  <div ref="{{ colRef }}" style="position:fixed;left:var(--offleft);bottom:var(--offbot);z-index:15;">
     <h1 style="margin:0;display:flex;align-items:baseline;gap:2px;font-weight:800;font-size:clamp(30px,4.6vw,54px);letter-spacing:-0.045em;line-height:1;color:var(--ink);">
       <span>{{ brandName }}</span>
       <span style="width:.16em;height:.16em;border-radius:50%;background:var(--accent);align-self:flex-end;margin-bottom:.14em;"></span>
@@ -2509,7 +2534,7 @@ class Component extends DCLogic {
         h('path', { strokeWidth: 3, d: 'M12 5.9V3.4M12 18.1v2.5M6.72 8.95l-2.17-1.25M19.45 16.3l-2.17-1.25M6.72 15.05l-2.17 1.25M19.45 7.7l-2.17 1.25' })),
       togPanelStyle: {
         display: this.state.tog ? 'flex' : 'none', flexDirection: 'column', gap: '2px',
-        position: 'fixed', left: 'var(--btnoff)', top: '50%', transform: 'translateY(-50%)',
+        position: 'fixed', left: 'var(--offleft)', top: '50%', transform: 'translateY(-50%)',
         zIndex: 30, background: 'var(--chip)', border: '1px solid var(--hair)',
         borderRadius: '14px', padding: '10px 6px', boxShadow: 'var(--shadow)', minWidth: '190px'
       },

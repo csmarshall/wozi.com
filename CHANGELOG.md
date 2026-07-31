@@ -7,6 +7,30 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Added
 
+- **#32 — The machine runs under Safari's chrome on iOS.** `viewport-fit=cover`
+  hands the page the whole display instead of the safe rectangle, so the ghost
+  wheels continue behind the translucent toolbars, under the notch and past the
+  home indicator — a window onto a running train rather than a picture in a box.
+  It only reads that way because #30 already made the assembly fill the long axis
+  and let the cross axis bleed; before that there was nothing out there to see.
+  The four fixed controls are the one thing that must not follow it under the
+  chrome, so each corner offset is now `--btnoff` plus that edge's
+  `env(safe-area-inset-*)`. The insets sit in their own `--safe-*` custom
+  properties rather than being written into the offsets inline, for two reasons:
+  a bare `env()` inside a `calc()` is invalid on a browser that has never heard
+  of it, and an invalid `top` does not fall back to `--btnoff`, it falls back to
+  `auto`; and a plain custom property can be given a value from a test, which is
+  how `tools/devices.py` now exercises this. Chrome device emulation resolves
+  every inset to 0 no matter which phone it is pretending to be, so the harness
+  injects Apple's published insets itself and asserts the controls move inward by
+  exactly that much while the gears ignore them entirely — a check that fails on
+  all four profiles against the previous page. **Unverified:** no iOS runtime
+  exists on this machine, so what iOS actually reports for
+  `safe-area-inset-bottom` while Safari's tab bar is showing has not been
+  observed. Adding the inset can only move a control further from an obscured
+  edge, never into one, so the change is safe either way — but whether it fully
+  clears the tab bar wants a look on a real phone.
+
 - **#23 — Deploys from GitHub Actions, keyless.** Push to `main` publishes to
   `s3://wozi.com` and invalidates CloudFront. Auth is GitHub OIDC into
   `wozi-com-deploy`, whose trust policy pins the subject to

@@ -74,6 +74,72 @@ DEVICES = [
     ("Ultrawide",            2560, 1080, 1, IOS_UA,      90,  90),
 ]
 
+# (label, portrait w, portrait h, dpr, ua, orientation, chrome, (top, right, bottom, left))
+#
+# THE SECOND PASS, and why it has to fake its own numbers. `viewport-fit=cover`
+# hands the page the whole display, notch and home indicator included, and the
+# page is supposed to WANT that -- the gears run under the chrome. The four fixed
+# controls are the exception: they add env(safe-area-inset-*) so they stay
+# reachable. Chrome device emulation cannot help here. It implements env() and
+# resolves every inset to 0 on every emulated device, because the insets come
+# from the real window manager, not from the device metrics override. So there is
+# nothing to observe and no way to make Chrome produce one.
+#
+# What this pass tests instead is the LAYOUT CONSEQUENCE, which is the half that
+# lives in this repo: given non-zero insets, do the controls move inward by
+# exactly that much and stay clear, and do the gears ignore them and still bleed
+# to the physical edge? The insets reach the page through the --safe-* custom
+# properties rather than through env() written inline, precisely so they can be
+# set from here. Whether iOS then hands those properties the right numbers is
+# WebKit's half, and no harness on this machine can check it.
+#
+# Inset values are Apple's published safe areas for the notch/Dynamic Island
+# phones, in CSS px.
+SAFE_DEVICES = [
+    ("iPhone 13 / 14",     390, 844, 3, IOS_UA, "portrait",   96, (47, 0, 34, 0)),
+    ("iPhone 13 / 14",     390, 844, 3, IOS_UA, "landscape", 117, (0, 47, 21, 47)),
+    ("iPhone 15 Pro Max",  430, 932, 3, IOS_UA, "portrait",   96, (59, 0, 34, 0)),
+    ("iPhone 15 Pro Max",  430, 932, 3, IOS_UA, "landscape", 117, (0, 59, 21, 59)),
+]
+
+# Set the four insets, then measure every fixed control against the safe rect and
+# the whole assembly against the physical one. Written as a template so the
+# Python side owns the numbers.
+SAFE_MEASURE = r"""
+(() => {
+  const s = document.documentElement.style;
+  s.setProperty('--safe-t', '%(t)dpx'); s.setProperty('--safe-r', '%(r)dpx');
+  s.setProperty('--safe-b', '%(b)dpx'); s.setProperty('--safe-l', '%(l)dpx');
+  /* The controls that must NOT bleed: the three corner buttons and the wordmark
+     (its <h1>'s fixed parent). Everything else on the page is allowed under the
+     chrome and is supposed to be. */
+  const ctrls = [...document.querySelectorAll('button')].map(
+    b => [b.getAttribute('aria-label') || 'button', b]);
+  const h1 = document.querySelector('h1');
+  if (h1 && h1.parentElement) ctrls.push(['wordmark', h1.parentElement]);
+  const box = ([name, el]) => {
+    const r = el.getBoundingClientRect();
+    return { name: name, x0: +r.left.toFixed(1), y0: +r.top.toFixed(1),
+             x1: +r.right.toFixed(1), y1: +r.bottom.toFixed(1),
+             w: +r.width.toFixed(1), h: +r.height.toFixed(1) };
+  };
+  /* and the machine, which must still reach the physical edges */
+  let ax0 = 1e9, ax1 = -1e9, ay0 = 1e9, ay1 = -1e9;
+  document.querySelectorAll('svg').forEach(sv => {
+    const r = sv.getBoundingClientRect();
+    if (r.width < 30) return;
+    ax0 = Math.min(ax0, r.left); ax1 = Math.max(ax1, r.right);
+    ay0 = Math.min(ay0, r.top);  ay1 = Math.max(ay1, r.bottom);
+  });
+  return JSON.stringify({
+    vw: window.innerWidth, vh: window.innerHeight,
+    ctrls: ctrls.map(box),
+    allX0: +ax0.toFixed(1), allX1: +ax1.toFixed(1),
+    allY0: +ay0.toFixed(1), allY1: +ay1.toFixed(1)
+  });
+})()
+"""
+
 MEASURE = r"""
 (() => {
   /* Two different things get measured, because they have different jobs:
@@ -143,6 +209,7 @@ async def main():
     print(f"Chrome device emulation (not an iOS simulator — none installed)\n")
     print(f"{'device':22} {'orient':10} {'viewport':11} {'covered':7} {'off-ctr':8} verdict")
     bad = 0
+    sbad = 0
     mid = 0
     async with websockets.connect(ws_url, max_size=40 * 1024 * 1024) as ws:
         async def send(method, params=None):
@@ -204,10 +271,54 @@ async def main():
                       f"{covered * 100:5.0f}%   {centre_off * 100:4.0f}%    "
                       f"{'ok' if ok else 'FAIL: ' + ', '.join(why)}")
 
+        print(f"\nsafe areas (insets injected — Chrome resolves every env() to 0)\n")
+        print(f"{'device':22} {'orient':10} {'insets':16} {'clearance':11} verdict")
+        for label, pw, ph, dpr, ua, orient, chrome, insets in SAFE_DEVICES:
+            t, r_, b, l = insets
+            w, h = (pw, ph) if orient == "portrait" else (ph, pw)
+            h -= chrome
+            await send("Emulation.setUserAgentOverride", {"userAgent": ua})
+            await send("Emulation.setDeviceMetricsOverride", {
+                "width": w, "height": h, "deviceScaleFactor": dpr, "mobile": True,
+                "screenOrientation": {"type": "portraitPrimary" if orient == "portrait"
+                                      else "landscapePrimary",
+                                      "angle": 0 if orient == "portrait" else 90}})
+            await send("Emulation.setTouchEmulationEnabled", {"enabled": True, "maxTouchPoints": 5})
+            await send("Page.navigate", {"url": URL + ("&" if "?" in URL else "?") + f"s={w}x{h}"})
+            await asyncio.sleep(2.3)
+            res = await send("Runtime.evaluate", {
+                "expression": SAFE_MEASURE % {"t": t, "r": r_, "b": b, "l": l},
+                "returnByValue": True})
+            m = json.loads(res["result"]["value"])
+            why = []
+            # Every fixed control inside the safe rectangle, and still tappable.
+            # Half a pixel of slack: fractional layout, not a real overlap.
+            worst = 1e9
+            for c in m["ctrls"]:
+                clear = min(c["x0"] - l, m["vw"] - r_ - c["x1"],
+                            c["y0"] - t, m["vh"] - b - c["y1"])
+                worst = min(worst, clear)
+                if clear < -0.5:
+                    why.append(f"{c['name']} out by {-clear:.0f}px")
+                if c["w"] < 24 or c["h"] < 24:
+                    why.append(f"{c['name']} is {c['w']:.0f}x{c['h']:.0f}")
+            # ...and the machine ignoring all of it, as it is meant to.
+            horiz = m["vw"] >= m["vh"]
+            long_px = m["vw"] if horiz else m["vh"]
+            e0, e1 = (m["allX0"], m["allX1"]) if horiz else (m["allY0"], m["allY1"])
+            if e0 > 1 or e1 < long_px - 1:
+                why.append("assembly no longer reaches the physical edges")
+            if why:
+                sbad += 1
+            print(f"{label:22} {orient:10} {f'{t}/{r_}/{b}/{l}':16} "
+                  f"{worst:7.0f}px   {'ok' if not why else 'FAIL: ' + ', '.join(why)}")
+
     proc.kill()
     print(f"\n{len(DEVICES) * 2 - bad}/{len(DEVICES) * 2} passed"
           " — assembly must reach BOTH edges of the long side, links centred.")
-    return 0 if bad == 0 else 1
+    print(f"{len(SAFE_DEVICES) - sbad}/{len(SAFE_DEVICES)} passed"
+          " — fixed controls clear injected safe-area insets, gears ignore them.")
+    return 0 if bad == 0 and sbad == 0 else 1
 
 
 if __name__ == "__main__":
