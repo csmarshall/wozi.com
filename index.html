@@ -119,11 +119,6 @@ a:focus-visible,button:focus-visible,[tabindex]:focus-visible{outline:3px solid 
 @media (max-width:1080px){:root{--gap:2rem;--pad:6vw;}}
 @media (max-width:760px){:root{--pad:28px;--colw:100%;}}
 @media (max-width:430px){:root{--gap:1.25rem;}}
-@keyframes rotate{from{transform:rotate(0)}to{transform:rotate(360deg)}}
-@keyframes rotate-back{from{transform:rotate(0)}to{transform:rotate(-360deg)}}
-@keyframes signsway{from{transform:translate(-50%,0) rotate(-1.2deg)}to{transform:translate(-50%,-14px) rotate(1.2deg)}}
-@keyframes chainrun{to{stroke-dashoffset:calc(var(--pitch) * -1)}}
-@keyframes chainrun-back{to{stroke-dashoffset:var(--pitch)}}
 </style>
 </helmet>
 
@@ -166,6 +161,29 @@ a:focus-visible,button:focus-visible,[tabindex]:focus-visible{outline:3px solid 
 </main>
 
 </x-dc>
+<!-- SHIPPED LAYER DEFAULTS -- these are intentional, not leftover preview values (#8).
+     `data-props` below is both the editor's schema AND the runtime default whenever
+     a prop isn't overridden, so its "default" fields are the actual live settings:
+
+       spinUp:true        train winds up from rest on the flywheel
+       engravedRims:true  handle struck into each wheel's band -- Charles wants this
+                          visible; do not turn off
+       parallax:false     off deliberately, commit e6936a7 ("tweak: steel accent,
+                          parallax off, tighter corners")
+       character:false    chip + machinist stamp, turned off in commit 2e5a721
+                          ("fix: #16 ... chips off")
+       hoverDrag:true     hover loads the machine to ~40% speed
+       accent:"#5F686E"   the steel tone taken from the machine's own metal (--m4
+                          light / --m1 dark), Charles's explicit choice, also from
+                          e6936a7 -- supersedes both the shipped-in-error red
+                          (#E8483A) and the blue SESSION-LOG.md calls "committed"
+                          (#3B7DE8); neither of those is what ships today
+
+     SESSION-LOG.md's "Tweak state at handoff" section describes the *original*
+     no-repo build session, before either of the two commits above existed -- it
+     is a historical record of that one session, not a running description of
+     HEAD, and was never updated (nor should it be) as later real commits moved
+     these values on. Read this comment block, not that file, for what is live. -->
 <script type="text/x-dc" data-dc-script data-props="{&quot;domain&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Wordmark&quot;},&quot;frameRate&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[60,30,24,20],&quot;default&quot;:30,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;spinUp&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;engravedRims&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;parallax&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;character&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;hoverDrag&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;speed&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;min&quot;:0.25,&quot;max&quot;:2,&quot;step&quot;:0.25,&quot;default&quot;:1,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;gearScale&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;min&quot;:0.5,&quot;max&quot;:1.3,&quot;step&quot;:0.05,&quot;default&quot;:1,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;options&quot;:[&quot;#5F686E&quot;,&quot;#E8483A&quot;,&quot;#3B7DE8&quot;,&quot;#F4B32B&quot;,&quot;#1FA463&quot;],&quot;default&quot;:&quot;#5F686E&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;shuffle&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Gears&quot;}}">
 const MODULE = 7;
 
