@@ -260,7 +260,11 @@ const CLEARANCE = 13; /* px kept between the tip circles of wheels that are not 
 const TRAIN = [
   { teeth: 17, angle: 0, slug: 'linkedin', prof: { rim: 1.7 } },
   { teeth: 15, angle: 20, slug: 'github', prof: { rim: 1.6 } },
-  { teeth: 18, angle: -24, slug: 'mastodon', prof: { rim: 2.0 } },
+  /* Mastodon is retired at Charles's request -- barely used. Commented rather
+     than deleted, like the retired gear families: put the line back and the
+     wheel returns, since SITES, BRAND and the icon are all still here.
+     Remember to put 'mastodon' back in SINGLES at the same time. */
+  /* { teeth: 18, angle: -24, slug: 'mastodon', prof: { rim: 2.0 } }, */
   { teeth: 14, angle: 22, slug: 'instagram', prof: { rim: 1.4 } },
   { teeth: 17, angle: -20, slug: 'threads', prof: { rim: 1.7 } },
   { teeth: 15, angle: 24, slug: 'bluesky', prof: { rim: 1.9 } },
@@ -864,7 +868,7 @@ TRAIN.forEach((t, i) => {
 /* Sibling services sit on neighbouring wheels of the train. */
 const PAIR_SLOTS = [[0, 1], [3, 4]];
 const PAIRS = [['linkedin', 'github'], ['instagram', 'threads']];
-const SINGLES = ['mastodon', 'bluesky', 'mail', 'reddit'];
+const SINGLES = ['bluesky', 'mail', 'reddit'];   /* 'mastodon' retired with its wheel */
 
 /* Each hex is the brand's own published mark colour, cross-checked against the
    Simple Icons data set (which cites each vendor's brand page as its source).
@@ -1626,10 +1630,28 @@ class Component extends DCLogic {
         r: r, ro: ro, x: x, y: y, dir: dir, phase: phase,
         dur: (BASE_MS * t.teeth / 20).toFixed(2) });
     });
-    const minX = Math.min.apply(null, g.map(k => k.x - k.ro)) - 6;
-    const minY = Math.min.apply(null, g.map(k => k.y - k.ro)) - 6;
-    const maxX = Math.max.apply(null, g.map(k => k.x + k.ro)) + 6;
-    const maxY = Math.max.apply(null, g.map(k => k.y + k.ro)) + 6;
+    let minX = Math.min.apply(null, g.map(k => k.x - k.ro)) - 6;
+    let minY = Math.min.apply(null, g.map(k => k.y - k.ro)) - 6;
+    let maxX = Math.max.apply(null, g.map(k => k.x + k.ro)) + 6;
+    let maxY = Math.max.apply(null, g.map(k => k.y + k.ro)) + 6;
+    /* CENTRE THE HUBS, NOT THE TOOTH ENVELOPE (#2). The stage is centred by the
+       flex container using this box, and the box is the outer extent of the
+       teeth -- so whenever the two end wheels differ in size, the row of HUBS
+       sits off centre inside it even though the box itself is perfectly placed.
+       That is the whole of #2, and it went from invisible to a 10% offset the
+       moment a wheel was retired and the ends stopped being near-equal.
+
+       The eye reads the row of badges as "the train", not the tooth envelope, so
+       the box is grown on whichever side is short until it is symmetric about
+       the midpoint of the hubs. Nothing moves relative to anything else -- only
+       the frame the whole assembly is centred within. The outriggers are placed
+       in this same space afterwards and follow it. */
+    const hubMidX = (Math.min.apply(null, g.map(k => k.x)) + Math.max.apply(null, g.map(k => k.x))) / 2;
+    const hubMidY = (Math.min.apply(null, g.map(k => k.y)) + Math.max.apply(null, g.map(k => k.y))) / 2;
+    const halfX = Math.max(hubMidX - minX, maxX - hubMidX);
+    const halfY = Math.max(hubMidY - minY, maxY - hubMidY);
+    minX = hubMidX - halfX; maxX = hubMidX + halfX;
+    minY = hubMidY - halfY; maxY = hubMidY + halfY;
     g.forEach(k => { k.cx = k.x - minX; k.cy = k.y - minY; });
     const chains = g.filter(k => k.chainFrom !== null && k.chainFrom !== undefined).map(k => ({ a: g[k.chainFrom], b: k }));
     /* The wordmark hangs from the lowest wheel on two cords, clear of every gear. */

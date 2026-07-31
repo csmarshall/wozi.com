@@ -205,7 +205,11 @@ async def cdp():
     import re as _re, pathlib as _pl
     _src = (_pl.Path(__file__).resolve().parent.parent / "index.html").read_text()
     _i = _src.index("const TRAIN = [")
-    _want = len(_re.findall(r"slug:", _src[_i:_src.index("\n];", _i)]))
+    _block = _src[_i:_src.index("\n];", _i)]
+    # strip /* ... */ first: a RETIRED wheel is commented out, not deleted,
+    # and its slug would otherwise still be counted
+    _block = _re.sub(r"/\*.*?\*/", "", _block, flags=_re.S)
+    _want = len(_re.findall(r"slug:", _block))
     ok = (rot_changed == len(s1["rot"]) and len(s1["rot"]) > 0
           and dash_ok and not real_errors and worst < 2.0 and icons == _want)
     if icons != _want:

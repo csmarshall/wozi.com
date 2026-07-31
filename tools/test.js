@@ -62,7 +62,11 @@ const page = (function build() {
   /* TEETH_SUM is derived from the train's length now, so it is read the same way
      the page computes it rather than scraped as a literal -- a suite that hard-codes
      a number the page derives is exactly the drift this file exists to prevent. */
-  const trainLen = (grabBlock('const TRAIN =', '[', ']').match(/slug:/g) || []).length;
+  /* Comments are stripped first: a retired wheel is commented out rather than
+     deleted, and counting its slug would inflate the train's length -- which
+     feeds TEETH_SUM, so the error would land in the geometry. */
+  const trainLen = (grabBlock('const TRAIN =', '[', ']')
+    .replace(/\/\*[\s\S]*?\*\//g, '').match(/slug:/g) || []).length;
   const src = decls + '\n'
     + grabBlock('const PLANETARY_FLAVOURS =', '[', ']') + ';\n'
     + grabBlock('const RAVIGNEAUX_MENU =', '[', ']') + ';\n'
