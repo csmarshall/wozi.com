@@ -180,6 +180,19 @@ const BAND_RISE = 1.3;
    into the blank. The band alone is not the reserve: a wheel needs a continuous
    ring under it or the engraving is sitting on the edge of a hole. */
 const RIM_UNDER_BAND = 0.6;
+/* Where the middle of a line of Manrope sits above its own alphabetic baseline,
+   in ems: half of (ascent - descent), measured off the loaded face as 1.07 and
+   0.30. The engraving needs this because it does NOT ask the engine to centre
+   the type for it — see engraving(). `dominant-baseline: central` is the one
+   property in this file that three engines answer three ways, so the ring the
+   type rides on is offset by hand instead and the type is hung off the plain
+   alphabetic baseline, which every engine puts in the same place (#26).
+
+   The number is OURS, not the engine's: nothing reads a font metric at runtime,
+   so the same radius comes out of Blink, WebKit and Gecko alike. If Manrope
+   fails to load, the fallback's own middle differs by a few hundredths of an em
+   — on the order of a fifth of a pixel against an 11px band. */
+const BASELINE_MID = 0.385;
 const TOOTH_ROOT_MIN = 4;  /* px floor under any root circle. Without it a tiny gear
                               computes a negative root radius; with it, a gear small
                               enough to hit the floor comes out with SHORT teeth that
@@ -1494,9 +1507,21 @@ class Component extends DCLogic {
       if (width(f) / rr > MAX) f = (MAX * rr) / (txt.length * (per + track));
       return { f: f, sweep: (width(f) / rr) * 180 / Math.PI };
     };
-    /* Both lines sit on one ring, centred in the band. */
-    const rT = bandOut - m * (BAND_DEPTH / 2), rB = rT;
-    const T = fit(handle, rT, m * 0.80), B = fit(stamp, rB, m * 0.60);
+    /* Both lines are centred in the band; the rings they ride on are NOT at the band's
+       centre radius. Glyphs hang off the ALPHABETIC baseline — the one baseline every
+       engine puts in the same place — so each ring is dropped by BASELINE_MID of its own
+       font size to bring the middle of the lettering back onto the band's middle. The two
+       lines face opposite ways round the wheel: the top line's ascenders point outward and
+       the bottom line's point inward, so the same shift is opposite in sign. Asking the
+       engine to do this with `dominant-baseline: central` is what put the handle off
+       centre in WebKit while Blink and Gecko looked right (#26). */
+    const mid = bandOut - m * (BAND_DEPTH / 2);
+    /* Fit first at the band's centre: that is what decides whether a long handle has to
+       shrink, and the shift is measured in whatever size that lands on. */
+    const T0 = fit(handle, mid, m * 0.80), B0 = fit(stamp, mid, m * 0.60);
+    const rT = mid - BASELINE_MID * T0.f, rB = mid + BASELINE_MID * B0.f;
+    /* Re-fit on the ring each line actually rides — a tighter radius needs a wider sweep. */
+    const T = fit(handle, rT, T0.f), B = fit(stamp, rB, B0.f);
     return { handle: handle, stamp: stamp, rT: rT, rB: rB, fT: T.f, fB: B.f, sT: T.sweep, sB: B.sweep };
   }
 
@@ -2277,7 +2302,10 @@ class Component extends DCLogic {
       ).map((L, li) => h('text', {
         key: li, transform: 'translate(0,' + L.dy + ')',
         fontSize: eng.fT.toFixed(2), fill: L.col, fillOpacity: L.op, letterSpacing: '0.1em',
-        dominantBaseline: 'central',
+        /* Alphabetic on purpose: engraving() has already put the ring where the
+           lettering's own middle lands mid-band, so the engine is only asked for
+           the one baseline it cannot get wrong (#26). */
+        dominantBaseline: 'alphabetic',
         style: { fontFamily: "'Manrope',system-ui,sans-serif", fontWeight: 700 }
       }, h('textPath', { href: '#' + id + 'ringT', startOffset: '50%', textAnchor: 'middle' }, eng.handle)))) : null,
       /* Specular arc goes under the stamps, or it washes the bottom engraving out. */
@@ -2291,7 +2319,7 @@ class Component extends DCLogic {
       ).map((L, li) => h('text', {
         key: li, transform: 'translate(0,' + L.dy + ')',
         fontSize: eng.fB.toFixed(2), fill: L.col, fillOpacity: L.op, letterSpacing: '0.1em',
-        dominantBaseline: 'central',
+        dominantBaseline: 'alphabetic',   /* same reasoning as the handle above (#26) */
         style: { fontFamily: "'Manrope',system-ui,sans-serif", fontWeight: 700 }
       }, h('textPath', { href: '#' + id + 'ringB', startOffset: '50%', textAnchor: 'middle' }, eng.stamp)))) : null
     );

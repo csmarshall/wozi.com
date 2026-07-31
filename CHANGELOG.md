@@ -50,6 +50,44 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **#26 — Rim engraving off centre in WebKit only, and only there.** (Numbered
+  past #24 and #25: `index.html` already cites both, from a11y work that was
+  never logged here, and reusing them would have pointed those comments at this
+  entry.) The handle sat centred in Blink and Gecko and rode outward in WebKit —
+  Safari on the desktop and *every* browser on iOS, since they all run WebKit.
+  Measured rather than guessed, in all three engines on the same geometry, as
+  the offset of the line box's middle from the band's middle in fractions of
+  band depth: WebKit **+0.192**, Gecko −0.000, Blink −0.000. On the shipped
+  train that is 2.13px outward on an 11.13px band — far enough that the line box
+  cleared the band's outer edge by 0.4px while leaving 3.9px of bare metal
+  against the inner one.
+
+  The cause is `dominant-baseline: central`, which #16 introduced to fix this
+  exact symptom. WebKit does not apply it to text on a `textPath`: it lays the
+  glyphs on the plain alphabetic baseline, which is precisely the pre-#16
+  behaviour #16 described — *"the arc was being used as the baseline, so glyphs
+  rode above it."* #16 was never wrong about the fault. It was wrong to hand the
+  correction to a property that only two engines out of three implement here,
+  and Chrome-only harnesses could not see the difference.
+
+  Fixed by removing the engine's judgement from the loop rather than asking it
+  for a different answer. The type now hangs off `dominant-baseline: alphabetic`
+  — the initial value, the one every engine agrees on, and the one WebKit was
+  already using when it ignored the property — and `engraving()` offsets the
+  ring it rides on by `BASELINE_MID` (0.385em, half of Manrope's own ascent over
+  descent) so the middle of the lettering lands mid-band. The shift is opposite
+  in sign on the two lines, because the handle's ascenders point outward and the
+  machining stamp's point inward. Nothing reads a font metric at runtime: the
+  number is a constant in the page, so the radius is identical everywhere.
+  Re-measured after: WebKit **−0.003**, Gecko −0.005, Blink +0.003 — a spread of
+  0.193 of band depth between engines closed to 0.013, about a tenth of a pixel.
+
+  `tools/webkit_band.js` is the harness this needed and the repo did not have:
+  a WKWebView — Safari's engine, driven from JXA, no Safari setting enabled and
+  no window opened — that measures the engraving against its band and prints a
+  verdict. It reports PASS on the fixed page and FAIL on the old one. Every
+  other harness here is Chrome, which is how a WebKit-only fault shipped.
+
 - **#20 — Docs described a chain and a belt that render nowhere.** Every document
   in the repo said the page had a roller chain and a toothed belt; the shipped
   train is fully direct-mesh and draws neither. Verified against the served page:
