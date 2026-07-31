@@ -168,6 +168,40 @@ window.WOZI_CONFIG = {
   ],
 
   /* ---------------------------------------------------------------------------
+     ANALYTICS (#18) — cookieless, first-party, and OFF by default.
+
+     What was here before: Google Classic Analytics on the two cards/ pages,
+     with an EMPTY property id, so it never sent anything to any account. ga.js
+     was shut down in 2019. It has been removed.
+
+     How this works when enabled: a beacon is sent to a path on THIS domain —
+     no third-party script, no cookie, no consent banner, nothing to load. The
+     request itself is the datum, because CloudFront already writes an access
+     log line for every request it serves. Counting is then an Athena query over
+     logs you already pay to store, rather than a subscription.
+
+       endpoint  path prefix to beacon, e.g. '/e'. null disables everything and
+                 not one request is made.
+       pageview  count page loads
+       outbound  count badge clicks, as `<endpoint>/out/<service>`
+
+     Worth knowing before switching it on:
+       - Nothing serves <endpoint> yet, so these return 404. That is harmless
+         and still logs, which is the whole mechanism — but it does mean 404s in
+         your CloudFront metrics. A CloudFront Function returning 204 for /e/*
+         would silence that, and is the tidy version of this.
+       - navigator.sendBeacon survives the page being navigated away from, which
+         a plain fetch on an outbound click does not.
+       - Do not put anything identifying in the path. The service name is the
+         point; a handle or a referrer is not.
+     --------------------------------------------------------------------------- */
+  ANALYTICS: {
+    endpoint: null,
+    pageview: true,
+    outbound: true
+  },
+
+  /* ---------------------------------------------------------------------------
      ACCENTS — light value -> dark-mode counterpart. syncVars writes the accent
      onto the root element as an inline style, which beats any stylesheet rule,
      so each accent has to carry its own dark adaptation here or it loses one.
