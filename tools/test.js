@@ -55,7 +55,7 @@ function grabBlock(decl, open, close) {
 
 const page = (function build() {
   const consts = ['MODULE', 'TOOTH_ADD', 'TOOTH_DED', 'TOOTH_ROOT_MIN', 'BAND_RISE',
-    'BAND_DEPTH', 'RIM_UNDER_BAND', 'ROOT_MARGIN', 'MIN_MODULE',
+    'BAND_DEPTH', 'RIM_UNDER_BAND', 'BASELINE_MID', 'ROOT_MARGIN', 'MIN_MODULE',
     'TEETH_MIN', 'TEETH_MAX', 'TEETH_SLACK', 'TEETH_HOST',
     'ANG_MIN', 'ANG_MAX', 'BAND_MAX', 'ENDS_MAX'];
   const decls = consts.map(n => 'const ' + n + ' = ' + grabNumber(n) + ';').join('\n');
@@ -112,6 +112,24 @@ test('the engraving band is taller than the text it carries', () => {
   ok(page.BAND_DEPTH < textModules * 2.2,
     'band ' + page.BAND_DEPTH + 'm is more than twice its own lettering -- that surplus '
     + 'is radius taken from the works');
+});
+
+test('the ring the lettering rides on stays inside the band', () => {
+  /* engraving() does not ask the engine to centre the type: it hangs the glyphs off
+     the alphabetic baseline and drops the ring by BASELINE_MID of the font size, so
+     the middle of the lettering lands mid-band in every engine alike. That shift is
+     only safe while it is smaller than the band's own half-depth -- otherwise the
+     ring itself leaves the metal it is supposed to be cut into. Handle first (the
+     larger of the two lines, so the larger shift), then the machining stamp. */
+  const halfBand = page.BAND_DEPTH / 2;
+  [['handle', 0.80], ['stamp', 0.60]].forEach(([which, textModules]) => {
+    const shift = page.BASELINE_MID * textModules;
+    ok(shift < halfBand,
+      which + ' ring is dropped ' + shift.toFixed(3) + 'm, past the band half-depth '
+      + halfBand.toFixed(3) + 'm -- the arc would sit outside its own band');
+  });
+  ok(page.BASELINE_MID > 0 && page.BASELINE_MID < 0.5,
+    'BASELINE_MID ' + page.BASELINE_MID + ' is not a plausible ascent-over-descent middle');
 });
 
 /* ---- 2. the bore derives outside-in -------------------------------------- */

@@ -25,6 +25,15 @@ CDP; `pip` needs websockets, and Pillow/numpy for the image-analysis ones).
   mesh_poly.js /             and minimum gap at all six adjacent pairs, for
   mesh_inv.js                straight and involute profiles.
 - palettes.py              renders palette candidates side by side.
+- webkit_band.js <url>     the only harness here that is NOT Chrome. Builds a
+                           WKWebView — Safari's engine, and every iOS
+                           browser's — and measures the rim engraving against
+                           its band. Run with
+                           `osascript -l JavaScript tools/webkit_band.js <url>`;
+                           needs no Safari setting enabled and opens no window.
+                           Exists because #19 was invisible to everything else
+                           in this directory: Blink and Gecko centred the
+                           handle, WebKit put it 19% of a band depth out.
 
 Testing lesson recorded in git history worth repeating here: synthesized CDP
 pointer events never trigger native link drag-and-drop, so a harness can pass
