@@ -15,6 +15,7 @@
  */
 
 ObjC.import('Cocoa');
+ObjC.import('stdlib');   /* for $.exit -- osascript returns 0 no matter what run() returns */
 ObjC.import('WebKit');
 
 const MEASURE = `
@@ -78,10 +79,10 @@ function run(argv) {
     raw = (err && !err.isNil()) ? null : (res && !res.isNil() ? ObjC.unwrap(res) : null);
   });
   for (let i = 0; i < 60 && raw === null; i++) pump(0.25);
-  if (raw === null) return 'FATAL: WebKit never answered (is anything serving ' + url + '?)';
+  if (raw === null) { console.log('FATAL: WebKit never answered (is anything serving ' + url + '?)'); $.exit(2); }
 
   const d = JSON.parse(raw);
-  if (d.err) return 'FATAL: ' + d.err;
+  if (d.err) { console.log('FATAL: ' + d.err); $.exit(2); }
 
   const span = d.hi - d.lo;
   const cover = 100 * span / d.vw;
@@ -102,11 +103,43 @@ function run(argv) {
   out.push('linked wheels span     : ' + linkSpan.toFixed(1) + 'px, '
     + (100 * linkSpan / d.vw).toFixed(1) + '% of the window');
   out.push('');
-  /* devices.py wants the assembly at both edges; the same bar applies here. */
-  const ok = cover >= 98;
-  out.push(ok ? 'RESULT: PASS — the assembly reaches both edges'
-    : 'RESULT: FAIL — the assembly covers only ' + cover.toFixed(1)
-      + '% of the long axis, leaving ' + d.lo.toFixed(0) + 'px and '
-      + (d.vw - d.hi).toFixed(0) + 'px bare');
-  return out.join('\n');
+  /* TWO-SIDED, deliberately (#46). The first version of this file checked only
+     `cover >= 98` and PASSED on the very train it was written to catch: the
+     outriggers bleed to 127% of the window, so the assembly reaches both edges
+     while the linked wheels sit at 29% and the machine reads as a toy in the
+     middle of the screen. A bound with no counterpart is how #44 cleared 20
+     device profiles, and this harness had the identical flaw within an hour of
+     being written to expose it.
+     The floor is 0.45, taken from CHROME measurements: 55-64% on every phone,
+     tablet and laptop profile and 30-33% on the ultrawides, a 22-point empty
+     gap, so 0.45 sits in the middle of it.
+     BUT WEBKIT RUNS LOWER, and by a lot: 44.3% at 1280x900 where Chrome reports
+     60.7%, and 27.8% at 2000x1200 where Chrome reports 38.5%. So this harness
+     currently fails at EVERY desktop width, not only the wide ones. That is not
+     a bad threshold -- it is #44 being worse in WebKit than the Chrome numbers
+     suggested, which is exactly what Charles saw and what no Blink harness could
+     report. Do not loosen the floor to make this green. Re-derive it from WebKit
+     numbers once #44 is fixed, and expect it to end up HIGHER, not lower.
+     Caveat: per-load variance in one engine is about 3.4 points, so any single
+     reading near the boundary is noise. Compare medians, not samples. This file is macOS-only and is NOT in deploy.yml,
+     so the floor gates nothing and cannot block a push -- which is why it can
+     land before #44 is fixed, whereas devices.py's copy of it must not. */
+  const linkShare = linkSpan / d.vw;
+  const LINK_FLOOR = 0.45;
+  const reaches = cover >= 98;
+  const bigEnough = linkShare >= LINK_FLOOR;
+  const ok = reaches && bigEnough;
+  if (!reaches) out.push('FAIL: the assembly covers only ' + cover.toFixed(1)
+    + '% of the long axis, leaving ' + d.lo.toFixed(0) + 'px and '
+    + (d.vw - d.hi).toFixed(0) + 'px bare');
+  if (!bigEnough) out.push('FAIL: the linked wheels span only '
+    + (100 * linkShare).toFixed(1) + '% of the window, under the '
+    + (100 * LINK_FLOOR).toFixed(0) + '% floor — the train reads as a toy in the '
+    + 'middle of the screen even though the ghosts reach the edges (#44)');
+  out.push(ok ? 'RESULT: PASS — reaches both edges AND the train is big enough'
+              : 'RESULT: FAIL');
+  /* see the note in webkit_band.js: osascript exits 0 regardless of what run()
+     returns, so this has to say so itself. */
+  console.log(out.join('\n'));
+  $.exit(ok ? 0 : 1);
 }

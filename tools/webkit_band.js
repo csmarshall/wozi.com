@@ -26,6 +26,7 @@
  * past about +/-0.02 is visible on a phone.
  */
 ObjC.import('Cocoa');
+ObjC.import('stdlib');   /* for $.exit -- osascript returns 0 no matter what run() returns */
 ObjC.import('WebKit');
 
 const MEASURE = `
@@ -112,10 +113,10 @@ function run(argv) {
     raw = (err && !err.isNil()) ? null : (res && !res.isNil() ? ObjC.unwrap(res) : null);
   });
   for (let i = 0; i < 60 && raw === null; i++) pump(0.25);
-  if (raw === null) return 'FATAL: WebKit never answered (is anything serving ' + url + '?)';
+  if (raw === null) { console.log('FATAL: WebKit never answered (is anything serving ' + url + '?)'); $.exit(2); }
 
   const d = JSON.parse(raw);
-  if (!d.rows.length) return 'FATAL: no engraved text found at ' + url;
+  if (!d.rows.length) { console.log('FATAL: no engraved text found at ' + url); $.exit(2); }
 
   const pad = (s, w) => (' '.repeat(w) + s).slice(-w);
   const num = (v, w, p) => pad(v.toFixed(p === undefined ? 2 : p), w);
@@ -137,6 +138,11 @@ function run(argv) {
     + '   min ' + Math.min.apply(null, off).toFixed(4)
     + '   max ' + Math.max.apply(null, off).toFixed(4));
   lines.push('positive = the lettering rides OUTWARD; overOut > 0 = it has left the band');
-  lines.push(Math.abs(mean) < 0.02 ? 'RESULT: PASS' : 'RESULT: FAIL — not centred in WebKit');
-  return lines.join('\n');
+  const ok = Math.abs(mean) < 0.02;
+  lines.push(ok ? 'RESULT: PASS' : 'RESULT: FAIL — not centred in WebKit');
+  /* osascript returns 0 whatever run() returns, so a printed FAIL was invisible
+     to any caller -- no shell && chain, no git hook, no scheduled job could gate
+     on it. Exit explicitly. */
+  console.log(lines.join('\n'));
+  $.exit(ok ? 0 : 1);
 }
