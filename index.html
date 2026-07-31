@@ -1104,14 +1104,15 @@ class Component extends DCLogic {
     const sx = e.clientX, sy = e.clientY, ox0 = off.x, oy0 = off.y;
     let moved = false;
     const move = (ev) => {
-      const dx = ev.clientX - sx + ox0, dy = ev.clientY - sy + oy0;
-      const d = Math.hypot(dx, dy) || 1;
-      /* Tether reach ~3 cap-widths: enough to pull the disc clear of the whole
-         centre works. 1.6 stopped at roughly the well radius, which read as a
-         wall rather than a stretch. */
-      const max = el.offsetWidth * 3.2;
-      const lim = max * Math.tanh(d / max);
-      off.x = dx / d * lim; off.y = dy / d * lim;
+      /* IT GOES WHERE YOU PUT IT. This used to run the offset through
+         max * tanh(d / max) with max = 3.2 cap-widths, which is an asymptote:
+         however hard you pulled, the cap stopped at about three of its own
+         widths and sat there. Charles's question was the right one -- if it
+         comes off the axle, it should come all the way off. The spring is what
+         makes it a magnet, not a leash, and that is untouched: let go anywhere
+         and it still flies home. */
+      off.x = ev.clientX - sx + ox0;
+      off.y = ev.clientY - sy + oy0;
       off.vx = 0; off.vy = 0;
       if (Math.hypot(ev.clientX - sx, ev.clientY - sy) > 6) moved = true;
       this._badgeDragging = slug;
@@ -1121,6 +1122,9 @@ class Component extends DCLogic {
       window.removeEventListener('pointerup', up);
       this._badgeDragging = null;
       if (moved) this._badgeMoved = slug;
+      /* Nothing else re-renders on release, so the pill would stay open until
+         the next unrelated render. */
+      this.forceUpdate();
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
@@ -1316,12 +1320,12 @@ class Component extends DCLogic {
           o.vy += (-K * o.y - C * o.vy) * dts;
           o.x += o.vx * dts; o.y += o.vy * dts;
           if (Math.abs(o.x) < 0.4 && Math.abs(o.y) < 0.4 && Math.abs(o.vx) < 8 && Math.abs(o.vy) < 8) {
-            el.style.transform = 'translate(-50%,-50%) scale(' + (this.state.hover === slug ? 1.16 : 1) + ')';
+            el.style.transform = 'translate(-50%,-50%) scale(' + ((this.state.hover === slug || this._badgeDragging === slug) ? 1.06 : 1) + ')';
             delete this._badgeOff[slug];
             continue;
           }
         }
-        el.style.transform = 'translate(-50%,-50%) translate(' + o.x.toFixed(1) + 'px,' + o.y.toFixed(1) + 'px) scale(' + (this.state.hover === slug ? 1.16 : 1) + ')';
+        el.style.transform = 'translate(-50%,-50%) translate(' + o.x.toFixed(1) + 'px,' + o.y.toFixed(1) + 'px) scale(' + ((this.state.hover === slug || this._badgeDragging === slug) ? 1.06 : 1) + ')';
       }
       this._raf = requestAnimationFrame(step);
     };
@@ -2596,7 +2600,11 @@ class Component extends DCLogic {
       const label = SITES[g.slug] ? SITES[g.slug].label : '';
       const pillType = pillFont(g.slug);
       const labelW = this.textWidth(label, pillType) + 4;
-      const on = hov === g.slug;
+      /* Open while hovered OR while being dragged. Without the second half the
+         pill collapses the instant the pointer leaves the plate, which on a
+         drag is immediately -- you would be dragging a circle you had just
+         watched turn back from a pill. */
+      const on = hov === g.slug || this._badgeDragging === g.slug;
       const bo = this._badgeOff[g.slug];
       return {
         label: site.label, path: site.path, href: site.href,
@@ -2614,7 +2622,7 @@ class Component extends DCLogic {
            makes the timing ours: it comes up in 90ms off the same hover state that
            already drives the badge. The badges do not rotate, only the gear SVGs
            do, so a transition here does not touch the one-clock invariant. The
-           counter-scale holds the text still while the badge grows to 1.16. */
+           counter-scale holds the text still while the badge grows. */
         /* THE PLATE MORPHS INTO A PILL. The label used to float above the badge
            in its own bubble; now the plate itself grows sideways and the name
            appears inside it, so one object changes shape rather than a second
