@@ -1313,8 +1313,32 @@ class Component extends DCLogic {
     const crossAvail = alongX ? hgt : w;
     const crossSolved = alongX ? solved.h : solved.w;
     const CROSS_BLEED = 1.25;
-    const fit = Math.max(0.28, Math.min(longAvail / longSolved,
-                                        crossAvail * CROSS_BLEED / crossSolved));
+    /* A CEILING ON WHEEL SIZE, because filling the screen is the chain's job and
+       not the individual wheel's. Removing the old cap made the train span the
+       long axis by inflating every wheel to about 1.9x -- Charles's word for the
+       result was HUGE, and he was right. The escape runs already keep adding
+       outriggers until they are genuinely off the edge, and a smaller scale means
+       each run covers MORE solve units, so it simply grows more wheels. Capping
+       here therefore costs no coverage: it moves the filling from one dimension
+       (bigger) to the other (longer), which is what a machine continuing past the
+       frame should look like. */
+    const GS_MAX = 1.25;
+    /* THE LINKED TRAIN TAKES A SHARE, NOT THE WHOLE. `solved` is the eight linked
+       wheels only -- the outriggers are added afterwards, in fitEscapes -- so
+       scaling `solved` to the full long axis leaves the icons spanning edge to
+       edge with nowhere for a ghost to sit, and anything that does not fit simply
+       runs off. That is what Charles saw in Firefox portrait.
+
+       Sizing the LINKS to a share of the axis is what he actually asked for and
+       what makes the picture read: the icons shrink as more of them are added,
+       they stay wholly on screen, and the space left at both ends is where the
+       leading and trailing ghosts live. The ghost runs then fill that space and
+       keep going off the edge, so the machine still covers 100% of the long axis
+       -- the coverage comes from the chain being longer, never from the wheels
+       being bigger. */
+    const LINK_SHARE = 0.78;
+    const fit = Math.max(0.28, Math.min(LINK_SHARE * longAvail / longSolved,
+                                        crossAvail * CROSS_BLEED / crossSolved, GS_MAX));
     const root = document.documentElement.style;
     root.setProperty('--gsfit', fit.toFixed(3));
     this.fitEscapes(fit);

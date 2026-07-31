@@ -141,7 +141,7 @@ async def main():
         return 2
 
     print(f"Chrome device emulation (not an iOS simulator — none installed)\n")
-    print(f"{'device':22} {'orient':10} {'viewport':11} {'covered':7} {'off-ctr':8} verdict")
+    print(f"{'device':22} {'orient':10} {'viewport':11} {'covered':7} {'links':8} verdict")
     bad = 0
     mid = 0
     async with websockets.connect(ws_url, max_size=40 * 1024 * 1024) as ws:
@@ -188,7 +188,13 @@ async def main():
                 covered = max(0.0, min(a1, long_px) - max(a0, 0)) / long_px
                 reaches = (a0 <= 1) and (a1 >= long_px - 1)
                 centre_off = abs(((l0 + l1) / 2) - long_px / 2) / long_px
-                ok = (train_long == want) and reaches and centre_off <= 0.06 and not m["overflowX"]
+                # The LINKED wheels must sit wholly on screen with room at both
+                # ends for a ghost -- coverage comes from the chain being longer,
+                # never from an icon running off the edge.
+                link_share = (l1 - l0) / long_px
+                links_in = (l0 >= -1) and (l1 <= long_px + 1) and link_share <= 0.88
+                ok = ((train_long == want) and reaches and centre_off <= 0.06
+                      and links_in and not m["overflowX"])
                 if not ok:
                     bad += 1
                 why = []
@@ -198,10 +204,12 @@ async def main():
                     why.append(f"stops {max(0, a0):.0f}px short / {max(0, long_px - a1):.0f}px short")
                 if centre_off > 0.06:
                     why.append(f"links off-centre by {centre_off:.0%}")
+                if not links_in:
+                    why.append(f"links span {link_share:.0%} / run off the edge")
                 if m["overflowX"]:
                     why.append("scrolls sideways")
                 print(f"{label:22} {orient:10} {str(w) + 'x' + str(h):11} "
-                      f"{covered * 100:5.0f}%   {centre_off * 100:4.0f}%    "
+                      f"{covered * 100:5.0f}%   {link_share * 100:4.0f}%    "
                       f"{'ok' if ok else 'FAIL: ' + ', '.join(why)}")
 
     proc.kill()
