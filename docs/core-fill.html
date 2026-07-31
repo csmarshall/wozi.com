@@ -1,0 +1,232 @@
+<meta charset="utf-8">
+<title>filling the web — candidates at real dealt sizes</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; padding: 26px clamp(12px, 3vw, 40px) 70px;
+         font: 15px/1.55 ui-sans-serif, -apple-system, "Segoe UI", sans-serif;
+         background: #14181c; color: #d8dee4; }
+  h1 { font-size: 19px; font-weight: 600; margin: 0 0 4px; }
+  .sub { color: #8b969f; margin: 0 0 22px; max-width: 66em; }
+  h2 { font-size: 15px; font-weight: 600; margin: 30px 0 2px; color: #eef2f5; }
+  .note { color: #8b969f; margin: 0 0 12px; font-size: 13.5px; max-width: 66em; }
+  table { border-collapse: collapse; margin-top: 8px; }
+  td { padding: 0 10px 4px 0; vertical-align: top; }
+  th { padding: 0 10px 6px 0; text-align: left; font-weight: 600;
+       color: #97a2ab; font-size: 13px; }
+  .cell { text-align: center; }
+  .cap { font-size: 12.5px; color: #97a2ab; margin-top: 3px; }
+  .num { font-variant-numeric: tabular-nums; color: #cfd6dc; }
+  .win { color: #7fc08a; }
+  .cost { color: #e0a05a; }
+  code { background: #1e242a; padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
+</style>
+
+<h1>Filling the web — four candidates, at the sizes wheels are actually dealt</h1>
+<p class="sub">
+  Every wheel here is drawn from <code>index.html</code>'s own numbers:
+  <code>r = MODULE·teeth/2</code>, <code>bandIn = r − MODULE·(1.3+1.59)</code>,
+  <code>wellR = bandIn − 2</code>, <code>hubR = max(8, 0.13·r)</code>, boss at
+  <code>hubR·1.5</code>. All four columns are at the <strong>same magnification</strong>,
+  so the 13-tooth wheel really is that much smaller than the 19-tooth one.
+  <strong>Fill</strong> is pattern area over the area of the annulus it is
+  supposed to fill.
+</p>
+
+<div id="out"></div>
+
+<script>
+const NS = 'http://www.w3.org/2000/svg';
+const M = 7, WALL = 1.2, MAG = 2.15;
+const el = (n, a) => { const e = document.createElementNS(NS, n);
+  for (const k in a) e.setAttribute(k, a[k]); return e; };
+const P = (rad, a) => [rad * Math.cos(a), rad * Math.sin(a)];
+const fmt = (p) => p.map(v => v.toFixed(2)).join(',');
+
+function geom(teeth) {
+  const r = M * teeth / 2;
+  const bandOut = r - M * 1.3, bandIn = bandOut - M * 1.59;
+  const wellR = Math.min(Math.max(4, r - M * 3.1), bandIn - 2);
+  const hubR = Math.max(8, r * 0.13);
+  return {r, teeth, bandOut, bandIn, wellR, hubR, rIn: hubR * 1.5 + WALL};
+}
+
+/* ---------- 1. the hex core that ships today ------------------------- */
+const DIRS = [[1,0],[1,-1],[0,-1],[-1,0],[-1,1],[0,1]];
+const ringOf = (k) => {
+  if (k === 0) return [[0, 0]];
+  const out = []; let q = DIRS[4][0] * k, rr = DIRS[4][1] * k;
+  for (let i = 0; i < 6; i++) for (let j = 0; j < k; j++) { out.push([q, rr]); q += DIRS[i][0]; rr += DIRS[i][1]; }
+  return out;
+};
+function hexcore(g) {
+  const cells = [];
+  let cell = 0, kMin = 0, kMax = -1, bestReach = -1;
+  for (let c = 4.8; c >= 3.1; c -= 0.05) {
+    const step = c + WALL / 2, px = Math.sqrt(3) * step, ry = 1.5 * step;
+    const at = (q, rr) => [px * (q + rr / 2), ry * rr];
+    let hi = -1;
+    for (let k = 0; k <= 14; k++) {
+      let fits = true;
+      for (const [q, rr] of ringOf(k)) { const p = at(q, rr);
+        if (Math.hypot(p[0], p[1]) + c > g.wellR - 0.5) { fits = false; break; } }
+      if (!fits) break; hi = k;
+    }
+    if (hi < 0) continue;
+    let lo = 0;
+    for (let k = 0; k <= hi; k++) {
+      let clear = true;
+      for (const [q, rr] of ringOf(k)) { const p = at(q, rr);
+        if (Math.hypot(p[0], p[1]) - c < g.rIn) { clear = false; break; } }
+      if (clear) { lo = k; break; } lo = k + 1;
+    }
+    if (lo > hi) continue;
+    let reach = 0;
+    for (const [q, rr] of ringOf(hi)) { const p = at(q, rr); reach = Math.max(reach, Math.hypot(p[0], p[1]) + c); }
+    if (reach > bestReach) { bestReach = reach; cell = c; kMin = lo; kMax = hi; }
+  }
+  if (!cell) return {paths: [], n: 0, area: 0};
+  const step = cell + WALL / 2, px = Math.sqrt(3) * step, ry = 1.5 * step;
+  let area = 0;
+  for (let k = kMin; k <= kMax; k++) for (const [q, rr] of ringOf(k)) {
+    const cx = px * (q + rr / 2), cy = ry * rr;
+    let d = '';
+    for (let v = 0; v < 6; v++) { const a = (90 + 60 * v) * Math.PI / 180;
+      d += (v ? 'L' : 'M') + fmt([cx + cell * Math.cos(a), cy + cell * Math.sin(a)]) + ' '; }
+    cells.push(d + 'Z');
+    area += 3 * Math.sqrt(3) / 2 * cell * cell;
+  }
+  return {paths: cells, n: cells.length, area};
+}
+
+/* ---------- 2. cartesian triangles, whole cells only ------------------ */
+function triCart(g) {
+  let best = null;
+  for (let a = 9; a >= 3.4; a -= 0.15) {
+    const pt = (i, j) => [a * (i + j / 2), a * (Math.sqrt(3) / 2) * j];
+    const n = Math.ceil(g.wellR / a) + 3, keep = [];
+    for (let j = -n; j <= n; j++) for (let i = -n; i <= n; i++) {
+      const up = [pt(i, j), pt(i + 1, j), pt(i, j + 1)];
+      const dn = [pt(i + 1, j), pt(i + 1, j + 1), pt(i, j + 1)];
+      for (const t of [up, dn]) {
+        if (!t.every(p => Math.hypot(p[0], p[1]) <= g.wellR - 0.5)) continue;
+        if (t.some(p => Math.hypot(p[0], p[1]) < g.rIn)) continue;
+        keep.push(t);
+      }
+    }
+    if (keep.length < 6) continue;
+    if (!best) best = {a, keep};
+  }
+  if (!best) return {paths: [], n: 0, area: 0};
+  const paths = [], k = 0.88;
+  let area = 0;
+  for (const t of best.keep) {
+    const c = [(t[0][0] + t[1][0] + t[2][0]) / 3, (t[0][1] + t[1][1] + t[2][1]) / 3];
+    const ins = t.map(p => [c[0] + (p[0] - c[0]) * k, c[1] + (p[1] - c[1]) * k]);
+    paths.push('M' + ins.map(fmt).join(' L') + ' Z');
+    area += Math.sqrt(3) / 4 * best.a * best.a * k * k;
+  }
+  return {paths, n: paths.length, area};
+}
+
+/* ---------- shared: how many concentric courses, and how wide -------- */
+function courses(g, target) {
+  const span = g.wellR - 0.5 - g.rIn;
+  const nC = Math.max(1, Math.round(span / target));
+  return {nC, h: span / nC, span};
+}
+
+/* ---------- 3. polar brickwork --------------------------------------- */
+function polarBrick(g) {
+  const {nC, h} = courses(g, 5.0);
+  const paths = []; let area = 0;
+  let k = Math.max(6, Math.round(2 * Math.PI * (g.rIn + h / 2) / h));
+  k = Math.round(k / 6) * 6 || 6;
+  for (let c = 0; c < nC; c++) {
+    const r0 = g.rIn + c * h, r1 = r0 + h, rm = (r0 + r1) / 2;
+    if (2 * Math.PI * rm / k > 1.9 * h) k *= 2;
+    const off = (c % 2) * Math.PI / k;
+    const gapA = WALL / rm, i0 = WALL / 2;
+    for (let s = 0; s < k; s++) {
+      const a0 = off + s * 2 * Math.PI / k + gapA / 2;
+      const a1 = off + (s + 1) * 2 * Math.PI / k - gapA / 2;
+      const R0 = r0 + i0, R1 = r1 - i0;
+      if (R1 <= R0 || a1 <= a0) continue;
+      paths.push('M' + fmt(P(R0, a0)) + ' A' + R0.toFixed(2) + ',' + R0.toFixed(2) + ' 0 0 1 ' + fmt(P(R0, a1))
+               + ' L' + fmt(P(R1, a1)) + ' A' + R1.toFixed(2) + ',' + R1.toFixed(2) + ' 0 0 0 ' + fmt(P(R1, a0)) + ' Z');
+      area += (a1 - a0) / 2 * (R1 * R1 - R0 * R0);
+    }
+  }
+  return {paths, n: paths.length, area};
+}
+
+/* ---------- 4. polar isogrid: a triangulated annulus ----------------- */
+function polarIso(g) {
+  const {nC, h} = courses(g, 5.4);
+  let k = Math.max(6, Math.round(2 * Math.PI * (g.rIn + h) / h / 2));
+  k = Math.round(k / 3) * 3 || 6;
+  const paths = []; let area = 0;
+  for (let c = 0; c < nC; c++) {
+    const r0 = g.rIn + c * h, r1 = r0 + h;
+    const oA = (c % 2) * Math.PI / k, oB = ((c + 1) % 2) * Math.PI / k;
+    const A = (s) => P(r0, oA + s * 2 * Math.PI / k);
+    const B = (s) => P(r1, oB + s * 2 * Math.PI / k);
+    for (let s = 0; s < k; s++) {
+      const tris = [[A(s), A(s + 1), B(c % 2 ? s + 1 : s)],
+                    [B(s), B(s + 1), A(c % 2 ? s : s + 1)]];
+      for (const t of tris) {
+        const ctr = [(t[0][0] + t[1][0] + t[2][0]) / 3, (t[0][1] + t[1][1] + t[2][1]) / 3];
+        const ins = t.map(p => [ctr[0] + (p[0] - ctr[0]) * 0.84, ctr[1] + (p[1] - ctr[1]) * 0.84]);
+        paths.push('M' + ins.map(fmt).join(' L') + ' Z');
+        area += Math.abs((ins[1][0] - ins[0][0]) * (ins[2][1] - ins[0][1])
+                       - (ins[2][0] - ins[0][0]) * (ins[1][1] - ins[0][1])) / 2;
+      }
+    }
+  }
+  return {paths, n: paths.length, area};
+}
+
+/* ---------- draw ----------------------------------------------------- */
+function wheel(g, res) {
+  const box = Math.ceil(g.r * MAG) + 8;
+  const svg = el('svg', {viewBox: `${-box} ${-box} ${2 * box} ${2 * box}`,
+                         width: 2 * box / 1.6, height: 2 * box / 1.6});
+  const root = el('g', {transform: `scale(${MAG})`});
+  root.appendChild(el('circle', {r: g.r, fill: '#2a3238', stroke: '#3d474e', 'stroke-width': 0.5}));
+  root.appendChild(el('circle', {r: (g.bandOut + g.bandIn) / 2, fill: 'none',
+                                 stroke: '#4a555d', 'stroke-width': g.bandOut - g.bandIn}));
+  root.appendChild(el('circle', {r: g.wellR, fill: '#232b31'}));
+  for (const d of res.paths)
+    root.appendChild(el('path', {d, fill: '#39434a', stroke: '#5b6771', 'stroke-width': 0.45}));
+  root.appendChild(el('circle', {r: g.hubR * 1.5, fill: '#1b2126', stroke: '#5b6771', 'stroke-width': 0.5}));
+  svg.appendChild(root);
+  return svg;
+}
+
+const CANDS = [['Hex core (ships today)', hexcore],
+               ['Cartesian triangles', triCart],
+               ['Polar brickwork', polarBrick],
+               ['Polar isogrid', polarIso]];
+const out = document.getElementById('out');
+
+for (const teeth of [13, 16, 19]) {
+  const g = geom(teeth);
+  const annulus = Math.PI * ((g.wellR - 0.5) ** 2 - g.rIn ** 2);
+  const h2 = document.createElement('h2');
+  h2.textContent = `${teeth} teeth — blank r ${g.r.toFixed(1)}, annulus ${g.rIn.toFixed(1)} → ${(g.wellR - 0.5).toFixed(1)} (${(g.wellR - 0.5 - g.rIn).toFixed(1)} wide)`;
+  out.appendChild(h2);
+  const t = document.createElement('table');
+  const tr1 = document.createElement('tr'), tr2 = document.createElement('tr');
+  for (const [name, fn] of CANDS) {
+    const res = fn(g);
+    const th = document.createElement('th'); th.textContent = name; tr1.appendChild(th);
+    const td = document.createElement('td'); td.className = 'cell';
+    td.appendChild(wheel(g, res));
+    const cap = document.createElement('div'); cap.className = 'cap';
+    const pct = 100 * res.area / annulus;
+    cap.innerHTML = `<span class="num">${res.n}</span> cells · fill `
+      + `<span class="${pct >= 60 ? 'win' : 'cost'}">${pct.toFixed(0)}%</span>`;
+    td.appendChild(cap); tr2.appendChild(td);
+  }
+  t.appendChild(tr1); t.appendChild(tr2); out.appendChild(t);
+}
+</script>

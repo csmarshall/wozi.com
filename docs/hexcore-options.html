@@ -1,0 +1,367 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>hex core — the three ways out of #38</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { margin: 0; padding: 28px clamp(12px, 4vw, 48px) 64px;
+         font: 15px/1.55 ui-sans-serif, -apple-system, "Segoe UI", sans-serif;
+         background: #14181c; color: #d8dee4; }
+  h1 { font-size: 19px; font-weight: 600; margin: 0 0 4px; letter-spacing: .01em; }
+  .sub { color: #8b969f; margin: 0 0 26px; max-width: 62em; }
+  .row { display: flex; flex-wrap: wrap; gap: clamp(14px, 3vw, 34px); align-items: flex-start; }
+  .panel { flex: 1 1 300px; min-width: 280px; max-width: 420px; }
+  .cap { margin-top: 12px; }
+  .cap b { display: block; font-size: 15px; color: #eef2f5; margin-bottom: 3px; }
+  .cap p { margin: 0 0 6px; color: #97a2ab; font-size: 13.5px; }
+  .cost { color: #e0a05a; font-size: 13px; }
+  .win { color: #7fc08a; font-size: 13px; }
+  .num { font-variant-numeric: tabular-nums; color: #cfd6dc; }
+  code { background: #1e242a; padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
+  footer { margin-top: 40px; color: #7b858d; font-size: 13px; max-width: 62em; }
+</style>
+
+<h1>#38 — the hex core does not reach the flats</h1>
+<p class="sub">
+  A hexagon inscribed in a circle falls short by <span class="num">1&nbsp;&minus;&nbsp;cos&nbsp;30°&nbsp;=&nbsp;13.4%</span>
+  of the radius, in six places. This page draws the same lattice the wheel uses —
+  pointy-top cells, centres <code>√3·s</code> apart along a row and <code>1.5·s</code> between rows,
+  kept by hex-ring distance — at the three treatments, so the choice is visual rather than
+  arithmetic. Same cell size in all three; only the boundary differs.
+</p>
+
+<div class="row" id="row"></div>
+
+<footer id="foot"></footer>
+
+<script>
+const SVGNS = 'http://www.w3.org/2000/svg';
+const R_BLANK = 150;
+const MODULE  = 7;
+// Same outside-in derivation the page uses: blank -> band -> rim -> bore.
+const BORE = R_BLANK - MODULE * (1.3 + 1.59) - MODULE * 0.6;
+
+/* axial (q,r) -> centre, for pointy-top cells of circumradius s */
+const centre = (q, r, s) => [Math.sqrt(3) * s * (q + r / 2), 1.5 * s * r];
+const ring   = (q, r) => (Math.abs(q) + Math.abs(r) + Math.abs(q + r)) / 2;
+const verts  = (cx, cy, s) => Array.from({length: 6}, (_, i) => {
+  const a = Math.PI / 180 * (60 * i - 90);          // pointy-top
+  return [cx + s * Math.cos(a), cy + s * Math.sin(a)];
+});
+const cellsWithin = (R) => {
+  const out = [];
+  for (let q = -R; q <= R; q++)
+    for (let r = Math.max(-R, -q - R); r <= Math.min(R, -q + R); r++)
+      out.push([q, r]);
+  return out;
+};
+const reachOf = (R, s) => {
+  let m = 0;
+  for (const [q, r] of cellsWithin(R)) {
+    const [cx, cy] = centre(q, r, s);
+    for (const [x, y] of verts(cx, cy, s)) m = Math.max(m, Math.hypot(x, y));
+  }
+  return m;
+};
+
+/* The shipped objective: largest reach of FULL hexagons. Sweep every ring
+   count, size each to touch the bore, keep whichever gets furthest out. */
+let best = null;
+for (let R = 1; R <= 7; R++) {
+  const s = BORE / (reachOf(R, 1) || 1);            // reach is linear in s
+  if (s < 3.2) continue;                             // legibility floor
+  const reach = reachOf(R, s);
+  if (!best || reach > best.reach) best = {R, s, reach};
+}
+const {R, s} = best;
+
+/* convex hull, for the hexagonal bore in option C */
+const hull = (pts) => {
+  const p = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cross = (o, a, b) => (a[0]-o[0])*(b[1]-o[1]) - (a[1]-o[1])*(b[0]-o[0]);
+  const half = (src) => {
+    const h = [];
+    for (const q of src) {
+      while (h.length >= 2 && cross(h[h.length-2], h[h.length-1], q) <= 0) h.pop();
+      h.push(q);
+    }
+    h.pop();
+    return h;
+  };
+  return half(p).concat(half(p.slice().reverse()));
+};
+
+const kept = cellsWithin(R);
+const allV = kept.flatMap(([q, r]) => { const [cx, cy] = centre(q, r, s); return verts(cx, cy, s); });
+const H = hull(allV);
+
+/* Option B, honestly: at the size above, the outermost VERTEX already touches
+   the bore, so not one further whole cell fits — the option is empty as stated.
+   It only exists if the cells shrink first. So B is drawn one step down: sized
+   so the patch's flats touch instead of its points, then filled. */
+const sB = s * Math.cos(Math.PI / 6);
+const keptB = cellsWithin(R);
+const extra = [];
+for (let q = -R - 3; q <= R + 3; q++)
+  for (let r = -R - 3; r <= R + 3; r++) {
+    if (ring(q, r) <= R) continue;
+    const [cx, cy] = centre(q, r, sB);
+    if (verts(cx, cy, sB).every(([x, y]) => Math.hypot(x, y) <= BORE)) extra.push([q, r]);
+  }
+const emptyAtFullSize = cellsWithin(R + 3).filter(([q, r]) => ring(q, r) > R)
+  .filter(([q, r]) => { const [cx, cy] = centre(q, r, s);
+    return verts(cx, cy, s).every(([x, y]) => Math.hypot(x, y) <= BORE); }).length;
+
+const el = (n, a) => { const e = document.createElementNS(SVGNS, n);
+  for (const k in a) e.setAttribute(k, a[k]); return e; };
+const poly = (pts) => pts.map(p => p.map(v => v.toFixed(2)).join(',')).join(' ');
+
+function draw(mode) {
+  const svg = el('svg', {viewBox: '-160 -160 320 320', width: '100%'});
+  svg.style.background = '#0e1216';
+  svg.style.borderRadius = '10px';
+
+  // blank + engraving band, so the crescent is read against real furniture
+  svg.appendChild(el('circle', {r: R_BLANK, fill: '#2a3238', stroke: '#3d474e', 'stroke-width': 1}));
+  svg.appendChild(el('circle', {r: R_BLANK - MODULE * 1.3, fill: 'none',
+                                stroke: '#4a555d', 'stroke-width': MODULE * 1.59}));
+  const bandR = R_BLANK - MODULE * 1.3 - MODULE * 1.59 / 2;
+  const bp = el('path', {id: 'b' + mode, fill: 'none',
+    d: `M ${-bandR} 0 A ${bandR} ${bandR} 0 1 1 ${bandR} 0 A ${bandR} ${bandR} 0 1 1 ${-bandR} 0`});
+  const defs = el('defs', {}); defs.appendChild(bp); svg.appendChild(defs);
+  const txt = el('text', {fill: '#98a4ad', 'font-size': 13, 'letter-spacing': 3.4,
+                          'font-family': 'ui-sans-serif, sans-serif'});
+  const tp = el('textPath', {href: '#b' + mode, startOffset: '25%', 'text-anchor': 'middle'});
+  tp.textContent = 'CHARLES.WOZI.COM';
+  txt.appendChild(tp); svg.appendChild(txt);
+
+  // the bore recess
+  if (mode === 'C') svg.appendChild(el('polygon', {points: poly(H), fill: '#1b2126'}));
+  else              svg.appendChild(el('circle', {r: BORE, fill: '#1b2126'}));
+
+  // the shortfall, highlighted, in the two circular-bore options
+  if (mode === 'A') {
+    const g = el('path', {'fill-rule': 'evenodd', fill: '#c2622e', 'fill-opacity': .30,
+      d: `M ${BORE} 0 A ${BORE} ${BORE} 0 1 1 ${-BORE} 0 A ${BORE} ${BORE} 0 1 1 ${BORE} 0 Z `
+       + 'M ' + poly(H).replace(/ /g, ' L ').replace(/,/g, ' ') + ' Z'});
+    svg.appendChild(g);
+  }
+
+  /* D: a relief groove cut along the patch's own six-flat outline, so the
+        leftover material is bounded on BOTH sides and reads as a land.
+     E: the land carries a bolt circle -- one hole centred in each of the six
+        crescents, which is what a real webbed gear puts there anyway. */
+  if (mode === 'D') {
+    const g1 = el('polygon', {points: poly(H.map(([x, y]) => {
+      const k = (Math.hypot(x, y) + 4.5) / Math.hypot(x, y); return [x * k, y * k]; })),
+      fill: 'none', stroke: '#11161a', 'stroke-width': 3.2, 'stroke-opacity': .85});
+    svg.appendChild(g1);
+    svg.appendChild(el('polygon', {points: poly(H.map(([x, y]) => {
+      const k = (Math.hypot(x, y) + 5.6) / Math.hypot(x, y); return [x * k, y * k]; })),
+      fill: 'none', stroke: '#6b7981', 'stroke-width': 1, 'stroke-opacity': .6}));
+  }
+  if (mode === 'E') {
+    // ray-cast the hull to find the six flats, then sit a hole in each crescent
+    /* distance from the centre to the hull along a ray:
+       k·d = p1 + t·(p2−p1), solved for t then k, with d a unit vector */
+    const hullR = (th) => {
+      const dx = Math.cos(th), dy = Math.sin(th);
+      let best = Infinity;
+      for (let i = 0; i < H.length; i++) {
+        const [x1, y1] = H[i], [x2, y2] = H[(i + 1) % H.length];
+        const den = (x2 - x1) * dy - (y2 - y1) * dx;
+        if (Math.abs(den) < 1e-9) continue;
+        const t = (y1 * dx - x1 * dy) / den;
+        if (t < 0 || t > 1) continue;
+        const k = (x1 + t * (x2 - x1)) * dx + (y1 + t * (y2 - y1)) * dy;
+        if (k > 0 && k < best) best = k;
+      }
+      return best;
+    };
+    const prof = [];
+    for (let d = 0; d < 360; d++) prof.push(hullR(d * Math.PI / 180));
+    const picked = [];
+    for (let d = 0; d < 360; d++) {
+      const ra = prof[d];
+      if (!isFinite(ra)) continue;
+      if (ra > prof[(d + 359) % 360] || ra > prof[(d + 1) % 360]) continue;
+      const a = d * Math.PI / 180;
+      const near = picked.some(p => {
+        let dd = Math.abs(p[0] - a) % (2 * Math.PI);
+        return Math.min(dd, 2 * Math.PI - dd) < 0.4;
+      });
+      if (!near) picked.push([a, ra]);
+    }
+    for (const [a, ra] of picked) {
+      const rc = (ra + BORE) / 2, hole = Math.min((BORE - ra) / 2 * 0.62, s * 0.5);
+      if (hole < 1.5) continue;
+      svg.appendChild(el('circle', {cx: rc * Math.cos(a), cy: rc * Math.sin(a), r: hole,
+        fill: '#11161a', stroke: '#6b7981', 'stroke-width': 1, 'stroke-opacity': .55}));
+    }
+  }
+
+  const size  = mode === 'B' ? sB : s;
+  const cells = mode === 'B' ? keptB.concat(extra) : kept;
+  for (const [q, r] of cells) {
+    const [cx, cy] = centre(q, r, size);
+    const isExtra = mode === 'B' && ring(q, r) > R;
+    svg.appendChild(el('polygon', {points: poly(verts(cx, cy, size * 0.93)),
+      fill: isExtra ? '#3f4d44' : '#333d44',
+      stroke: isExtra ? '#6f8f78' : '#59656d', 'stroke-width': 1.4}));
+  }
+  svg.appendChild(el('circle', {r: size * 1.5, fill: '#232b31', stroke: '#59656d', 'stroke-width': 1.4}));
+  return svg;
+}
+
+const COPY = {
+  A: ['A — leave it (what ships today)',
+      'A hexagonal patch of whole cells, circular bore. Six straight edges, six-fold symmetry, nothing cropped.',
+      '<span class="cost">Cost: the shaded crescent stays — CRESCENT% of the bore is bare.</span>'],
+  B: ['B — shrink a step, then fill the flats',
+      'At today’s size this option is EMPTY: the outermost vertex already touches the bore, so not one further whole cell fits. Shown here one step down — cells sized so the patch’s flats touch rather than its points — which is the only size at which extra whole cells (green) exist.',
+      '<span class="win">Fills the flats, every cell still whole.</span><br><span class="cost">Cost: the outline goes ragged, and the cells get smaller to buy it. Both of the things you rejected.</span>'],
+  C: ['C — cut the bore as a hexagon',
+      'Same cells, same size. The recess is machined to the pattern instead of the pattern being fitted to the recess.',
+      '<span class="win">No leftover crescent at all; reads as deliberate machining.</span><br><span class="cost">Cost: hexcore stops sharing the common circular bore — planetary and Ravigneaux need theirs round.</span>'],
+};
+
+const hullArea = Math.abs(H.reduce((a, p, i) => {
+  const q = H[(i + 1) % H.length]; return a + p[0] * q[1] - q[0] * p[1]; }, 0)) / 2;
+const bare = 100 - 100 * hullArea / (Math.PI * BORE * BORE);
+
+COPY.D = ['D — cut a relief groove along the patch edge',
+  'The land is the crescent of solid material between the hexagons and the bore — and structurally it is the most important material in the wheel. Today nothing marks where the pocketed field stops, so it reads as the pattern running out. A groove traced along the patch’s own six-flat outline gives the land an edge on BOTH sides.',
+  '<span class="win">The crescent becomes a machined land instead of a gap. No lattice change; the solver is untouched.</span><br><span class="cost">Cost: one more circle-ish stroke per wheel. Nothing else.</span>'];
+COPY.E = ['E — put a bolt circle in the land',
+  'The other thing a real webbed gear does with that annulus: drill it. One hole centred in each of the six crescents, on a common bolt circle, six-fold like the patch it surrounds.',
+  '<span class="win">Fills the space with something purposeful rather than filling it with more pattern.</span><br><span class="cost">Cost: six more features per wheel, and at small sizes the holes may close up — they would need a floor like the teeth have.</span>'];
+
+const r2 = document.createElement('div');
+r2.className = 'row';
+r2.style.marginTop = '38px';
+const h2 = document.createElement('h1');
+h2.style.margin = '40px 0 4px';
+h2.textContent = 'What "make the land deliberate" actually means';
+const s2 = document.createElement('p');
+s2.className = 'sub';
+s2.innerHTML = 'Both of these keep option A exactly as it is — same cells, same size, same circular bore, '
+  + 'nothing the solver does changes. They only add a machining mark so the leftover ring reads as '
+  + '<em>left there on purpose</em> rather than as the pattern giving up.';
+
+for (const m of ['A', 'B', 'C', 'D', 'E']) {
+  const d = document.createElement('div');
+  d.className = 'panel';
+  d.appendChild(draw(m));
+  const c = document.createElement('div');
+  c.className = 'cap';
+  c.innerHTML = `<b>${COPY[m][0]}</b><p>${COPY[m][1]}</p>`
+              + COPY[m][2].replace('CRESCENT%', bare.toFixed(1) + '%');
+  d.appendChild(c);
+  (m === 'D' || m === 'E' ? r2 : document.getElementById('row')).appendChild(d);
+}
+/* ---- isogrid, measured against the hex core on the same bore ---------- */
+const TRI = (a, bound) => {
+  const kept = [];
+  const P = (i, j) => [a * (i + j / 2), a * (Math.sqrt(3) / 2) * j];
+  const n = Math.ceil(BORE / a) + 3;
+  for (let j = -n; j <= n; j++)
+    for (let i = -n; i <= n; i++) {
+      const up   = [P(i, j), P(i + 1, j), P(i, j + 1)];
+      const down = [P(i + 1, j), P(i + 1, j + 1), P(i, j + 1)];
+      for (const t of [up, down]) {
+        if (!t.every(([x, y]) => bound(x, y))) continue;
+        if (t.some(([x, y]) => Math.hypot(x, y) < 24)) continue;   // clear the boss
+        kept.push(t);
+      }
+    }
+  return kept;
+};
+const inCircle = (x, y) => Math.hypot(x, y) <= BORE;
+/* regular hexagon of circumradius BORE, flat orientation matching the lattice */
+const inHex = (x, y) => {
+  for (let k = 0; k < 6; k++) {
+    const a2 = Math.PI / 180 * (60 * k + 30);
+    if (x * Math.cos(a2) + y * Math.sin(a2) > BORE * Math.cos(Math.PI / 6)) return false;
+  }
+  return true;
+};
+const areaOf = (pts) => Math.abs(pts.reduce((s2, p, i) => {
+  const q = pts[(i + 1) % pts.length]; return s2 + p[0] * q[1] - q[0] * p[1]; }, 0)) / 2;
+
+function isoPanel(bound, label) {
+  /* same objective as the hex core: sweep the cell size, keep the patch that
+     reaches furthest with WHOLE cells only */
+  let best = null;
+  for (let a = 34; a >= 12; a -= 0.25) {
+    const kept = TRI(a, bound);
+    if (kept.length < 12) continue;
+    let reach = 0;
+    for (const t of kept) for (const [x, y] of t) reach = Math.max(reach, Math.hypot(x, y));
+    if (!best || reach > best.reach + 1e-9) best = {a, kept, reach};
+  }
+  const svg = el('svg', {viewBox: '-160 -160 320 320', width: '100%'});
+  svg.style.background = '#0e1216';
+  svg.style.borderRadius = '10px';
+  svg.appendChild(el('circle', {r: R_BLANK, fill: '#2a3238', stroke: '#3d474e', 'stroke-width': 1}));
+  svg.appendChild(el('circle', {r: R_BLANK - MODULE * 1.3, fill: 'none',
+                                stroke: '#4a555d', 'stroke-width': MODULE * 1.59}));
+  svg.appendChild(el('circle', {r: BORE, fill: '#1b2126'}));
+  const hullPts = hull(best.kept.flat());
+  for (const t of best.kept) {
+    const c = [t.reduce((s2, p) => s2 + p[0], 0) / 3, t.reduce((s2, p) => s2 + p[1], 0) / 3];
+    const inset = t.map(([x, y]) => [x + (c[0] - x) * 0.10, y + (c[1] - y) * 0.10]);
+    svg.appendChild(el('polygon', {points: poly(inset), fill: '#333d44',
+                                   stroke: '#59656d', 'stroke-width': 1.1}));
+  }
+  svg.appendChild(el('circle', {r: 22, fill: '#232b31', stroke: '#59656d', 'stroke-width': 1.4}));
+  return {svg, cov: 100 * areaOf(hullPts) / (Math.PI * BORE * BORE),
+          reach: best.reach, a: best.a, n: best.kept.length, label};
+}
+
+const isoH = isoPanel(inHex, 'straight-edged (hexagon boundary)');
+const isoC = isoPanel(inCircle, 'whole cells to the circle (ragged)');
+
+const h3 = document.createElement('h1');
+h3.style.margin = '46px 0 4px';
+h3.textContent = 'Isogrid, measured on the same bore';
+const s3 = document.createElement('p');
+s3.className = 'sub';
+s3.innerHTML = 'Charles asked whether a triangular lattice covers more area. Same bore, same '
+  + 'objective as the hex core — whole cells only, sweep the cell size, keep whichever patch '
+  + 'reaches furthest. The hex core scores <span class="num">' + (100 - bare).toFixed(1)
+  + '%</span> of the bore for comparison.';
+const r3 = document.createElement('div');
+r3.className = 'row';
+for (const p of [isoH, isoC]) {
+  const d = document.createElement('div');
+  d.className = 'panel';
+  d.appendChild(p.svg);
+  const c = document.createElement('div');
+  c.className = 'cap';
+  const delta = p.cov - (100 - bare);
+  c.innerHTML = '<b>Isogrid — ' + p.label + '</b>'
+    + '<p><span class="num">' + p.cov.toFixed(1) + '%</span> of the bore covered '
+    + '<span class="' + (delta > 0 ? 'win' : 'cost') + '">(' + (delta > 0 ? '+' : '')
+    + delta.toFixed(1) + ' pts vs the hex core)</span>. Reach <span class="num">'
+    + p.reach.toFixed(1) + '</span> of <span class="num">' + BORE.toFixed(1)
+    + '</span>, cell side <span class="num">' + p.a.toFixed(2) + '</span>, '
+    + p.n + ' whole cells.</p>';
+  d.appendChild(c);
+  r3.appendChild(d);
+}
+document.body.insertBefore(h2, document.getElementById('foot'));
+document.body.insertBefore(s2, document.getElementById('foot'));
+document.body.insertBefore(r2, document.getElementById('foot'));
+
+document.body.insertBefore(h3, document.getElementById('foot'));
+document.body.insertBefore(s3, document.getElementById('foot'));
+document.body.insertBefore(r3, document.getElementById('foot'));
+
+document.getElementById('foot').innerHTML =
+  `Solved here the same way the wheel solves it: ${R} rings at cell circumradius `
+  + `<span class="num">${s.toFixed(2)}</span> reaches <span class="num">${best.reach.toFixed(1)}</span> `
+  + `of a <span class="num">${BORE.toFixed(1)}</span> bore — the furthest any whole-cell patch gets, and `
+  + `the reason option B is empty at this size (<span class="num">${emptyAtFullSize}</span> extra cells fit). `
+  + `Shrunk to <span class="num">${sB.toFixed(2)}</span>, <span class="num">${extra.length}</span> extra cells appear. `
+  + `The patch covers <span class="num">${(100 - bare).toFixed(1)}%</span> of the bore. `
+  + `This is a mock of the lattice for the decision, not the shipped renderer — same maths, no teeth.`;
+</script>

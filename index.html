@@ -613,6 +613,35 @@ const CENTRE_FAMILIES = [
     /* `cell` is the CEILING on cell size; the core then takes whichever size at
        or under it reaches furthest with whole hexagons. Coarse, medium, fine. */
     variants: [{ arms: 6, cell: 4.6 }, { arms: 6, cell: 3.9 }, { arms: 6, cell: 3.2 }] },
+  /* The three fill families below all answer the same question the hex core
+     asked and could not close: how much of the WEB -- the annulus between the
+     boss and the engraving -- can be filled with a pattern that stays uniformly
+     symmetric. Measured at real dealt sizes (docs/core-fill.html), against the
+     hex core's 43-54%:
+       isogrid     41-57%   Cartesian, so it still leaves a boundary crescent,
+                            but every cell is a true equilateral triangle
+       polarbrick  60-62%   reaches the well circle exactly
+       polariso    67%      reaches the well circle exactly
+     `cell` means triangle side for isogrid and COURSE HEIGHT for the two polar
+     families -- coarse, medium, fine in each case. */
+  /* `cell` is the triangle SIDE, and it is not comparable to the hex core's
+     number: a triangle of side s has area (sqrt3/4)s^2, a hexagon of
+     circumradius a has (3sqrt3/2)a^2, so equal visual weight wants s = 2.45a.
+     Sized off the hex core's 3.9 that is about 9.6. Set to the hex core's own
+     figures first and the core read as a fine mesh screen rather than as
+     triangles -- the cells were three and a half times too small.
+
+     Then 9.6 overshot the other way: legible triangles, but a bare third of the
+     web around them, because a Cartesian lattice steps outward only in WHOLE
+     cells and a big cell steps coarsely. That tension is inherent here -- small
+     cells fill and read as mesh, large cells read well and leave a ring. These
+     sit deliberately between the two. */
+  { type: 'isogrid', web: 3.1, hub: 0.13,
+    variants: [{ arms: 6, cell: 8.0 }, { arms: 6, cell: 7.0 }, { arms: 6, cell: 6.2 }] },
+  { type: 'polarbrick', web: 3.1, hub: 0.15,
+    variants: [{ arms: 6, cell: 6.0 }, { arms: 6, cell: 5.0 }, { arms: 6, cell: 4.2 }] },
+  { type: 'polariso', web: 3.1, hub: 0.15,
+    variants: [{ arms: 6, cell: 6.4 }, { arms: 6, cell: 5.4 }, { arms: 6, cell: 4.4 }] },
   /* CELL_MIN is the real guard here: a ring target of five would happily grind
      the cells down to specks to reach it, so the floor stops it and the search
      falls back to the most rings a legible cell can manage. */
@@ -1708,7 +1737,14 @@ class Component extends DCLogic {
     const raw = site ? site.path : '';
     /* Just the handle: everything after the last slash. */
     const handle = raw.indexOf('/') >= 0 ? raw.slice(raw.lastIndexOf('/') + 1) : raw;
-    const stamp = 'M' + MODULE + ' Z' + g.teeth;
+    /* A printed wheel carries its material and process as well as its geometry,
+       the way a real AM part does -- that mark is how you tell a printed one
+       from a cut one on inspection, which is exactly its job (#43). The four
+       lattice families are the printed ones; everything else is machined and
+       says nothing extra. */
+    const printedK = g.kind === 'hexcore' || g.kind === 'isogrid'
+                  || g.kind === 'polarbrick' || g.kind === 'polariso';
+    const stamp = 'M' + MODULE + ' Z' + g.teeth + (printedK ? ' · 17-4PH DMLS' : '');
     const MAX = 168 * Math.PI / 180;
     const fit = (txt, rr, base) => {
       const per = 0.60, track = 0.10;
@@ -1897,6 +1933,32 @@ class Component extends DCLogic {
     /* Openings are cut out of the blank itself: each one is appended to the body path
        as a subpath and filled with even-odd, so the page shows through. No masks. */
     const holes = [];
+    /* THE FOUR LATTICE FAMILIES ARE PRINTED PARTS, NOT MACHINED ONES (#43).
+       That reframing is what finally closed #38. Read as a milled web, a
+       honeycomb is wrong three ways -- poor in in-plane shear, sharp internal
+       corners no endmill can cut, and a ring of bare metal at the flats that
+       reads as the pattern running out. Read as an additively manufactured one,
+       all three invert: a lattice is exactly what you design for AM, no cutter
+       means no tool radius to honour, and the ring is the PERIMETER SHELL that
+       every printed part has around its lattice. The crescent stops being a
+       defect and becomes a required feature.
+
+       Metal rather than nylon, because what is drawn here is a designed
+       lightweighting lattice -- open pockets on the visible face -- and not
+       slicer infill, which is an FDM concept and is always buried under solid
+       top layers. Metal also keeps these wheels inside WHEEL_POOL, which is
+       ground truth; a plastic part would have needed a palette exception. */
+    const amPrinted = kind === 'hexcore' || kind === 'isogrid'
+                   || kind === 'polarbrick' || kind === 'polariso';
+    /* Two concentric shell walls just inside the well. Drawn, not cut: on a real
+       printed part the shell is solid material, so these are lines on the face
+       rather than entries in `holes`. */
+    const amShells = (arr) => {
+      if (!amPrinted) return;
+      for (let s2 = 0; s2 < 2; s2++)
+        arr.push(h('circle', { key: 'shell' + s2, r: wellR - 0.6 - s2 * 1.5, fill: 'none',
+          stroke: p[3], strokeOpacity: s2 ? 0.30 : 0.45, strokeWidth: 0.9 }));
+    };
     const PT = (rad, deg) => {
       const a = deg * Math.PI / 180;
       return (rad * Math.cos(a)).toFixed(2) + ',' + (rad * Math.sin(a)).toFixed(2);
@@ -2333,6 +2395,106 @@ class Component extends DCLogic {
           }
         }
       }
+      amShells(inner);
+      inner.push(h('circle', { key: 'boss', r: hubR * 1.5, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
+    } else if (kind === 'isogrid') {
+      /* Equilateral triangles on a true Cartesian lattice -- the isogrid pattern
+         real stiffened hardware uses, and the one Charles picked for covering the
+         most area while every cell stays a proper equilateral triangle.
+
+         SYMMETRY IS THE REQUIREMENT, not the boundary shape. The earlier
+         ring-course honeycomb was rejected for lacking it: its walls between
+         courses never lined up with the walls within a course. A triangular
+         lattice centred on a LATTICE VERTEX has exact six-fold symmetry, so
+         clipping it to a circle leaves a boundary that is six-fold too -- it
+         steps, but it steps identically in all six sextants, which is what the
+         eye actually reads as regular.
+
+         Whole cells only, so no triangle is ever cut. */
+      inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
+      /* Floor is in TRIANGLE sides, so it is far above the hex core's 3.1 for
+         the same reason the variants are -- a 3.1 triangle is a speck. */
+      const sideI = Math.max(5.6, (g.cv && g.cv.cell) || 7.0);
+      const rInI = hubR * 1.5 + 1.2, rOutI = wellR - 0.5;
+      const ptI = (i2, j2) => [sideI * (i2 + j2 / 2), sideI * (Math.sqrt(3) / 2) * j2];
+      const nI = Math.ceil(rOutI / sideI) + 3;
+      for (let j2 = -nI; j2 <= nI; j2++) {
+        for (let i2 = -nI; i2 <= nI; i2++) {
+          const up = [ptI(i2, j2), ptI(i2 + 1, j2), ptI(i2, j2 + 1)];
+          const dn = [ptI(i2 + 1, j2), ptI(i2 + 1, j2 + 1), ptI(i2, j2 + 1)];
+          for (const t of [up, dn]) {
+            if (!t.every(q2 => Math.hypot(q2[0], q2[1]) <= rOutI)) continue;
+            if (t.some(q2 => Math.hypot(q2[0], q2[1]) < rInI)) continue;
+            /* shrink about the centroid so the gap between cells is the wall */
+            const cxI = (t[0][0] + t[1][0] + t[2][0]) / 3, cyI = (t[0][1] + t[1][1] + t[2][1]) / 3;
+            const k2 = 1 - 1.2 / sideI;
+            holes.push('M' + t.map(q2 => (cxI + (q2[0] - cxI) * k2).toFixed(2) + ','
+                                       + (cyI + (q2[1] - cyI) * k2).toFixed(2)).join(' L') + ' Z');
+          }
+        }
+      }
+      amShells(inner);
+      inner.push(h('circle', { key: 'boss', r: hubR * 1.5, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
+    } else if (kind === 'polarbrick' || kind === 'polariso') {
+      /* POLAR, not Cartesian -- and that is the whole point. The region to fill
+         is an ANNULUS, between the boss and the engraving. A Cartesian lattice
+         can never fill a ring: it either crops cells or leaves the crescents
+         that #38 spent four attempts arguing about. A polar pattern is defined
+         BY the annulus, so it fills it by construction and reaches the well
+         circle exactly, with no leftover.
+
+         Both variants below share the same course arithmetic and differ only in
+         what they put in a course: annular cells laid like brickwork, or a
+         triangulated band. Cell count per course is forced to a multiple of six
+         and only ever DOUBLES going outward, so the whole figure keeps exact
+         six-fold symmetry no matter how many courses it has -- the property the
+         ring-course honeycomb lacked and was retired for. */
+      inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
+      const WALLP = 1.2;
+      const rInP = hubR * 1.5 + WALLP, rOutP = wellR - 0.5;
+      const spanP = rOutP - rInP;
+      const target = Math.max(3.6, (g.cv && g.cv.cell) || 5.0);
+      const nC = Math.max(1, Math.round(spanP / target));
+      const hC = spanP / nC;
+      const XY = (rad, a) => [rad * Math.cos(a), rad * Math.sin(a)];
+      const f2 = (q2) => q2[0].toFixed(2) + ',' + q2[1].toFixed(2);
+      /* start from a multiple of six so every doubling stays a multiple of six */
+      let kP = Math.max(6, Math.round(2 * Math.PI * (rInP + hC / 2) / hC / 6) * 6);
+      for (let c = 0; c < nC; c++) {
+        const r0 = rInP + c * hC, r1 = r0 + hC, rm = (r0 + r1) / 2;
+        if (2 * Math.PI * rm / kP > 1.9 * hC) kP *= 2;
+        if (kind === 'polarbrick') {
+          /* Alternate courses are offset half a cell, so no wall runs straight
+             through the web -- the same reason a brick wall is laid in bond. */
+          const off = (c % 2) * Math.PI / kP;
+          const gapA = WALLP / rm, R0 = r0 + WALLP / 2, R1 = r1 - WALLP / 2;
+          if (R1 <= R0) continue;
+          for (let s = 0; s < kP; s++) {
+            const a0 = off + s * 2 * Math.PI / kP + gapA / 2;
+            const a1 = off + (s + 1) * 2 * Math.PI / kP - gapA / 2;
+            if (a1 <= a0) continue;
+            holes.push('M' + f2(XY(R0, a0)) + ' A' + R0.toFixed(2) + ',' + R0.toFixed(2)
+              + ' 0 0 1 ' + f2(XY(R0, a1)) + ' L' + f2(XY(R1, a1)) + ' A' + R1.toFixed(2)
+              + ',' + R1.toFixed(2) + ' 0 0 0 ' + f2(XY(R1, a0)) + ' Z');
+          }
+        } else {
+          /* Consecutive rings are offset by HALF a step, so each vertex of one
+             ring sits opposite the midpoint of the other -- that is what makes
+             every triangle the same shape instead of alternating fat and thin. */
+          const oA = c * Math.PI / kP, oB = (c + 1) * Math.PI / kP;
+          const A = (s) => XY(r0, oA + s * 2 * Math.PI / kP);
+          const B = (s) => XY(r1, oB + s * 2 * Math.PI / kP);
+          const shrink = 1 - 1.15 / Math.max(hC, 3);
+          for (let s = 0; s < kP; s++) {
+            for (const t of [[A(s), A(s + 1), B(s)], [B(s), B(s + 1), A(s + 1)]]) {
+              const cx2 = (t[0][0] + t[1][0] + t[2][0]) / 3, cy2 = (t[0][1] + t[1][1] + t[2][1]) / 3;
+              holes.push('M' + t.map(q2 => (cx2 + (q2[0] - cx2) * shrink).toFixed(2) + ','
+                                         + (cy2 + (q2[1] - cy2) * shrink).toFixed(2)).join(' L') + ' Z');
+            }
+          }
+        }
+      }
+      amShells(inner);
       inner.push(h('circle', { key: 'boss', r: hubR * 1.5, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
     } else if (kind === 'labyrinth') {
       /* Two staggered rings of arc slots, brake-rotor fashion. The stagger is
@@ -2528,7 +2690,12 @@ class Component extends DCLogic {
       h('path', { d: arc(faceR - 2, 205, 335), fill: 'none', stroke: flat ? 'none' : 'var(--gloss)', strokeWidth: Math.max(2, r * 0.05), strokeLinecap: 'round', opacity: 0.5 }),
       /* LAYER: character — stamped module/tooth-count, as on a real blank. Same struck
          treatment as the handle, so both sides of the band read alike. */
-      this.props.character ? h('g', { key: 'stamp' }, (flat
+      /* The `character` layer is off as shipped (commit 2e5a721), which would
+         have made the process mark invisible on the very wheels that need it.
+         A printed wheel therefore renders its stamp regardless of that flag --
+         the mark is part of the part, not a decorative layer you can switch
+         off. Machined wheels still obey `character` and so still show nothing. */
+      (this.props.character || amPrinted) ? h('g', { key: 'stamp' }, (flat
         ? [{ dy: 0, col: FLAT_INK, op: 0.66 }]
         : [{ dy: -0.5, col: p[3], op: 0.8 },
            { dy: 0.5, col: p[0], op: 0.4 }]
@@ -2814,7 +2981,8 @@ class Component extends DCLogic {
         const names = { spokes: 'Spoke slots', holes: 'Lightening drills', pockets: 'Kidney pockets',
           spiral: 'Curved spokes', iris: 'Iris blades', star: 'Star truss', honeycomb: 'Honeycomb',
           labyrinth: 'Labyrinth rotor', sunburst: 'Sunburst', planetary: 'Planetary (star gear)',
-          hexcore: 'Hex core', ravigneaux: 'Ravigneaux (double row)' };
+          hexcore: 'Hex core', ravigneaux: 'Ravigneaux (double row)',
+          isogrid: 'Isogrid', polarbrick: 'Radial brickwork', polariso: 'Radial isogrid' };
         const item = (key, label) => {
           const active = key ? FORCE_KIND === key : !FORCE_KIND;
           return {

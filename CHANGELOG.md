@@ -7,6 +7,59 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Added
 
+- **#38 / #43 — Three ways to fill the web, and the hex core becomes a printed
+  part.** #38 had been argued four times without closing, and the reason turns
+  out to be that every option was a variation inside the losing family. The
+  region to fill is an **annulus** — between the boss and the engraving — and a
+  Cartesian lattice can never fill a ring. It either crops cells or leaves the
+  six crescents the issue kept relitigating. A **polar** pattern is defined *by*
+  the annulus, so it fills it by construction. Measured at real dealt sizes
+  (`docs/core-fill.html`, never published), as a fraction of the annulus:
+
+  | | 13T | 16T | 19T |
+  |---|---|---|---|
+  | hex core | 43% | 50% | 54% |
+  | `isogrid` | 41% | 56% | 57% |
+  | `polarbrick` | 61% | 62% | 60% |
+  | `polariso` | 67% | 67% | 67% |
+
+  The ceiling near 67% is the walls, which are material, not loss. What matters
+  is that the two polar families reach the well circle exactly and the Cartesian
+  ones do not. All three ship: `isogrid` for its equilateral cells, the polar
+  pair for coverage. Eleven families now, so nothing repeats.
+
+  **Symmetry is the requirement, not the boundary shape.** The retired
+  ring-course honeycomb failed because its walls between courses never lined up
+  with the walls within one. Every family here holds exact six-fold symmetry:
+  the triangular lattice is centred on a lattice *vertex*, and the polar cell
+  count starts at a multiple of six and only ever doubles outward.
+
+  And the hex core's own question is answered by reframing rather than
+  geometry. Read as a **milled** web it is wrong three ways — honeycomb is poor
+  in in-plane shear, the pockets have sharp internal corners no endmill can cut,
+  and the ring at the flats reads as the pattern running out. Read as an
+  **additively manufactured** one, all three invert: a lattice is what you
+  design for AM, no cutter means no tool radius to honour, and that ring is the
+  **perimeter shell** every printed part carries around its lattice. The
+  crescent is a required feature, not a defect. So the four lattice families now
+  draw two shell walls inside the well and stamp `17-4PH · DMLS` beside their
+  module and tooth count — metal rather than nylon, because what is drawn is a
+  designed lightweighting lattice on the visible face and not slicer infill,
+  which is an FDM concept and is always buried under solid top layers. Metal
+  also keeps these wheels inside `WHEEL_POOL`, which is ground truth.
+
+  A printed wheel renders that stamp regardless of the `character` layer, which
+  is off as shipped (`2e5a721`) and would otherwise have hidden the mark on
+  precisely the wheels that need it. Machined wheels still obey the flag and
+  still say nothing.
+
+  Two sizing traps are recorded in the code because both were hit: `cell` means
+  triangle *side* for `isogrid` and course *height* for the polar pair, and
+  neither is comparable to the hex core's number — equal visual weight needs
+  `s = 2.45a`, so the first attempt rendered a mesh screen with cells 3.4× too
+  small, and the correction then overshot into legible triangles with a third of
+  the web bare. The shipped values sit deliberately between the two.
+
 - **#41 — The device gate covers 2560×1440, and says out loud what it does not
   cover.** The layout guard had never been run above 2560×1080, which meant the
   widths people actually reported problems at were the widths nothing measured.
