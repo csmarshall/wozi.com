@@ -50,6 +50,28 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **#31 — Five hub marks were redraws, and four brand hexes were wrong.** The
+  Reddit fix was treated as a one-off; auditing the other seven against
+  **Simple Icons** — which is CC0 and cites each vendor's own brand page — showed
+  the same problem everywhere. `bluesky` was a Font Awesome butterfly on a
+  512-unit grid; `github`, `instagram`, `mastodon` and `threads` were Bootstrap
+  Icons redraws on a 16-unit grid. All five are now the official Simple Icons
+  path, re-cut to this repo's wrapper so `loadIcons()`'s `fill="#000"` swap still
+  bites. The colours were off by more than rounding: GitHub `#24292F` → `#181717`
+  (that was GitHub's old *text* grey, not its logo black), Bluesky `#0285FF` →
+  `#1185FE`, Instagram `#E1306C` → `#FF0069` (`#E1306C` is a sample from the old
+  2016 gradient, superseded), Threads `#101010` → `#000000`. `reddit`, `linkedin`
+  and `mastodon` were already correct. `mail` is a generic envelope, not a brand,
+  and is exempt.
+
+  Three guideline problems are **known and not fixed**, because each one is a
+  design decision rather than an error. Hover recolours the mark to
+  `var(--accent)`, which most brand guidelines forbid outright. Instagram's
+  current guidelines want the gradient glyph and permit flat colour only in
+  monochrome contexts, which this page is not. And at the 30px floor the badge
+  can reach, the marks are below several published minimum sizes — Mastodon and
+  the snoo are the first to go muddy.
+
 - **#20 — Docs described a chain and a belt that render nowhere.** Every document
   in the repo said the page had a roller chain and a toothed belt; the shipped
   train is fully direct-mesh and draws neither. Verified against the served page:

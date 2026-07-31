@@ -812,9 +812,16 @@ const PAIR_SLOTS = [[0, 1], [3, 4]];
 const PAIRS = [['linkedin', 'github'], ['instagram', 'threads']];
 const SINGLES = ['mastodon', 'bluesky', 'mail', 'reddit'];
 
+/* Each hex is the brand's own published mark colour, cross-checked against the
+   Simple Icons data set (which cites each vendor's brand page as its source).
+   `mail` is not a brand — it is a generic envelope, so its colour is ours to
+   choose and is picked to sit with the palette. LinkedIn is the one entry with
+   no Simple Icons row to check against (they removed it on request), so #0A66C2
+   is taken from LinkedIn's own brand site and is the least independently
+   verified value here. */
 const BRAND = {
-  linkedin: '#0A66C2', github: '#24292F', mastodon: '#6364FF',
-  instagram: '#E1306C', threads: '#101010', bluesky: '#0285FF', mail: '#E8615A',
+  linkedin: '#0A66C2', github: '#181717', mastodon: '#6364FF',
+  instagram: '#FF0069', threads: '#000000', bluesky: '#1185FE', mail: '#E8615A',
   reddit: '#FF4500'
 };
 

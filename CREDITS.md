@@ -78,11 +78,45 @@ The hub marks in `assets/icons/` are each service's own brand mark, used to link
 to Charles's own profile on that service — ordinary nominative use, not an
 endorsement claim.
 
-- **Reddit** — path taken from **Simple Icons**
-  (<https://github.com/simple-icons/simple-icons>), which is **CC0-1.0**. Three
-  hand-drawn attempts at the snoo were rejected before this: getting a
-  well-known mark subtly wrong looks worse than not having it, and an accurate
-  open-licensed path was the right answer rather than a fourth try.
+Six of the eight are now **Simple Icons** paths
+(<https://github.com/simple-icons/simple-icons>), which is **CC0-1.0**:
+`bluesky`, `github`, `instagram`, `mastodon`, `reddit`, `threads`. Simple Icons
+cites each vendor's own brand page as the source for the glyph and the hex, so
+taking the path and the colour together is the closest thing to an official
+asset that is redistributable. The paths are used verbatim; only the wrapper is
+re-cut to this repo's convention — `viewBox="0 0 24 24"`, `fill="#000"`, and no
+`<title>`, because `loadIcons()` swaps that literal `fill="#000"` for
+`currentColor` and supplies its own accessible name on the surrounding link.
+
+Reddit came first, and set the rule. Three hand-drawn attempts at the snoo were
+rejected before it: getting a well-known mark subtly wrong looks worse than not
+having it, and an accurate open-licensed path was the right answer rather than a
+fourth try. The other five were audited against Simple Icons afterwards and were
+all approximations of the same kind — recognisable, but redrawn — so they were
+replaced on the same reasoning.
+
+Two are not Simple Icons paths:
+
+- **LinkedIn** — Simple Icons **does not carry LinkedIn**; it was removed at the
+  company's request, so there is no CC0 path to compare against. The file is a
+  third-party redraw of the "in" bug, kept as it stands because the alternative
+  is hand-drawing the mark, which is the failure mode the Reddit work was
+  correcting. The colour, `#0A66C2`, is LinkedIn's published "LinkedIn Blue" and
+  is the one hex here with no independent cross-check. Treat this icon as the
+  least verified of the eight.
+
+- **Mail** — a generic envelope, drawn here. Not a brand mark, so nothing to
+  match; its colour is chosen to sit with the palette rather than taken from
+  anyone.
+
+Being straight about where the page still departs from the guidelines: the badge
+recolours the mark to the site accent on hover and focus, and most brand
+guidelines prohibit recolouring a mark at all. Instagram's guidelines call for
+the gradient glyph and allow a flat single colour only in monochrome contexts,
+which this page is not. And the badge floors at 30px, under which several of
+these marks are below their published minimum size. Those are choices this page
+is making with its eyes open, not oversights — but they are departures, and
+a strict reading of any of the three guidelines would not permit them.
 
 ## Notes for whoever reads this next
 
