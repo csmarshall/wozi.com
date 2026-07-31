@@ -36,6 +36,12 @@ CHROME = (_os.environ.get("CHROME")
           or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8765/"
 OUT = sys.argv[2] if len(sys.argv) > 2 else "/tmp/gear_sheet.png"
+# Containers have no sandbox and a tiny /dev/shm, so Chrome refuses to start
+# without these. Only added off macOS, where they are unnecessary. This sheet
+# referenced CI_FLAGS without ever defining it, so it raised NameError on every
+# run since the harnesses were made CI-portable.
+CI_FLAGS = ([] if _sys.platform == "darwin" else
+            ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"])
 PORT = 9500
 PROFILE = "/private/tmp/claude-501/-Users-charles-work-claude-wozi-com/fd0b7254-2923-429f-bfc6-8be63ee34a46/scratchpad/chrome-sheet"
 ROOT = Path(__file__).resolve().parent.parent

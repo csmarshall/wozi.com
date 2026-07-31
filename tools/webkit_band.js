@@ -61,9 +61,21 @@ const MEASURE = `
       if (err < bestErr) { bestErr = err; best = i; top = eTop <= eBot; }
     }
     const ex = t.getExtentOfChar(best);
-    /* top line sits at negative y and reads outward; bottom line is the mirror */
-    const lo = top ? -(ex.y + ex.height) : ex.y;
-    const hi = top ? -ex.y : ex.y + ex.height;
+    /* Radial extent is |y| at the axis, for BOTH rings -- so take it directly
+       rather than inferring a direction.
+       This used to pick top-vs-bottom from the glyph's ROTATION and then
+       measure from its POSITION. Those agree on the handle ring and disagree on
+       the stamp ring, which is drawn with the opposite sweep so its text reads
+       upright at the bottom: the top flag came out false for a glyph at
+       negative y, so lo/hi were returned NEGATIVE and compared against positive
+       band radii. That reported off/depth -7.43 and overOut +79.99 for
+       lettering sitting correctly inside the band. It went unseen because the
+       character layer has been off since 2e5a721, so this harness had only ever
+       measured the handle ring.
+       NOTE: this whole probe is a template literal, so it must contain no
+       backticks -- one in this comment is what broke it first time round. */
+    const e0 = Math.abs(ex.y), e1 = Math.abs(ex.y + ex.height);
+    const lo = Math.min(e0, e1), hi = Math.max(e0, e1);
     const bandMid = (bandIn + bandOut) / 2, boxMid = (lo + hi) / 2;
     out.push({
       ring: href.replace('#', ''), ch: t.textContent.charAt(best),
