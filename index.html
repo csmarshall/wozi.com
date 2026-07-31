@@ -901,17 +901,25 @@ const ACCENTS = {
    luminance is exactly what the eye reports as garish. Simultaneous contrast --
    the "brighter against white" effect -- accounts for only about 4% of it.
 
-   So the fix moves separation work off chroma and onto value: pull 15% toward
-   the colour's own luminance, then take 7% off. Chroma -18%, contrast
-   2.28 -> 2.69:1, colour's share 39% -> 30%, inside dark's own band. Hues move
-   under 2 degrees in OKLCH and WHEEL_POOL is untouched -- the pool stays ground
-   truth, and derivation stays where this file has always said it belongs. */
+   So the fix moves separation work off chroma: pull 15% toward the colour's own
+   luminance. Hues move under 2 degrees in OKLCH and WHEEL_POOL is untouched --
+   the pool stays ground truth, and derivation stays where this file has always
+   said it belongs.
+
+   The 7% DARKENING that shipped alongside this is gone. It was the other half of
+   the original proposal and it is what Charles then read as "so dark - they have
+   like a dark tint": measured over the pool it dropped mean luminance from 0.377
+   to 0.313, a 17% cut, which is a lot to spend on a problem that was never about
+   lightness. Desaturation alone lands at 0.367 -- indistinguishable from the
+   original in value -- while still taking the chroma out, which was the actual
+   complaint. Cheaper and more targeted: fix the thing that was wrong, leave the
+   thing that was not. */
 function flatTones(hex, soft) {
   const n = parseInt(hex.slice(1), 16);
   let c = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
   if (soft) {
     const y = 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
-    c = c.map(v => Math.round((v + (y - v) * 0.15) * 0.93));
+    c = c.map(v => Math.round(v + (y - v) * 0.15));
   }
   const mix = (t, target) => '#' + c.map(v => Math.round(v + (target - v) * t).toString(16).padStart(2, '0')).join('');
   /* The face is a HINT lighter, not a pale disc: at 20% toward white it read as
