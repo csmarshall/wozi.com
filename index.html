@@ -829,9 +829,36 @@ const ACCENTS = {
    Dark mode keeps the modelled treatment. Charles's verdict after a full night
    of gradient tuning: the shading itself is what made light mode ugly, and dark
    was passable — so the disputed axis is deleted only where it is disputed. */
-function flatTones(hex) {
+/* `soft` is set for the LIGHT page only, and it is putting back a lesson this
+   file already learned and then lost. The comment above shades() records it from
+   rewrites #13, #16, #19 and #20: one palette cannot serve both themes, because
+   a wheel that sits 5-9:1 against the dark page sits barely 2:1 against the pale
+   one. That correction lived in shades(). When both themes went flat, flatTones
+   shipped theme-blind and quietly reverted to one-palette-serves-both.
+
+   Measured, that is the whole of the "light mode looks oversaturated" complaint,
+   and it is not oversaturation: the wheel pixels are byte-identical in both
+   themes, and light-mode chroma is if anything a hair LOWER. What differs is who
+   does the separating. In dark, luminance carries the wheel away from the page
+   and hue reads as finish -- colour does 16-30% of the figure/ground work. In
+   light the same hexes land at 1.38-2.79:1 and colour is forced to do 31-58% of
+   it; #F2C14E is nearly equiluminant with the page at 1.38:1, so its boundary is
+   drawn almost entirely by chroma. A boundary made of chroma at matched
+   luminance is exactly what the eye reports as garish. Simultaneous contrast --
+   the "brighter against white" effect -- accounts for only about 4% of it.
+
+   So the fix moves separation work off chroma and onto value: pull 15% toward
+   the colour's own luminance, then take 7% off. Chroma -18%, contrast
+   2.28 -> 2.69:1, colour's share 39% -> 30%, inside dark's own band. Hues move
+   under 2 degrees in OKLCH and WHEEL_POOL is untouched -- the pool stays ground
+   truth, and derivation stays where this file has always said it belongs. */
+function flatTones(hex, soft) {
   const n = parseInt(hex.slice(1), 16);
-  const c = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  let c = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  if (soft) {
+    const y = 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
+    c = c.map(v => Math.round((v + (y - v) * 0.15) * 0.93));
+  }
   const mix = (t, target) => '#' + c.map(v => Math.round(v + (target - v) * t).toString(16).padStart(2, '0')).join('');
   /* The face is a HINT lighter, not a pale disc: at 20% toward white it read as
      a glow ringing the hub on the pale page — in a flat drawing the raised face
@@ -1550,7 +1577,7 @@ class Component extends DCLogic {
     const h = React.createElement;
     const flat = true;  /* both themes are flat — Charles's call, 2026-07-30, after a side-by-side against the modelled dark */
     const p = shades(g.color || '#C9D2D6', flat);
-    const ft = flatTones(g.color || '#C9D2D6');
+    const ft = flatTones(g.color || '#C9D2D6', this.state.theme !== 'dark');
     const id = 'gr' + g.i, size = (g.ro + 6) * 2, r = g.r, m = MODULE;
     const prof = g.prof;
     /* LAYER: character — the flag is all-or-nothing across the train, so it reads
