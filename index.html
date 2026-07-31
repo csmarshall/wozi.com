@@ -25,7 +25,14 @@
   --m1:#FFFFFF; --m2:#D4DADE; --m3:#98A2A9; --m4:#5F686E;
   --b1:#F7E7BE; --b2:#DFC183; --b3:#B08F45; --b4:#7A5F28;
   --edge:rgba(12,22,28,.38); --gloss:rgba(255,255,255,.8);
-  --s:1; --gsm:1; --gsfit:0.86; --gs:calc(var(--gsfit) * var(--gsm));
+  /* --gsfit is the fit scale, and it is a READOUT, not a lever: the train's
+     geometry is multiplied by it in JS at render time so every wheel is drawn at
+     the size it is displayed (#37). It used to feed a `transform: scale()` on the
+     gear container, which meant the wheels were rasterised small and stretched.
+     The value here is the boot fit, used for the first render before fitStage()
+     has measured anything; gsRender() reads it from this declaration so the two
+     cannot drift apart. */
+  --s:1; --gsfit:0.86;
   --dir:row; --pad:5vw; --gap:4vw; --colw:400px;
   /* Corner spacing is one icon width, so the gap around the theme toggle reads
      the same as the icon it sits next to. The button is larger than its icon and
@@ -1149,12 +1156,20 @@ class Component extends DCLogic {
 
   /* Background machinery: extra wheels seeded off each edge, meshed onto the visible
      train, dimmed and set behind it so they read as context rather than content. */
-  fitEscapes(fit) {
+  fitEscapes() {
     const stage = this._stageRef.current;
     if (!stage) return;
     const solved = this.solve();
     const rect = stage.getBoundingClientRect();
-    const gs = fit * (this.props.gearScale ?? 1);
+    if (!rect.width) return;
+    /* READ THE SCALE OFF THE STAGE, exactly as onGrab does, rather than taking
+       the fit this pass computed. The runs are placed in screen space and stored
+       in solve units, so the number that converts between them has to be the one
+       the stage is ACTUALLY drawn at right now. Handing in the new target instead
+       made the two disagree for one pass -- and since a different ghost set
+       re-renders the stage, which changes the rect, which yields a different
+       ghost set, the two never settled and the render loop never ended. */
+    const gs = rect.width / solved.w;
     const vw = window.innerWidth, vh = window.innerHeight;
     const ghosts = [];
     this._seed = 20260729;
@@ -1384,6 +1399,16 @@ class Component extends DCLogic {
      doubling back on itself. Only the layout bearings rotate — badges stay upright. */
   axisRot() { return window.innerHeight > window.innerWidth * 1.05 ? 90 : 0; }
 
+  /* The one number every rendered coordinate in the stage is multiplied by.
+     Before fitStage() has measured the viewport there is nothing to multiply by
+     yet, so the boot value is read back out of the `--gsfit` declaration rather
+     than repeated here -- one source of truth for the first frame. */
+  gsRender() {
+    if (this._gsr) return this._gsr;
+    const boot = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--gsfit'));
+    return Math.floor((boot || 0.86) * (this.props.gearScale ?? 1) * 100) / 100;
+  }
+
   fitStage() {
     const rot = this.axisRot();
     /* More room means longer drive runs: the strands get real straight spans instead of
@@ -1473,7 +1498,26 @@ class Component extends DCLogic {
                                         crossAvail * CROSS_BLEED / crossSolved, GS_MAX));
     const root = document.documentElement.style;
     root.setProperty('--gsfit', fit.toFixed(3));
-    this.fitEscapes(fit);
+    /* THE WHEELS ARE DRAWN AT FINAL SIZE (#37). Everything inside the stage used
+       to lay out in unscaled solve units under one `transform: scale(--gs)`
+       ancestor, with the badges alone positioned at `calc(px * var(--gs))`. That
+       put the two on opposite sides of a scale boundary: each wheel wrapper
+       carries `will-change: transform`, so it is promoted to its own compositing
+       layer, and a promoted layer is rasterised at its LAYOUT size and then
+       stretched by the ancestor's scale. Blink re-rasterises when the composited
+       scale changes; WebKit frequently does not, which is why Safari showed soft
+       teeth against razor-sharp badge plates while Chrome looked fine.
+
+       So the scale is baked into the geometry instead, and the vector reaches the
+       compositor already the right size. Quantised to 1% so dragging a window
+       edge does not re-render on every pixel -- and it must be quantised, because
+       this is the value a change of which costs a full re-render. Quantised DOWN,
+       never to nearest: the fit above is a ceiling that keeps the linked wheels
+       wholly on screen, and rounding up would spend part of the margin the ghost
+       runs are supposed to live in. */
+    const gsr = Math.floor(fit * (this.props.gearScale ?? 1) * 100) / 100;
+    if (gsr !== this._gsr) { this._gsr = gsr; this.forceUpdate(); }
+    this.fitEscapes();
     root.setProperty('--dir', rowMode ? 'row' : 'column');
   }
 
@@ -1521,7 +1565,9 @@ class Component extends DCLogic {
     const r = document.documentElement.style;
     const speed = this.props.speed ?? 1;
     r.setProperty('--s', String(speed > 0 ? 1 / speed : 1));
-    r.setProperty('--gsm', String(this.props.gearScale ?? 1));
+    /* gearScale is no longer a CSS variable: it multiplies into gsRender() and
+       reaches the page as real pixel geometry, so nothing has to resolve it at
+       used-value time (#37). */
     /* Dark mode gets the lighter counterpart; an accent dark enough to read on
        the light background disappears against the dark one. */
     if (this.props.accent) {
@@ -1754,7 +1800,7 @@ class Component extends DCLogic {
 
   /* Cheap stand-in for the background wheels: body, web and hub, no masks or turning
      marks — they are blurred and dim, so the detail would be wasted frames. */
-  ghostSvg(g) {
+  ghostSvg(g, S) {
     const h = React.createElement;
     const flat = true;  /* both themes are flat — Charles's call, 2026-07-30, after a side-by-side against the modelled dark */
     const p = shades(g.color || '#9AA6AD', flat);
@@ -1777,7 +1823,9 @@ class Component extends DCLogic {
     const path = this.teethPath(g.teeth, r, g.prof);
     /* Softness comes from low-contrast fills, not a CSS blur: a filter on a rotating
        element re-rasterises every frame, which is what made these stutter. */
-    return h('svg', { width: size, height: size, viewBox: (-size / 2) + ' ' + (-size / 2) + ' ' + size + ' ' + size, style: { position: 'absolute', left: (-size / 2) + 'px', top: (-size / 2) + 'px', overflow: 'visible' } },
+    /* The BOX is scaled, the viewBox is not: the vector is drawn at the size it
+       is displayed rather than drawn small and blown up by an ancestor (#37). */
+    return h('svg', { width: size * S, height: size * S, viewBox: (-size / 2) + ' ' + (-size / 2) + ' ' + size + ' ' + size, style: { position: 'absolute', left: (-size * S / 2) + 'px', top: (-size * S / 2) + 'px', overflow: 'visible' } },
       /* An outline is what separates "far away" from "out of focus". Without one
          these read as blurred, which is the complaint in #22 -- there is no blur
          anywhere in this file. */
@@ -1788,7 +1836,7 @@ class Component extends DCLogic {
     );
   }
 
-  gearSvg(g) {
+  gearSvg(g, S) {
     const h = React.createElement;
     const flat = true;  /* both themes are flat — Charles's call, 2026-07-30, after a side-by-side against the modelled dark */
     const p = shades(g.color || '#C9D2D6', flat);
@@ -2386,7 +2434,10 @@ class Component extends DCLogic {
       return 'M' + (rad * Math.cos(a0)).toFixed(2) + ',' + (rad * Math.sin(a0)).toFixed(2) +
         ' A' + rad + ' ' + rad + ' 0 0 1 ' + (rad * Math.cos(a1)).toFixed(2) + ',' + (rad * Math.sin(a1)).toFixed(2);
     };
-    return h('svg', { width: size, height: size, viewBox: (-size / 2) + ' ' + (-size / 2) + ' ' + size + ' ' + size, style: { position: 'absolute', left: (-size / 2) + 'px', top: (-size / 2) + 'px', overflow: 'visible' } },
+    /* The BOX is scaled, the viewBox is not: every path, gradient and engraving
+       below is authored in module units and stays there, while the element that
+       reaches the compositor is already the size it will be seen at (#37). */
+    return h('svg', { width: size * S, height: size * S, viewBox: (-size / 2) + ' ' + (-size / 2) + ' ' + size + ' ' + size, style: { position: 'absolute', left: (-size * S / 2) + 'px', top: (-size * S / 2) + 'px', overflow: 'visible' } },
       h('defs', null,
         /* All shading is symmetric about the vertical axis — lit from above, never from
            a corner — so concentric webs and hubs read as centred. */
@@ -2517,6 +2568,10 @@ class Component extends DCLogic {
     const h = React.createElement;
     const solved = this.solve();
     const hov = this.state.hover;
+    /* THE SCALE IS APPLIED HERE, ONCE, TO EVERY COORDINATE (#37). solve() stays in
+       module units -- it is what the geometry suite and the mesh tools read -- and
+       nothing downstream of this line is in solve units any more. */
+    const S = this.gsRender();
     /* Wordmark reads the domain it is served from, so the same page works on any site. */
     let host = '';
     try { host = (window.location.hostname || '').replace(/^www\./, '').toLowerCase(); } catch (e) {}
@@ -2529,23 +2584,26 @@ class Component extends DCLogic {
     this._ghostEls = [];
     this._epiEls = [];
     const ghosts = h('div', { key: 'ghosts', ref: (el) => { this._ghostLayer = el; },
-      style: { position: 'absolute', left: 0, top: 0, width: solved.w + 'px', height: solved.h + 'px',
+      style: { position: 'absolute', left: 0, top: 0, width: (solved.w * S) + 'px', height: (solved.h * S) + 'px',
       /* Light mode carries the outriggers harder: pale grey at 0.22 over a near-white
          page was close to invisible, and since #10 these runs carry the composition
          out to both edges rather than trailing off a corner. Still well behind the
          train — they imply the machine continues, they do not compete with it. Dark
          mode is unchanged; the same greys read correctly against #1E2226. */
       transform: this.props.parallax ? 'scale(0.94)' : null, transformOrigin: 'center', opacity: this.state.theme === 'dark' ? 0.17 : 0.46, zIndex: 0, pointerEvents: 'none' } },
-      (this.state.ghosts || []).map(g => h('div', { key: g.i, style: { position: 'absolute', left: g.cx + 'px', top: g.cy + 'px', width: 0, height: 0 } },
+      (this.state.ghosts || []).map(g => h('div', { key: g.i, style: { position: 'absolute', left: (g.cx * S) + 'px', top: (g.cy * S) + 'px', width: 0, height: 0 } },
         h('div', { ref: (el) => { if (this._ghostEls) this._ghostEls.push({ el: el, g: g }); },
           style: { transform: 'rotate(' + g.phase.toFixed(2) + 'deg)' } },
-          this.ghostSvg(g)))));
+          this.ghostSvg(g, S)))));
     /* The artwork is decoration: the meaning is carried by the labelled <a>
        badges, which are siblings of this container, not children. One
        aria-hidden here removes all of it from the accessibility tree -- most
        importantly the rim engravings, which screen readers were announcing
        twice each (the struck effect stacks two text layers) (#24). */
-    const gearArt = h('div', { 'aria-hidden': 'true', style: { position: 'absolute', left: 0, top: 0, width: solved.w + 'px', height: solved.h + 'px', transform: 'scale(var(--gs))', transformOrigin: 'top left' } },
+    /* NO TRANSFORM ON THIS CONTAINER. It carried `scale(var(--gs))` until #37, and
+       that one declaration is what made Safari soft: everything below it was laid
+       out small and then stretched as a bitmap by the compositor. */
+    const gearArt = h('div', { 'aria-hidden': 'true', style: { position: 'absolute', left: 0, top: 0, width: (solved.w * S) + 'px', height: (solved.h * S) + 'px' } },
       ghosts,
       /* One cast-shadow layer behind every wheel, so a wheel's shadow can never fall
          on top of the neighbour it meshes with (#18). Static — never touched by the
@@ -2559,10 +2617,10 @@ class Component extends DCLogic {
          belongs under the object and should show *through* the gaps between teeth,
          which is also what makes the teeth read as teeth rather than as a hole in a
          halo. Invisible in dark mode either way, which is why it survived this long. */
-      h('div', { key: 'shadows', style: { position: 'absolute', left: 0, top: 0, width: solved.w + 'px', height: solved.h + 'px', zIndex: 0, pointerEvents: 'none' } },
+      h('div', { key: 'shadows', style: { position: 'absolute', left: 0, top: 0, width: (solved.w * S) + 'px', height: (solved.h * S) + 'px', zIndex: 0, pointerEvents: 'none' } },
         solved.gears.map(g => h('div', { key: g.i, style: {
-          position: 'absolute', left: (g.cx - g.ro * 1.12) + 'px', top: (g.cy - g.ro * 1.12 + 5) + 'px',
-          width: (g.ro * 2.24) + 'px', height: (g.ro * 2.24) + 'px',
+          position: 'absolute', left: ((g.cx - g.ro * 1.12) * S) + 'px', top: ((g.cy - g.ro * 1.12 + 5) * S) + 'px',
+          width: (g.ro * 2.24 * S) + 'px', height: (g.ro * 2.24 * S) + 'px',
           /* Softer in daylight. A light environment throws a weaker, more diffuse
              shadow; the same alpha that reads as contact on a dark page pools
              into a grey puddle on a pale one. */
@@ -2570,14 +2628,21 @@ class Component extends DCLogic {
             ? 'radial-gradient(closest-side, rgba(10,20,26,.26) 0%, rgba(10,20,26,.20) 58%, rgba(10,20,26,.08) 80%, rgba(10,20,26,0) 100%)'
             : 'radial-gradient(closest-side, rgba(24,34,30,.15) 0%, rgba(24,34,30,.11) 58%, rgba(24,34,30,.04) 80%, rgba(24,34,30,0) 100%)'
         } }))),
-      h('svg', { key: 'chains', width: solved.w, height: solved.h, style: { position: 'absolute', left: 0, top: 0, overflow: 'visible' } },
+      /* A viewBox, so chainEl() can keep emitting solve-unit path data and pitch
+         dash arrays while the element it lands in is already at display size.
+         Nothing in the shipped train draws here -- the dormant strand capability
+         is what this is for, and it stays scale-correct by construction. */
+      h('svg', { key: 'chains', width: solved.w * S, height: solved.h * S, viewBox: '0 0 ' + solved.w + ' ' + solved.h, style: { position: 'absolute', left: 0, top: 0, overflow: 'visible' } },
         solved.chains.map((c, ci) => this.chainEl('c' + ci, c.a, c.b))),
-      solved.gears.map(g => h('div', { key: g.i, style: { position: 'absolute', left: g.cx + 'px', top: g.cy + 'px', width: 0, height: 0 } },
+      solved.gears.map(g => h('div', { key: g.i, style: { position: 'absolute', left: (g.cx * S) + 'px', top: (g.cy * S) + 'px', width: 0, height: 0 } },
+        /* `will-change` stays. It is not the fault -- promotion is what keeps a
+           rotating SVG off the paint path -- the fault was promoting a layer whose
+           layout size was not its display size (#37). Now they are the same. */
         h('div', { ref: (el) => { if (this._spinEls) this._spinEls[g.i] = el; },
           style: {
             transform: 'rotate(' + g.phase.toFixed(2) + 'deg)', willChange: 'transform'
           } },
-          this.gearSvg(g)))))
+          this.gearSvg(g, S)))))
 
     const links = solved.gears.filter(g => g.slug).map(g => {
       const site = SITES[g.slug];
@@ -2592,7 +2657,12 @@ class Component extends DCLogic {
          magnetic cap is FOR, and it keeps the icon at a comfortable size. */
       const disc = Math.max(30, Math.min(60, Math.round(g.r * discF)));
       const cap = Math.round(g.r * capF);
-      const size = 'min(calc(' + cap + 'px * var(--gs)), max(30px, calc(' + disc + 'px * var(--gs))))';
+      /* Was a CSS `min(calc(px * var(--gs)), max(30px, calc(px * var(--gs))))`.
+         The badges were already the sharp half of #37 because they laid out at
+         final size, but they got there by asking the engine to resolve --gs at
+         used-value time; now the whole stage is one arithmetic in JS, so there is
+         only one place a scale is applied and only one thing to keep honest. */
+      const size = Math.min(cap * S, Math.max(30, disc * S));
       /* How wide the name needs. The pill has to know its target width BEFORE it
          opens, because `max-content` cannot be transitioned -- so the label is
          MEASURED rather than estimated. A per-character guess clipped "Mastodon"
@@ -2612,7 +2682,7 @@ class Component extends DCLogic {
         noDrag: (e) => e.preventDefault(),
         clickGuard: (e) => { if (this._badgeMoved === g.slug) { e.preventDefault(); this._badgeMoved = null; } },
         iconEl: h('span', {
-          style: { width: 'calc(' + size + ' * 0.56)', height: 'calc(' + size + ' * 0.56)', display: 'block', lineHeight: 0, color: BRAND[g.slug] || 'var(--ink)', transition: 'color .2s ease' },
+          style: { width: (size * 0.56) + 'px', height: (size * 0.56) + 'px', display: 'block', lineHeight: 0, color: BRAND[g.slug] || 'var(--ink)', transition: 'color .2s ease' },
           dangerouslySetInnerHTML: { __html: this.state.icons[g.slug] || '' }
         }),
         enter: () => this.setState({ hover: g.slug }),
@@ -2658,10 +2728,10 @@ class Component extends DCLogic {
              pins the left edge and keeps the mark exactly where it was. `left`
              is used by nothing else -- crucially not by the magnetic drag, which
              owns `transform` -- so the two never fight. */
-          left: 'calc(' + g.cx + 'px * var(--gs)' + (on ? ' + ' + (labelW + 7) / 2 + 'px' : '') + ')',
-          top: 'calc(' + g.cy + 'px * var(--gs))',
-          width: on ? 'calc(' + size + ' + ' + (labelW + 7) + 'px)' : size,
-          height: size, boxSizing: 'border-box',
+          left: (g.cx * S + (on ? (labelW + 7) / 2 : 0)) + 'px',
+          top: (g.cy * S) + 'px',
+          width: (on ? size + labelW + 7 : size) + 'px',
+          height: size + 'px', boxSizing: 'border-box',
           paddingRight: on ? '2px' : '0px',
           /* 999px, not 50%: a circle at rest, a pill the moment it is wider than
              it is tall, with the same end radius throughout the morph. */
@@ -2701,7 +2771,7 @@ class Component extends DCLogic {
       },
       onStageEnter: () => { if (this.props.hoverDrag) this.setState({ overStage: true }); },
       onStageLeave: () => { if (this.state.overStage) this.setState({ overStage: false }); },
-      stageStyle: { position: 'relative', flex: '0 0 auto', width: 'calc(' + solved.w + 'px * var(--gs))', height: 'calc(' + solved.h + 'px * var(--gs))', cursor: 'grab', touchAction: 'none' },
+      stageStyle: { position: 'relative', flex: '0 0 auto', width: (solved.w * S) + 'px', height: (solved.h * S) + 'px', cursor: 'grab', touchAction: 'none' },
 
       themeLabel: this.state.theme === 'dark' ? 'Switch to light' : 'Switch to dark',
       /* Table of Gears (Charles's 'TOG'): a hidden browse menu over the same

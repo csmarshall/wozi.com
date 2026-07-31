@@ -74,6 +74,66 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **#37 — Blurry wheels in Safari: a promoted layer rasterised small, then
+  stretched.** Every wheel wrapper carries `will-change: transform`, which
+  promotes it to its own compositing layer, and a compositing layer is rasterised
+  at its **layout** size. The whole gear container then multiplied that raster by
+  `transform: scale(var(--gs))`. The badge plates, alone on the page, laid out at
+  final size via `calc(px * var(--gs))` — which is why they stayed razor sharp
+  while the teeth went soft, and why the contrast between them was the diagnosis.
+  Blink re-rasterises a promoted layer when the composited scale changes; WebKit
+  frequently does not, so Chrome looked fine throughout. #30 made it worse
+  without causing it: uncapping the fit so the train could fill the long axis
+  meant a bigger blow-up of the same small bitmap.
+
+  Measured on Charles's own Safari screenshot, which is the only real composited
+  WebKit frame available here — 10–90 edge-spread width, in pixels, and
+  normalised high-frequency energy, over the gear teeth and over the badge plates
+  in the *same* image: teeth **8.1–8.9px / hf 0.30–0.37**, plates **5.2–6.4px /
+  hf 0.82–0.94**. The two halves of one screenshot differ by half again in edge
+  width and by a factor of ~2.7 in high-frequency content.
+
+  Fixed by rendering the wheels at final size instead of scaling a raster.
+  `solve()` still works in module units — the geometry suite and the mesh tools
+  read it, and it must not move — but `renderVals()` now multiplies every
+  coordinate it emits by one quantised scale, `gsRender()`, and the container's
+  `transform` is gone. Each wheel's SVG keeps its viewBox and takes a scaled
+  `width`/`height`, so every path, gradient and engraving below it is still
+  authored in module units while the element handed to the compositor is already
+  the size it will be seen at. The badges follow the same arithmetic in plain
+  pixels, so there is now exactly one place a scale is applied. `will-change`
+  stays: promotion was never the fault — promoting a layer whose layout size was
+  not its display size was.
+
+  The check that replaces the eyeball is a ratio the DOM can answer: displayed
+  wheel width ÷ the wheel SVG's own `width` attribute, which is the factor the
+  engine has to blow the raster up by. In WKWebView — Safari's engine, same
+  harness family as `tools/webkit_band.js` — that was **1.2500 on all eight
+  wheels before and 1.0000 after**, at the same displayed size. In Blink across
+  four viewports it was 1.250 / 1.180 / 1.067 / 0.727 before and 1.000
+  everywhere after, and it stays 1.000 through a live resize sweep from 1600px
+  to 700px.
+
+  Dropping `will-change` was tried first, as the cheaper fix, and rejected on
+  two counts. It relies on the engine choosing *not* to promote an element whose
+  transform is rewritten every frame, which is a heuristic and not a contract —
+  if WebKit promotes it anyway the blur comes straight back. And the thing it
+  trades away is real: promotion is what keeps a rotating SVG off the paint path
+  (#6). Blink's main-thread cost came out at 17.5 ms/s without `will-change`
+  against 17.0 with, and 17.5 for the fix as shipped — all inside the run-to-run
+  spread, so the measurement neither justified nor condemned it, and the
+  structural change costs nothing measurable either way.
+
+  **Unverified:** WebKit's *composited output* could not be photographed on this
+  machine. `takeSnapshotWithConfiguration` re-renders from the display list
+  rather than reading the compositor — a control page with an identical vector
+  mounted promoted and unpromoted inside a scaled ancestor came back
+  bit-identical, so the harness is blind to exactly this class of fault — and an
+  offscreen WKWebView has no display link, so rAF never fires and nothing paints
+  on a clock. What is verified is the geometry the fault is made of, before and
+  after, in WebKit itself; what is not is a Safari photograph of the fixed page.
+  That wants Charles's eye on a real browser.
+
 - **#26 — Rim engraving off centre in WebKit only, and only there.** (Numbered
   past #24 and #25: `index.html` already cites both, from a11y work that was
   never logged here, and reusing them would have pointed those comments at this
