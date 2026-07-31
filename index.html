@@ -1286,12 +1286,35 @@ class Component extends DCLogic {
     const w = window.innerWidth, hgt = window.innerHeight;
     const rowMode = w > 820 && w > hgt * 1.2;
     const colH = this._colRef && this._colRef.current ? this._colRef.current.offsetHeight : 60;
-    const availW = w * (rowMode ? 0.86 : 0.92);
-    const availH = hgt - colH - (rowMode ? 90 : 110);
-    /* The artwork is vector, so on a large display the train should grow to fill the room
-       rather than sit small in the middle of it. The spread boost widens the solve, which
-       used to fight the old 1.15 ceiling and made big screens render SMALLER wheels. */
-    const fit = Math.max(0.28, Math.min(availW / solved.w, availH / solved.h, 1.75));
+    /* THE MACHINE FILLS THE LONG AXIS, EDGE TO EDGE. The ghosts exist to say it
+       continues past the frame, so the long side of the screen is what the scale
+       must satisfy -- not the smaller of the two axes, and not a shaved fraction
+       of it.
+
+       What was here took min(availW, availH) against a width already cut to
+       86-92%, under a hard 1.75 ceiling, and every one of those three starved it
+       in a different situation. On a phone the cross term won: real Safari chrome
+       leaves landscape about 313px tall instead of the device's nominal 430, so
+       the height term shrank the train until it no longer spanned the width, and
+       Charles got dead space at both ends. On a wide desktop the CEILING won: the
+       fit wanted 1.9 and was capped at 1.75, which is the same gap at both sides
+       of a maximised Safari window. The wordmark and the buttons sat correctly
+       throughout, which is what told him the viewport was being read fine and it
+       was the gear area that was wrong.
+
+       So: fill the long axis, and let the cross axis bleed. `main` is
+       overflow:hidden and the colophon is position:fixed, so bleeding costs
+       nothing and is what the outriggers want. CROSS_BLEED is the one guard --
+       past 1.25x the cross viewport the wheels are simply too big and the train
+       reads as a wall rather than a machine. */
+    const alongX = w >= hgt;
+    const longAvail = alongX ? w : hgt;
+    const longSolved = alongX ? solved.w : solved.h;
+    const crossAvail = alongX ? hgt : w;
+    const crossSolved = alongX ? solved.h : solved.w;
+    const CROSS_BLEED = 1.25;
+    const fit = Math.max(0.28, Math.min(longAvail / longSolved,
+                                        crossAvail * CROSS_BLEED / crossSolved));
     const root = document.documentElement.style;
     root.setProperty('--gsfit', fit.toFixed(3));
     this.fitEscapes(fit);

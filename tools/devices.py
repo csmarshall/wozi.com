@@ -38,15 +38,26 @@ IPAD_UA = ("Mozilla/5.0 (iPad; CPU OS 17_5 like Mac OS X) AppleWebKit/605.1.15 "
 AND_UA = ("Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) "
           "Chrome/124.0.0.0 Mobile Safari/537.36")
 
-# (label, portrait width, portrait height, dpr, user agent)
+# (label, portrait width, portrait height, dpr, ua, portrait chrome, landscape chrome)
+#
+# THE CHROME NUMBERS ARE THE POINT. A phone's nominal height is not the height a
+# page gets: Safari and Chrome keep a URL bar, and in landscape Safari adds a tab
+# strip on top of it.測 measuring against the full device height is what made
+# this harness pass a layout that visibly failed on Charles's own iPhone -- the
+# viewport it was handed was 100px taller than any real browser would give.
+# Values are CSS px of chrome subtracted from the height, read off real Safari
+# screenshots (landscape iPhone loses ~117px to the tab strip plus toolbar).
 DEVICES = [
-    ("iPhone SE (2022)",      375,  667, 2, IOS_UA),
-    ("iPhone 13 / 14",        390,  844, 3, IOS_UA),
-    ("iPhone 15 Pro Max",     430,  932, 3, IOS_UA),
-    ("iPad mini",             744, 1133, 2, IPAD_UA),
-    ("iPad Pro 12.9",        1024, 1366, 2, IPAD_UA),
-    ("Pixel 8",               412,  915, 2.625, AND_UA),
-    ("Galaxy S23 Ultra",      412,  915, 3.5, AND_UA),
+    ("iPhone SE (2022)",      375,  667, 2, IOS_UA,      88, 100),
+    ("iPhone 13 / 14",        390,  844, 3, IOS_UA,      96, 117),
+    ("iPhone 15 Pro Max",     430,  932, 3, IOS_UA,      96, 117),
+    ("iPad mini",             744, 1133, 2, IPAD_UA,   64,  64),
+    ("iPad Pro 12.9",        1024, 1366, 2, IPAD_UA,     0, 0),
+    ("Pixel 8",               412,  915, 2.625, AND_UA,  72,  56),
+    ("Galaxy S23 Ultra",      412,  915, 3.5, AND_UA,    72,  56),
+    # desktop Safari maximised: the case where the old 1.75 ceiling bit
+    ("MacBook Safari full",  1440,  900, 2, IOS_UA,      90,  90),
+    ("Ultrawide",            2560, 1080, 1, IOS_UA,      90,  90),
 ]
 
 MEASURE = r"""
@@ -130,9 +141,10 @@ async def main():
                 if msg.get("id") == my:
                     return msg.get("result", {})
 
-        for label, pw, ph, dpr, ua in DEVICES:
+        for label, pw, ph, dpr, ua, pchrome, lchrome in DEVICES:
             for orient in ("portrait", "landscape"):
                 w, h = (pw, ph) if orient == "portrait" else (ph, pw)
+                h -= pchrome if orient == "portrait" else lchrome   # browser chrome is real
                 await send("Emulation.setUserAgentOverride", {"userAgent": ua})
                 await send("Emulation.setDeviceMetricsOverride", {
                     "width": w, "height": h, "deviceScaleFactor": dpr, "mobile": True,
