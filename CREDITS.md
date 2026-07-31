@@ -72,6 +72,18 @@ version of those was wrong, it was wrong in this repository's own way.
   precedent in the ALF 502 turbofan reduction box and in automatics that brake
   the carrier for reverse.
 
+## Icons
+
+The hub marks in `assets/icons/` are each service's own brand mark, used to link
+to Charles's own profile on that service — ordinary nominative use, not an
+endorsement claim.
+
+- **Reddit** — path taken from **Simple Icons**
+  (<https://github.com/simple-icons/simple-icons>), which is **CC0-1.0**. Three
+  hand-drawn attempts at the snoo were rejected before this: getting a
+  well-known mark subtly wrong looks worse than not having it, and an accurate
+  open-licensed path was the right answer rather than a fourth try.
+
 ## Notes for whoever reads this next
 
 `docs/research/planetary-solver.md` has the long form: which source states which

@@ -21,11 +21,19 @@ import urllib.request
 
 import websockets
 
-CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+import os as _os, shutil as _sh
+# CI runs on Linux, where Chrome is not in /Applications. Honour $CHROME,
+# then fall back to whatever is on PATH, then to the macOS bundle.
+CHROME = (_os.environ.get("CHROME")
+          or _sh.which("google-chrome") or _sh.which("chromium-browser")
+          or _sh.which("chromium")
+          or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
 import sys as _s
 URL = _s.argv[1] if len(_s.argv) > 1 else "http://127.0.0.1:8765/"
 PORT = 9333
-PROFILE = "/private/tmp/claude-501/-Users-charles-work-claude-wozi-com/fd0b7254-2923-429f-bfc6-8be63ee34a46/scratchpad/chrome-profile"
+import tempfile as _tf
+# The scratchpad path only exists on Charles's machine; CI gets a temp dir.
+PROFILE = _os.environ.get("CHROME_PROFILE") or _tf.mkdtemp(prefix="wozi-chrome-")
 
 SAMPLE_JS = r"""
 (() => {

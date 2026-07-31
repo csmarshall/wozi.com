@@ -49,6 +49,40 @@ jobs:
       - name: Verify the geometry before anything else
         run: node tools/test.js
 
+      # The train being wonky breaks the whole illusion of the page, so the
+      # layout is gated too, not just the gear maths. tools/devices.py drives
+      # headless Chrome at nine real device profiles in both orientations --
+      # with browser chrome subtracted, which is the part that matters: measuring
+      # against a device's NOMINAL height is a viewport no real browser hands
+      # you, and it is exactly why an earlier version of this harness passed a
+      # layout that was visibly broken on Charles's iPhone.
+      - uses: browser-actions/setup-chrome@v1
+        id: chrome
+        with:
+          chrome-version: stable
+
+      - name: Verify the layout on real device profiles
+        env:
+          CHROME: ${{ steps.chrome.outputs.chrome-path }}
+        run: |
+          python3 -m pip install --quiet --disable-pip-version-check websockets
+          python3 -m http.server 8765 --bind 127.0.0.1 &
+          SERVER=$!
+          # wait for it rather than sleeping blind
+          for i in $(seq 1 40); do
+            if curl -sf -o /dev/null http://127.0.0.1:8765/index.html; then break; fi
+            sleep 0.25
+          done
+          set +e
+          python3 tools/devices.py http://127.0.0.1:8765/ ; LAYOUT=$?
+          python3 tools/verify_motion.py http://127.0.0.1:8765/ ; MOTION=$?
+          set -e
+          kill $SERVER 2>/dev/null || true
+          if [ $LAYOUT -ne 0 ] || [ $MOTION -ne 0 ]; then
+            echo "::error::layout or motion gate failed — not deploying"
+            exit 1
+          fi
+
       - name: Assume the deploy role via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
