@@ -37,6 +37,13 @@
      directly any more: both go through the --off* tokens below, which add the
      safe-area inset for the edge each one is pinned to. */
   --icon:20px; --btn:44px;
+  /* Gap between the three corner buttons. The 44px button is a TOUCH TARGET,
+     deliberately larger than the 20px glyph it holds, so the visible spacing
+     is already the button's own padding plus this -- which is why a flat 6px
+     read as a wide, loose row. Clamped and viewport-relative so a phone packs
+     them tight and a large display lets them breathe, without either end
+     colliding or drifting apart. */
+  --btngap:clamp(0px, 0.6vw, 8px);
   --corner:var(--icon);
   --btnoff:calc(var(--corner) - (var(--btn) - var(--icon)) / 2);
   /* THE STAGE BLEEDS, THE CONTROLS DO NOT. `viewport-fit=cover` hands the page
@@ -122,10 +129,10 @@ a:focus-visible,button:focus-visible,[tabindex]:focus-visible{outline:3px solid 
 
 <main style="min-height:100vh;min-height:100svh;box-sizing:border-box;display:flex;flex-direction:var(--dir);align-items:center;justify-content:center;gap:var(--gap);padding:var(--pad);background:var(--bg);overflow:hidden;">
 
-  <button onClick="{{ toggleTog }}" title="{{ togLabel }}" aria-label="{{ togLabel }}" aria-expanded="{{ togExpanded }}" style="position:fixed;top:var(--offtop);right:calc(var(--offright) + (var(--btn) + 6px) * 2);z-index:20;display:flex;align-items:center;justify-content:center;width:var(--btn);height:var(--btn);padding:0;border:0;border-radius:999px;background:transparent;color:var(--muted);cursor:pointer;transition:color .18s ease;" style-hover="color:var(--ink);">
+  <button onClick="{{ toggleTog }}" title="{{ togLabel }}" aria-label="{{ togLabel }}" aria-expanded="{{ togExpanded }}" style="position:fixed;top:var(--offtop);right:calc(var(--offright) + (var(--btn) + var(--btngap)) * 2);z-index:20;display:flex;align-items:center;justify-content:center;width:var(--btn);height:var(--btn);padding:0;border:0;border-radius:999px;background:transparent;color:var(--muted);cursor:pointer;transition:color .18s ease;" style-hover="color:var(--ink);">
     {{ togIcon }}
   </button>
-  <button onClick="{{ toggleMotion }}" title="{{ motionLabel }}" aria-label="{{ motionLabel }}" aria-pressed="{{ motionPressed }}" style="position:fixed;top:var(--offtop);right:calc(var(--offright) + var(--btn) + 6px);z-index:20;display:flex;align-items:center;justify-content:center;width:var(--btn);height:var(--btn);padding:0;border:0;border-radius:999px;background:transparent;color:var(--muted);cursor:pointer;transition:color .18s ease;" style-hover="color:var(--ink);">
+  <button onClick="{{ toggleMotion }}" title="{{ motionLabel }}" aria-label="{{ motionLabel }}" aria-pressed="{{ motionPressed }}" style="position:fixed;top:var(--offtop);right:calc(var(--offright) + var(--btn) + var(--btngap));z-index:20;display:flex;align-items:center;justify-content:center;width:var(--btn);height:var(--btn);padding:0;border:0;border-radius:999px;background:transparent;color:var(--muted);cursor:pointer;transition:color .18s ease;" style-hover="color:var(--ink);">
     {{ motionIcon }}
   </button>
   <button onClick="{{ toggleTheme }}" title="{{ themeLabel }}" aria-label="{{ themeLabel }}" style="position:fixed;top:var(--offtop);right:var(--offright);z-index:20;display:flex;align-items:center;justify-content:center;width:var(--btn);height:var(--btn);padding:0;border:0;border-radius:999px;background:transparent;color:var(--muted);cursor:pointer;transition:color .18s ease;" style-hover="color:var(--ink);">
