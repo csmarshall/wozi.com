@@ -2342,10 +2342,14 @@ class Component extends DCLogic {
          reaches as far as big hexagons can, a fine one gets closer to the rim
          because smaller cells step out in finer increments.
 
-         What no search can remove is the six gaps at the patch's flats. A
-         hexagon inscribed in a circle falls short by 1 - cos(30) there, about
-         13% of the radius. That is the price of whole hexagons in a round web,
-         and it is the price Charles chose over a clipped, ragged edge. */
+         The six gaps at the patch's flats are now partly recovered -- see the
+         exact-vertex keep below, which takes every whole cell that fits rather
+         than only those in a complete ring. What remains cannot be removed by
+         any search that refuses to cut a cell: a hexagon inscribed in a circle
+         falls short by 1 - cos(30), about 13% of the radius, and on most wheels
+         the leftover at the flats is narrower than one whole hexagon. Filling
+         it completely needs a pattern defined BY the annulus rather than
+         clipped to it, which is what polarbrick and polariso are for. */
       const ceiling = Math.min((g.cv && g.cv.cell) || CELL_MAX, CELL_MAX);
       let cellX = 0, kMin = 0, kMax = -1, bestReach = -1;
       for (let c = ceiling; c >= CELL_MIN; c -= 0.05) {
@@ -2382,14 +2386,46 @@ class Component extends DCLogic {
         if (reach > bestReach + 1e-9) { bestReach = reach; cellX = c; kMin = lo; kMax = hi; }
       }
       if (cellX) {
+        /* THE SIZE is chosen by complete rings above, but the KEEP is exact.
+           Charles, looking at a GitHub wheel: "isn't there space for even a few
+           more hexagons on each side between the side of the shape and the
+           curve of the inner circle". Measured across all twelve wheel-and-
+           variant combinations, ten genuinely have no room -- the gap at the
+           flats is real but narrower than a whole cell. Two do: 15T coarse by
+           six cells, 19T fine by twelve.
+
+           Those were being rejected by a test that asks `distance + c > rOut`,
+           which treats every hexagon as a CIRCLE of radius c. A hexagon only
+           reaches c toward its six vertices; everywhere else it is shorter, by
+           up to 1 - cos(30). So cells that genuinely fit were being refused.
+           The keep below tests the six VERTICES instead, and takes every whole
+           cell that clears -- not only those in a complete ring.
+
+           This cannot cost symmetry, which is the property that matters here:
+           the lattice is six-fold symmetric about the centre and the test
+           depends only on distance from it, so the kept set is closed under a
+           60-degree rotation. A cell that fits guarantees its five partners
+           fit. The patch gains symmetric bumps at the flats rather than an
+           asymmetric edge -- and no cell is ever cut. */
         const step = cellX + WALLX / 2, px = Math.sqrt(3) * step, ry2 = 1.5 * step;
-        for (let k = kMin; k <= kMax; k++) {
+        const vertsX = (cx, cy) => {
+          const o = [];
+          for (let v = 0; v < 6; v++) {
+            const va = (90 + 60 * v) * Math.PI / 180;
+            o.push([cx + cellX * Math.cos(va), cy + cellX * Math.sin(va)]);
+          }
+          return o;
+        };
+        const span = kMax + 2;
+        for (let k = 0; k <= span; k++) {
           for (const [q, r] of ringOf(k)) {
             const cx = px * (q + r / 2), cy = ry2 * r;
+            const V = vertsX(cx, cy);
+            if (!V.every(v2 => Math.hypot(v2[0], v2[1]) <= rOutX)) continue;
+            if (V.some(v2 => Math.hypot(v2[0], v2[1]) < rInX)) continue;
             let d2 = '';
             for (let v = 0; v < 6; v++) {
-              const va = (90 + 60 * v) * Math.PI / 180;
-              d2 += (v ? 'L' : 'M') + (cx + cellX * Math.cos(va)).toFixed(2) + ',' + (cy + cellX * Math.sin(va)).toFixed(2) + ' ';
+              d2 += (v ? 'L' : 'M') + V[v][0].toFixed(2) + ',' + V[v][1].toFixed(2) + ' ';
             }
             holes.push(d2 + 'Z');
           }

@@ -7,6 +7,38 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Added
 
+- **#38 — The hex core takes the cells it was refusing.** Charles, looking at a
+  GitHub wheel: *"isn't there space for even a few more hexagons on each side
+  between the side of the shape and the curve of the inner circle"*. There was,
+  and the reason it was being refused is a conservative test: the fit check
+  asked `distance + c > rOut`, which treats every hexagon as a **circle** of
+  radius `c`. A hexagon only reaches `c` toward its six vertices; in every other
+  direction it falls short by up to `1 − cos 30°`. So cells that genuinely fit
+  were rejected — and specifically the ones at the flats, which is exactly where
+  the gap is visible. The keep now tests the six vertices and takes every whole
+  cell that clears, rather than only cells belonging to a complete ring.
+
+  | wheel | coarse | medium | fine |
+  |---|---|---|---|
+  | 14T | 18 | 18 | 18 → **24** |
+  | 15T | 18 → **24** | 42 | 42 |
+  | 16T | 18 → **42** | 42 | 42 → **66** |
+  | 18T | 42 → **48** | 72 | 72 → **102** |
+  | 19T | 72 | 108 | 108 → **120** |
+
+  This cannot cost symmetry, which is the property that actually matters here:
+  the lattice is six-fold symmetric about the centre and the test depends only
+  on distance from it, so the kept set is closed under a 60° rotation — a cell
+  that fits guarantees its five partners fit. Verified numerically rather than
+  by eye: **21 of 21 wheel-and-variant combinations, worst mismatch 0.0000**.
+  The patch gains symmetric bumps at the flats, never an uneven edge, and no
+  cell is ever cut.
+
+  What is left cannot be taken without cutting a cell — on most wheels the
+  residue at the flats is narrower than one whole hexagon. That is the residue
+  `polarbrick` and `polariso` exist to remove, being defined *by* the annulus
+  rather than clipped to it.
+
 - **#38 / #43 — Three ways to fill the web, and the hex core becomes a printed
   part.** #38 had been argued four times without closing, and the reason turns
   out to be that every option was a variation inside the losing family. The
