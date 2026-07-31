@@ -108,11 +108,18 @@ jobs:
 
       - name: Publish the runtime
         run: |
-          aws s3 cp support.js "$BUCKET/support.js" \
-            --content-type "text/javascript; charset=utf-8" \
-            --cache-control "public, max-age=300" \
-            --only-show-errors
-          echo "  support.js"
+          # config.js carries the link table, the people and the palette, and
+          # index.html reads it at load. If it is missing the page still renders
+          # a turning machine -- with NO LINKS -- and only says so in the
+          # console, so a forgotten publish here is close to invisible. The
+          # live-site check below asserts it is served and parses.
+          for f in support.js config.js; do
+            aws s3 cp "$f" "$BUCKET/$f" \
+              --content-type "text/javascript; charset=utf-8" \
+              --cache-control "public, max-age=300" \
+              --only-show-errors
+            echo "  $f"
+          done
 
       - name: Publish hub icons
         run: |
@@ -213,6 +220,21 @@ jobs:
 
           check https://wozi.com/ 200 'support.js'
           check https://wozi.com/support.js 200 ''
+          # config.js carries the link table, the people and the palette. If it
+          # 404s, index.html still renders a turning machine with NO LINKS and
+          # only complains to the console -- a failure a screenshot would pass.
+          # Assert it is served, that it is really the config, and that it
+          # actually parses, since a truncated or corrupted body would otherwise
+          # look identical to a missing one at the point it matters.
+          check https://wozi.com/config.js 200 'WOZI_CONFIG'
+          check_content_type https://wozi.com/config.js "text/javascript; charset=utf-8"
+          cfg=$(curl -sS --max-time 20 https://wozi.com/config.js || true)
+          if node --check <(printf '%s' "$cfg") >/dev/null 2>&1; then
+            echo "  ok   https://wozi.com/config.js parses"
+          else
+            echo "  FAIL https://wozi.com/config.js does not parse as JavaScript"
+            fail=1
+          fi
           check https://wozi.com/assets/icons/github.svg 200 'svg'
           check https://wozi.com/cards/ 200 'Charles'
           check https://wozi.com/keybase.html 200 ''

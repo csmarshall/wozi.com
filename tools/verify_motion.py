@@ -203,13 +203,25 @@ async def cdp():
     # than hardcoded -- it was pinned at 7 and started failing the moment an
     # eighth link was added, which is a gate lying about a page that was fine.
     import re as _re, pathlib as _pl
-    _src = (_pl.Path(__file__).resolve().parent.parent / "index.html").read_text()
-    _i = _src.index("const TRAIN = [")
-    _block = _src[_i:_src.index("\n];", _i)]
+    # TRAIN is derived from the active person's links now (#40), so the wheel
+    # count lives in config.js rather than in index.html.
+    _cfg = (_pl.Path(__file__).resolve().parent.parent / "config.js").read_text()
+    _i = _cfg.index("PEOPLE:")
+    _depth, _j = 0, _cfg.index("[", _i)
+    for _k in range(_j, len(_cfg)):
+        if _cfg[_k] == "[":
+            _depth += 1
+        elif _cfg[_k] == "]":
+            _depth -= 1
+            if _depth == 0:
+                _block = _cfg[_i:_k + 1]
+                break
     # strip /* ... */ first: a RETIRED wheel is commented out, not deleted,
-    # and its slug would otherwise still be counted
+    # and it would otherwise still be counted
     _block = _re.sub(r"/\*.*?\*/", "", _block, flags=_re.S)
-    _want = len(_re.findall(r"slug:", _block))
+    # count href, NOT slug -- a person carries a slug of their own as well as
+    # one per link, so slugs would report one wheel too many per person
+    _want = len(_re.findall(r"href:", _block))
     ok = (rot_changed == len(s1["rot"]) and len(s1["rot"]) > 0
           and dash_ok and not real_errors and worst < 2.0 and icons == _want)
     if icons != _want:

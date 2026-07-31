@@ -33,6 +33,11 @@ const meshEpi = require('./mesh_epi.js');
 const meshRav = require('./mesh_rav.js');
 
 const SRC = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+/* The settings moved to config.js (#40), so the suite reads BOTH files. It has
+   to: TRAIN is derived from the active person's links now, and its length feeds
+   TEETH_SUM and therefore the geometry -- a suite that only read index.html
+   would be measuring a train whose size it could no longer see. */
+const CFG_SRC = fs.readFileSync(path.join(__dirname, '..', 'config.js'), 'utf8');
 
 /* ---- extraction: pull the real thing out of the real page ---------------- */
 
@@ -42,15 +47,18 @@ function grabNumber(name) {
   return parseFloat(m[1]);
 }
 
-function grabBlock(decl, open, close) {
-  const i = SRC.indexOf(decl);
-  if (i < 0) throw new Error('block not found in index.html: ' + decl);
-  let j = SRC.indexOf(open, i), depth = 0;
-  for (let k = j; k < SRC.length; k++) {
-    if (SRC[k] === open) depth++;
-    else if (SRC[k] === close) { depth--; if (depth === 0) return SRC.slice(i, k + 1); }
+function grabBlockFrom(src, where, decl, open, close) {
+  const i = src.indexOf(decl);
+  if (i < 0) throw new Error('block not found in ' + where + ': ' + decl);
+  let j = src.indexOf(open, i), depth = 0;
+  for (let k = j; k < src.length; k++) {
+    if (src[k] === open) depth++;
+    else if (src[k] === close) { depth--; if (depth === 0) return src.slice(i, k + 1); }
   }
   throw new Error('unterminated block: ' + decl);
+}
+function grabBlock(decl, open, close) {
+  return grabBlockFrom(SRC, 'index.html', decl, open, close);
 }
 
 const page = (function build() {
@@ -65,8 +73,22 @@ const page = (function build() {
   /* Comments are stripped first: a retired wheel is commented out rather than
      deleted, and counting its slug would inflate the train's length -- which
      feeds TEETH_SUM, so the error would land in the geometry. */
-  const trainLen = (grabBlock('const TRAIN =', '[', ']')
-    .replace(/\/\*[\s\S]*?\*\//g, '').match(/slug:/g) || []).length;
+  /* TRAIN is no longer a literal -- it is built from the active person's links
+     in config.js. Count them there, still stripping comments first, because a
+     retired wheel is commented out rather than deleted and counting its slug
+     would inflate the train's length. That length feeds TEETH_SUM, so the error
+     would land in the geometry rather than anywhere obvious.
+     The count is taken over the WHOLE PEOPLE block, and the suite asserts below
+     that there is exactly one person -- so this stays honest, and the day a
+     second chain is added the assertion fails and forces this to be revisited
+     rather than silently summing two people's wheels into one train. */
+  const peopleBlock = grabBlockFrom(CFG_SRC, 'config.js', 'PEOPLE:', '[', ']')
+    .replace(/\/\*[\s\S]*?\*\//g, '');
+  /* Count `href:`, NOT `slug:` -- a person carries a slug of their own as well
+     as one per link, so counting slugs would report one wheel too many per
+     person and inflate TEETH_SUM. Only links have an href. */
+  const trainLen = (peopleBlock.match(/href:/g) || []).length;
+  if (!trainLen) throw new Error('no links found in config.js PEOPLE');
   const src = decls + '\n'
     + grabBlock('const PLANETARY_FLAVOURS =', '[', ']') + ';\n'
     + grabBlock('const RAVIGNEAUX_MENU =', '[', ']') + ';\n'
@@ -97,6 +119,62 @@ function test(name, fn) {
 }
 function ok(cond, msg) { if (!cond) throw new Error(msg); }
 function eq(a, b, msg) { if (a !== b) throw new Error(msg + ' (got ' + a + ', want ' + b + ')'); }
+
+/* ---- 0. the split between page and config -------------------------------- */
+
+test('no setting is defined in both index.html and config.js', () => {
+  /* The whole point of #40's split is that each value has exactly ONE home.
+     A copy is the failure mode that matters: edit one, forget the other, and
+     the page ships something nobody chose -- and because index.html reads the
+     config at load, the copy that wins is not the one you edited. Assert it
+     directly rather than trusting review. */
+  const names = ['SERVICES', 'PEOPLE', 'PAIR_SLOTS', 'PAIRS', 'SINGLES',
+    'BRAND', 'PILL_STACK', 'WHEEL_POOL', 'ACCENTS'];
+  const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '');
+  const page = strip(SRC), cfg = strip(CFG_SRC);
+  names.forEach(n => {
+    /* In index.html these must appear only as `const NAME = CONF.NAME` reads,
+       never as an authored literal. */
+    const authored = new RegExp('const\\s+' + n + '\\s*=\\s*[\\[{]');
+    ok(!authored.test(page),
+      n + ' is authored as a literal in index.html — it belongs in config.js only');
+    ok(cfg.indexOf(n + ':') >= 0, n + ' is missing from config.js');
+  });
+});
+
+test('config.js is a plain script that assigns WOZI_CONFIG', () => {
+  /* It must not be a module and must not defer: index.html reads WOZI_CONFIG
+     while building the train, so anything that delays it breaks the page. */
+  ok(/window\.WOZI_CONFIG\s*=/.test(CFG_SRC), 'config.js does not assign window.WOZI_CONFIG');
+  ok(!/\bexport\b/.test(CFG_SRC.replace(/\/\*[\s\S]*?\*\//g, '')),
+    'config.js uses export — it is loaded as a plain script, so it must not be a module');
+  ok(/<script src="\.\/config\.js"><\/script>/.test(SRC),
+    'index.html does not load config.js');
+  ok(SRC.indexOf('config.js') < SRC.indexOf('support.js'),
+    'config.js must be loaded BEFORE support.js');
+});
+
+test('config.js is named in the deploy whitelist', () => {
+  /* The deploy publishes an explicit list of paths, so a file in the repo does
+     NOT reach the web by existing. If config.js is missing from it the page
+     still renders a turning machine with no links, and only says so in the
+     console -- a failure a screenshot would happily pass. */
+  const wf = fs.readFileSync(
+    path.join(__dirname, '..', '.github', 'workflows', 'deploy.yml'), 'utf8');
+  ok(/\bconfig\.js\b/.test(wf), 'config.js is not published by .github/workflows/deploy.yml');
+});
+
+test('exactly one person, or the wheel count needs revisiting', () => {
+  /* trainLen above counts every link across the WHOLE people list, which is
+     only the train's length while there is one chain on stage. The day a second
+     person is added this fails, which is the point: TEETH_SUM is derived from
+     the train's length, so summing two people's wheels would land the error in
+     the geometry rather than anywhere visible. */
+  const block = grabBlockFrom(CFG_SRC, 'config.js', 'PEOPLE:', '[', ']')
+    .replace(/\/\*[\s\S]*?\*\//g, '');
+  const people = (block.match(/\bslug:/g) || []).length - (block.match(/\bhref:/g) || []).length;
+  eq(people, 1, 'more than one person in config.js — trainLen and TEETH_SUM must become per-person');
+});
 
 /* ---- 1. the page and its constants --------------------------------------- */
 

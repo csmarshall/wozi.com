@@ -3,6 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- config.js MUST load before support.js: the runtime below reads WOZI_CONFIG
+     while building the train, so it has to already exist. It is a plain script,
+     not a module, for exactly that reason -- a module would defer.
+     It is also named in the deploy whitelist; a file in the repo does not reach
+     the web on its own. -->
+<script src="./config.js"></script>
 <script src="./support.js"></script>
 </head>
 <body>
@@ -282,20 +288,60 @@ const CLEARANCE = 13; /* px kept between the tip circles of wheels that are not 
    "Dormant capability: chain and belt", before re-enabling either. */
 /* One directly-meshed train: every wheel drives its neighbour, so spacing is fixed by
    the pitch radii and only the bearing varies — a gentle serpentine, no slack to fold. */
-const TRAIN = [
-  { teeth: 17, angle: 0, slug: 'linkedin', prof: { rim: 1.7 } },
-  { teeth: 15, angle: 20, slug: 'github', prof: { rim: 1.6 } },
-  /* Mastodon is retired at Charles's request -- barely used. Commented rather
-     than deleted, like the retired gear families: put the line back and the
-     wheel returns, since SITES, BRAND and the icon are all still here.
-     Remember to put 'mastodon' back in SINGLES at the same time. */
-  /* { teeth: 18, angle: -24, slug: 'mastodon', prof: { rim: 2.0 } }, */
-  { teeth: 14, angle: 22, slug: 'instagram', prof: { rim: 1.4 } },
-  { teeth: 17, angle: -20, slug: 'threads', prof: { rim: 1.7 } },
-  { teeth: 15, angle: 24, slug: 'bluesky', prof: { rim: 1.9 } },
-  { teeth: 18, angle: -18, slug: 'mail', prof: { rim: 1.6 } },
-  { teeth: 16, angle: 21, slug: 'reddit', prof: { rim: 1.8 } }
-];
+/* ---------------------------------------------------------------------------
+   THE CONFIG. Settings live in config.js; this file keeps the machinery.
+
+   There is deliberately NO fallback copy of the link table here. A duplicate is
+   the one failure this whole split exists to prevent: edit one, forget the
+   other, and the page ships something nobody chose. So if the config is missing
+   the machine still turns -- on unlinked wheels -- and says loudly why, which is
+   visibly wrong rather than quietly stale. CI asserts config.js is reachable and
+   parses, so that state should never reach production.
+   --------------------------------------------------------------------------- */
+const CFG = (typeof window !== 'undefined' && window.WOZI_CONFIG) || null;
+if (!CFG) console.error('wozi: config.js did not load — the train will render '
+  + 'without links. Check that it is published (deploy.yml whitelist).');
+const CONF = CFG || { SERVICES: {}, PEOPLE: [], PAIR_SLOTS: [], PAIRS: [],
+  SINGLES: [], BRAND: {}, PILL_STACK: {}, ACCENTS: {},
+  WHEEL_POOL: ['#4A90E2', '#17A05C', '#8CB8F2'] };
+
+/* Which person's chain is on stage. The hostname decides it, so one CloudFront
+   distribution carrying several alternate domain names serves this same
+   byte-identical object to all of them and each lands on its own chain --
+   selection happens here rather than at the edge, so nothing has to vary by
+   Host and one cached object covers every domain. `?who=` overrides, for
+   testing a chain from any host. */
+const WHO = (function () {
+  const people = CONF.PEOPLE || [];
+  if (!people.length) return { slug: '', name: '', links: [] };
+  let q = '';
+  try { q = new URLSearchParams(location.search).get('who') || ''; } catch (e) {}
+  const host = (typeof location !== 'undefined' && location.hostname) || '';
+  return people.find(p => p.slug === q)
+      || people.find(p => (p.hosts || []).indexOf(host) >= 0)
+      || people[0];
+})();
+
+/* TRAIN is DERIVED from the active person's links now, rather than authored.
+
+   IT CARRIES NO TOOTH COUNTS AND NO ANGLES, deliberately. Both are dealt fresh
+   every load -- dealTeeth() draws each wheel uniformly from [TEETH_MIN,
+   TEETH_MAX] and then filters the draw, and the bearing deal below it does the
+   same for angles -- so every wheel's values are overwritten before anything
+   reads them. The old hand-written numbers here were seeds inherited from the
+   original fixed list and were dead the day dealing was introduced: nothing
+   between this line and dealTeeth() reads .teeth or .angle at all. Writing them
+   out again would only invite someone to tune a number that has no effect.
+
+   Nor is there a placeholder: dealTeeth() and the bearing deal ASSIGN these
+   properties, they never read them, so seeding with TEETH_MIN would not even
+   parse here -- that constant is declared further down and would be in its
+   temporal dead zone.
+
+   `prof.rim` sets the face radius on UNMARKED wheels only. Every wheel here is
+   marked, and a marked wheel takes its face from the engraving band instead, so
+   this is a default rather than a per-wheel choice. */
+const TRAIN = (WHO.links || []).map(l => ({ slug: l.slug, prof: { rim: 1.7 } }));
 
 /* The tooth counts above are the seed, not the answer: they are dealt per load,
    so the machine has a different silhouette every visit rather than the same
@@ -891,12 +937,23 @@ TRAIN.forEach((t, i) => {
    bare shuffle can seat them side by side, where they read as the same wheel
    (#12) — so a deal is rejected while any two NEIGHBOURING wheels are within
    40 degrees, bounded retries, best deal kept. */
-const WHEEL_POOL = [
-  { c: '#4A90E2', h: 212 }, { c: '#17A05C', h: 150 }, { c: '#8CB8F2', h: 214 },
-  { c: '#E8615A', h: 3 },   { c: '#6ECFA6', h: 155 }, { c: '#F2C14E', h: 42 },
-  { c: '#9B8CE0', h: 251 },                                     /* the template's seven */
-  { c: '#EC8C4E', h: 24 },  { c: '#54BFB6', h: 175 }, { c: '#DB79B8', h: 322 }  /* gap fill */
-];
+/* The pool is authored in config.js as plain hexes. Hue is DERIVED here rather
+   than stored beside each colour: it used to be a hand-written `h` field, which
+   was a duplicate that could drift silently -- change a hex, forget its hue, and
+   the 40-degree separation rule below misbehaves with no error at all. All ten
+   agreed within one degree when checked, so deriving it changed nothing and
+   removed the hazard. */
+const hueOf = (hex) => {
+  const r = parseInt(hex.slice(1, 3), 16) / 255,
+        g = parseInt(hex.slice(3, 5), 16) / 255,
+        b = parseInt(hex.slice(5, 7), 16) / 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+  if (!d) return 0;
+  let h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  h *= 60;
+  return h < 0 ? h + 360 : h;
+};
+const WHEEL_POOL = (CONF.WHEEL_POOL || []).map(c => ({ c: c, h: hueOf(c) }));
 function dealColours(n) {
   const dist = (a, b) => Math.min(Math.abs(a - b), 360 - Math.abs(a - b));
   let best = null, bestScore = -1;
@@ -920,9 +977,9 @@ TRAIN.forEach((t, i) => {
 });
 
 /* Sibling services sit on neighbouring wheels of the train. */
-const PAIR_SLOTS = [[0, 1], [3, 4]];
-const PAIRS = [['linkedin', 'github'], ['instagram', 'threads']];
-const SINGLES = ['bluesky', 'mail', 'reddit'];   /* 'mastodon' retired with its wheel */
+const PAIR_SLOTS = CONF.PAIR_SLOTS || [];
+const PAIRS = CONF.PAIRS || [];
+const SINGLES = CONF.SINGLES || [];
 
 /* Each hex is the brand's own published mark colour, cross-checked against the
    Simple Icons data set (which cites each vendor's brand page as its source).
@@ -946,25 +1003,12 @@ const SINGLES = ['bluesky', 'mail', 'reddit'];   /* 'mastodon' retired with its 
    not ours to serve, and eight webfonts on a page with no build step would cost
    more than the fidelity is worth. So this is partial by design: a nicety when
    the font happens to be installed, and never a regression when it is not. */
-const PILL_STACK = {
-  github: "'Mona Sans', 'Segoe UI'",                    /* GitHub's own, OFL */
-  linkedin: "'Brandon Text', 'Source Sans 3', 'Source Sans Pro'",
-  instagram: "'Instagram Sans', 'Segoe UI'",
-  threads: "'Instagram Sans', 'Segoe UI'",              /* same house as Instagram */
-  bluesky: "Inter",                                     /* Bluesky's UI face, OFL */
-  mastodon: "Roboto",                                   /* Mastodon's UI face, Apache */
-  reddit: "'Reddit Sans', 'IBM Plex Sans'",
-  mail: ""                                              /* not a brand: the site's own */
-};
+const PILL_STACK = CONF.PILL_STACK || {};
 const pillFont = (slug) => {
   const own = PILL_STACK[slug];
   return "650 13px " + (own ? own + ", " : "") + "Manrope, system-ui, sans-serif";
 };
-const BRAND = {
-  linkedin: '#0A66C2', github: '#181717', mastodon: '#6364FF',
-  instagram: '#FF0069', threads: '#000000', bluesky: '#1185FE', mail: '#E8615A',
-  reddit: '#FF4500'
-};
+const BRAND = CONF.BRAND || {};
 
 /* Accent pairs: light value -> dark-mode counterpart.
    The stylesheet already lightens the default blue for dark mode, but syncVars
@@ -973,13 +1017,7 @@ const BRAND = {
    now carries its own, and syncVars picks per theme.
    'steel' is the machine's own metal, taken from the light --m4 / dark --m1
    tones, so the accent reads as part of the object rather than applied to it. */
-const ACCENTS = {
-  '#E8483A': '#F4796D',  /* red    */
-  '#3B7DE8': '#7FA9F0',  /* blue   */
-  '#F4B32B': '#F7C65E',  /* amber  */
-  '#1FA463': '#4FC48C',  /* green  */
-  '#5F686E': '#AEB8BF'   /* steel  */
-};
+const ACCENTS = CONF.ACCENTS || {};
 
 /* LIGHT MODE IS FLAT (#choice, 2026-07-30): the authored colour as a solid
    body, a thin darker outline, plain dark lettering — a machinist's drawing.
@@ -1063,16 +1101,15 @@ function shades(hex, soft) {
     : [mix(0.55, 255), mix(0.14, 255), mix(0.2, 0), mix(0.42, 0)];
 }
 
-const SITES = {
-  linkedin: { label: 'LinkedIn', path: '/in/csmarshall', href: 'http://www.linkedin.com/in/csmarshall' },
-  github: { label: 'GitHub', path: '/csmarshall', href: 'https://github.com/csmarshall/' },
-  mastodon: { label: 'Mastodon', path: '/@cs_marshall', href: 'http://macaw.social/@cs_marshall' },
-  instagram: { label: 'Instagram', path: '/cs_marshall', href: 'http://www.instagram.com/cs_marshall/' },
-  threads: { label: 'Threads', path: '/csmarshall', href: 'https://www.threads.com/csmarshall' },
-  bluesky: { label: 'Bluesky', path: '/charles.wozi.com', href: 'https://bsky.app/profile/charles.wozi.com' },
-  mail: { label: 'Mail', path: 'charles@wozi.com', href: 'mailto:charles@wozi.com' },
-  reddit: { label: 'Reddit', path: '/user/cs_marshall', href: 'https://www.reddit.com/user/cs_marshall/' }
-};
+/* SITES is per-PERSON now: config.js keeps SERVICES (what a service is, shared
+   by everyone) separate from each person's own handle and URL, because
+   `/in/csmarshall` is Charles's, not LinkedIn's. This rebuilds the flat shape
+   the rest of the file already expects, for whichever chain is on stage. */
+const SITES = (WHO.links || []).reduce(function (acc, l) {
+  const svc = (CONF.SERVICES || {})[l.slug] || {};
+  acc[l.slug] = { label: svc.label || l.slug, path: l.path, href: l.href };
+  return acc;
+}, {});
 
 class Component extends DCLogic {
   state = { theme: 'light', hover: null, icons: {}, ghosts: [], motion: null, tog: false };
@@ -3030,7 +3067,37 @@ class Component extends DCLogic {
               background: active ? 'var(--accent)' : 'transparent' }
           };
         };
-        const out = [item(null, 'Mixed deal (default)')];
+        /* THE PERSON PICKER LIVES HERE, and only appears when there is someone
+           to pick. With one chain configured this loop adds nothing at all, so
+           the page is byte-identical to what it was before people existed --
+           which is the whole reason the picker was built now rather than later:
+           adding a person becomes a config edit, with no page work.
+
+           Plain `?who=` links, exactly like the gear entries above, because the
+           hostname already decides the default. Switching person is a
+           navigation, not state -- the tooth deal, the colour deal and the
+           centre deal all run at load, so a fresh document is the correct way
+           to change which chain is on stage. */
+        const people = CONF.PEOPLE || [];
+        const out = [];
+        if (people.length > 1) {
+          people.forEach(p => {
+            const active = WHO.slug === p.slug;
+            out.push({
+              href: '?who=' + p.slug, label: p.name, current: active ? 'true' : 'false',
+              style: { display: 'block', padding: '7px 12px', borderRadius: '9px',
+                textDecoration: 'none', font: "700 13px/1.3 'Manrope',system-ui,sans-serif",
+                color: active ? 'var(--bg)' : 'var(--ink)',
+                background: active ? 'var(--accent)' : 'transparent' }
+            });
+          });
+          out.push({
+            href: '', label: '', current: 'false',
+            style: { display: 'block', height: '1px', margin: '6px 10px',
+              background: 'var(--hair)', pointerEvents: 'none' }
+          });
+        }
+        out.push(item(null, 'Mixed deal (default)'));
         CENTRE_FAMILIES.forEach(f => {
           out.push(item(f.type, names[f.type] || f.type));
           /* The double row rides directly under the single, since it is the same
