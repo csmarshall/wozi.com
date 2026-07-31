@@ -7,6 +7,61 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Added
 
+- **#41 — The device gate covers 2560×1440, and says out loud what it does not
+  cover.** The layout guard had never been run above 2560×1080, which meant the
+  widths people actually reported problems at were the widths nothing measured.
+  QHD-wide is now in the list and passes. Two wider profiles are present as
+  commented-out rows rather than being quietly absent: 3440 fails on four
+  consecutive runs, 20–35px short of one edge at 99% coverage, and 5120 falls
+  700–800px short. Both are **coverage**, not centring — the assembly is placed
+  correctly and simply does not reach — and closing either means deciding how
+  many more outrigger wheels that empty edge is worth against the per-SVG frame
+  cost #6 fought to remove. That is a judgement, not a bug fix, and a gate that
+  fails on an open question trains everyone to ignore red. The rows carry their
+  own reasoning inline so neither width can be lost, and they go back in
+  together once the outrigger count is settled.
+
+- **#36 — The engraved underscores have ink, not just space.** `cs_marshall`
+  was hard to read on the band because the underscore is pure edge: it has no
+  body to spare, so at 5.6px it lost far more coverage to anti-aliasing than a
+  letter did. Measured on the same rasteriser the SVG text goes through, its
+  effective opacity came out at 0.45 against 0.57–0.60 for ordinary letters —
+  the glyph was being drawn at roughly three-quarters the weight of its
+  neighbours. Raising `fillOpacity` was rejected because it darkens every glyph
+  equally and the struck-metal look is the point. Instead a hairline stroke
+  matched to the fill (`ENGRAVE_STROKE` 0.035, about 0.2px here) is applied to
+  the handle ring only, taking the underscore to 0.57 and 2.74:1 while moving
+  letters by a tenth of that. The stamp ring is deliberately untouched — it
+  carries no underscores.
+
+- **#35 — The badge disc separates from the page in light mode.** The disc sat
+  at **1.05:1** against the page, which is no edge at all; the comment claiming
+  1.21:1 had been measured against the original white disc and never updated
+  when it was toned down to answer a glare complaint. Rather than move back
+  toward white and re-open that complaint, the disc is toned *darker* —
+  `#CCCEC9`, the same hue scaled down — reaching 1.31:1 while still clearing
+  11.3:1 against GitHub's near-black mark and 13.2:1 against Threads' pure
+  black, so it remains a pale field for dark logos. Dark mode was already at
+  12.2:1 and is unchanged.
+
+- **#8 — The shipped defaults are stated, not inferred.** `SESSION-LOG.md`
+  warned that the initial commit had baked in unsaved preview values, and it was
+  right at the time — but two later commits (`e6936a7`, `2e5a721`) had already
+  corrected parallax, character chips and the accent before the issue was even
+  filed. Nothing currently shipping is accidental; every value traces to a
+  deliberate commit. Establishing that took git archaeology against a stale log,
+  so the `data-props` block now carries a comment naming all six live values and
+  citing the commits that set them. `engravedRims` and the steel accent are
+  deliberate overrides and were left exactly as they are. No default was flipped.
+
+- **#7 — The dead CSS keyframes are gone.** `rotate`, `rotate-back`, `signsway`,
+  `chainrun` and `chainrun-back` were left over from the build that animated the
+  train in CSS, before everything moved onto the one `requestAnimationFrame`
+  clock. Each was confirmed unreferenced across the whole repo before removal —
+  the only surviving `animation:` rules anywhere are `support.js`'s own loading
+  shimmer, which is unrelated. Nothing that turns has used CSS animation for a
+  long time; now nothing can accidentally start.
+
 - **#32 — The machine runs under Safari's chrome on iOS.** `viewport-fit=cover`
   hands the page the whole display instead of the safe rectangle, so the ghost
   wheels continue behind the translucent toolbars, under the notch and past the
