@@ -120,7 +120,7 @@ a:focus-visible,button:focus-visible,[tabindex]:focus-visible{outline:3px solid 
 </style>
 </helmet>
 
-<main style="min-height:100vh;box-sizing:border-box;display:flex;flex-direction:var(--dir);align-items:center;justify-content:center;gap:var(--gap);padding:var(--pad);background:var(--bg);overflow:hidden;">
+<main style="min-height:100vh;min-height:100svh;box-sizing:border-box;display:flex;flex-direction:var(--dir);align-items:center;justify-content:center;gap:var(--gap);padding:var(--pad);background:var(--bg);overflow:hidden;">
 
   <button onClick="{{ toggleTog }}" title="{{ togLabel }}" aria-label="{{ togLabel }}" aria-expanded="{{ togExpanded }}" style="position:fixed;top:var(--offtop);right:calc(var(--offright) + (var(--btn) + 6px) * 2);z-index:20;display:flex;align-items:center;justify-content:center;width:var(--btn);height:var(--btn);padding:0;border:0;border-radius:999px;background:transparent;color:var(--muted);cursor:pointer;transition:color .18s ease;" style-hover="color:var(--ink);">
     {{ togIcon }}
@@ -1336,7 +1336,20 @@ class Component extends DCLogic {
       this.forceUpdate();
     }
     const solved = this.solve();
-    const w = window.innerWidth, hgt = window.innerHeight;
+    /* MEASURE WHAT IS ACTUALLY VISIBLE. On iOS Safari `100vh` is the LARGE
+       viewport -- the height the page would have if the toolbars were collapsed --
+       while `window.innerHeight` is the visual viewport, which is what you can
+       currently see. The two differ by the toolbar, so `main` was laying out
+       taller than the screen while the scale was computed against the shorter
+       number: the train ended up centred in a box that extends past the fold,
+       which is dead space at one end and clipping at the other. Desktop never
+       showed it because there the two are equal.
+       `min-height:100svh` on `main` fixes the layout half (svh is the SMALL
+       viewport, never larger than what is visible; the `100vh` before it is the
+       fallback for engines that do not know svh). This is the measuring half. */
+    const vv = window.visualViewport;
+    const w = (vv && vv.width) || window.innerWidth;
+    const hgt = (vv && vv.height) || window.innerHeight;
     const rowMode = w > 820 && w > hgt * 1.2;
     const colH = this._colRef && this._colRef.current ? this._colRef.current.offsetHeight : 60;
     /* THE MACHINE FILLS THE LONG AXIS, EDGE TO EDGE. The ghosts exist to say it
@@ -1404,6 +1417,9 @@ class Component extends DCLogic {
     this.fitStage();
     this.onResize = () => this.fitStage();
     window.addEventListener('resize', this.onResize);
+    /* iOS fires this and not `resize` when the toolbar collapses or the keyboard
+       comes up, so without it the fit is stale exactly when the viewport moves. */
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', this.onResize);
     /* LAYER: parallax — the far plane drifts against pointer movement. */
     this._onPointer = (e) => {
       if (!this.props.parallax || !this._ghostLayer) return;
@@ -1429,6 +1445,7 @@ class Component extends DCLogic {
   componentWillUnmount() {
     if (this.mq && this.mq.removeEventListener) this.mq.removeEventListener('change', this.onSys);
     window.removeEventListener('resize', this.onResize);
+    if (window.visualViewport) window.visualViewport.removeEventListener('resize', this.onResize);
     if (this._onPointer) window.removeEventListener('pointermove', this._onPointer);
     if (this._raf) cancelAnimationFrame(this._raf);
     if (this._io) this._io.disconnect();
