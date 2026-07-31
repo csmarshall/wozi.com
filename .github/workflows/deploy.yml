@@ -228,11 +228,20 @@ jobs:
           # look identical to a missing one at the point it matters.
           check https://wozi.com/config.js 200 'WOZI_CONFIG'
           check_content_type https://wozi.com/config.js "text/javascript; charset=utf-8"
-          cfg=$(curl -sS --max-time 20 https://wozi.com/config.js || true)
-          if node --check <(printf '%s' "$cfg") >/dev/null 2>&1; then
-            echo "  ok   https://wozi.com/config.js parses"
+          # Write to a REAL FILE. `node --check <(printf ...)` hands node a
+          # /dev/fd/63 pipe, which it cannot treat as a module source, so it
+          # failed on a config that was served perfectly -- a gate reporting a
+          # fault in the thing it was checking rather than in itself.
+          curl -sS --max-time 20 https://wozi.com/config.js -o /tmp/config-live.js || true
+          if [ -s /tmp/config-live.js ] && node --check /tmp/config-live.js 2>/tmp/config-err.txt; then
+            echo "  ok   https://wozi.com/config.js parses ($(wc -c </tmp/config-live.js) bytes)"
           else
             echo "  FAIL https://wozi.com/config.js does not parse as JavaScript"
+            echo "  ---- node --check said ----"
+            sed 's/^/    /' /tmp/config-err.txt 2>/dev/null || true
+            echo "  ---- first 200 bytes ----"
+            head -c 200 /tmp/config-live.js 2>/dev/null | sed 's/^/    /' || true
+            echo ""
             fail=1
           fi
           check https://wozi.com/assets/icons/github.svg 200 'svg'
