@@ -25,7 +25,9 @@ from pathlib import Path
 
 import websockets
 
-import os as _os, shutil as _sh
+import os as _os, shutil as _sh, sys as _sys
+def _sys_platform_is_darwin():
+    return _sys.platform == "darwin"
 # CI runs on Linux, where Chrome is not in /Applications. Honour $CHROME,
 # then fall back to whatever is on PATH, then to the macOS bundle.
 CHROME = (_os.environ.get("CHROME")
@@ -105,7 +107,7 @@ async def main():
     proc = subprocess.Popen(
         [CHROME, "--headless=new", f"--remote-debugging-port={PORT}",
          f"--user-data-dir={PROFILE}", "--window-size=1200,760",
-         "--no-first-run", "--no-default-browser-check", "about:blank"],
+         "--no-first-run", *CI_FLAGS, "--no-default-browser-check", "about:blank"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     ws_url = None

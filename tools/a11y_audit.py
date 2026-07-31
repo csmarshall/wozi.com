@@ -7,7 +7,9 @@ Run against both themes, because contrast findings differ per theme.
 import asyncio, json, subprocess, sys, time, urllib.request
 import websockets
 
-import os as _os, shutil as _sh
+import os as _os, shutil as _sh, sys as _sys
+def _sys_platform_is_darwin():
+    return _sys.platform == "darwin"
 # CI runs on Linux, where Chrome is not in /Applications. Honour $CHROME,
 # then fall back to whatever is on PATH, then to the macOS bundle.
 CHROME = (_os.environ.get("CHROME")
@@ -16,6 +18,10 @@ CHROME = (_os.environ.get("CHROME")
           or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
 OUT = "/private/tmp/claude-501/-Users-charles-work-claude-wozi-com/fd0b7254-2923-429f-bfc6-8be63ee34a46/scratchpad"
 AXE = OUT + "/node_modules/axe-core/axe.min.js"
+# Containers have no sandbox and a tiny /dev/shm, so Chrome refuses to start
+# without these. Only added off macOS, where they are unnecessary.
+CI_FLAGS = ([] if _sys_platform_is_darwin() else
+            ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"])
 URL = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8765/"
 PORT = 9420
 
@@ -82,7 +88,7 @@ MANUAL = r"""
 async def main():
     proc = subprocess.Popen(
         [CHROME, "--headless=new", f"--remote-debugging-port={PORT}",
-         f"--user-data-dir={OUT}/cp-a11y", "--hide-scrollbars", "--no-first-run", "about:blank"],
+         f"--user-data-dir={OUT}/cp-a11y", "--hide-scrollbars", "--no-first-run", *CI_FLAGS, "about:blank"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     ws = None
     for _ in range(60):

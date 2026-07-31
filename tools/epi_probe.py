@@ -25,13 +25,19 @@ import urllib.request
 
 import websockets
 
-import os as _os, shutil as _sh
+import os as _os, shutil as _sh, sys as _sys
+def _sys_platform_is_darwin():
+    return _sys.platform == "darwin"
 # CI runs on Linux, where Chrome is not in /Applications. Honour $CHROME,
 # then fall back to whatever is on PATH, then to the macOS bundle.
 CHROME = (_os.environ.get("CHROME")
           or _sh.which("google-chrome") or _sh.which("chromium-browser")
           or _sh.which("chromium")
           or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+# Containers have no sandbox and a tiny /dev/shm, so Chrome refuses to start
+# without these. Only added off macOS, where they are unnecessary.
+CI_FLAGS = ([] if _sys_platform_is_darwin() else
+            ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"])
 URL = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8765/?kind=planetary"
 PORT = 9341
 PROFILE = "/private/tmp/claude-501/-Users-charles-work-claude-wozi-com/fd0b7254-2923-429f-bfc6-8be63ee34a46/scratchpad/chrome-epi"
@@ -85,7 +91,7 @@ async def cdp():
     proc = subprocess.Popen(
         [CHROME, "--headless=new", f"--remote-debugging-port={PORT}",
          f"--user-data-dir={PROFILE}", "--window-size=1440,900",
-         "--no-first-run", "--no-default-browser-check", "about:blank"],
+         "--no-first-run", *CI_FLAGS, "--no-default-browser-check", "about:blank"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     ws_url = None
