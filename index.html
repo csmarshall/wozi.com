@@ -226,7 +226,8 @@ const TRAIN = [
   { teeth: 14, angle: 22, slug: 'instagram', prof: { rim: 1.4 } },
   { teeth: 17, angle: -20, slug: 'threads', prof: { rim: 1.7 } },
   { teeth: 15, angle: 24, slug: 'bluesky', prof: { rim: 1.9 } },
-  { teeth: 18, angle: -18, slug: 'mail', prof: { rim: 1.6 } }
+  { teeth: 18, angle: -18, slug: 'mail', prof: { rim: 1.6 } },
+  { teeth: 16, angle: 21, slug: 'reddit', prof: { rim: 1.8 } }
 ];
 
 /* The tooth counts above are the seed, not the answer: they are dealt per load,
@@ -242,7 +243,12 @@ const TRAIN = [
    as a mistake rather than a choice. And one wheel is kept genuinely large, since
    the planetary goes to the biggest blank available and a cramped one has
    nothing worth seeing inside it. */
-const TEETH_MIN = 13, TEETH_MAX = 19, TEETH_SUM = 114, TEETH_SLACK = 4, TEETH_HOST = 18;
+/* TEETH_SUM scales with the number of wheels -- it is the train's overall length,
+   and it was 114 when there were seven. Eight links means a longer train at the
+   same wheel size, which the stage then scales to fit, so each wheel lands about
+   an eighth smaller on the glass. That is the cost of the extra link, not a bug. */
+const TEETH_MIN = 13, TEETH_MAX = 19, TEETH_SLACK = 4, TEETH_HOST = 18;
+const TEETH_SUM = Math.round(16.3 * TRAIN.length);
 /* dealt further down, once the planetary's sizing rules exist to consult */
 
 /* Centre designs: two-level deal for maximum per-visit variety. FAMILIES are
@@ -537,7 +543,9 @@ const CENTRE_FAMILIES = [
     /* `rings` is how many complete rings of cells the core should have. The cell
        size follows from it -- the largest that still fits that many. Three rings
        of big hexagons, or five of small ones. */
-    variants: [{ arms: 6, rings: 3 }, { arms: 6, rings: 4 }, { arms: 6, rings: 5 }] },
+    /* `cell` is the CEILING on cell size; the core then takes whichever size at
+       or under it reaches furthest with whole hexagons. Coarse, medium, fine. */
+    variants: [{ arms: 6, cell: 4.6 }, { arms: 6, cell: 3.9 }, { arms: 6, cell: 3.2 }] },
   /* CELL_MIN is the real guard here: a ring target of five would happily grind
      the cells down to specks to reach it, so the floor stops it and the search
      falls back to the most rings a legible cell can manage. */
@@ -802,11 +810,12 @@ TRAIN.forEach((t, i) => {
 /* Sibling services sit on neighbouring wheels of the train. */
 const PAIR_SLOTS = [[0, 1], [3, 4]];
 const PAIRS = [['linkedin', 'github'], ['instagram', 'threads']];
-const SINGLES = ['mastodon', 'bluesky', 'mail'];
+const SINGLES = ['mastodon', 'bluesky', 'mail', 'reddit'];
 
 const BRAND = {
   linkedin: '#0A66C2', github: '#24292F', mastodon: '#6364FF',
-  instagram: '#E1306C', threads: '#101010', bluesky: '#0285FF', mail: '#E8615A'
+  instagram: '#E1306C', threads: '#101010', bluesky: '#0285FF', mail: '#E8615A',
+  reddit: '#FF4500'
 };
 
 /* Accent pairs: light value -> dark-mode counterpart.
@@ -889,7 +898,8 @@ const SITES = {
   instagram: { label: 'Instagram', path: '/cs_marshall', href: 'http://www.instagram.com/cs_marshall/' },
   threads: { label: 'Threads', path: '/csmarshall', href: 'https://www.threads.com/csmarshall' },
   bluesky: { label: 'Bluesky', path: '/charles.wozi.com', href: 'https://bsky.app/profile/charles.wozi.com' },
-  mail: { label: 'Mail', path: 'charles@wozi.com', href: 'mailto:charles@wozi.com' }
+  mail: { label: 'Mail', path: 'charles@wozi.com', href: 'mailto:charles@wozi.com' },
+  reddit: { label: 'Reddit', path: '/user/cs_marshall', href: 'https://www.reddit.com/user/cs_marshall/' }
 };
 
 class Component extends DCLogic {
@@ -1554,9 +1564,19 @@ class Component extends DCLogic {
     const flat = true;  /* both themes are flat — Charles's call, 2026-07-30, after a side-by-side against the modelled dark */
     const p = shades(g.color || '#9AA6AD', flat);
     /* The linkless background wheels read too faint on the pale page, so their
-       flat tones run ~22% darker than the palette greys suggest — depth by tone,
-       not by fading (#21's lesson). */
-    const dim = (hex) => { const n = parseInt(hex.slice(1), 16); const c = [(n >> 16) & 255, (n >> 8) & 255, n & 255]; return '#' + c.map(v => Math.round(v * 0.78).toString(16).padStart(2, '0')).join(''); };
+       flat tones run darker than the palette greys suggest — depth by tone, not
+       by fading (#21's lesson).
+
+       How much darker is now PER THEME, because the two pages pull opposite ways:
+       on the pale page darkening is what makes a ghost visible, on the dark page
+       it is what makes it vanish. One factor served both until the light wheels
+       were given their own tone -- that moved the linked wheels down to
+       1.63-3.41:1 against the page and left the ghosts stranded at 1.62:1, the
+       faintest thing on screen, which is what Charles saw. At 0.55 they sit near
+       2.0:1: plainly there, still under the linked wheels, and still grey against
+       colour so the hierarchy is carried by hue as well as by tone. */
+    const dimK = this.state.theme === 'dark' ? 0.78 : 0.55;
+    const dim = (hex) => { const n = parseInt(hex.slice(1), 16); const c = [(n >> 16) & 255, (n >> 8) & 255, n & 255]; return '#' + c.map(v => Math.round(v * dimK).toString(16).padStart(2, '0')).join(''); };
     const ft = flatTones(dim(g.color || '#9AA6AD'));
     const size = (g.ro + 4) * 2, r = g.r;
     const path = this.teethPath(g.teeth, r, g.prof);
@@ -1986,20 +2006,29 @@ class Component extends DCLogic {
         }
         return out;
       };
-      /* The cell size is searched against a RING TARGET, and the objective matters
-         more than it sounds. Taking the first size that fits gave two rings and
-         eighteen cells -- a necklace, not a core. Maximising the CELL COUNT
-         instead drove every wheel to the smallest cell allowed, because smaller
-         always packs more, and the hexagons stopped reading as hexagons at all.
+      /* The objective is Charles's, stated plainly: the largest reach of FULL
+         hexagons. Not the most cells -- that drove every wheel to the smallest
+         cell allowed and turned the core into a dot screen. Not the first size
+         to clear a ring target either -- that stopped the search the moment it
+         qualified and left a bald band between the outermost cells and the
+         engraving. Reach, with whole cells, is the thing worth maximising.
 
-         So: walk down from the coarsest allowed and take the LARGEST cell that
-         still yields the wanted number of rings. That balances the two things in
-         tension -- obvious hexagons want big cells, a real core wants several
-         rings -- and it gives the variants something meaningful to vary: three
-         rings of large cells, or five of small ones. */
-      const wantRings = (g.cv && g.cv.rings) || 4;
-      let cellX = 0, kMin = 0, kMax = -1, bestRings = -1;
-      for (let c = CELL_MAX; c >= CELL_MIN; c -= 0.1) {
+         So: walk every size from this wheel's ceiling down to the legibility
+         floor, build the complete-ring patch each one gives, and keep whichever
+         patch gets furthest out. Larger cells win ties, so a size only gets
+         smaller if that actually buys reach.
+
+         The variant sets the ceiling, and it stays meaningful: a coarse ceiling
+         reaches as far as big hexagons can, a fine one gets closer to the rim
+         because smaller cells step out in finer increments.
+
+         What no search can remove is the six gaps at the patch's flats. A
+         hexagon inscribed in a circle falls short by 1 - cos(30) there, about
+         13% of the radius. That is the price of whole hexagons in a round web,
+         and it is the price Charles chose over a clipped, ragged edge. */
+      const ceiling = Math.min((g.cv && g.cv.cell) || CELL_MAX, CELL_MAX);
+      let cellX = 0, kMin = 0, kMax = -1, bestReach = -1;
+      for (let c = ceiling; c >= CELL_MIN; c -= 0.05) {
         const step = c + WALLX / 2, px = Math.sqrt(3) * step, ry2 = 1.5 * step;
         const at = (q, r) => [px * (q + r / 2), ry2 * r];
         let hi = -1;
@@ -2024,10 +2053,13 @@ class Component extends DCLogic {
           lo = k + 1;
         }
         if (lo > hi) continue;
-        const rings = hi - lo + 1;
-        if (rings >= wantRings) { cellX = c; kMin = lo; kMax = hi; break; }
-        /* nothing reaches the target on this web -- keep the best it can do */
-        if (rings > bestRings) { bestRings = rings; cellX = c; kMin = lo; kMax = hi; }
+        /* how far the outermost complete ring actually gets: its corner cells */
+        let reach = 0;
+        for (const [q, r] of ringOf(hi)) {
+          const P = at(q, r);
+          reach = Math.max(reach, Math.hypot(P[0], P[1]) + c);
+        }
+        if (reach > bestReach + 1e-9) { bestReach = reach; cellX = c; kMin = lo; kMax = hi; }
       }
       if (cellX) {
         const step = cellX + WALLX / 2, px = Math.sqrt(3) * step, ry2 = 1.5 * step;

@@ -56,9 +56,13 @@ function grabBlock(decl, open, close) {
 const page = (function build() {
   const consts = ['MODULE', 'TOOTH_ADD', 'TOOTH_DED', 'TOOTH_ROOT_MIN', 'BAND_RISE',
     'BAND_DEPTH', 'RIM_UNDER_BAND', 'ROOT_MARGIN', 'MIN_MODULE',
-    'TEETH_MIN', 'TEETH_MAX', 'TEETH_SUM', 'TEETH_SLACK', 'TEETH_HOST',
+    'TEETH_MIN', 'TEETH_MAX', 'TEETH_SLACK', 'TEETH_HOST',
     'ANG_MIN', 'ANG_MAX', 'BAND_MAX', 'ENDS_MAX'];
   const decls = consts.map(n => 'const ' + n + ' = ' + grabNumber(n) + ';').join('\n');
+  /* TEETH_SUM is derived from the train's length now, so it is read the same way
+     the page computes it rather than scraped as a literal -- a suite that hard-codes
+     a number the page derives is exactly the drift this file exists to prevent. */
+  const trainLen = (grabBlock('const TRAIN =', '[', ']').match(/slug:/g) || []).length;
   const src = decls + '\n'
     + grabBlock('const PLANETARY_FLAVOURS =', '[', ']') + ';\n'
     + grabBlock('const RAVIGNEAUX_MENU =', '[', ']') + ';\n'
@@ -66,7 +70,10 @@ const page = (function build() {
     + grabBlock('function planetaryMenuFor(', '{', '}') + '\n'
     + 'return { planetaryBore, planetaryMenuFor, RAVIGNEAUX_MENU, PLANETARY_FLAVOURS, '
     + consts.join(', ') + ' };';
-  return new Function('enumeratePlanetaries', src)(enumeratePlanetaries);
+  const built = new Function('enumeratePlanetaries', src)(enumeratePlanetaries);
+  built.TRAIN_LEN = trainLen;
+  built.TEETH_SUM = Math.round(16.3 * trainLen);
+  return built;
 })();
 
 /* ---- tiny harness -------------------------------------------------------- */
@@ -267,10 +274,10 @@ test('no planet anywhere is under eight teeth', () => {
 /* ---- 8. the deals obey their own bounds ---------------------------------- */
 
 test('the tooth deal always produces a legal train', () => {
-  const { TEETH_MIN, TEETH_MAX, TEETH_SUM, TEETH_SLACK, TEETH_HOST } = page;
+  const { TEETH_MIN, TEETH_MAX, TEETH_SUM, TEETH_SLACK, TEETH_HOST, TRAIN_LEN } = page;
   let found = 0;
   for (let trial = 0; trial < 4000; trial++) {
-    const cut = Array.from({ length: 7 }, () =>
+    const cut = Array.from({ length: TRAIN_LEN }, () =>
       TEETH_MIN + Math.floor(Math.random() * (TEETH_MAX - TEETH_MIN + 1)));
     if (Math.abs(cut.reduce((a, b) => a + b, 0) - TEETH_SUM) > TEETH_SLACK) continue;
     if (Math.max.apply(null, cut) < TEETH_HOST) continue;
@@ -300,9 +307,9 @@ test('the bearing deal keeps the train a horizontal line', () => {
   for (let trial = 0; trial < 2000; trial++) {
     const first = Math.random() < 0.5 ? 1 : -1;
     const ang = [0];
-    for (let i = 1; i < 7; i++) ang.push(first * (i % 2 ? 1 : -1) * (ANG_MIN + Math.random() * (ANG_MAX - ANG_MIN)));
+    for (let i = 1; i < page.TRAIN_LEN; i++) ang.push(first * (i % 2 ? 1 : -1) * (ANG_MIN + Math.random() * (ANG_MAX - ANG_MIN)));
     let y = 0, lo = 0, hi = 0;
-    for (let i = 1; i < 7; i++) {
+    for (let i = 1; i < page.TRAIN_LEN; i++) {
       y += (MODULE * 16) * Math.sin(ang[i] * Math.PI / 180);   /* two mid-size wheels */
       lo = Math.min(lo, y); hi = Math.max(hi, y);
     }

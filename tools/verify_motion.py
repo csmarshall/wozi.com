@@ -185,8 +185,17 @@ async def cdp():
     # and is NOT moving is a failure.
     dash_ok = len(s1["dash"]) == 0 or dash_changed > 0
     real_errors = [e for e in errors if "favicon.ico" not in e]
+    # The icon count is the number of LINKED wheels, read from index.html rather
+    # than hardcoded -- it was pinned at 7 and started failing the moment an
+    # eighth link was added, which is a gate lying about a page that was fine.
+    import re as _re, pathlib as _pl
+    _src = (_pl.Path(__file__).resolve().parent.parent / "index.html").read_text()
+    _i = _src.index("const TRAIN = [")
+    _want = len(_re.findall(r"slug:", _src[_i:_src.index("\n];", _i)]))
     ok = (rot_changed == len(s1["rot"]) and len(s1["rot"]) > 0
-          and dash_ok and not real_errors and worst < 2.0 and icons == 7)
+          and dash_ok and not real_errors and worst < 2.0 and icons == _want)
+    if icons != _want:
+        print(f"hub icons          : {icons} injected, expected {_want} (one per linked wheel)")
     print("\nstrands            :",
           "none (correct for the direct-mesh train)" if not s1["dash"]
           else f"{len(s1['dash'])} present, {dash_changed} advancing")
