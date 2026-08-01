@@ -2499,7 +2499,20 @@ class Component extends DCLogic {
          Pointy-top axial coordinates: x = sqrt(3)*step*(q + r/2), y = 1.5*step*r,
          with step = cell + wall/2 so the gap where two cells meet is the wall. */
       inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
-      const WALLX = 1.2, CELL_MIN = 3.1, CELL_MAX = 4.8;
+      /* THE WALL SCALES WITH THE WHEEL (Charles's call). It was a flat 1.2 on
+         every wheel, which is a FIXED cost against a VARIABLE budget: at 1.2 it
+         eats 12.5% of a 13-tooth annulus and only 4% of a 19-tooth one, three
+         times the price on the wheel that can least afford it. Proportional to
+         tooth count keeps the share even and costs the big wheels nothing.
+         THE FLOOR IS THE POINT, though. Fill alone always prefers a thinner
+         wall -- the sweep said 0.6 everywhere -- but at S ~ 1.25 that renders
+         at 0.75px and aliases into a grey smear, which is the mesh-screen
+         failure already rejected twice. 0.85 solve units is about 1.06px at the
+         usual scale, the thinnest that still reads as a wall rather than a
+         seam. Fill cannot see that, which is exactly why it needs a bound of
+         its own. */
+      const WALLX = Math.max(0.85, 1.2 * (g.teeth || TEETH_MAX) / TEETH_MAX);
+      const CELL_MIN = 3.1, CELL_MAX = 4.8;
       /* Clear the BOSS, not the hub. The boss disc is drawn at hubR * 1.5 and
          painted over the web, so a lattice that only cleared hubR * 1.1 ran its
          innermost ring underneath it -- half-covered cells, and the ragged inner
@@ -2688,8 +2701,48 @@ class Component extends DCLogic {
       inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
       /* Floor is in TRIANGLE sides, so it is far above the hex core's 3.1 for
          the same reason the variants are -- a 3.1 triangle is a speck. */
-      const sideI = Math.max(5.6, (g.cv && g.cv.cell) || 7.0);
-      const rInI = coreIn(hubR), rOutI = coreOut;
+      const rInI = coreIn(hubR);
+      /* FIT THE SIZE TO THE ANNULUS, the same way the hex core does. This took
+         the triangle side straight from the variant and never checked it
+         against the band, so a size that happened to suit one wheel left a wide
+         bare ring on another. Sweep instead, score the bare span at BOTH
+         boundaries, and break ties toward the LARGER cell so fitting better can
+         never quietly mean finer. Relax to the pre-shell limit if nothing fits
+         at all -- on the smallest wheels the band is barely one row deep, and a
+         core that touches the inner shell beats a blank web. */
+      const rOutTryI = [coreOut, wellR - 0.5];
+      let sideI = 0, rOutI = rOutTryI[0];
+      for (let a2 = 0; a2 < rOutTryI.length && !sideI; a2++) {
+        rOutI = rOutTryI[a2];
+        const seenI = [];
+        for (let sd = Math.min((g.cv && g.cv.cell) || 7.0, 11.5); sd >= 5.2; sd -= 0.1) {
+          const pt = (i3, j3) => [sd * (i3 + j3 / 2), sd * (Math.sqrt(3) / 2) * j3];
+          const nn = Math.ceil(rOutI / sd) + 3;
+          let lo3 = Infinity, hi3 = 0, cnt = 0;
+          for (let j3 = -nn; j3 <= nn; j3++) {
+            for (let i3 = -nn; i3 <= nn; i3++) {
+              const up3 = [pt(i3, j3), pt(i3 + 1, j3), pt(i3, j3 + 1)];
+              const dn3 = [pt(i3 + 1, j3), pt(i3 + 1, j3 + 1), pt(i3, j3 + 1)];
+              for (const t3 of [up3, dn3]) {
+                let a3 = Infinity, b3 = 0, ok3 = true;
+                for (const q3 of t3) {
+                  const d3 = Math.hypot(q3[0], q3[1]);
+                  if (d3 > rOutI) { ok3 = false; break; }
+                  a3 = Math.min(a3, d3); b3 = Math.max(b3, d3);
+                }
+                if (!ok3 || nearestEdge(t3) < rInI) continue;
+                cnt++; lo3 = Math.min(lo3, a3); hi3 = Math.max(hi3, b3);
+              }
+            }
+          }
+          if (cnt) seenI.push({ s: sd, waste: (lo3 - rInI) + (rOutI - hi3) });
+        }
+        if (!seenI.length) continue;
+        let bw3 = Infinity;
+        seenI.forEach(r3 => { if (r3.waste < bw3) bw3 = r3.waste; });
+        seenI.forEach(r3 => { if (r3.waste <= bw3 + 0.5 && r3.s > sideI) sideI = r3.s; });
+      }
+      if (!sideI) sideI = Math.max(5.6, (g.cv && g.cv.cell) || 7.0);
       const ptI = (i2, j2) => [sideI * (i2 + j2 / 2), sideI * (Math.sqrt(3) / 2) * j2];
       const nI = Math.ceil(rOutI / sideI) + 3;
       for (let j2 = -nI; j2 <= nI; j2++) {
