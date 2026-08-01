@@ -3042,7 +3042,22 @@ class Component extends DCLogic {
             maxWidth: on ? labelW + 'px' : '0px',
             opacity: on ? 1 : 0,
             marginLeft: on ? '7px' : '0px',
-            font: pillType.replace('13px', '13px/1'), letterSpacing: '.005em',
+            /* LINE-HEIGHT MUST CONTAIN THE DESCENDERS. This was 13px/1, and
+               `overflow: hidden` above is not optional -- it is what lets the
+               pill open by animating max-width from 0 -- so a short line box
+               does not merely overflow, it CLIPS. And overflow cannot be hidden
+               on one axis alone; asking for it horizontally takes the vertical
+               with it.
+               Measured at 13px Manrope: the font's own box is 18px (ascent 14,
+               descent 4) and "Instagram" inks 12.68px with a 3.32px descender.
+               At line-height 13px the half-leading is (13-18)/2 = -2.5px, which
+               puts the baseline 11.5px down a 13px box, so the descender runs to
+               14.82px and 1.82px of it is sliced off -- more than half the tail
+               of the g. Solving (LH-18)/2 + 14 + 3.32 <= LH gives LH >= 16.64px,
+               so 1.4 (18.2px) clears it with room, and matches the face's own
+               natural box rather than inventing a number. Affects every label
+               with a descender: Instagram, and any handle carrying g/y/p/q/j. */
+            font: pillType.replace('13px', '13px/1.4'), letterSpacing: '.005em',
             /* A FIXED dark ink, not var(--ink). The label sits ON the plate, and
                the plate is deliberately pale in BOTH themes -- so the themed ink
                is near-white in dark mode and the name vanished into its own
