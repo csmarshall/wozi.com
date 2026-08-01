@@ -31,7 +31,15 @@ ObjC.import('WebKit');
 
 const MEASURE = `
 (() => {
-  const MODULE = 7, BAND_DEPTH = 1.59;
+  /* READ THE GEOMETRY OFF THE PAGE, never keep a copy (#47). These two were
+     hardcoded here, and they are the load-bearing pair -- bandOut is bandIn
+     plus MODULE * BAND_DEPTH, which every off/depth number is measured
+     against -- so a change in index.html would have left this harness
+     measuring a stale band and reporting confidently either way. */
+  const G = window.__WOZI_GEOM;
+  if (!G) return JSON.stringify({ ua: navigator.userAgent, rows: [],
+    err: 'window.__WOZI_GEOM missing - is this the wozi page?' });
+  const MODULE = G.MODULE, BAND_DEPTH = G.BAND_DEPTH;
   const out = [];
   document.querySelectorAll('text').forEach((t) => {
     const tp = t.querySelector('textPath');

@@ -598,6 +598,30 @@ const ROOT_MARGIN = 1.05;
    Together they say what Charles's calculation says: the blank decides how many
    planets it can carry and how many teeth each one gets. */
 const MIN_MODULE = 1.8;
+
+/* ONE PLACE FOR A HARNESS TO READ THE GEOMETRY (#47). tools/webkit_band.js kept
+   its own `const MODULE = 7, BAND_DEPTH = 1.59` -- the load-bearing pair, since
+   bandOut = bandIn + MODULE * BAND_DEPTH is what every off/depth number is
+   measured against. Change BAND_DEPTH there and that harness goes on measuring
+   a stale band: PASS on broken lettering, or FAIL on correct lettering, which
+   already cost a day once.
+
+   This complements tools/test.js rather than replacing it. That one parses this
+   file STATICALLY, before a browser exists, which is what lets it gate before
+   Chrome is installed. This is read at RUNTIME, which is what a WKWebView can
+   do. Both resolve to the same declarations.
+
+   IT LIVES HERE, BELOW THE LAST CONSTANT IT NAMES, and that is not cosmetic:
+   placed higher it referenced MIN_MODULE and TEETH_MIN from their temporal dead
+   zone, threw at module load and blanked the whole page -- the same failure
+   class as #53, introduced while fixing #47. Anything added here must be
+   declared above it. */
+if (typeof window !== 'undefined') {
+  window.__WOZI_GEOM = { MODULE: MODULE, BAND_RISE: BAND_RISE, BAND_DEPTH: BAND_DEPTH,
+    RIM_UNDER_BAND: RIM_UNDER_BAND, BASELINE_MID: BASELINE_MID, RING_STUB: RING_STUB,
+    TOOTH_ADD: TOOTH_ADD, TOOTH_DED: TOOTH_DED, TOOTH_ROOT_MIN: TOOTH_ROOT_MIN,
+    MIN_MODULE: MIN_MODULE, TEETH_MIN: TEETH_MIN, TEETH_MAX: TEETH_MAX };
+}
 function planetaryMenuFor(teeth) {
   const bore = planetaryBore(teeth);
   const seen = {}, fits = [], nearest = [];
