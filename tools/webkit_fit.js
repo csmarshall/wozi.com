@@ -124,10 +124,16 @@ function run(argv) {
      reading near the boundary is noise. Compare medians, not samples. This file is macOS-only and is NOT in deploy.yml,
      so the floor gates nothing and cannot block a push -- which is why it can
      land before #44 is fixed, whereas devices.py's copy of it must not. */
+  /* DATUM: badge EDGES (the anchors' bounding rects), which is about 86% of the
+     tooth envelope fitStage divides LINK_SHARE by, and about 4 points looser
+     than devices.py's badge-CENTRE measure. Three measures of one quantity were
+     in play 15 points apart (#46); this one is named here so its threshold can
+     be read against the right thing. Scaled from devices.py's centre floor by
+     that ratio rather than reusing the number blind. */
   const linkShare = linkSpan / d.vw;
-  const LINK_FLOOR = 0.45;
+  const LINK_FLOOR = 0.48, LINK_CEIL = 0.84;
   const reaches = cover >= 98;
-  const bigEnough = linkShare >= LINK_FLOOR;
+  const bigEnough = linkShare >= LINK_FLOOR && linkShare <= LINK_CEIL;
   const ok = reaches && bigEnough;
   if (!reaches) out.push('FAIL: the assembly covers only ' + cover.toFixed(1)
     + '% of the long axis, leaving ' + d.lo.toFixed(0) + 'px and '

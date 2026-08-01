@@ -313,7 +313,31 @@ async def main():
                 # ends for a ghost -- coverage comes from the chain being longer,
                 # never from an icon running off the edge.
                 link_share = (l1 - l0) / long_px
-                links_in = (l0 >= -1) and (l1 <= long_px + 1) and link_share <= 0.88
+                # TWO-SIDED, AND ON A NAMED DATUM (#46).
+                #
+                # This is the BADGE-CENTRE span -- l0/l1 are hub centres -- which
+                # is about 81% of the tooth envelope that index.html's fitStage
+                # actually divides LINK_SHARE by. Three different measures of
+                # "linked span" were in play, 15 points apart: the envelope
+                # (0.780 when LINK_SHARE binds), badge edges (0.673), and badge
+                # centres (0.632). A threshold is meaningless without saying
+                # which, so: these bounds are on CENTRES, and any harness copying
+                # them must use centres too.
+                #
+                # The old ceiling of 0.88 could never fail. On this datum 0.88
+                # corresponds to LINK_SHARE ~ 1.086, which the page cannot
+                # produce while LINK_SHARE is 0.78. That is the other half of why
+                # #44 passed 20 profiles: no floor, and a ceiling outside the
+                # reachable range. A bound that cannot be crossed is not a bound.
+                #
+                # Now bracketed around the reachable 0.632: a floor at 0.45
+                # catches the train collapsing (it read 0.30-0.33 on the
+                # ultrawides while #44 was live), a ceiling at 0.80 catches it
+                # running off the edges, and both sit inside what the page can
+                # actually reach.
+                LINK_FLOOR, LINK_CEIL = 0.45, 0.80
+                links_in = ((l0 >= -1) and (l1 <= long_px + 1)
+                            and LINK_FLOOR <= link_share <= LINK_CEIL)
                 ok = ((train_long == want) and reaches and centre_off <= 0.06
                       and links_in and not m["overflowX"])
                 if not ok:
@@ -326,7 +350,14 @@ async def main():
                 if centre_off > 0.06:
                     why.append(f"links off-centre by {centre_off:.0%}")
                 if not links_in:
-                    why.append(f"links span {link_share:.0%} / run off the edge")
+                    if link_share < LINK_FLOOR:
+                        why.append(f"links span only {link_share:.0%}, under the "
+                                   f"{LINK_FLOOR:.0%} floor — the train has collapsed (#44)")
+                    elif link_share > LINK_CEIL:
+                        why.append(f"links span {link_share:.0%}, over the "
+                                   f"{LINK_CEIL:.0%} ceiling — they will run off the edge")
+                    else:
+                        why.append("links run off the edge")
                 if m["overflowX"]:
                     why.append("scrolls sideways")
                 print(f"{label:22} {orient:10} {str(w) + 'x' + str(h):11} "

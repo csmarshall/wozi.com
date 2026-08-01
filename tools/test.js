@@ -181,6 +181,66 @@ test('exactly one person, or the wheel count needs revisiting', () => {
   eq(people, 1, 'more than one person in config.js — trainLen and TEETH_SUM must become per-person');
 });
 
+test('an empty train does not throw — a missing config degrades, it does not blank', () => {
+  /* #53. Four documents promise "the machine still turns, on unlinked wheels".
+     It did not: with no config, TRAIN is empty, every draw in dealTeeth is
+     rejected (Math.max.apply(null, []) is -Infinity, always below host), and
+     execution reached TRAIN[0].teeth and threw. It is a module-load IIFE, so
+     the whole script aborted and NOTHING rendered. CI cannot see this case --
+     it asserts config.js is 200 and parses -- so the suite has to. */
+  const fn = grabBlock('(function dealTeeth()', '{', '}');
+  const run = new Function(`
+    const TRAIN = [];
+    const TEETH_MIN = ${page.TEETH_MIN}, TEETH_MAX = ${page.TEETH_MAX};
+    const TEETH_SLACK = ${page.TEETH_SLACK}, TEETH_HOST = ${page.TEETH_HOST};
+    const TEETH_SUM = 0, FORCE_FAMILY = null;
+    const smallestBlankHolding = () => ${page.TEETH_MIN};
+    ${fn})();
+    return 'ok';`);
+  let out;
+  try { out = run(); } catch (e) { throw new Error('dealTeeth threw on an empty train: ' + e.message); }
+  eq(out, 'ok', 'dealTeeth did not complete on an empty train');
+});
+
+test('a service the active person does not have is never seated on a wheel', () => {
+  /* #53. config.js states "a service named here but absent from the active
+     person's links is simply skipped". It was not -- solve() seated PAIRS and
+     SINGLES without checking them against the person, and renderVals() then read
+     SITES[g.slug].label unguarded, crashing the page 2000 times out of 2000.
+     This matters now: #39 is shipped and adding a person is a config edit.
+     Replays the real seating block against a person missing three services. */
+  const i = SRC.indexOf('const pairSlots = PAIR_SLOTS');
+  const j = SRC.indexOf('const g = [], strands = []', i);
+  ok(i > 0 && j > i, 'could not find the slug-seating block in index.html');
+  const frag = SRC.slice(i, j);
+  const seated = new Function(`
+    const PAIR_SLOTS = [[0,1],[3,4]];
+    const PAIRS = [['linkedin','github'], ['instagram','threads']];
+    const SINGLES = ['bluesky','mail','reddit'];
+    const SITES = { linkedin:{}, github:{}, bluesky:{}, mail:{} };   /* 5-link person */
+    const TRAIN = [1,2,3,4,5];
+    const shuffle = (arr) => arr;
+    ${frag}
+    return Object.values(slugFor).filter(s => s && !SITES[s]);`)();
+  eq(seated.length, 0,
+    'seated services the active person does not have: ' + [...new Set(seated)].join(', '));
+});
+
+test('the fit scale has no constant ceiling on the ratio', () => {
+  /* #44/#19. A cap on LINK_SHARE * longAvail / longSolved is crossed at SOME
+     width, and past it the train is a fixed size whose share falls as 1/W. That
+     bug shipped at 1.15, then 1.55, then 1.25 -- three values of the same
+     constant, each fixing it and reintroducing it further out. The ceiling is
+     gone; this asserts it stays gone, because re-adding one is the natural
+     "fix" the next time the wheels look too big. */
+  const i = SRC.indexOf('const fit = Math.max(0.28');
+  ok(i > 0, 'could not find the fit computation');
+  const line = SRC.slice(i, SRC.indexOf(';', i));
+  ok(!/GS_MAX/.test(line),
+    'a constant ceiling is back in the fit — see #44: cap an absolute size, never a ratio');
+  ok(/crossAvail/.test(line), 'the cross-axis guard is missing from the fit');
+});
+
 /* ---- 1. the page and its constants --------------------------------------- */
 
 test('index.html parses and exposes its geometry constants', () => {

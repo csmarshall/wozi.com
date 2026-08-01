@@ -1624,7 +1624,30 @@ class Component extends DCLogic {
        here therefore costs no coverage: it moves the filling from one dimension
        (bigger) to the other (longer), which is what a machine continuing past the
        frame should look like. */
-    const GS_MAX = 1.25;
+    /* NO CEILING ON THE RATIO. It was 1.15, then 1.55, then 1.25, then a
+       measured sweep said 2.6 -- and each value fixed the same bug and then
+       reintroduced it further out. That is not bad luck, it is what a cap on a
+       RATIO does: LINK_SHARE * longAvail / longSolved grows with the viewport,
+       so any constant ceiling is crossed at some width, and past that width the
+       train is a fixed physical size whose share of the screen falls as 1/W.
+       #19 and #44 are the same bug at two of those values.
+
+       Measured over 4000 replayed deals: solved.w is 779.6 module units and
+       solved.h is 209.1, so the CROSS term is crossAvail * 1.25 / 209.1 and only
+       drops below 2.6 when the cross viewport is under about 435px -- a
+       landscape phone. The cross axis is therefore not a guard on desktop at
+       all, and "raise the cap and let CROSS_BLEED take over" would have started
+       failing again at ~2600px, 50.8% linked share at 3440 and 34.2% at 5120.
+       The sweep that produced 2.6 stopped at 2560, one step short of seeing it.
+
+       So the ceiling is gone. LINK_SHARE binds at every width and the linked
+       share is width-invariant BY CONSTRUCTION rather than by choosing a lucky
+       constant. What stops the wheels being HUGE is the cross-axis term, which
+       is the guard that is actually physical -- a wheel cannot exceed the short
+       axis -- and the 0.28 floor, which is a floor and not a ceiling.
+
+       If a size cap is ever wanted again it must be an ABSOLUTE wheel size in
+       px, not a multiplier on a ratio, or this recurs a fourth time. */
     /* THE LINKED TRAIN TAKES A SHARE, NOT THE WHOLE. `solved` is the eight linked
        wheels only -- the outriggers are added afterwards, in fitEscapes -- so
        scaling `solved` to the full long axis leaves the icons spanning edge to
@@ -1640,7 +1663,7 @@ class Component extends DCLogic {
        being bigger. */
     const LINK_SHARE = 0.78;
     const fit = Math.max(0.28, Math.min(LINK_SHARE * longAvail / longSolved,
-                                        crossAvail * CROSS_BLEED / crossSolved, GS_MAX));
+                                        crossAvail * CROSS_BLEED / crossSolved));
     const root = document.documentElement.style;
     root.setProperty('--gsfit', fit.toFixed(3));
     /* THE WHEELS ARE DRAWN AT FINAL SIZE (#37). Everything inside the stage used
