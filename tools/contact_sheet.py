@@ -42,7 +42,17 @@ OUT = sys.argv[2] if len(sys.argv) > 2 else "/tmp/gear_sheet.png"
 # run since the harnesses were made CI-portable.
 CI_FLAGS = ([] if _sys.platform == "darwin" else
             ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"])
-PORT = 9500
+# THE PORT IS NOT FIXED (#42). Every harness here used a hardcoded DevTools
+# port, so two running at once fought over it and the loser reported a
+# ConnectionClosedError -- which reads as a page fault, not a harness fault, and
+# wasted real time this session more than once. Bind to whatever the OS gives
+# us, and honour CDP_PORT if a caller wants a specific one.
+def _free_port():
+    import socket
+    s = socket.socket(); s.bind(("127.0.0.1", 0))
+    p = s.getsockname()[1]; s.close()
+    return p
+PORT = int(_os.environ.get("CDP_PORT") or 0) or _free_port()
 PROFILE = "/private/tmp/claude-501/-Users-charles-work-claude-wozi-com/fd0b7254-2923-429f-bfc6-8be63ee34a46/scratchpad/chrome-sheet"
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -111,7 +121,7 @@ SHOT = r"""
 async def main():
     fams = families()
     proc = subprocess.Popen(
-        [CHROME, "--headless=new", f"--remote-debugging-port={PORT}",
+        [CHROME, "--headless=new", "--window-position=-4000,-4000", f"--remote-debugging-port={PORT}",
          f"--user-data-dir={PROFILE}", "--window-size=1200,760",
          "--no-first-run", *CI_FLAGS, "--no-default-browser-check", "about:blank"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

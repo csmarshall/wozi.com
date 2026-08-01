@@ -80,6 +80,18 @@ PROBE = r"""
 """
 
 
+# THE PORT IS NOT FIXED (#42). Every harness here used a hardcoded DevTools
+# port, so two running at once fought over it and the loser reported a
+# ConnectionClosedError -- which reads as a page fault, not a harness fault, and
+# wasted real time this session more than once. Bind to whatever the OS gives
+# us, and honour CDP_PORT if a caller wants a specific one.
+def _free_port():
+    import socket
+    s = socket.socket(); s.bind(("127.0.0.1", 0))
+    p = s.getsockname()[1]; s.close()
+    return p
+
+
 async def shoot(url, width, dark, outdir, port):
     profile = tempfile.mkdtemp(prefix="wozi-wide-")
     proc = subprocess.Popen(
@@ -142,7 +154,7 @@ async def main():
     print(f"{'width':>6} {'wheels':>7} {'assembly':>9} {'linked':>7} {'ghost vs page':>14}")
     rows = []
     for i, w in enumerate(WIDTHS):
-        d = await shoot(url, w, dark, outdir, 9700 + i)
+        d = await shoot(url, w, dark, outdir, _free_port())
         if not d:
             print(f"{w:>6}   (no data)"); continue
         rows.append(d)

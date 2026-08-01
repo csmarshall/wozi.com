@@ -19,8 +19,18 @@ import websockets
 CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 URL = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8765/"
 OUT = "/private/tmp/claude-501/-Users-charles-work-claude-wozi-com/fd0b7254-2923-429f-bfc6-8be63ee34a46/scratchpad"
-PORT = 9350
-
+import os  # for CDP_PORT, below
+# THE PORT IS NOT FIXED (#42). Every harness here used a hardcoded DevTools
+# port, so two running at once fought over it and the loser reported a
+# ConnectionClosedError -- which reads as a page fault, not a harness fault, and
+# wasted real time this session more than once. Bind to whatever the OS gives
+# us, and honour CDP_PORT if a caller wants a specific one.
+def _free_port():
+    import socket
+    s = socket.socket(); s.bind(("127.0.0.1", 0))
+    p = s.getsockname()[1]; s.close()
+    return p
+PORT = int(os.environ.get("CDP_PORT") or 0) or _free_port()
 VIEWPORTS = [
     (390, 844, "390x844-phone"),
     (900, 1200, "900x1200-portrait"),
@@ -53,7 +63,7 @@ GEOM = r"""
 
 async def main():
     proc = subprocess.Popen(
-        [CHROME, "--headless=new", f"--remote-debugging-port={PORT}",
+        [CHROME, "--headless=new", "--window-position=-4000,-4000", f"--remote-debugging-port={PORT}",
          f"--user-data-dir={OUT}/cp-shots", "--hide-scrollbars",
          "--no-first-run", "about:blank"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

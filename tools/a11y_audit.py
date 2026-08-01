@@ -32,8 +32,17 @@ CI_FLAGS = ([] if _sys_platform_is_darwin() else
             ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"])
 _FAILURES = []
 URL = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8765/"
-PORT = 9420
-
+# THE PORT IS NOT FIXED (#42). Every harness here used a hardcoded DevTools
+# port, so two running at once fought over it and the loser reported a
+# ConnectionClosedError -- which reads as a page fault, not a harness fault, and
+# wasted real time this session more than once. Bind to whatever the OS gives
+# us, and honour CDP_PORT if a caller wants a specific one.
+def _free_port():
+    import socket
+    s = socket.socket(); s.bind(("127.0.0.1", 0))
+    p = s.getsockname()[1]; s.close()
+    return p
+PORT = int(_os.environ.get("CDP_PORT") or 0) or _free_port()
 # Things axe structurally cannot judge on this page.
 MANUAL = r"""
 (() => {
@@ -96,7 +105,7 @@ MANUAL = r"""
 
 async def main():
     proc = subprocess.Popen(
-        [CHROME, "--headless=new", f"--remote-debugging-port={PORT}",
+        [CHROME, "--headless=new", "--window-position=-4000,-4000", f"--remote-debugging-port={PORT}",
          f"--user-data-dir={OUT}/cp-a11y", "--hide-scrollbars", "--no-first-run", *CI_FLAGS, "about:blank"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     ws = None
