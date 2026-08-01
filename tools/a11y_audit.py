@@ -7,7 +7,7 @@ Run against both themes, because contrast findings differ per theme.
 import asyncio, json, subprocess, sys, time, urllib.request
 import websockets
 
-import os as _os, shutil as _sh, sys as _sys
+import os as _os, shutil as _sh, sys as _sys, tempfile as _tf
 def _sys_platform_is_darwin():
     return _sys.platform == "darwin"
 # CI runs on Linux, where Chrome is not in /Applications. Honour $CHROME,
@@ -16,12 +16,21 @@ CHROME = (_os.environ.get("CHROME")
           or _sh.which("google-chrome") or _sh.which("chromium-browser")
           or _sh.which("chromium")
           or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
-OUT = "/private/tmp/claude-501/-Users-charles-work-claude-wozi-com/fd0b7254-2923-429f-bfc6-8be63ee34a46/scratchpad"
-AXE = OUT + "/node_modules/axe-core/axe.min.js"
+# WHERE AXE LIVES. This used to be hardcoded to one session's scratchpad
+# directory, which stops existing when that session ends -- so the tool raised
+# FileNotFoundError on every run afterwards and nobody noticed, because it also
+# had no exit code (#47). Resolve it relative to the repo, honour an override,
+# and fall back to a temp dir that a fetch can populate.
+_HERE = _os.path.dirname(_os.path.abspath(__file__))
+_REPO = _os.path.dirname(_HERE)
+OUT = _os.environ.get("WOZI_SCRATCH") or _tf.mkdtemp(prefix="wozi-a11y-")
+AXE = (_os.environ.get("AXE_PATH")
+       or _os.path.join(_REPO, "node_modules", "axe-core", "axe.min.js"))
 # Containers have no sandbox and a tiny /dev/shm, so Chrome refuses to start
 # without these. Only added off macOS, where they are unnecessary.
 CI_FLAGS = ([] if _sys_platform_is_darwin() else
             ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"])
+_FAILURES = []
 URL = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8765/"
 PORT = 9420
 
@@ -100,7 +109,27 @@ async def main():
                 ws = json.load(urllib.request.urlopen(rq, timeout=1))["webSocketDebuggerUrl"]; break
             except Exception:
                 time.sleep(0.2)
-    axe_src = open(AXE).read()
+    # FETCH AXE IF IT IS NOT THERE, rather than requiring a node_modules that
+    # this repo deliberately does not have. The path used to point into one
+    # session's scratchpad, which stops existing when that session ends -- so
+    # this raised FileNotFoundError on every run afterwards, and nobody noticed
+    # because the tool also had no exit code (#47). Cached in a temp dir.
+    if not _os.path.exists(AXE):
+        _cache = _os.path.join(_tf.gettempdir(), "wozi-axe.min.js")
+        if not _os.path.exists(_cache):
+            import urllib.request as _u
+            print(f"   fetching axe-core -> {_cache}")
+            try:
+                _u.urlretrieve("https://unpkg.com/axe-core@4/axe.min.js", _cache)
+            except Exception as _e:
+                print(f"FATAL: axe-core unavailable and could not be fetched: {_e}")
+                print("       set AXE_PATH=/path/to/axe.min.js to use a local copy")
+                proc.kill()
+                return 2
+        _use = _cache
+    else:
+        _use = AXE
+    axe_src = open(_use).read()
     mid = 0
     async with websockets.connect(ws, max_size=8 * 10 ** 7) as c:
         async def send(m, p=None):
@@ -132,6 +161,12 @@ async def main():
                 print("   no violations")
             for x in sorted(v, key=lambda z: ["critical","serious","moderate","minor"].index(z["impact"] or "minor")):
                 print(f"   [{(x['impact'] or '?').upper():<8}] {x['id']:<28} x{x['n']}  {x['help']}")
+                # WHAT ACTUALLY FAILS THIS GATE. Only critical and serious, so
+                # the check has teeth without turning red over a moderate hint
+                # nobody has agreed to act on -- a gate that fails on an open
+                # question trains everyone to ignore it (#41, #46).
+                if (x["impact"] or "") in ("critical", "serious"):
+                    _FAILURES.append(f"axe {theme}: [{x['impact']}] {x['id']} x{x['n']} — {x['help']}")
             if theme == "dark":
                 m = json.loads(await ev(MANUAL))
                 print("\n=== structural / behavioural (axe cannot judge these) ===")
@@ -146,6 +181,30 @@ async def main():
                 print(f"   SVG <text> nodes         : {m['svgTextNodes']}  (hidden: {m['svgTextHidden']})")
                 print(f"     sample announced       : {m['svgTextSample']}")
                 print(f"   targets under 24x24px    : {m['smallTargets']}")
+                # WCAG 2.5.8 target size. Two-sided by nature -- there is no
+                # upper bound worth asserting on a hit target, so this one floor
+                # is the whole check.
+                if m["smallTargets"]:
+                    _FAILURES.append(f"{m['smallTargets']} interactive target(s) under 24x24px (WCAG 2.5.8)")
+                if not m["lang"]:
+                    _FAILURES.append("no lang attribute on <html>")
+                if not m["main"]:
+                    _FAILURES.append("no <main> landmark")
+                if m["focusableNoLabel"]:
+                    _FAILURES.append(f"{m['focusableNoLabel']} focusable element(s) with no accessible name")
     proc.kill()
+    # AN EXIT CODE, so this is a gate rather than a printout (#47). It ended at
+    # asyncio.run(main()) with main() returning None, so it exited 0 whatever it
+    # found -- and every "axe clean, gate green" in the merge log was a report
+    # somebody read, not a check that could go red.
+    return 1 if _FAILURES else 0
 
-asyncio.run(main())
+if __name__ == "__main__":
+    _code = asyncio.run(main())
+    if _FAILURES:
+        print("\nRESULT: FAIL")
+        for f in _FAILURES:
+            print("  " + f)
+    else:
+        print("\nRESULT: PASS")
+    sys.exit(_code or (1 if _FAILURES else 0))

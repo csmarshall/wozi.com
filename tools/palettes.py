@@ -32,9 +32,24 @@ PALETTES = [
 
 
 def variant(src, colours):
-    return re.sub(r"const WHEEL_PALETTE = \[[^\]]*\];",
-                  "const WHEEL_PALETTE = ['" + "', '".join(colours) + "'];",
-                  src, count=1)
+    """Swap the wheel palette in a copy of config.js.
+
+    THIS TARGETED A NAME THAT NO LONGER EXISTS. It substituted WHEEL_PALETTE,
+    which #40 renamed to WHEEL_POOL when the pool moved out of index.html into
+    config.js -- and re.sub with no match returns the source unchanged and
+    raises nothing, so this rendered six IDENTICAL palettes and reported
+    success. Same family as the CI_FLAGS bug: a tool failing into something
+    that looks like a result (#47).
+
+    Asserts the substitution happened, so the next rename is loud.
+    """
+    out, n = re.subn(r"WHEEL_POOL:\s*\[[^\]]*\]",
+                     "WHEEL_POOL: ['" + "', '".join(colours) + "']",
+                     src, count=1)
+    if n != 1:
+        raise SystemExit("palettes.py: WHEEL_POOL not found in config.js — "
+                         "the palette was renamed again; fix this substitution")
+    return out
 
 
 async def shoot(send, theme, tag):

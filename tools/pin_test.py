@@ -112,5 +112,10 @@ async def main():
             contrast = (max(body, bg) + 0.05) / (min(body, bg) + 0.05)
             print(f"   wheel body {body:.3f} vs page {bg:.3f}  ->  contrast {contrast:.2f}:1")
     proc.kill()
+    return 0
 
-asyncio.run(main())
+# An exit code, so this can be used in a chain or a hook rather than only read
+# by a human (#47). It ended at asyncio.run(main()) with main() returning None,
+# so it exited 0 whatever it measured.
+if __name__ == "__main__":
+    sys.exit(asyncio.run(main()) or 0)
