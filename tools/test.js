@@ -209,7 +209,10 @@ test('a service the active person does not have is never seated on a wheel', () 
      SITES[g.slug].label unguarded, crashing the page 2000 times out of 2000.
      This matters now: #39 is shipped and adding a person is a config edit.
      Replays the real seating block against a person missing three services. */
-  const i = SRC.indexOf('const pairSlots = PAIR_SLOTS');
+  /* Anchor on the cache wrapper, not on the first declaration inside it — the
+     seating is wrapped in `if (!this._slugFor) {` since #55, so slicing from
+     the inner line yields an unmatched brace. */
+  const i = SRC.indexOf('if (!this._slugFor) {');
   const j = SRC.indexOf('const g = [], strands = []', i);
   ok(i > 0 && j > i, 'could not find the slug-seating block in index.html');
   const frag = SRC.slice(i, j);
@@ -220,8 +223,9 @@ test('a service the active person does not have is never seated on a wheel', () 
     const SITES = { linkedin:{}, github:{}, bluesky:{}, mail:{} };   /* 5-link person */
     const TRAIN = [1,2,3,4,5];
     const shuffle = (arr) => arr;
+    /* the block caches onto \`this\`, so it is called with one (#55) */
     ${frag}
-    return Object.values(slugFor).filter(s => s && !SITES[s]);`)();
+    return Object.values(slugFor).filter(s => s && !SITES[s]);`).call({});
   eq(seated.length, 0,
     'seated services the active person does not have: ' + [...new Set(seated)].join(', '));
 });

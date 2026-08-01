@@ -1768,26 +1768,44 @@ class Component extends DCLogic {
       }
       return arr;
     };
+    /* SEATED ONCE, NOT ON EVERY SOLVE (#55). solve() re-runs whenever fitStage
+       invalidates its cache, so this shuffle used to move a service -- and the
+       handle engraved on that wheel's band -- onto a different wheel while the
+       user was resizing. 14 thresholds between 380px and 1000px of the smaller
+       axis, plus every orientation flip. Worse, 6 of them fire on `boost`,
+       which is read only in the `linked` branch that no shipped TRAIN entry
+       takes, so nearly half of the reshuffles were for a variable with no
+       effect on this train at all.
+       The file already states the rule 200 lines up, about colour: "computed
+       once at module load and never on resize, so the wheels cannot change
+       colour under the pointer". Colours obeyed it; slugs did not.
+       Cached on the instance rather than hoisted to module scope because the
+       shuffle reads this.props.shuffle, and PAIR_SLOTS/SITES are declared
+       further down the file than the colour deal is. */
+    if (!this._slugFor) {
     const pairSlots = PAIR_SLOTS, singleSlots = [];
-    TRAIN.forEach((t, i) => { if (!pairSlots.some(pr => pr.indexOf(i) >= 0)) singleSlots.push(i); });
-    /* ONLY SEAT SERVICES THE ACTIVE PERSON ACTUALLY HAS (#53). config.js says
-       "a service named here but absent from the active person's links is simply
-       skipped" -- it was not, and a second person crashed the page 2000 times
-       out of 2000, because renderVals() reads SITES[g.slug].label unguarded.
-       That matters now rather than later: #39 is shipped, the picker is built,
-       and adding a person is documented as a config edit. Filtering here is the
-       right place -- it keeps the promise where the seating happens, instead of
-       leaving every consumer to guard a slug that should never have existed. */
-    const has = (slug) => Object.prototype.hasOwnProperty.call(SITES, slug);
-    const pairs = shuffle(PAIRS.filter(pr => pr.every(has)).map(pr => shuffle(pr.slice())));
-    const singles = shuffle(SINGLES.filter(has));
-    const slugFor = {};
-    /* Both guards are needed and for different reasons: PAIRS empty gave
-       pairs[NaN] -> a TypeError, while SINGLES empty merely left the slug null
-       and the badge filtered out later. Same shape, two outcomes, three lines
-       apart -- so treat them the same. */
-    if (pairs.length) pairSlots.forEach((pr, k) => { const pair = pairs[k % pairs.length]; slugFor[pr[0]] = pair[0]; slugFor[pr[1]] = pair[1]; });
-    if (singles.length) singleSlots.forEach((s, k) => { slugFor[s] = singles[k % singles.length]; });
+      TRAIN.forEach((t, i) => { if (!pairSlots.some(pr => pr.indexOf(i) >= 0)) singleSlots.push(i); });
+      /* ONLY SEAT SERVICES THE ACTIVE PERSON ACTUALLY HAS (#53). config.js says
+         "a service named here but absent from the active person's links is simply
+         skipped" -- it was not, and a second person crashed the page 2000 times
+         out of 2000, because renderVals() reads SITES[g.slug].label unguarded.
+         That matters now rather than later: #39 is shipped, the picker is built,
+         and adding a person is documented as a config edit. Filtering here is the
+         right place -- it keeps the promise where the seating happens, instead of
+         leaving every consumer to guard a slug that should never have existed. */
+      const has = (slug) => Object.prototype.hasOwnProperty.call(SITES, slug);
+      const pairs = shuffle(PAIRS.filter(pr => pr.every(has)).map(pr => shuffle(pr.slice())));
+      const singles = shuffle(SINGLES.filter(has));
+      const slugFor = {};
+      /* Both guards are needed and for different reasons: PAIRS empty gave
+         pairs[NaN] -> a TypeError, while SINGLES empty merely left the slug null
+         and the badge filtered out later. Same shape, two outcomes, three lines
+         apart -- so treat them the same. */
+      if (pairs.length) pairSlots.forEach((pr, k) => { const pair = pairs[k % pairs.length]; slugFor[pr[0]] = pair[0]; slugFor[pr[1]] = pair[1]; });
+      if (singles.length) singleSlots.forEach((s, k) => { slugFor[s] = singles[k % singles.length]; });
+      this._slugFor = slugFor;
+    }
+    const slugFor = this._slugFor;
     const g = [], strands = [];
     let x = 0, y = 0, dir = 1, phase = 0;
     TRAIN.forEach((t, i) => {
