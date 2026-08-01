@@ -12,8 +12,13 @@ address and mobile number.
 The deploy **names the paths it publishes** rather than excluding the ones it
 does not — a whitelist, so a new file cannot reach the web by being forgotten.
 
-Published: `index.html`, `support.js`, `assets/`, `cards/`, `keybase.html`,
-`ssh_public_key`.
+Published: `index.html`, `support.js`, `config.js`, `assets/`, `cards/`,
+`keybase.html`, `ssh_public_key`.
+
+`config.js` carries the link table, the people and the palette. It is published,
+and CI asserts it is reachable, serves as `text/javascript` and parses — this
+rulebook simply failed to list it for a while (#59), which is the worst kind of
+drift: the rules requiring a file the rules do not name.
 
 `keybase.html` is a signed ownership proof and is kept live deliberately — the
 claim only verifies while the file is reachable, so dropping it from the include

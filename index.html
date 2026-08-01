@@ -478,18 +478,30 @@ function planetaryBore(teeth) {
    co-rotates with the wheel instead of opposing it.
 
    This list is MEASURED, not derived, and that distinction matters. The search
-   in tools/ravigneaux.js finds 131 sets whose geometry closes and whose planets
-   clear each other; 43 of those also assemble, meaning all N stations agree on
-   one sun clocking. But only these 26 survive tools/mesh_rav.js, which rolls
-   each one through a full turn at five carrier clockings and checks all five
-   relationships -- the three that must mesh, and the two that must NOT touch
-   (inner row against the ring, outer row against the sun).
+   in tools/ravigneaux.js emits the sets whose geometry closes, whose planets
+   clear each other, and which assemble -- meaning all N stations agree on one
+   sun clocking. tools/mesh_rav.js then rolls each survivor through a full turn
+   at five carrier clockings and checks all five relationships: the three that
+   must mesh, and the two that must NOT touch (inner row against the ring,
+   outer row against the sun).
 
-   The 17 that assemble but fail are involute interference: a larger gear's tooth
-   reaching past an eight-tooth pinion's base circle, where teethPath has only a
-   straight wall to offer. No closed-form assembly rule predicts that, which is
-   exactly why the approved list is the measured one. `blank` is the smallest
-   wheel that can hold the set at a legible module. */
+   Re-measured 2026-07-31 at the CURRENT bound, MAX_ZR = 44:
+
+     EMIT_TO=/tmp/rav.json node tools/ravigneaux.js 44 --emit   ->  886 assemble
+     node tools/mesh_rav.js /tmp/rav.json                       ->  638 clear all five
+     this menu                                                        98 shipped
+
+   The ones that assemble but fail are involute interference: a larger gear's
+   tooth reaching past an eight-tooth pinion's base circle, where teethPath has
+   only a straight wall to offer. No closed-form assembly rule predicts that,
+   which is exactly why the approved list is the measured one.
+
+   THE NUMBERS ABOVE MOVE WITH THE BORE. They read 131 / 43 / 26 when the search
+   ran to Zr = 35, and every one of them was stale in this comment by the time
+   anyone read it (#59) -- widening the deal bounds makes sets reachable that
+   nothing had ever counted. If you change MIN_MODULE, the deal bounds or any
+   TOOTH_* constant, re-run the two commands above rather than quoting these.
+   `blank` is the smallest wheel that can hold the set at a legible module. */
 const RAVIGNEAUX_MENU = [
   { pg2: [8, 8, 8, 29, 3], blank: 16 },
   { pg2: [9, 8, 8, 30, 3], blank: 16 },
@@ -1500,7 +1512,11 @@ class Component extends DCLogic {
     this._rmq = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
     let savedMotion = null;
     try { savedMotion = localStorage.getItem('wozi-motion'); } catch (e) {}
-    if (savedMotion === 'run' || savedMotion === 'rest') this.state.motion = savedMotion;
+    /* setState, not a direct write. This was `this.state.motion = savedMotion`,
+       which rendered correctly only because componentDidMount calls apply()
+       further down and that re-renders. Swap those two lines and the pause
+       button ships with the wrong label (#59). */
+    if (savedMotion === 'run' || savedMotion === 'rest') this.setState({ motion: savedMotion });
     const startRunning = savedMotion === 'run' ? true
       : savedMotion === 'rest' ? false : !(this._rmq && this._rmq.matches);
     this._v = (this.props.spinUp === false && startRunning) ? this.idleRate() : 0;
@@ -3307,7 +3323,12 @@ class Component extends DCLogic {
       transform: this.props.parallax ? 'scale(0.94)' : null, transformOrigin: 'center', opacity: this.state.theme === 'dark' ? 0.17 : 0.46, zIndex: 0, pointerEvents: 'none' } },
       /* offset by the layer's own origin, so widening the box moves nothing */
       _gl.map(g => h('div', { key: g.i, style: { position: 'absolute', left: (g.cx * S - _gx0) + 'px', top: (g.cy * S - _gy0) + 'px', width: 0, height: 0 } },
-        h('div', { ref: (el) => { if (this._ghostEls) this._ghostEls.push({ el: el, g: g }); },
+        /* Guard on `el`, not just on the array: React calls a detached ref with
+             null, so without it this collected roughly 2N entries per render, half
+             of them {el: null} (#59). applyRotation skipped them, so nothing broke
+             -- it just grew, quietly, and was the only one of the three ref
+             collectors here that was wrong. */
+          h('div', { ref: (el) => { if (el && this._ghostEls) this._ghostEls.push({ el: el, g: g }); },
           style: { transform: 'rotate(' + g.phase.toFixed(2) + 'deg)' } },
           this.ghostSvg(g, S)))));
     /* The artwork is decoration: the meaning is carried by the labelled <a>
