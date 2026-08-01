@@ -28,8 +28,17 @@
      which is large text on this colour, stays above the 3:1 floor (#16). */
   --bg:#E8EAE5; --ink:#20302E; --muted:#6B7E7C; --hair:#D5DAD6; --chip:#FFFFFF;
   --accent:#3B7DE8; --shadow:0 1px 2px rgba(20,40,38,.06);
-  --m1:#FFFFFF; --m2:#D4DADE; --m3:#98A2A9; --m4:#5F686E;
-  --b1:#F7E7BE; --b2:#DFC183; --b3:#B08F45; --b4:#7A5F28;
+  /* THE METAL AND BRASS RAMPS, kept as a comment rather than as declarations
+     (#57). Both sets were referenced ZERO times -- 16 declarations, no var()
+     uses -- because wheel tone is derived per wheel by shades()/flatTones()
+     from WHEEL_POOL, not read from CSS. They are recorded here because the
+     values are still cited: config.js names --m4 light / --m1 dark as the
+     provenance of the steel accent #5F686E, and deleting the declarations
+     without this would delete where that colour came from.
+       light metal   m1 #FFFFFF  m2 #D4DADE  m3 #98A2A9  m4 #5F686E
+       light brass   b1 #F7E7BE  b2 #DFC183  b3 #B08F45  b4 #7A5F28
+       dark  metal   m1 #AEB8BF  m2 #7C858C  m3 #4E565C  m4 #2B3135
+       dark  brass   b1 #D8B978  b2 #A98844  b3 #75592A  b4 #463618 */
   --edge:rgba(12,22,28,.38); --gloss:rgba(255,255,255,.8);
   /* --gsfit is the fit scale, and it is a READOUT, not a lever: the train's
      geometry is multiplied by it in JS at render time so every wheel is drawn at
@@ -38,8 +47,10 @@
      The value here is the boot fit, used for the first render before fitStage()
      has measured anything; gsRender() reads it from this declaration so the two
      cannot drift apart. */
-  --s:1; --gsfit:0.86;
-  --dir:row; --pad:5vw; --gap:4vw; --colw:400px;
+  /* --s (1/speed) removed: 0 var(--s) uses, and syncVars recomputed it every
+     render for nothing. Motion timing goes through the rAF loop, not CSS (#57). */
+  --gsfit:0.86;
+  --dir:row; --pad:5vw; --gap:4vw;
   /* Corner spacing is one icon width, so the gap around the theme toggle reads
      the same as the icon it sits next to. The button is larger than its icon and
      centres it, so the button box is pulled in by half that difference — derived
@@ -86,8 +97,7 @@
 :root[data-theme="dark"]{
   --bg:#1E2226; --ink:#EEF1F0; --muted:#93A5A3; --hair:#373E3D; --chip:#2A3034;
   --accent:#7FA9F0; --shadow:0 1px 2px rgba(0,0,0,.35);
-  --m1:#AEB8BF; --m2:#7C858C; --m3:#4E565C; --m4:#2B3135;
-  --b1:#D8B978; --b2:#A98844; --b3:#75592A; --b4:#463618;
+  /* metal/brass ramps: see the light-mode block above (#57) */
   --edge:rgba(0,0,0,.6); --gloss:rgba(255,255,255,.38);
 }
 html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:'Manrope',system-ui,sans-serif;-webkit-font-smoothing:antialiased;}
@@ -130,7 +140,7 @@ a:focus-visible,button:focus-visible,[tabindex]:focus-visible{outline:3px solid 
    transitions: badge scale, tooltip fade, toggle colour. */
 @media (prefers-reduced-motion:reduce){*{transition:none !important}}
 @media (max-width:1080px){:root{--gap:2rem;--pad:6vw;}}
-@media (max-width:760px){:root{--pad:28px;--colw:100%;}}
+@media (max-width:760px){:root{--pad:28px;}}
 @media (max-width:430px){:root{--gap:1.25rem;}}
 </style>
 </helmet>
@@ -1352,10 +1362,10 @@ class Component extends DCLogic {
     this._seed = 20260729;
     const hosts = [solved.gears[0], solved.gears[solved.gears.length - 1]];
     const taken = [];
-    const crosses = (p1, p2, p3, p4) => {
-      const s = (a, b, c) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
-      return s(p1, p2, p3) * s(p1, p2, p4) < 0 && s(p3, p4, p1) * s(p3, p4, p2) < 0;
-    };
+    /* Uses the module-level segCross (#57). This was a second copy, identical
+       character-for-character including its inner helper, shadowing a perfectly
+       good function three lines above where it is used -- exactly the drift
+       hazard that has already bitten this repo twice. */
     /* The escape runs continue the train's OWN AXIS rather than leaving by whichever
        screen edge happens to be nearest. Nearest-edge was measuring the wrong thing:
        on a wide, short viewport the closest edges are the top and bottom, so one run
@@ -1389,7 +1399,7 @@ class Component extends DCLogic {
         const reach = reachAlong(sx, sy, ang);
         const oa = ang * Math.PI / 180;
         const seg = [{ x: sx, y: sy }, { x: sx + (reach + 80) * Math.cos(oa), y: sy + (reach + 80) * Math.sin(oa) }];
-        if (!taken.some(t => crosses(seg[0], seg[1], t[0], t[1]))) { e = { ang: ang, reach: reach }; break; }
+        if (!taken.some(t => segCross(seg[0], seg[1], t[0], t[1]))) { e = { ang: ang, reach: reach }; break; }
       }
       if (!e) return;
       const ea = e.ang * Math.PI / 180;
@@ -1768,7 +1778,6 @@ class Component extends DCLogic {
   syncVars() {
     const r = document.documentElement.style;
     const speed = this.props.speed ?? 1;
-    r.setProperty('--s', String(speed > 0 ? 1 / speed : 1));
     /* gearScale is no longer a CSS variable: it multiplies into gsRender() and
        reaches the page as real pixel geometry, so nothing has to resolve it at
        used-value time (#37). */
@@ -1904,8 +1913,7 @@ class Component extends DCLogic {
         }
       }
       g.push({ i: i, teeth: t.teeth, color: t.color, cv: t.cv || null, crot: t.crot || 0, slug: slugFor[i] || null, belt: t.link || null, kind: t.kind || 'holes', arms: t.arms || 5, prof: prof, chainFrom: chainFrom,
-        r: r, ro: ro, x: x, y: y, dir: dir, phase: phase,
-        dur: (BASE_MS * t.teeth / 20).toFixed(2) });
+        r: r, ro: ro, x: x, y: y, dir: dir, phase: phase });
     });
     let minX = Math.min.apply(null, g.map(k => k.x - k.ro)) - 6;
     let minY = Math.min.apply(null, g.map(k => k.y - k.ro)) - 6;
