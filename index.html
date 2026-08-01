@@ -2037,6 +2037,27 @@ class Component extends DCLogic {
     /* Openings are cut out of the blank itself: each one is appended to the body path
        as a subpath and filled with even-odd, so the page shows through. No masks. */
     const holes = [];
+    /* Distance from the wheel centre to a convex cell's NEAREST point, which is
+       on an EDGE, not at a vertex (#45). A vertex test is the wrong predicate
+       for the inner boundary: a regular hexagon's inradius is 0.866 of its
+       circumradius and an equilateral triangle's only 0.289, so a cell can clear
+       the boss at every vertex while an edge cuts inside it.
+       Measured across all 21 wheel/variant combinations, this currently changes
+       ZERO cells in either family -- the intrusion band is about L^2/8R wide
+       (~0.62px for an 8px triangle side against a 13px boss) and no lattice cell
+       lands in it. So this is correctness insurance, not a visible fix. It
+       matters as soon as cells grow or the boss shrinks, and #44's pending
+       change makes every wheel bigger. */
+    const nearestEdge = (V) => {
+      let m = Infinity;
+      for (let i = 0; i < V.length; i++) {
+        const a = V[i], b = V[(i + 1) % V.length];
+        const dx = b[0] - a[0], dy = b[1] - a[1];
+        const t = Math.max(0, Math.min(1, -(a[0] * dx + a[1] * dy) / (dx * dx + dy * dy)));
+        m = Math.min(m, Math.hypot(a[0] + t * dx, a[1] + t * dy));
+      }
+      return m;
+    };
     /* THE FOUR LATTICE FAMILIES ARE PRINTED PARTS, NOT MACHINED ONES (#43).
        That reframing is what finally closed #38. Read as a milled web, a
        honeycomb is wrong three ways -- poor in in-plane shear, sharp internal
@@ -2526,7 +2547,7 @@ class Component extends DCLogic {
             const cx = px * (q + r / 2), cy = ry2 * r;
             const V = vertsX(cx, cy);
             if (!V.every(v2 => Math.hypot(v2[0], v2[1]) <= rOutX)) continue;
-            if (V.some(v2 => Math.hypot(v2[0], v2[1]) < rInX)) continue;
+            if (nearestEdge(V) < rInX) continue;   /* EDGE, not vertex (#45) */
             let d2 = '';
             for (let v = 0; v < 6; v++) {
               d2 += (v ? 'L' : 'M') + V[v][0].toFixed(2) + ',' + V[v][1].toFixed(2) + ' ';
@@ -2564,7 +2585,7 @@ class Component extends DCLogic {
           const dn = [ptI(i2 + 1, j2), ptI(i2 + 1, j2 + 1), ptI(i2, j2 + 1)];
           for (const t of [up, dn]) {
             if (!t.every(q2 => Math.hypot(q2[0], q2[1]) <= rOutI)) continue;
-            if (t.some(q2 => Math.hypot(q2[0], q2[1]) < rInI)) continue;
+            if (nearestEdge(t) < rInI) continue;   /* EDGE, not vertex (#45) */
             /* shrink about the centroid so the gap between cells is the wall */
             const cxI = (t[0][0] + t[1][0] + t[2][0]) / 3, cyI = (t[0][1] + t[1][1] + t[2][1]) / 3;
             const k2 = 1 - 1.2 / sideI;
