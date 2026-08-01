@@ -2932,15 +2932,52 @@ class Component extends DCLogic {
     this._chainEls = [];
     this._ghostEls = [];
     this._epiEls = [];
+    /* THE GHOST LAYER MUST CONTAIN ITS OWN CHILDREN (#21).
+       This div carries `opacity`, and an opacity below 1 forces the whole
+       subtree to be composited as a GROUP -- which has to be rasterised into a
+       single surface. WebKit sizes that surface from this element's BOX; Blink
+       sizes it from the union of its descendants' visual overflow. The box used
+       to be `solved`, i.e. the LINKED wheels only (about 982px in a 2000px
+       window), while the ghost children sit at `left: g.cx * S` which is
+       NEGATIVE for the left-hand run and past the right edge for the other. So
+       in Safari the outriggers were rasterised away, and in Chrome they were
+       not -- which is the whole of #21.
+
+       It also explains the symptoms that made this so hard to place: the clip
+       cut a gear straight through mid-tooth (a raster clip, not a layout edge),
+       it sat centred on the stage at roughly the stage's width, and its bounds
+       appeared to move as the machine turned, because the overflow union Blink
+       uses breathes with the rotating children while WebKit's box does not.
+
+       Fix: size the layer to the union of every ghost, and shift the children by
+       the same origin so nothing moves on screen. The box now contains what it
+       paints, in any engine, which is what should have been true all along --
+       this only ever worked because Blink chose not to clip.
+
+       `ro` is generous on purpose: a ghost's outer radius is its pitch radius
+       plus an addendum, and over-reserving costs nothing but a slightly larger
+       surface, whereas under-reserving clips a tooth. */
+    const _gl = this.state.ghosts || [];
+    let _gx0 = 0, _gy0 = 0, _gx1 = solved.w * S, _gy1 = solved.h * S;
+    _gl.forEach(g => {
+      /* pitch radius + addendum, plus a flat pad: the drawn wheel is wider than
+         its geometry by its stroke and its baked-in shadow, and measurement put
+         the shortfall at 10-17px. Over-reserving costs only a slightly larger
+         compositing surface; under-reserving clips a tooth, which is the bug. */
+      const ro = MODULE * (g.teeth / 2 + 1.25) * S + 6 * MODULE * S;
+      _gx0 = Math.min(_gx0, g.cx * S - ro); _gy0 = Math.min(_gy0, g.cy * S - ro);
+      _gx1 = Math.max(_gx1, g.cx * S + ro); _gy1 = Math.max(_gy1, g.cy * S + ro);
+    });
     const ghosts = h('div', { key: 'ghosts', ref: (el) => { this._ghostLayer = el; },
-      style: { position: 'absolute', left: 0, top: 0, width: (solved.w * S) + 'px', height: (solved.h * S) + 'px',
+      style: { position: 'absolute', left: _gx0 + 'px', top: _gy0 + 'px', width: (_gx1 - _gx0) + 'px', height: (_gy1 - _gy0) + 'px',
       /* Light mode carries the outriggers harder: pale grey at 0.22 over a near-white
          page was close to invisible, and since #10 these runs carry the composition
          out to both edges rather than trailing off a corner. Still well behind the
          train — they imply the machine continues, they do not compete with it. Dark
          mode is unchanged; the same greys read correctly against #1E2226. */
       transform: this.props.parallax ? 'scale(0.94)' : null, transformOrigin: 'center', opacity: this.state.theme === 'dark' ? 0.17 : 0.46, zIndex: 0, pointerEvents: 'none' } },
-      (this.state.ghosts || []).map(g => h('div', { key: g.i, style: { position: 'absolute', left: (g.cx * S) + 'px', top: (g.cy * S) + 'px', width: 0, height: 0 } },
+      /* offset by the layer's own origin, so widening the box moves nothing */
+      _gl.map(g => h('div', { key: g.i, style: { position: 'absolute', left: (g.cx * S - _gx0) + 'px', top: (g.cy * S - _gy0) + 'px', width: 0, height: 0 } },
         h('div', { ref: (el) => { if (this._ghostEls) this._ghostEls.push({ el: el, g: g }); },
           style: { transform: 'rotate(' + g.phase.toFixed(2) + 'deg)' } },
           this.ghostSvg(g, S)))));
