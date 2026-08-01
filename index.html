@@ -288,7 +288,6 @@ const RING_STUB = 0.70;
 const BASE_MS = 21000;
 const GHOST_COLORS = ['#9AA6AD', '#A9B4BA', '#8F9BA3', '#B3BCC2'];
 
-const GHOST_KINDS = ['spokes', 'holes', 'pockets', 'ring', 'spiral'];
 function segCross(p1, p2, p3, p4) {
   const s = (a, b, c) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
   return s(p1, p2, p3) * s(p1, p2, p4) < 0 && s(p3, p4, p1) * s(p3, p4, p2) < 0;
@@ -1436,9 +1435,11 @@ class Component extends DCLogic {
         const phase = ang + 180 - (0.5 - u) * pThis;
         const g = { cx: cx, cy: cy, r: r, teeth: teeth, dir: -prev.dir, phase: phase,
           color: GHOST_COLORS[Math.floor(this.rnd() * GHOST_COLORS.length)],
-          kind: GHOST_KINDS[Math.floor(this.rnd() * GHOST_KINDS.length)], arms: 3 + Math.floor(this.rnd() * 5),
-          prof: { rim: 1.5 + this.rnd() * 0.8,
-            web: 2.4 + this.rnd() * 1.2, hub: 0.18 + this.rnd() * 0.14, hole: 0.09 + this.rnd() * 0.05, arm: 0.14 + this.rnd() * 0.08 },
+          /* No kind, arms or prof: ghostSvg draws body, web and hub at fixed
+             module multiples and reads none of them (#57). They were seven
+             rnd() draws feeding nothing -- and because they consumed the
+             sequence, deleting them deals a different set of background wheels.
+             That is not a regression: these are re-dealt on every load anyway. */
           ro: r + MODULE * 0.95, i: 'gh' + ei + k };
         ghosts.push(g);
         reached += d;
@@ -2008,7 +2009,11 @@ class Component extends DCLogic {
      cannot do both, which is what forced #11 to trade contact for clearance.
      Below the base circle no involute exists, so the flank runs radially down
      into the root. */
-  teethPath(n, r, prof, chipIdx, mod) {
+  /* No `prof` here on purpose: a tooth is a function of the module and the
+     TOOTH_* constants alone, never of the web style bolted to the same wheel.
+     The parameter used to be in this signature and was never read (#57), which
+     invited exactly the wrong idea -- that a profile could change the teeth. */
+  teethPath(n, r, chipIdx, mod) {
     const m = mod || MODULE;
     const ro = r + m * TOOTH_ADD, rr = Math.max(TOOTH_ROOT_MIN, r - m * TOOTH_DED), a = 2 * Math.PI / n;
     const phi = TOOTH_PA * Math.PI / 180, rb = r * Math.cos(phi);
@@ -2102,7 +2107,7 @@ class Component extends DCLogic {
     const dim = (hex) => { const n = parseInt(hex.slice(1), 16); const c = [(n >> 16) & 255, (n >> 8) & 255, n & 255]; return '#' + c.map(v => Math.round(v * dimK).toString(16).padStart(2, '0')).join(''); };
     const ft = flatTones(dim(g.color || '#9AA6AD'));
     const size = (g.ro + 4) * 2, r = g.r;
-    const path = this.teethPath(g.teeth, r, g.prof);
+    const path = this.teethPath(g.teeth, r);
     /* Softness comes from low-contrast fills, not a CSS blur: a filter on a rotating
        element re-rasterises every frame, which is what made these stutter. */
     /* The BOX is scaled, the viewBox is not: the vector is drawn at the size it
@@ -2155,7 +2160,7 @@ class Component extends DCLogic {
        must not do. The stride is coprime with nothing in particular — it only has
        to avoid landing in the same place twice running. */
     const chip = this.props.character ? (g.i * 5 + 3) % g.teeth : -1;
-    const path = this.teethPath(g.teeth, r, prof, chip);
+    const path = this.teethPath(g.teeth, r, chip);
     /* Every wheel carries the same engraving band: a solid annulus one module deep just
        inside the tooth roots. The web is held clear of it so nothing is ever cut through
        the lettering, and because MODULE is shared the band is identical on all wheels. */
@@ -2505,7 +2510,7 @@ class Component extends DCLogic {
           h('path', { d: 'M0,0 L' + rad.r.toFixed(2) + ',0', stroke: ft.line, strokeWidth: 3, strokeOpacity: 0.85 }),
           h('g', { transform: 'translate(' + rad.r.toFixed(2) + ',0)' },
             h('g', { ref: epi(kFac, base), style: { transform: 'rotate(' + base.toFixed(2) + 'deg)' } },
-              h('path', { d: this.teethPath(teeth, pitchR, prof, -1, m2), fill: fill, stroke: ft.line, strokeWidth: 1 })),
+              h('path', { d: this.teethPath(teeth, pitchR, -1, m2), fill: fill, stroke: ft.line, strokeWidth: 1 })),
             h('circle', { r: 2.4, fill: ft.line })));
       const planets = [];
       for (let k2 = 0; k2 < NP; k2++) {
@@ -2521,7 +2526,7 @@ class Component extends DCLogic {
       }
       post.push(h('g', { key: 'epicarrier', ref: epi(kC, baseC), style: { transform: 'rotate(' + baseC.toFixed(2) + 'deg)' } }, planets));
       post.push(h('g', { key: 'episun', ref: epi(kS, baseS), style: { transform: 'rotate(' + baseS.toFixed(2) + 'deg)' } },
-        h('path', { d: this.teethPath(Zs, Rs, prof, -1, m2), fill: ft.well, stroke: ft.line, strokeWidth: 1 })));
+        h('path', { d: this.teethPath(Zs, Rs, -1, m2), fill: ft.well, stroke: ft.line, strokeWidth: 1 })));
     } else if (kind === 'iris') {
       /* Aperture blades: tangential crescents, pointed at both ends. The metal
          between blades is a full-depth curved spoke — nothing floats. */
@@ -3138,9 +3143,6 @@ class Component extends DCLogic {
         h('radialGradient', { id: id + 'u', cx: '50%', cy: '30%', r: '80%' },
           h('stop', { key: 'a', offset: '0%', stopColor: ft.face }),
           h('stop', { key: 'b', offset: '100%', stopColor: ft.face })),
-        h('radialGradient', { id: id + 'd', cx: '50%', cy: '32%', r: '80%' },
-          h('stop', { offset: '0%', stopColor: p[3] }),
-          h('stop', { offset: '100%', stopColor: p[2] })),
         /* Two reading arcs on the solid band: the handle across the top, the machining
            stamp across the bottom, both running left-to-right and upright. */
         marked ? (function () {
