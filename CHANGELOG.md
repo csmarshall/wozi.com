@@ -7,6 +7,67 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **#58 — `const flat = true` made about half of `gearSvg` unreachable.** The
+  flag sat at the top of both `gearSvg` and `ghostSvg` guarding a modelled-metal
+  rendering behind roughly forty ternaries. It read as a live choice and was not
+  one: both themes went flat on 2026-07-30 and every branch behind it has been
+  dead since, so anyone editing a wheel had to reason about a second drawing
+  that never runs.
+
+  Gone rather than dormant — unlike the chain and belt this is not a capability
+  anyone means to invoke again, so the comment at the head of `gearSvg` records
+  what the modelled treatment did (five-stop body gradient, radial wells and
+  bosses, turned-metal rings, specular arc across the lower face, drop shadow
+  behind the blank, two-layer cut/lit engraving) and the code goes.
+
+  What came out: **21** gradient stops repeating their own neighbours' colour,
+  **17** paths drawn with *both* `fill="none"` and `stroke="none"`, `turned()`
+  which returned `null` unconditionally plus its four call sites, and the
+  ghosts' unused `shades()` palette. `shades()` stays live in `gearSvg` — `p[3]`
+  is the line colour throughout.
+
+  Verified in pixels, not by eye: collapsing dead branches changes the markup by
+  construction, so a markup diff cannot answer the question. **0 px differ**
+  against HEAD at 1440×900 and 390×844.
+
+  Worth recording: the first diff said 57,709 px changed and it was the
+  animation phase, not the code. Same class of mistake as measuring a rotated
+  element with `getBoundingClientRect` — the measurement was fine, the thing
+  being measured was moving. That is what forced #48 into existence.
+
+- **#57 — a gradient nothing fills, a parameter nothing reads, three fields
+  nothing draws.** The `<id>d` radial gradient was defined on every wheel and
+  `url(#…d)` appears zero times in the file. `teethPath` took `prof` and never
+  read it — a tooth is a function of the module and the `TOOTH_*` constants
+  alone, never of the web style bolted to the same wheel, so the parameter
+  invited exactly the wrong idea; removed from the signature and all five call
+  sites with a comment saying why it must not come back. The background wheels
+  carried `kind`, `arms` and a five-field `prof` that `ghostSvg` never reads.
+
+  The isolation matters: deleting the seven `rnd()` draws shifts the seeded
+  sequence, so the ghosts deal differently — 43,009 px, max channel delta 21,
+  all faint grey machinery. Putting the seven draws back with their values still
+  unused reads **0 px**, which is the proof that the gradient and the parameter
+  are inert and the whole diff is the reshuffled deal. These wheels are re-dealt
+  on every load anyway.
+
+- **#42 — fourteen harnesses fought over one DevTools port each.** Every CDP
+  tool hardcoded its port (9333, 9341, 9350, 9351, 9352, 9371, 9390, 9391, 9412,
+  9420, 9430, 9500, 9600, 9700+i). Two running at once meant the loser raised
+  `ConnectionClosedError`, which reads as a **page** fault rather than a harness
+  fault — it produced a false `devices.py` failure on a layout that was entirely
+  fine, and re-run alone the same page reported 20/20 and 4/4.
+
+  Each now asks the OS for a free port and honours `CDP_PORT` when a caller
+  wants a specific one. `cap_drag` and `epi_shot` keep their positional
+  argument; it falls back to a free port instead of a fixed one. `wide_sheet`
+  derived per-shot ports from a fixed base, so two sheets collided
+  shot-for-shot — each shot now takes its own. Proved by running
+  `verify_motion`, `pin_test` and `deal_dump` concurrently, all exiting 0.
+
+  Every launch also carries `--window-position=-4000,-4000`, so a headless run
+  stops stealing focus mid-session on macOS.
+
 - **#51 — The hover pill clipped its own descenders, and nothing measured
   type.** Charles: *"Instagram's label is cut off along the bottom."* The label
   span sets `overflow: hidden`, which is **not** optional — it is the mechanism
@@ -39,6 +100,33 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
   calculation covers all of them.
 
 ### Added
+
+- **#48 — `tools/pixel_regress.py`, a pixel gate that can actually fail.** The
+  page is dealt at random *and* it turns, so two screenshots of identical code
+  never matched and no visual check could be automated. Both sources of
+  variation are pinned in the harness — `index.html` carries no test hooks:
+
+  1. an LCG over `Math.random`, installed through
+     `Page.addScriptToEvaluateOnNewDocument` so it beats every page script, so
+     the same seed deals the same train;
+  2. `requestAnimationFrame` queued rather than run, `performance.now` pinned to
+     the same virtual clock, and `__pump(n)` advancing exactly *n* frames of
+     exactly 1/60s.
+
+  The second half is the one that would have been skipped. The loop stamps
+  `last` from the real clock when it mounts and compares it against the frame
+  timestamp, so a page that loaded 30ms slower skipped a different number of
+  frames and stopped at a different angle. **With rAF frozen and the clock real,
+  two runs of unchanged code still differed by ~40,000 px. With both frozen,
+  zero.**
+
+  Comparison checks the ref out into a throwaway `git worktree` on its own port,
+  so nothing touches the working tree — no stash, no checkout, no uncommitted
+  edit lost to a harness run.
+
+  Mutation-proved per #47: ghost stroke opacity 0.65 → 0.45, a max channel delta
+  of **2** and invisible to the eye, is caught at both viewports and exits 1; an
+  unmodified tree exits 0.
 
 - **#51 — `tools/pill_clip.py`, a gate for type.** The clipping above was
   reported by eye and could have come back the same way: `test.js` is geometry,
