@@ -2083,8 +2083,9 @@ class Component extends DCLogic {
      marks — they are blurred and dim, so the detail would be wasted frames. */
   ghostSvg(g, S) {
     const h = React.createElement;
-    const flat = true;  /* both themes are flat — Charles's call, 2026-07-30, after a side-by-side against the modelled dark */
-    const p = shades(g.color || '#9AA6AD', flat);
+    /* Flat, like the foreground wheels -- the modelled arm of every fill here
+       was unreachable behind a `const flat = true` (#58), and with it went the
+       last use of shades() in this method. */
     /* The linkless background wheels read too faint on the pale page, so their
        flat tones run darker than the palette greys suggest — depth by tone, not
        by fading (#21's lesson).
@@ -2110,10 +2111,10 @@ class Component extends DCLogic {
       /* An outline is what separates "far away" from "out of focus". Without one
          these read as blurred, which is the complaint in #22 -- there is no blur
          anywhere in this file. */
-      h('path', { d: path, fill: flat ? ft.body : p[2], fillOpacity: flat ? 1 : 0.95, stroke: flat ? ft.line : p[3], strokeWidth: 1, strokeOpacity: flat ? 0.65 : 0.5, strokeLinejoin: 'round' }),
-      h('circle', { r: Math.max(6, r - MODULE * 1.9), fill: flat ? ft.face : p[1], fillOpacity: flat ? 1 : 0.75 }),
-      h('circle', { r: Math.max(4, r - MODULE * 3.1), fill: flat ? ft.well : p[3], fillOpacity: flat ? 1 : 0.6 }),
-      h('circle', { r: Math.max(7, r * 0.2), fill: flat ? ft.face : p[1], fillOpacity: flat ? 1 : 0.8 })
+      h('path', { d: path, fill: ft.body, stroke: ft.line, strokeWidth: 1, strokeOpacity: 0.65, strokeLinejoin: 'round' }),
+      h('circle', { r: Math.max(6, r - MODULE * 1.9), fill: ft.face }),
+      h('circle', { r: Math.max(4, r - MODULE * 3.1), fill: ft.well }),
+      h('circle', { r: Math.max(7, r * 0.2), fill: ft.face })
     );
   }
 
@@ -2131,8 +2132,19 @@ class Component extends DCLogic {
     const px = (want, lo, hi) => Math.min(hi === undefined ? Infinity : hi,
                                           Math.max(lo === undefined ? 0 : lo, want / (S || 1)));
     const h = React.createElement;
-    const flat = true;  /* both themes are flat — Charles's call, 2026-07-30, after a side-by-side against the modelled dark */
-    const p = shades(g.color || '#C9D2D6', flat);
+    /* BOTH THEMES ARE FLAT -- Charles's call, 2026-07-30, after a side-by-side
+       against the modelled version. This was a `const flat = true` guarding
+       every modelled branch below, which made about half of this method
+       unreachable while still reading as a live choice (#58). The modelled
+       treatment is gone rather than dormant: unlike the chain and belt, it was
+       not a capability anyone intends to invoke again, and leaving it in place
+       meant every edit here had to reason about a second rendering that never
+       runs. What it did, for the record: a vertical five-stop body gradient
+       (p[0]..p[3]), radial wells and bosses, concentric turned-metal rings, a
+       specular arc across the lower face, a drop shadow behind the blank, and
+       two-layer cut/lit engraving. shades() is still live -- p[3] is the line
+       colour throughout. */
+    const p = shades(g.color || '#C9D2D6', true);
     const ft = flatTones(g.color || '#C9D2D6', this.state.theme !== 'dark');
     const id = 'gr' + g.i, size = (g.ro + 6) * 2, r = g.r, m = MODULE;
     const prof = g.prof;
@@ -2161,16 +2173,6 @@ class Component extends DCLogic {
                           interiors, so anything living inside an opening -- the
                           planetary's moving parts -- draws here instead */
     const kind = g.kind;
-
-    const turned = (key, r0, r1, n) => {
-      if (flat) return null;   /* a turned-metal finish has no meaning on a flat face */
-      const out = [];
-      for (let k = 0; k < n; k++) {
-        const rr2 = r0 + (r1 - r0) * (k / (n - 1 || 1));
-        out.push(h('circle', { key: key + k, r: rr2.toFixed(2), fill: 'none', stroke: k % 2 ? 'var(--gloss)' : p[3], strokeOpacity: 0.13, strokeWidth: 1 }));
-      }
-      return out;
-    };
 
     /* Openings are cut out of the blank itself: each one is appended to the body path
        as a subpath and filled with even-odd, so the page shows through. No masks. */
@@ -2258,20 +2260,17 @@ class Component extends DCLogic {
           ' A' + rI.toFixed(2) + ',' + rI.toFixed(2) + ' 0 0 0 ' + PT(rI, a0) +
           ' A' + cap.toFixed(2) + ',' + cap.toFixed(2) + ' 0 0 1 ' + PT(rO, a0) + ' Z');
         inner.push(h('path', { key: 'sl' + k, d: this.arcD(mid, a0, a1), fill: 'none', stroke: p[3], strokeOpacity: 0.55, strokeWidth: wSlot + 4, strokeLinecap: 'round' }));
-        inner.push(h('path', { key: 'sg' + k, d: this.arcD(mid, a0, a1), fill: 'none', stroke: flat ? 'none' : 'var(--gloss)', strokeOpacity: 0.3, strokeWidth: wSlot + 2, strokeLinecap: 'round', transform: 'translate(-0.5,-1)' }));
-      }
+        }
     };
 
     if (kind === 'spokes') {
       const arms = g.arms;
       inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
-      inner.push(turned('t', hubR * 1.2, faceR - 3, 6));
       inner.push(h('circle', { key: 'sh', r: wellR + 2, fill: 'none', stroke: p[3], strokeOpacity: 0.35, strokeWidth: 2.5 }));
       slots(arms, hubR * 1.5, wellR, 9, 0.72);
     } else if (kind === 'pockets') {
       /* Cut clean through — a blind pocket reads as a failed hole at this scale. */
       inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
-      inner.push(turned('t', hubR * 1.2, faceR - 3, 7));
       inner.push(h('circle', { key: 'sh', r: wellR + 1, fill: 'none', stroke: p[3], strokeOpacity: 0.35, strokeWidth: 2 }));
       slots(g.arms, hubR * 1.35, wellR, 8, 0.8);
     } else if (kind === 'holes') {
@@ -2310,7 +2309,6 @@ class Component extends DCLogic {
       const hr = Math.min(spanD * FIT, orbit * Math.sin(Math.PI / count) * NEIGH);
       inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
       inner.push(h('circle', { key: 'well', r: wellR, fill: 'url(#' + id + 'w)' }));
-      inner.push(turned('t', hubR * 1.3, wellR - 2, 5));
       for (let k = 0; k < count; k++) {
         const a = (k / count) * Math.PI * 2, cx = (orbit * Math.cos(a)).toFixed(2), cy = (orbit * Math.sin(a)).toFixed(2);
         holes.push('M' + (+cx + hr) + ',' + cy + ' A' + hr + ',' + hr + ' 0 1 0 ' + (+cx - hr) + ',' + cy + ' A' + hr + ',' + hr + ' 0 1 0 ' + (+cx + hr) + ',' + cy + ' Z');
@@ -2350,9 +2348,7 @@ class Component extends DCLogic {
     } else if (kind === 'ring') {
       inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
       inner.push(h('circle', { key: 'well', r: wellR, fill: 'url(#' + id + 'w)' }));
-      inner.push(turned('t', hubR * 1.15, wellR - 1, 9));
       inner.push(h('circle', { key: 'grv', r: (wellR + faceR) / 2, fill: 'none', stroke: p[3], strokeOpacity: 0.5, strokeWidth: 2 }));
-      inner.push(h('circle', { key: 'grv2', r: (wellR + faceR) / 2 - 1.4, fill: 'none', stroke: flat ? 'none' : 'var(--gloss)', strokeOpacity: 0.4, strokeWidth: 1 }));
       /* Drilled relief holes — round openings are unambiguous geometry, where a narrow
          kidney slot can collapse on a thin web and stop punching. */
       const count = 5, orbit = (wellR + hubR * 1.3) / 2;
@@ -3117,7 +3113,7 @@ class Component extends DCLogic {
         /* A struck edge on each slot so the cut reads as machined, not clip art. */
         let se = 'M' + spt(0, -spW / 2 - 1.3) + ' ';
         for (let q = 1; q <= STEPS; q++) se += 'L' + spt(q / STEPS, -spW / 2 - 1.3) + ' ';
-        inner.push(h('path', { key: 'spe' + k, d: se, fill: 'none', stroke: flat ? ft.line : p[3], strokeOpacity: 0.5, strokeWidth: 1.4 }));
+        inner.push(h('path', { key: 'spe' + k, d: se, fill: 'none', stroke: ft.line, strokeOpacity: 0.5, strokeWidth: 1.4 }));
       }
       inner.push(h('circle', { key: 'boss', r: hubR * 1.5, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
     }
@@ -3134,26 +3130,14 @@ class Component extends DCLogic {
         /* All shading is symmetric about the vertical axis — lit from above, never from
            a corner — so concentric webs and hubs read as centred. */
         h('linearGradient', { id: id + 'f', x1: '50%', y1: '0%', x2: '50%', y2: '100%' },
-          flat ? h('stop', { offset: '0%', stopColor: ft.body }) :
-          h('stop', { offset: '0%', stopColor: p[0] }),
-          h('stop', { offset: '24%', stopColor: flat ? ft.body : p[1] }),
-          h('stop', { offset: '48%', stopColor: flat ? ft.body : p[2] }),
-          h('stop', { offset: '68%', stopColor: flat ? ft.body : p[1] }),
-          h('stop', { offset: '100%', stopColor: flat ? ft.body : p[3] })),
+          h('stop', { offset: '0%', stopColor: ft.body }),
+          h('stop', { offset: '100%', stopColor: ft.body })),
         h('radialGradient', { id: id + 'w', cx: '50%', cy: '34%', r: '78%' },
-          flat
-            ? [h('stop', { key: 'a', offset: '0%', stopColor: ft.well }),
-               h('stop', { key: 'b', offset: '100%', stopColor: ft.well })]
-            : [h('stop', { key: 'a', offset: '0%', stopColor: p[2] }),
-               h('stop', { key: 'b', offset: '62%', stopColor: p[3] }),
-               h('stop', { key: 'c', offset: '100%', stopColor: p[2] })]),
+          h('stop', { key: 'a', offset: '0%', stopColor: ft.well }),
+          h('stop', { key: 'b', offset: '100%', stopColor: ft.well })),
         h('radialGradient', { id: id + 'u', cx: '50%', cy: '30%', r: '80%' },
-          flat
-            ? [h('stop', { key: 'a', offset: '0%', stopColor: ft.face }),
-               h('stop', { key: 'b', offset: '100%', stopColor: ft.face })]
-            : [h('stop', { key: 'a', offset: '0%', stopColor: p[0] }),
-               h('stop', { key: 'b', offset: '55%', stopColor: p[1] }),
-               h('stop', { key: 'c', offset: '100%', stopColor: p[3] })]),
+          h('stop', { key: 'a', offset: '0%', stopColor: ft.face }),
+          h('stop', { key: 'b', offset: '100%', stopColor: ft.face })),
         h('radialGradient', { id: id + 'd', cx: '50%', cy: '32%', r: '80%' },
           h('stop', { offset: '0%', stopColor: p[3] }),
           h('stop', { offset: '100%', stopColor: p[2] })),
@@ -3176,7 +3160,6 @@ class Component extends DCLogic {
         holes.length ? h('clipPath', { id: id + 'c', clipPathUnits: 'userSpaceOnUse' },
           h('path', { d: path + ' ' + holes.join(' '), clipRule: 'evenodd' })) : null),
       h('g', holes.length ? { clipPath: 'url(#' + id + 'c)', clipRule: 'evenodd' } : null,
-        flat ? null : h('path', { d: path + ' ' + holes.join(' '), fillRule: 'evenodd', fill: p[3], opacity: 0.9, transform: 'translate(0,1)' }),
         h('path', { d: path + ' ' + holes.join(' '), fillRule: 'evenodd', fill: 'url(#' + id + 'f)', stroke: this.state.theme === 'dark' ? ft.line : ft.edge, strokeWidth: this.state.theme === 'dark' ? 1.6 : 1.1, strokeLinejoin: 'round' }),
         inner,
         h('circle', { r: faceR, fill: 'none', stroke: 'var(--edge)', strokeWidth: 1, strokeOpacity: 0.4 })),
@@ -3185,11 +3168,7 @@ class Component extends DCLogic {
       h('circle', { r: Math.max(3, hubR * 0.4), fill: p[3], opacity: 0.5 }),
       /* LAYER: engraved rims — stamped into the solid band just inside the tooth roots,
          cut shadow above and highlight below so it reads as struck metal, not overlaid text. */
-      this.props.engravedRims && eng.handle ? h('g', { key: 'eng' }, (flat
-        ? [{ dy: 0, col: FLAT_INK, op: 0.72 }]
-        : [{ dy: -0.6, col: p[3], op: 0.85 },
-           { dy: 0.6, col: p[0], op: 0.45 }]
-      ).map((L, li) => h('text', {
+      this.props.engravedRims && eng.handle ? h('g', { key: 'eng' }, [{ dy: 0, col: FLAT_INK, op: 0.72 }].map((L, li) => h('text', {
         key: li, transform: 'translate(0,' + L.dy + ')',
         fontSize: eng.fT.toFixed(2), fill: L.col, fillOpacity: L.op, letterSpacing: '0.1em',
         /* Same ink as the fill, matched in opacity, just fattening every edge by a
@@ -3204,8 +3183,6 @@ class Component extends DCLogic {
         dominantBaseline: 'alphabetic',
         style: { fontFamily: "'Manrope',system-ui,sans-serif", fontWeight: 700 }
       }, h('textPath', { href: '#' + id + 'ringT', startOffset: '50%', textAnchor: 'middle' }, eng.handle)))) : null,
-      /* Specular arc goes under the stamps, or it washes the bottom engraving out. */
-      h('path', { d: arc(faceR - 2, 205, 335), fill: 'none', stroke: flat ? 'none' : 'var(--gloss)', strokeWidth: Math.max(2, r * 0.05), strokeLinecap: 'round', opacity: 0.5 }),
       /* LAYER: character — stamped module/tooth-count, as on a real blank. Same struck
          treatment as the handle, so both sides of the band read alike. */
       /* The `character` layer is off as shipped (commit 2e5a721), which would
@@ -3213,11 +3190,7 @@ class Component extends DCLogic {
          A printed wheel therefore renders its stamp regardless of that flag --
          the mark is part of the part, not a decorative layer you can switch
          off. Machined wheels still obey `character` and so still show nothing. */
-      (this.props.character || amPrinted) ? h('g', { key: 'stamp' }, (flat
-        ? [{ dy: 0, col: FLAT_INK, op: 0.66 }]
-        : [{ dy: -0.5, col: p[3], op: 0.8 },
-           { dy: 0.5, col: p[0], op: 0.4 }]
-      ).map((L, li) => h('text', {
+      (this.props.character || amPrinted) ? h('g', { key: 'stamp' }, [{ dy: 0, col: FLAT_INK, op: 0.66 }].map((L, li) => h('text', {
         key: li, transform: 'translate(0,' + L.dy + ')',
         fontSize: eng.fB.toFixed(2), fill: L.col, fillOpacity: L.op, letterSpacing: '0.1em',
         dominantBaseline: 'alphabetic',   /* same reasoning as the handle above (#26) */
