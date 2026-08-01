@@ -20,6 +20,15 @@ on:
       - '**.md'
       - 'legacy/**'
       - '.gitignore'
+  # Gate the BRANCH, not just the bucket (#52). Until this existed the suite,
+  # the layout gate and the motion gate ran only after a merge had already
+  # landed on main -- so every merge was verified after the fact, which for a
+  # repo that routinely merges several agent branches one at a time is the
+  # wrong end. The verification steps below all run BEFORE any credential is
+  # assumed, so the pull_request path needs no OIDC role and a fork cannot
+  # assume one; the deploy half is guarded on the event instead.
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 # Never let two deploys race each other onto the same bucket.
@@ -88,6 +97,7 @@ jobs:
           fi
 
       - name: Assume the deploy role via OIDC
+        if: github.event_name != 'pull_request'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::464480389332:role/wozi-com-deploy
@@ -101,6 +111,7 @@ jobs:
       # no console error at all.
 
       - name: Publish HTML
+        if: github.event_name != 'pull_request'
         run: |
           for f in index.html keybase.html cards/index.html cards/charles/index.html; do
             aws s3 cp "$f" "$BUCKET/$f" \
@@ -111,6 +122,7 @@ jobs:
           done
 
       - name: Publish the runtime
+        if: github.event_name != 'pull_request'
         run: |
           # config.js carries the link table, the people and the palette, and
           # index.html reads it at load. If it is missing the page still renders
@@ -126,6 +138,7 @@ jobs:
           done
 
       - name: Publish hub icons
+        if: github.event_name != 'pull_request'
         run: |
           aws s3 sync assets/ "$BUCKET/assets/" \
             --content-type "image/svg+xml" \
@@ -135,6 +148,7 @@ jobs:
           aws s3 ls "$BUCKET/assets/icons/" | awk '{print "  assets/icons/" $4}'
 
       - name: Publish card assets
+        if: github.event_name != 'pull_request'
         run: |
           aws s3 cp cards/styles/qrserve.css "$BUCKET/cards/styles/qrserve.css" \
             --content-type "text/css; charset=utf-8" \
@@ -148,6 +162,7 @@ jobs:
           echo "  cards/styles/qrserve.css, cards/images/icon.png, cards/charles/contact.vcf"
 
       - name: Publish the SSH public key
+        if: github.event_name != 'pull_request'
         run: |
           # No extension, so without an explicit type browsers download it
           # instead of showing it.
@@ -157,6 +172,7 @@ jobs:
           echo "  ssh_public_key"
 
       - name: Invalidate CloudFront
+        if: github.event_name != 'pull_request'
         id: invalidate
         run: |
           # Mandatory, not optional. The distribution's default TTL is 86400,
@@ -171,6 +187,7 @@ jobs:
           echo "invalidation complete"
 
       - name: Verify the deploy is actually live
+        if: github.event_name != 'pull_request'
         run: |
           set -o pipefail
           fail=0
@@ -250,6 +267,32 @@ jobs:
           fi
           check https://wozi.com/assets/icons/github.svg 200 'svg'
           check https://wozi.com/cards/ 200 'Charles'
+          # PRESENCE IS NOT ENOUGH HERE (#54). This repo went private because a
+          # second person's real address and mobile were being served from
+          # cards/ -- and a check that only asserts "Charles appears" passes
+          # just as happily if someone else's card comes back alongside his.
+          # The failure mode is a privacy incident, so the assertion is
+          # exact-match rather than substring: what is served must be
+          # byte-identical to what we published. That names nothing sensitive
+          # in this file and catches anything unexpected, not just the one case
+          # we already know about.
+          # keybase.html gets the same treatment for a different reason: its
+          # body is signature-covered, so a truncated response still returns 200
+          # while the ownership proof silently stops verifying.
+          exact() {   # exact <url> <repo-file>
+            local got want
+            got=$(curl -sS --max-time 20 "$1" | shasum -a 256 | cut -d' ' -f1)
+            want=$(shasum -a 256 < "$2" | cut -d' ' -f1)
+            if [ "$got" = "$want" ]; then
+              echo "  ok   $1 is byte-identical to $2"
+            else
+              echo "  FAIL $1 does not match $2 (served $got, published $want)"
+              fail=1
+            fi
+          }
+          exact https://wozi.com/cards/ cards/index.html
+          exact https://wozi.com/cards/charles/ cards/charles/index.html
+          exact https://wozi.com/keybase.html keybase.html
           check https://wozi.com/keybase.html 200 ''
           check https://wozi.com/ssh_public_key 200 'ssh-'
           # Served as anything but image/svg+xml, loadIcons() still fetches the

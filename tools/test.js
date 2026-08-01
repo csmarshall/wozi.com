@@ -65,7 +65,12 @@ const page = (function build() {
   const consts = ['MODULE', 'TOOTH_ADD', 'TOOTH_DED', 'TOOTH_ROOT_MIN', 'BAND_RISE',
     'BAND_DEPTH', 'RIM_UNDER_BAND', 'BASELINE_MID', 'ROOT_MARGIN', 'MIN_MODULE',
     'TEETH_MIN', 'TEETH_MAX', 'TEETH_SLACK', 'TEETH_HOST',
-    'ANG_MIN', 'ANG_MAX', 'BAND_MAX', 'ENDS_MAX'];
+    'ANG_MIN', 'ANG_MAX', 'BAND_MAX', 'ENDS_MAX',
+    /* RING_STUB governs the mesh this suite's headline test is named after, and
+       was the one constant kept as a copy here instead of read from the page.
+       Mutating index.html alone used to leave every test green while 10 of 19
+       sets fouled (#51). */
+    'RING_STUB'];
   const decls = consts.map(n => 'const ' + n + ' = ' + grabNumber(n) + ';').join('\n');
   /* TEETH_SUM is derived from the train's length now, so it is read the same way
      the page computes it rather than scraped as a literal -- a suite that hard-codes
@@ -254,7 +259,7 @@ test('every dealable single-row set meshes (sun and ring, zero penetration)', ()
   for (const s of SINGLE) {
     let sunPen = 0, ringPen = 0, sunGap = Infinity, ringGap = Infinity;
     for (const Q of [0, 37, 111, 249]) {
-      const r = meshEpi.audit(s.pg, { kind: 'involute', sunPhase: 'fixed', addI: 0.70 }, Q, 0, 0, 90);
+      const r = meshEpi.audit(s.pg, { kind: 'involute', sunPhase: 'fixed', addI: page.RING_STUB }, Q, 0, 0, 90);
       sunPen = Math.max(sunPen, r.sunPen); ringPen = Math.max(ringPen, r.ringPen);
       sunGap = Math.min(sunGap, r.sunGap); ringGap = Math.min(ringGap, r.ringGap);
     }

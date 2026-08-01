@@ -265,6 +265,15 @@ const TOOTH_ROOT_MIN = 4;  /* px floor under any root circle. Without it a tiny 
 const TOOTH_FILLET = 0.38; /* root fillet radius, in modules — the standard value that
                               goes with 20-degree full depth. Without it the flank meets
                               the root circle at a sharp corner, which no cut gear has. */
+/* The ring gear's stub addendum, as a fraction of the ring's own module. Full
+   depth fouls three of the five dealt sets; 0.70 clears all five at every
+   carrier clocking. It lived as a bare literal inside gearSvg and was therefore
+   the one constant tools/test.js could not extract, so the suite kept its own
+   copy -- and mutating the page alone left the suite green at 21/21 while 10 of
+   19 sets fouled, ringPen up to 0.229, including the test literally named
+   "every dealable single-row set meshes". Named here so there is exactly one of
+   it, and extracted by the suite like every other constant (#51). */
+const RING_STUB = 0.70;
 
 const BASE_MS = 21000;
 const GHOST_COLORS = ['#9AA6AD', '#A9B4BA', '#8F9BA3', '#B3BCC2'];
@@ -2280,7 +2289,7 @@ class Component extends DCLogic {
       const invR = (x) => Math.tan(x) - x;
       const psiR = TOOTH_THICK * Math.PI / Zr;
       const halfR = (R) => (psiR - invR(phiR) + invR(Math.acos(Math.min(1, rbR / R)))) * 180 / Math.PI;
-      const ringTip = Rr - m2 * 0.70, ringRoot = Rr + m2 * TOOTH_DED;
+      const ringTip = Rr - m2 * RING_STUB, ringRoot = Rr + m2 * TOOTH_DED;
       const aR = 360 / Zr, ST = 7;
       let ringD = 'M' + PT(ringRoot, -aR / 2) + ' ';
       for (let k2 = 0; k2 < Zr; k2++) {
