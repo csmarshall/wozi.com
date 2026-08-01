@@ -288,6 +288,17 @@ const RING_STUB = 0.70;
 const BASE_MS = 21000;
 const GHOST_COLORS = ['#9AA6AD', '#A9B4BA', '#8F9BA3', '#B3BCC2'];
 
+/* ONE WAY TO WRITE A POLAR POINT. There were seven copies of this formula --
+   P, PT, at, XY+f2, a second P, and two arc builders that differed only in a
+   hardcoded large-arc flag (#59). Every one of them rounded to the same two
+   decimals, so they were duplicates in the strict sense: same maths, same
+   output, seven chances to fix a bug in six places.
+   polarR takes RADIANS, which is what the tooth loops already carry; polarD
+   takes DEGREES, which is what the web and engraving code carries. Both return
+   the "x,y" pair an SVG path wants. */
+const polarR = (rad, a) => (rad * Math.cos(a)).toFixed(2) + ',' + (rad * Math.sin(a)).toFixed(2);
+const polarD = (rad, deg) => polarR(rad, deg * Math.PI / 180);
+
 function segCross(p1, p2, p3, p4) {
   const s = (a, b, c) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
   return s(p1, p2, p3) * s(p1, p2, p4) < 0 && s(p3, p4, p1) * s(p3, p4, p2) < 0;
@@ -1603,7 +1614,14 @@ class Component extends DCLogic {
         slugs.forEach((s, i) => {
           let t = texts[i] || '';
           if (t) {
-            t = t.split('fill="#000"').join('fill="currentColor"');
+            /* Every icon in assets/ is cut with a literal fill="#000" today, so
+               an exact string swap works -- but it works by luck, and the failure
+               is silent: an icon re-exported as #000000, #000 in single quotes,
+               or in lower/upper case keeps its black fill, renders invisible on
+               the dark page, and logs nothing. Match the ways a black fill is
+               actually written instead (#59). */
+            t = t.replace(/fill\s*=\s*(["'])\s*(#000|#000000|black)\s*\1/gi,
+                          'fill="currentColor"');
             t = t.replace('<svg ', '<svg aria-hidden="true" focusable="false" width="100%" height="100%" ');
           }
           icons[s] = t;
@@ -1991,12 +2009,27 @@ class Component extends DCLogic {
                   || g.kind === 'polarbrick' || g.kind === 'polariso';
     const stamp = 'M' + MODULE + ' Z' + g.teeth + (printedK ? ' · 17-4PH DMLS' : '');
     const MAX = 168 * Math.PI / 180;
+    /* A FLOOR AS WELL AS A CEILING. The shrink below is one-sided: it divides the
+       available sweep by the character count, so a long enough string scales the
+       type toward nothing and engraves a grey smudge rather than a mark. At
+       MIN_ENGRAVE (0.30 module, about 2.1 units) the lettering is still legible
+       on a large wheel, and past that the string is cut instead of the type --
+       an abbreviated handle reads, an illegible one does not. Nothing shipped
+       comes close to the floor today; it is here so that adding a long handle to
+       config.js is a truncation rather than a silent smear (#59, and the same
+       one-sided-bound class as #46). */
+    const MIN_ENGRAVE = 0.30;
     const fit = (txt, rr, base) => {
       const per = 0.60, track = 0.10;
-      let f = base;
-      const width = (fs) => txt.length * fs * (per + track);
-      if (width(f) / rr > MAX) f = (MAX * rr) / (txt.length * (per + track));
-      return { f: f, sweep: (width(f) / rr) * 180 / Math.PI };
+      let f = base, t = txt;
+      const width = (fs, str) => str.length * fs * (per + track);
+      if (width(f, t) / rr > MAX) f = (MAX * rr) / (t.length * (per + track));
+      if (f < m * MIN_ENGRAVE) {
+        f = m * MIN_ENGRAVE;
+        const room = Math.floor((MAX * rr) / (f * (per + track)));
+        if (room >= 2 && t.length > room) t = t.slice(0, room - 1) + '\u2026';
+      }
+      return { f: f, txt: t, sweep: (width(f, t) / rr) * 180 / Math.PI };
     };
     /* Both lines are centred in the band; the rings they ride on are NOT at the band's
        centre radius. Glyphs hang off the ALPHABETIC baseline — the one baseline every
@@ -2013,7 +2046,10 @@ class Component extends DCLogic {
     const rT = mid - BASELINE_MID * T0.f, rB = mid + BASELINE_MID * B0.f;
     /* Re-fit on the ring each line actually rides — a tighter radius needs a wider sweep. */
     const T = fit(handle, rT, T0.f), B = fit(stamp, rB, B0.f);
-    return { handle: handle, stamp: stamp, rT: rT, rB: rB, fT: T.f, fB: B.f, sT: T.sweep, sB: B.sweep };
+    /* T.txt / B.txt, not handle / stamp: if fit() had to cut the string, the
+       sweep it returned describes the CUT string, and drawing the original
+       against that sweep would overrun the ring. */
+    return { handle: T.txt, stamp: B.txt, rT: rT, rB: rB, fT: T.f, fB: B.f, sT: T.sweep, sB: B.sweep };
   }
 
   /* One gear blank, drawn with true involute flanks.
@@ -2044,7 +2080,7 @@ class Component extends DCLogic {
     /* Fillet blend: how far up the flank and how far round the root it reaches. */
     const fr = Math.min(m * TOOTH_FILLET, (rStart - rr) * 0.9 + 0.01);
     const rFil = Math.min(rStart, rr + fr), fa = fr / rr;
-    const P = (rad, ang) => (rad * Math.cos(ang)).toFixed(2) + ',' + (rad * Math.sin(ang)).toFixed(2);
+    const P = polarR;
     const STEPS = 7;
     const flank = [];
     for (let s = 0; s <= STEPS; s++) flank.push(rStart + (ro - rStart) * (s / STEPS));
@@ -2092,8 +2128,8 @@ class Component extends DCLogic {
   arcD(rad, a0deg, a1deg) {
     const a0 = a0deg * Math.PI / 180, a1 = a1deg * Math.PI / 180;
     const large = (a1deg - a0deg) > 180 ? 1 : 0;
-    return 'M' + (rad * Math.cos(a0)).toFixed(2) + ',' + (rad * Math.sin(a0)).toFixed(2) +
-      ' A' + rad.toFixed(2) + ',' + rad.toFixed(2) + ' 0 ' + large + ' 1 ' + (rad * Math.cos(a1)).toFixed(2) + ',' + (rad * Math.sin(a1)).toFixed(2);
+    return 'M' + polarR(rad, a0) +
+      ' A' + rad.toFixed(2) + ',' + rad.toFixed(2) + ' 0 ' + large + ' 1 ' + polarR(rad, a1);
   }
 
   ringPath(rad) {
@@ -2259,10 +2295,7 @@ class Component extends DCLogic {
         arr.push(h('circle', { key: 'shell' + s2, r: wellR - SHELL_OFF - s2 * SHELL_STEP, fill: 'none',
           stroke: p[3], strokeOpacity: s2 ? 0.30 : 0.45, strokeWidth: 0.9 }));
     };
-    const PT = (rad, deg) => {
-      const a = deg * Math.PI / 180;
-      return (rad * Math.cos(a)).toFixed(2) + ',' + (rad * Math.sin(a)).toFixed(2);
-    };
+    const PT = polarD;
     /* Kidney lightening slots — the classic cast/machined gear web, arms left between them. */
     const slots = (arms, rIn, rOut, armDeg, widthScale) => {
       const gap = 360 / arms, mid = (rIn + rOut) / 2;
@@ -2983,7 +3016,7 @@ class Component extends DCLogic {
       const nC = Math.max(1, Math.round(spanP / target));
       const hC = spanP / nC;
       const XY = (rad, a) => [rad * Math.cos(a), rad * Math.sin(a)];
-      const f2 = (q2) => q2[0].toFixed(2) + ',' + q2[1].toFixed(2);
+      const f2 = (q2) => q2[0].toFixed(2) + ',' + q2[1].toFixed(2);  /* XY above returns a pair for vector maths, so this formats rather than re-deriving */
       /* start from a multiple of six so every doubling stays a multiple of six */
       let kP = Math.max(6, Math.round(2 * Math.PI * (rInP + hC / 2) / hC / 6) * 6);
       for (let c = 0; c < nC; c++) {
@@ -3138,11 +3171,6 @@ class Component extends DCLogic {
       }
       inner.push(h('circle', { key: 'boss', r: hubR * 1.5, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
     }
-    const arc = (rad, from, to) => {
-      const a0 = from * Math.PI / 180, a1 = to * Math.PI / 180;
-      return 'M' + (rad * Math.cos(a0)).toFixed(2) + ',' + (rad * Math.sin(a0)).toFixed(2) +
-        ' A' + rad + ' ' + rad + ' 0 0 1 ' + (rad * Math.cos(a1)).toFixed(2) + ',' + (rad * Math.sin(a1)).toFixed(2);
-    };
     /* The BOX is scaled, the viewBox is not: every path, gradient and engraving
        below is authored in module units and stays there, while the element that
        reaches the compositor is already the size it will be seen at (#37). */
@@ -3164,10 +3192,7 @@ class Component extends DCLogic {
         marked ? (function () {
           /* Two reading lines stacked in the band, each on an arc sized to its own text so
              the lettering always sits centred across the top and never wraps onto itself. */
-          const at = (deg, rr) => {
-            const a = deg * Math.PI / 180;
-            return (rr * Math.cos(a)).toFixed(2) + ',' + (rr * Math.sin(a)).toFixed(2);
-          };
+          const at = (deg, rr) => polarD(rr, deg);
           /* Handle across the top, machining stamp across the bottom — same ring, opposite
              sides, each running left-to-right and upright on its own side. */
           const line = (key, rr, sweep, mid, cw) => h('path', { key: key, id: id + key, fill: 'none',
