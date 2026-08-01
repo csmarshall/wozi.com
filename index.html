@@ -693,12 +693,20 @@ const CENTRE_FAMILIES = [
      clear it, so a fat boss eats the very rings that make this design work --
      at hub 0.2 the web had room for barely two. */
   { type: 'hexcore', web: 3.1, hub: 0.13,
-    /* `rings` is how many complete rings of cells the core should have. The cell
-       size follows from it -- the largest that still fits that many. Three rings
-       of big hexagons, or five of small ones. */
-    /* `cell` is the CEILING on cell size; the core then takes whichever size at
-       or under it reaches furthest with whole hexagons. Coarse, medium, fine. */
-    variants: [{ arms: 6, cell: 4.6 }, { arms: 6, cell: 3.9 }, { arms: 6, cell: 3.2 }] },
+    /* `cellFrac` is the ceiling on cell size AS A FRACTION OF THE ANNULUS, not
+       as an absolute size (#63). It was absolute -- 4.6 / 3.9 / 3.2 -- against a
+       core annulus that runs 7.0 units at 13 teeth and 27.0 at 19, a 3.87x
+       spread. So a 19-tooth wheel had 3.9x the radial room of a 13-tooth one
+       and chose a cell 1.5% larger, giving it roughly eight times the cell count
+       and the mesh-screen look rejected three times. Worse, variants 4.6 and 3.9
+       produced IDENTICAL output on 5 of 7 wheels -- two of three were not
+       distinguishable, so coarse/medium/fine was largely decorative.
+       As fractions the cell count holds roughly constant across the train, which
+       is what coarse/medium/fine is supposed to mean. These reproduce today's
+       19-tooth values, so the largest wheel is unchanged and the small ones stop
+       being starved. Same pattern as polarbrick/polariso, which have always
+       divided their span rather than capping it absolutely. */
+    variants: [{ arms: 6, cellFrac: 0.22 }, { arms: 6, cellFrac: 0.16 }, { arms: 6, cellFrac: 0.12 }] },
   /* The three fill families below all answer the same question the hex core
      asked and could not close: how much of the WEB -- the annulus between the
      boss and the engraving -- can be filled with a pattern that stays uniformly
@@ -2692,7 +2700,21 @@ class Component extends DCLogic {
          the leftover at the flats is narrower than one whole hexagon. Filling
          it completely needs a pattern defined BY the annulus rather than
          clipped to it, which is what polarbrick and polariso are for. */
-      const ceiling = Math.min((g.cv && g.cv.cell) || CELL_MAX, CELL_MAX);
+      /* A FRACTION OF THE ANNULUS, not an absolute size (#63). CELL_MAX stays
+         as a hard sanity bound, but it never binds in practice -- the point is
+         that the ceiling now scales with the room available. `cell` is still
+         honoured if a variant supplies one, so the other families and any
+         hand-set entry keep working. */
+      const spanC = Math.max(1, rOutTry[0] - rInX);
+      /* THE CEILING MUST STAY ABOVE THE FLOOR. The sweep runs from ceiling DOWN
+         to CELL_MIN, so a ceiling below it executes zero iterations and the web
+         renders blank -- which is what a bare fraction did at 13, 14 and 16
+         teeth, where 7.0 * 0.22 = 1.54 is under the floor. Clamping between the
+         two is the whole correction, and it is the same one-sided error this
+         change exists to fix, made once more in the fixing. */
+      const ceiling = Math.max(CELL_MIN, Math.min(
+        (g.cv && g.cv.cellFrac) ? spanC * g.cv.cellFrac : ((g.cv && g.cv.cell) || CELL_MAX),
+        CELL_MAX));
       /* SCORE BOTH BOUNDARIES, not just the outer one.
          The old objective was "largest reach of whole cells", which is
          one-sided: it asks how far the pattern gets and never asks what it
