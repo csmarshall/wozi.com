@@ -2078,10 +2078,24 @@ class Component extends DCLogic {
     /* Two concentric shell walls just inside the well. Drawn, not cut: on a real
        printed part the shell is solid material, so these are lines on the face
        rather than entries in `holes`. */
+    /* Where the perimeter shells sit, and how far every core stays clear of
+       them. Named once because three families and the shell drawing all need
+       the same numbers -- they were separate literals, and the cores were let
+       out to wellR - 0.5 while the inner shell sits at wellR - 2.1, so every
+       lattice ran straight THROUGH both rings it was supposed to be framed by.
+       Charles, marking up a bare wheel: fill between the boss and the inner
+       shell, "pull it in a few px on either end so the centre won't clip the
+       lines".
+       CORE_GAP is that margin. The inner limit also clears the boss's own
+       stroke, which is 1.2 wide and therefore reaches 0.6 beyond its radius. */
+    const SHELL_STEP = 1.5, SHELL_OFF = 0.6, CORE_GAP = 0.8;
+    const shellIn = wellR - SHELL_OFF - SHELL_STEP;      /* the inner ring */
+    const coreOut = shellIn - CORE_GAP;                  /* cores stop here */
+    const coreIn = (hub) => hub * 1.5 + 0.6 + CORE_GAP;  /* boss + its stroke */
     const amShells = (arr) => {
       if (!amPrinted) return;
       for (let s2 = 0; s2 < 2; s2++)
-        arr.push(h('circle', { key: 'shell' + s2, r: wellR - 0.6 - s2 * 1.5, fill: 'none',
+        arr.push(h('circle', { key: 'shell' + s2, r: wellR - SHELL_OFF - s2 * SHELL_STEP, fill: 'none',
           stroke: p[3], strokeOpacity: s2 ? 0.30 : 0.45, strokeWidth: 0.9 }));
     };
     const PT = (rad, deg) => {
@@ -2440,7 +2454,28 @@ class Component extends DCLogic {
          innermost ring underneath it -- half-covered cells, and the ragged inner
          edge the hex-ring boundary was supposed to have got rid of. Every other
          family clears 1.5 or more for the same reason; this one did not. */
-      const rInX = Math.max(hubR * 1.5 + WALLX, 7), rOutX = wellR - 0.5;
+      /* The shell clearance is a nicety; having ANY pattern is not. On a
+         13-tooth wheel the boss alone takes 12 of a 23.3 well, so holding the
+         core off the inner shell as well leaves 6.97 units -- less than one
+         CELL_MIN cell needs to land in -- and the web renders completely blank.
+         Measured: 13T lost its pattern entirely when the clearance went in.
+         So the clearance yields when it would cost the pattern outright. The
+         core may then touch the inner shell on the smallest wheels, which reads
+         as tight rather than as broken. */
+      /* The shell clearance is a nicety; having ANY pattern is not.
+         TESTING THE BAND'S WIDTH IS THE WRONG TEST, which cost 13T its whole
+         core: its window is 13.4..20.4, a full 6.97 wide against a 6.2 cell
+         diameter, so a width check says there is room -- but no RING lands
+         there. Ring radii are fixed multiples of the pitch because the lattice
+         is anchored at the wheel centre, and at every legal cell size ring 2
+         starts below 13.4 while ring 3 ends above 20.4. Nothing in between, and
+         the pattern cannot be slid outward to fit.
+         So the fallback asks the only question that matters -- did the sweep
+         find anything -- and relaxes to the pre-shell limit if it did not. The
+         core may then touch the inner shell on the smallest wheels, which reads
+         as tight rather than as a blank web. */
+      const rInX = Math.max(coreIn(hubR), 7);
+      const rOutTry = [coreOut, wellR - 0.5];
       const DIRS = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
       const ringOf = (k) => {
         if (k === 0) return [[0, 0]];
@@ -2476,7 +2511,26 @@ class Component extends DCLogic {
          it completely needs a pattern defined BY the annulus rather than
          clipped to it, which is what polarbrick and polariso are for. */
       const ceiling = Math.min((g.cv && g.cv.cell) || CELL_MAX, CELL_MAX);
-      let cellX = 0, kMin = 0, kMax = -1, bestReach = -1;
+      /* SCORE BOTH BOUNDARIES, not just the outer one.
+         The old objective was "largest reach of whole cells", which is
+         one-sided: it asks how far the pattern gets and never asks what it
+         leaves behind at the inner edge. Because the lattice is anchored at the
+         wheel centre, ring radii land on multiples of the pitch and a ring is
+         either wholly in or wholly out -- so a size that reaches furthest can
+         still start late and leave a wide bare band around the boss. Measured
+         on a 19-tooth wheel: cells occupying 22.2 to 33.6 inside an annulus of
+         14.4 to 41.4, with 40% of the radial span bare at the two ends. That is
+         the ring floating in the middle of the web that Charles photographed.
+         Scoring the SUM of both gaps instead picks sizes whose rings happen to
+         land near both limits: 17T coarse goes 42 -> 66 cells, 19T coarse
+         54 -> 102, and every other combination is unchanged. Larger cells still
+         win ties, so a size only shrinks when that genuinely buys fit.
+         Same lesson as #46, applied to geometry rather than to a test: a bound
+         with no counterpart optimises one end and abandons the other. */
+      let cellX = 0, kMin = 0, kMax = -1, bestWaste = Infinity, rOutX = rOutTry[0];
+      for (let attempt = 0; attempt < rOutTry.length && !cellX; attempt++) {
+      rOutX = rOutTry[attempt];
+      bestWaste = Infinity;
       for (let c = ceiling; c >= CELL_MIN; c -= 0.05) {
         const step = c + WALLX / 2, px = Math.sqrt(3) * step, ry2 = 1.5 * step;
         const at = (q, r) => [px * (q + r / 2), ry2 * r];
@@ -2502,13 +2556,27 @@ class Component extends DCLogic {
           lo = k + 1;
         }
         if (lo > hi) continue;
-        /* how far the outermost complete ring actually gets: its corner cells */
-        let reach = 0;
-        for (const [q, r] of ringOf(hi)) {
-          const P = at(q, r);
-          reach = Math.max(reach, Math.hypot(P[0], P[1]) + c);
+        /* the ink this size actually lays down, and the bare span it leaves at
+           EACH boundary -- measured on the exact keep, not on ring indices */
+        let ink0 = Infinity, ink1 = 0, any = false;
+        for (let k = 0; k <= hi + 2; k++) {
+          for (const [q, r] of ringOf(k)) {
+            const P = at(q, r);
+            let v0 = Infinity, v1 = 0, ok = true;
+            for (let v = 0; v < 6; v++) {
+              const va = (90 + 60 * v) * Math.PI / 180;
+              const d = Math.hypot(P[0] + c * Math.cos(va), P[1] + c * Math.sin(va));
+              if (d > rOutX) { ok = false; break; }
+              v0 = Math.min(v0, d); v1 = Math.max(v1, d);
+            }
+            if (!ok) continue;
+            any = true; ink0 = Math.min(ink0, v0); ink1 = Math.max(ink1, v1);
+          }
         }
-        if (reach > bestReach + 1e-9) { bestReach = reach; cellX = c; kMin = lo; kMax = hi; }
+        if (!any) continue;
+        const waste = (ink0 - rInX) + (rOutX - ink1);
+        if (waste < bestWaste - 1e-9) { bestWaste = waste; cellX = c; kMin = lo; kMax = hi; }
+      }
       }
       if (cellX) {
         /* THE SIZE is chosen by complete rings above, but the KEEP is exact.
@@ -2576,7 +2644,7 @@ class Component extends DCLogic {
       /* Floor is in TRIANGLE sides, so it is far above the hex core's 3.1 for
          the same reason the variants are -- a 3.1 triangle is a speck. */
       const sideI = Math.max(5.6, (g.cv && g.cv.cell) || 7.0);
-      const rInI = hubR * 1.5 + 1.2, rOutI = wellR - 0.5;
+      const rInI = coreIn(hubR), rOutI = coreOut;
       const ptI = (i2, j2) => [sideI * (i2 + j2 / 2), sideI * (Math.sqrt(3) / 2) * j2];
       const nI = Math.ceil(rOutI / sideI) + 3;
       for (let j2 = -nI; j2 <= nI; j2++) {
@@ -2612,7 +2680,7 @@ class Component extends DCLogic {
          ring-course honeycomb lacked and was retired for. */
       inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
       const WALLP = 1.2;
-      const rInP = hubR * 1.5 + WALLP, rOutP = wellR - 0.5;
+      const rInP = coreIn(hubR), rOutP = coreOut;
       const spanP = rOutP - rInP;
       const target = Math.max(3.6, (g.cv && g.cv.cell) || 5.0);
       const nC = Math.max(1, Math.round(spanP / target));
