@@ -2141,10 +2141,33 @@ class Component extends DCLogic {
          more work than leaving the web solid. Now few and LARGE, as big as the
          spacing allows, seated in the outer web where removed mass actually
          counts -- the bike-chainring / flywheel drilling pattern. */
-      const count = g.arms;
-      const rInD = Math.max(hubR * 1.5, 9), rOutD = wellR - 2;
-      const orbit = rInD + (rOutD - rInD) * 0.58;
-      const hr = Math.min((rOutD - rInD) * 0.46, orbit * Math.sin(Math.PI / count) * 0.82);
+      const rInD = Math.max(hubR * 1.5, 9), rOutD = wellR - 2, spanD = rOutD - rInD;
+      /* CENTRE ON THE AREA, NOT THE RADIUS. Charles, looking at a drilled wheel:
+         "why isn't the circle centred in the AREA of the annulus?" It was not:
+         the orbit was rIn + span*0.58, a hand-picked fraction. Area grows as
+         r^2, so the radius that halves an annulus is sqrt((rIn^2+rOut^2)/2),
+         which is always FURTHER OUT than the arithmetic midpoint -- and by an
+         amount that depends on the wheel, so no constant can serve them all:
+         the correct fraction is 0.568 at 13 teeth and 0.624 at 19. The drills
+         sat too close to the hub with more bare metal outside them than in. */
+      const orbit = Math.sqrt((rInD * rInD + rOutD * rOutD) / 2);
+      /* AND THE COUNT FOLLOWS FROM IT, rather than being dealt. A drill is
+         capped by two things: fitting the radial band (span * FIT) and not
+         touching its neighbour on the bolt circle (orbit * sin(pi/n) * NEIGH).
+         Most material comes out when those two balance, which is a closed form,
+         no search: sin(pi/n) = span*FIT / (orbit*NEIGH). Small wheels want MANY
+         SMALL holes and big wheels FEW LARGE ones, which a fixed count cannot
+         express -- measured, removed area goes from 29-56% to a steady 68-73%
+         across the train, and the answers (11 drills at 13 teeth, 6 at 19) match
+         a brute-force sweep exactly.
+         The variant still varies the look, but as a nudge about the optimum
+         instead of an absolute count, so it can no longer ask a small wheel for
+         six holes it has no room for. */
+      const FIT = 0.48, NEIGH = 0.90;
+      const ideal = Math.PI / Math.asin(Math.max(0.02, Math.min(1, spanD * FIT / (orbit * NEIGH))));
+      const nudge = ((g.arms || 5) % 3) - 1;             /* -1, 0 or +1 */
+      const count = Math.max(3, Math.min(12, Math.round(ideal) + nudge));
+      const hr = Math.min(spanD * FIT, orbit * Math.sin(Math.PI / count) * NEIGH);
       inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
       inner.push(h('circle', { key: 'well', r: wellR, fill: 'url(#' + id + 'w)' }));
       inner.push(turned('t', hubR * 1.3, wellR - 2, 5));
@@ -2153,6 +2176,34 @@ class Component extends DCLogic {
         holes.push('M' + (+cx + hr) + ',' + cy + ' A' + hr + ',' + hr + ' 0 1 0 ' + (+cx - hr) + ',' + cy + ' A' + hr + ',' + hr + ' 0 1 0 ' + (+cx + hr) + ',' + cy + ' Z');
         /* a thin chamfer ring only -- the machining witness, not decoration */
         inner.push(h('circle', { key: 'h' + k, cx: cx, cy: cy, r: hr + 1.2, fill: 'none', stroke: p[3], strokeWidth: 1.4, strokeOpacity: 0.55 }));
+      }
+      /* SECOND TIER, in the corners the first one cannot reach. Charles: "two
+         sets of circles, one small and one large". After the primary ring there
+         are curved triangles left between each neighbouring pair and the outer
+         boundary, and the largest circle that fits one is found by walking the
+         radius and taking the smallest of the three clearances -- to the two
+         primaries, to rIn, and to rOut. It lands OUTBOARD of the primaries
+         rather than between them: rho 37.5 against a 31.3 orbit on a 19-tooth
+         wheel. Worth 8-10 points of removed area, 68-73% -> 76-82%.
+         Skipped when it would be a speck: below about 1.8 units it renders
+         under 2.5px and reads as dirt rather than as drilling. */
+      let t2r = 0, t2rho = 0;
+      for (let rho = rInD; rho <= rOutD; rho += 0.05) {
+        const aa = Math.PI / count;
+        const dd = Math.hypot(rho * Math.cos(aa) - orbit, rho * Math.sin(aa));
+        const rr = Math.min(dd - hr, rho - rInD, rOutD - rho);
+        if (rr > t2r) { t2r = rr; t2rho = rho; }
+      }
+      if (t2r >= 1.8) {
+        for (let k = 0; k < count; k++) {
+          const a = ((k + 0.5) / count) * Math.PI * 2;
+          const cx = (t2rho * Math.cos(a)).toFixed(2), cy = (t2rho * Math.sin(a)).toFixed(2);
+          const rr = t2r.toFixed(2);
+          holes.push('M' + (+cx + +rr) + ',' + cy + ' A' + rr + ',' + rr + ' 0 1 0 ' + (+cx - +rr) + ',' + cy
+            + ' A' + rr + ',' + rr + ' 0 1 0 ' + (+cx + +rr) + ',' + cy + ' Z');
+          inner.push(h('circle', { key: 't2' + k, cx: cx, cy: cy, r: t2r + 0.9, fill: 'none',
+            stroke: p[3], strokeWidth: 1.0, strokeOpacity: 0.45 }));
+        }
       }
     } else if (kind === 'ring') {
       inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
@@ -2527,56 +2578,50 @@ class Component extends DCLogic {
          win ties, so a size only shrinks when that genuinely buys fit.
          Same lesson as #46, applied to geometry rather than to a test: a bound
          with no counterpart optimises one end and abandons the other. */
-      let cellX = 0, kMin = 0, kMax = -1, bestWaste = Infinity, rOutX = rOutTry[0];
+      /* SWEEP THE SIZE DIRECTLY. This used to decide viability by asking which
+         COMPLETE RINGS fit, then score the result -- but the keep stopped caring
+         about rings when it started taking every whole cell that clears (#38).
+         The search was still optimising for a constraint the renderer no longer
+         had, and complete rings only land well at fine pitches, so it drove the
+         cells small: 19T picked 3.35 and laid down 102 of them, which reads as a
+         mesh rather than as hexagons. Charles: "these don't look optimal".
+         Dropping the ring test finds sizes that are both bigger AND fit better
+         -- 19T goes to 4.75 with 48 cells and LESS bare span than the 3.35 it
+         was choosing, 17T to 4.35 with 30.
+         Ties on fit go to the LARGER cell, which is the counterweight the last
+         version lacked: fit was bounded at both ends, size at neither. */
+      let cellX = 0, bestWaste = Infinity, rOutX = rOutTry[0];
       for (let attempt = 0; attempt < rOutTry.length && !cellX; attempt++) {
-      rOutX = rOutTry[attempt];
-      bestWaste = Infinity;
-      for (let c = ceiling; c >= CELL_MIN; c -= 0.05) {
-        const step = c + WALLX / 2, px = Math.sqrt(3) * step, ry2 = 1.5 * step;
-        const at = (q, r) => [px * (q + r / 2), ry2 * r];
-        let hi = -1;
-        for (let k = 0; k <= 14; k++) {
-          let fits = true;
-          for (const [q, r] of ringOf(k)) {
-            const P = at(q, r);
-            if (Math.hypot(P[0], P[1]) + c > rOutX) { fits = false; break; }
-          }
-          if (!fits) break;
-          hi = k;
-        }
-        if (hi < 0) continue;
-        let lo = 0;
-        for (let k = 0; k <= hi; k++) {
-          let clear = true;
-          for (const [q, r] of ringOf(k)) {
-            const P = at(q, r);
-            if (Math.hypot(P[0], P[1]) - c < rInX) { clear = false; break; }
-          }
-          if (clear) { lo = k; break; }
-          lo = k + 1;
-        }
-        if (lo > hi) continue;
-        /* the ink this size actually lays down, and the bare span it leaves at
-           EACH boundary -- measured on the exact keep, not on ring indices */
-        let ink0 = Infinity, ink1 = 0, any = false;
-        for (let k = 0; k <= hi + 2; k++) {
-          for (const [q, r] of ringOf(k)) {
-            const P = at(q, r);
-            let v0 = Infinity, v1 = 0, ok = true;
-            for (let v = 0; v < 6; v++) {
-              const va = (90 + 60 * v) * Math.PI / 180;
-              const d = Math.hypot(P[0] + c * Math.cos(va), P[1] + c * Math.sin(va));
-              if (d > rOutX) { ok = false; break; }
-              v0 = Math.min(v0, d); v1 = Math.max(v1, d);
+        rOutX = rOutTry[attempt];
+        bestWaste = Infinity;
+        const seen = [];
+        for (let c = ceiling; c >= CELL_MIN; c -= 0.05) {
+          const step = c + WALLX / 2, px = Math.sqrt(3) * step, ry2 = 1.5 * step;
+          const at = (q, r) => [px * (q + r / 2), ry2 * r];
+          const span = Math.ceil(rOutX / step) + 2;
+          let ink0 = Infinity, ink1 = 0, n = 0;
+          for (let k = 0; k <= span; k++) {
+            for (const [q, r] of ringOf(k)) {
+              const P = at(q, r);
+              let v0 = Infinity, v1 = 0, ok = true;
+              for (let v = 0; v < 6; v++) {
+                const va = (90 + 60 * v) * Math.PI / 180;
+                const d = Math.hypot(P[0] + c * Math.cos(va), P[1] + c * Math.sin(va));
+                if (d > rOutX) { ok = false; break; }
+                v0 = Math.min(v0, d); v1 = Math.max(v1, d);
+              }
+              if (!ok || v0 < rInX) continue;
+              n++; ink0 = Math.min(ink0, v0); ink1 = Math.max(ink1, v1);
             }
-            if (!ok) continue;
-            any = true; ink0 = Math.min(ink0, v0); ink1 = Math.max(ink1, v1);
           }
+          if (!n) continue;
+          seen.push({ c: c, waste: (ink0 - rInX) + (rOutX - ink1) });
         }
-        if (!any) continue;
-        const waste = (ink0 - rInX) + (rOutX - ink1);
-        if (waste < bestWaste - 1e-9) { bestWaste = waste; cellX = c; kMin = lo; kMax = hi; }
-      }
+        if (!seen.length) continue;
+        let best = Infinity;
+        seen.forEach(r => { if (r.waste < best) best = r.waste; });
+        /* among sizes that fit essentially as well, take the LARGEST cell */
+        seen.forEach(r => { if (r.waste <= best + 0.35 && r.c > cellX) { cellX = r.c; bestWaste = r.waste; } });
       }
       if (cellX) {
         /* THE SIZE is chosen by complete rings above, but the KEEP is exact.
@@ -2609,7 +2654,7 @@ class Component extends DCLogic {
           }
           return o;
         };
-        const span = kMax + 2;
+        const span = Math.ceil(rOutX / step) + 2;
         for (let k = 0; k <= span; k++) {
           for (const [q, r] of ringOf(k)) {
             const cx = px * (q + r / 2), cy = ry2 * r;
