@@ -805,6 +805,16 @@ function smallestBlankHolding(wantTwo) {
     ? smallestBlankHolding(FORCE_FAMILY === 'ravigneaux') : TEETH_MIN;
   const host = Math.max(TEETH_HOST, floor);
   const span = TEETH_MAX - floor + 1;
+  /* NO WHEELS MEANS NOTHING TO DEAL, and saying so here is what keeps a missing
+     config a degraded page rather than a blank one (#53). With TRAIN empty every
+     draw is rejected -- Math.max.apply(null, []) is -Infinity, always below host
+     -- so execution reached the fallback line below and threw on TRAIN[0]. This
+     is a module-load IIFE, so that aborted the whole script and NOTHING
+     rendered, while four separate documents promise the machine still turns
+     without links. CI cannot see this case: it asserts config.js is 200 and
+     parses, and the failure it exists for is an edge serving a truncated body,
+     a content blocker, or a stale cache. */
+  if (!TRAIN.length) return;
   for (let tries = 0; tries < 600; tries++) {
     const cut = TRAIN.map(() => floor + Math.floor(Math.random() * span));
     if (Math.abs(cut.reduce((a, b) => a + b, 0) - TEETH_SUM) > TEETH_SLACK && floor === TEETH_MIN) continue;
@@ -1737,11 +1747,24 @@ class Component extends DCLogic {
     };
     const pairSlots = PAIR_SLOTS, singleSlots = [];
     TRAIN.forEach((t, i) => { if (!pairSlots.some(pr => pr.indexOf(i) >= 0)) singleSlots.push(i); });
-    const pairs = shuffle(PAIRS.map(pr => shuffle(pr.slice())));
-    const singles = shuffle(SINGLES.slice());
+    /* ONLY SEAT SERVICES THE ACTIVE PERSON ACTUALLY HAS (#53). config.js says
+       "a service named here but absent from the active person's links is simply
+       skipped" -- it was not, and a second person crashed the page 2000 times
+       out of 2000, because renderVals() reads SITES[g.slug].label unguarded.
+       That matters now rather than later: #39 is shipped, the picker is built,
+       and adding a person is documented as a config edit. Filtering here is the
+       right place -- it keeps the promise where the seating happens, instead of
+       leaving every consumer to guard a slug that should never have existed. */
+    const has = (slug) => Object.prototype.hasOwnProperty.call(SITES, slug);
+    const pairs = shuffle(PAIRS.filter(pr => pr.every(has)).map(pr => shuffle(pr.slice())));
+    const singles = shuffle(SINGLES.filter(has));
     const slugFor = {};
-    pairSlots.forEach((pr, k) => { const pair = pairs[k % pairs.length]; slugFor[pr[0]] = pair[0]; slugFor[pr[1]] = pair[1]; });
-    singleSlots.forEach((s, k) => { slugFor[s] = singles[k % singles.length]; });
+    /* Both guards are needed and for different reasons: PAIRS empty gave
+       pairs[NaN] -> a TypeError, while SINGLES empty merely left the slug null
+       and the badge filtered out later. Same shape, two outcomes, three lines
+       apart -- so treat them the same. */
+    if (pairs.length) pairSlots.forEach((pr, k) => { const pair = pairs[k % pairs.length]; slugFor[pr[0]] = pair[0]; slugFor[pr[1]] = pair[1]; });
+    if (singles.length) singleSlots.forEach((s, k) => { slugFor[s] = singles[k % singles.length]; });
     const g = [], strands = [];
     let x = 0, y = 0, dir = 1, phase = 0;
     TRAIN.forEach((t, i) => {
@@ -3205,7 +3228,13 @@ class Component extends DCLogic {
           } },
           this.gearSvg(g, S)))))
 
-    const links = solved.gears.filter(g => g.slug).map(g => {
+    /* Filter on a slug that RESOLVES, not merely on one being present. solve()
+       now only seats services the active person has (#53), so this is belt and
+       braces -- but the unguarded `site.label` two dozen lines down is what
+       actually threw, and two of its neighbours already used the guarded form,
+       which is the tell that this was half-known. One filter beats three
+       scattered ternaries. */
+    const links = solved.gears.filter(g => g.slug && SITES[g.slug]).map(g => {
       const site = SITES[g.slug];
       /* The planetary wheel gets a smaller axle cap: the badge is the grounded
          carrier's end plate, and shrinking it uncovers the sun -- the
