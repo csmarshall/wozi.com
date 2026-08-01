@@ -633,6 +633,19 @@ if (typeof window !== 'undefined') {
     MIN_MODULE: MIN_MODULE, TEETH_MIN: TEETH_MIN, TEETH_MAX: TEETH_MAX };
 }
 function planetaryMenuFor(teeth) {
+  /* MEMOISED, because it is pure and runs at least a dozen times at module load
+     (#59). CENTRE_FAMILIES alone calls it THREE TIMES ON THE SAME ARGUMENT in
+     one expression, plus once per epicyclic wheel, plus inside holds() and
+     smallestBlankHolding() which can call it seven times. Each call enumerates
+     7 flavours x Zr in [24,44] x Zs, so this is first-paint cost on every load
+     for an answer that cannot change.
+     THE CACHE HANGS OFF THE FUNCTION, not off a module-level const, and that is
+     required rather than stylistic: tools/test.js extracts this function BY NAME
+     with grabBlock and executes it standalone, so anything declared outside the
+     braces is left behind and the suite dies on a ReferenceError. Tried it the
+     other way first; it did. */
+  planetaryMenuFor._c = planetaryMenuFor._c || {};
+  if (planetaryMenuFor._c[teeth]) return planetaryMenuFor._c[teeth];
   const bore = planetaryBore(teeth);
   const seen = {}, fits = [], nearest = [];
   PLANETARY_FLAVOURS.forEach(function (c) {
@@ -662,14 +675,14 @@ function planetaryMenuFor(teeth) {
      far more of them than single-row sets, so merging the lists would make the
      double row the usual case rather than the treat. */
   const rav = RAVIGNEAUX_MENU.filter(function (v) { return v.blank <= teeth; });
-  if (fits.length || rav.length) return { one: fits, two: rav, fallback: false };
+  if (fits.length || rav.length) return planetaryMenuFor._c[teeth] = { one: fits, two: rav, fallback: false };
   /* Nothing fits — this blank is simply too small to hold an epicyclic, which is
      an honest answer and not a failure. Hand back the closest thing rather than a
      set whose teeth would be floored into stubs. Only reachable through
      ?kind=planetary, which forces every wheel; a dealt planetary is always seated
      on the largest blank in the train, and the tooth deal guarantees one. */
   nearest.sort(function (a, b) { return b.score - a.score; });
-  return { one: [nearest.length ? { pg: nearest[0].pg } : { pg: [12, 9, 30, 3] }], two: [], fallback: true };
+  return planetaryMenuFor._c[teeth] = { one: [nearest.length ? { pg: nearest[0].pg } : { pg: [12, 9, 30, 3] }], two: [], fallback: true };
 }
 
 const CENTRE_FAMILIES = [
