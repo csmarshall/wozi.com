@@ -5,7 +5,59 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ## Unreleased
 
+### Fixed
+
+- **#51 — The hover pill clipped its own descenders, and nothing measured
+  type.** Charles: *"Instagram's label is cut off along the bottom."* The label
+  span sets `overflow: hidden`, which is **not** optional — it is the mechanism
+  that lets the pill open by animating `max-width` from `0` — and overflow
+  cannot be hidden on one axis alone, so asking for it horizontally takes the
+  vertical with it. Paired with `font: 13px/1`, the line box was exactly as tall
+  as the font size while the face's own box is 18px, so the tails were not
+  overflowing, they were **sliced**.
+
+  Measured at 13px Manrope: ascent 14, descent 4, and "Instagram" inks 12.68px
+  with a 3.32px descender. At line-height 13px the half-leading is
+  `(13 − 18) / 2 = −2.5px`, putting the baseline 11.5px down a 13px box, so the
+  ink reached 14.82px and **1.82px was cut** — more than half the tail of the g.
+  Solving `(LH − 18)/2 + 14 + 3.32 ≤ LH` gives `LH ≥ 16.64px`; `1.4` (18.2px)
+  clears it and matches the face's own natural box rather than inventing a
+  number. Two labels were affected, not one — Bluesky lost 1.62px of its y.
+
+  | label | before | after |
+  |---|---|---|
+  | Instagram | ink 14.82 vs clip 13 → **+1.82 clipped** | 17.42 vs 18.2 → −0.78 |
+  | Bluesky | ink 14.62 vs clip 13 → **+1.62 clipped** | 17.22 vs 18.2 → −0.98 |
+  | the other five | −1.30 (no descender) | −3.70 |
+
+  Confirmed in **both** engines. That mattered: a WebKit-only paint clip is a
+  live defect on this page (#21), so "fixed in Blink" would not have been
+  evidence about Safari. A WKWebView reports the same numbers, and the fallback
+  path — the Google-hosted Manrope never arriving, so the stack falls through to
+  `system-ui` — clears too, at −1.46. Neither *Instagram Sans* nor *Segoe UI*
+  resolves on a stock Mac, so every pill renders in the same face and the one
+  calculation covers all of them.
+
 ### Added
+
+- **#51 — `tools/pill_clip.py`, a gate for type.** The clipping above was
+  reported by eye and could have come back the same way: `test.js` is geometry,
+  `devices.py` is layout, `verify_motion.py` is animation, and **nothing had
+  ever looked at a glyph**. This hovers every badge with a real
+  `Input.dispatchMouseEvent` — a `MouseEvent` built in JS does not open the
+  pill, the span stays 0 wide, and the gate would then be measuring a collapsed
+  box — then places each baseline by the half-leading rule from the font's own
+  metrics and compares the deepest ink against the clip edge.
+
+  Two-sided, per #46: it also asserts every pill actually **opened**. A pill
+  stuck shut has no width and nothing to clip, so a clipping check alone would
+  pass most loudly on a page where the feature is broken outright.
+
+  And it can fail, per #47 — demonstrated rather than assumed. Pointed at the
+  deployed bucket, which still carries `13px/1`, it returns 1 and names
+  Instagram at `+1.82` and Bluesky at `+1.62`; pointed at this tree it returns 0
+  with a worst overrun of `−0.58`. It runs in CI beside the layout and motion
+  gates, before any AWS credential is assumed.
 
 - **#38 — The hex core takes the cells it was refusing.** Charles, looking at a
   GitHub wheel: *"isn't there space for even a few more hexagons on each side

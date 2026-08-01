@@ -76,10 +76,14 @@ jobs:
           set +e
           python3 tools/devices.py http://127.0.0.1:8765/ ; LAYOUT=$?
           python3 tools/verify_motion.py http://127.0.0.1:8765/ ; MOTION=$?
+          # Type, which no other gate looks at: the hover pill's label sets
+          # overflow:hidden to animate open, so a line box shorter than the ink
+          # does not overflow, it CLIPS. That shipped once and was caught by eye.
+          python3 tools/pill_clip.py http://127.0.0.1:8765/ ; PILL=$?
           set -e
           kill $SERVER 2>/dev/null || true
-          if [ $LAYOUT -ne 0 ] || [ $MOTION -ne 0 ]; then
-            echo "::error::layout or motion gate failed — not deploying"
+          if [ $LAYOUT -ne 0 ] || [ $MOTION -ne 0 ] || [ $PILL -ne 0 ]; then
+            echo "::error::layout, motion or pill gate failed — not deploying"
             exit 1
           fi
 
