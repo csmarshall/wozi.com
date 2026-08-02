@@ -397,49 +397,49 @@ const TRAIN = (WHO.links || []).map(l => ({ slug: l.slug, prof: { rim: 1.7 } }))
    same wheel size, which the stage then scales to fit, so each wheel lands about
    an eighth smaller on the glass. That is the cost of the extra link, not a bug. */
 const TEETH_MIN = 13, TEETH_MAX = 19, TEETH_SLACK = 4, TEETH_HOST = 18;
-const TEETH_SUM = Math.round(16.3 * TRAIN.length);
-/* HOW MANY GEARS THE MACHINE SHOWS ACROSS ITS LONG AXIS, counting outriggers.
-   A gear is then longAvail / GEARS_ACROSS pixels wide, whoever is on stage: the
-   linked chain contributes however many wheels it has and the ghost runs make up
-   the rest, so harper.wozi.com draws her wheel at the size a wheel has on the
-   main page and simply carries more leading and trailing outriggers.
+/* The tooth count the deal aims at per wheel. Named once because two separate
+   things derive from it -- the train's target total below, and the nominal span
+   the standard gear size comes from -- and a literal repeated in both would be a
+   copy that could drift. */
+const TEETH_MEAN = 16.3;
+const TEETH_SUM = Math.round(TEETH_MEAN * TRAIN.length);
+/* THE SPAN A NOMINAL CHAIN OCCUPIES, computed rather than measured, and it is
+   what gives every page the same gear size. A chain shorter than the longest is
+   scaled as though the longest were on stage, so harper.wozi.com draws her wheel
+   at the size a wheel has on the main page and simply carries more leading and
+   trailing outriggers instead of one larger gear.
 
-   STATED IN GEARS, NOT IN MODULE UNITS, and that matters. The first attempt at
-   this floored the solved span at an ESTIMATE of a full chain's width
-   (16.3 teeth per wheel times the module, 798.7 units). A real seven-wheel solve
-   averages 779.6 but ranges either side of that with the deal, so the floor
-   clamped some loads and not others -- the main page's own scale moved between
-   visits, and 107k pixels changed against a fixed seed. An estimator of a thing
-   the solver already computes exactly is a copy, and it drifted immediately.
+   NOTHING HERE IS A TUNED NUMBER. Everything comes from values the page already
+   defines -- the module, the tooth count the deal aims at, and the bearing range
+   the serpentine is dealt from -- so changing any of them recomputes this, and
+   there is no constant left that a human has to remember to re-measure.
 
-   There is a second property worth having: rendered size is longAvail divided by
-   this, so the fit and the wheel's own span CANCEL. A wheel comes out the same
-   number of pixels whatever tooth count it was dealt -- deterministic per
-   viewport, and independent of the deal. Wheels within a chain still vary in size
-   relative to each other, because there the chain's own span binds instead.
+   Two earlier attempts failed in ways worth recording:
 
-   DERIVED FROM A SCAN OF EVERY CHAIN, so adding people never needs a retune and
-   everyone stays consistent with everyone else. The longest chain sets the scale
-   and every shorter one matches it.
+     1. Flooring the span at MODULE * TEETH_MEAN * N. That ignores the bearings
+        entirely, so it modelled seven wheels as a straight rack at 798.7 units
+        when a real solve averages 779.6. Being an OVERestimate, it clamped the
+        very chain it was modelling -- the main page's scale moved between visits
+        and a fixed-seed pixel diff showed 107k changed pixels.
+     2. Correcting that with a measured SERPENTINE_PACKING factor of 0.85. That
+        worked, but it was a magic number standing in for a derivation, and its
+        own comment had to say "re-measure this if MODULE, TOOTH_ADD, the deal
+        bounds or the bearing range ever move" -- which is a description of drift,
+        not a defence against it.
 
-   SERPENTINE_PACKING is there because a chain of N wheels does NOT span N gear
-   widths. The bearings run 14-30 degrees off the axis, so each centre advances by
-   the cosine of that, and the drawn wheel span carries tooth addendum and padding
-   beyond the pitch circle as well. Seven wheels measure 6.1-6.9 gear widths, not
-   7 -- so counting wheels overestimates the width they occupy by about 1.4x, and
-   using the raw count would shrink every gear on the page by ~30%.
+   The correction the first attempt was missing is simply the bearing. Centres
+   advance along the axis by (r1 + r2) * cos(bearing), and the deal draws every
+   bearing from [ANG_MIN, ANG_MAX], so the mean of that range is the honest
+   foreshortening. A chain of N wheels of mean radius r therefore spans
+   2r + (N-1) * 2r * cos(mean bearing) -- one full wheel, plus a foreshortened
+   centre distance for each step after it.
 
-   Measured, not chosen: 15 loads across 5 viewports from 390x844 to 3440x1440
-   put the effective gears-across between 6.134 and 6.855 for the seven-wheel
-   chain. The standard size must not clamp a real chain -- that is what makes the
-   main page's scale independent of this -- so the factor has to stay at or below
-   6.134 / 7 = 0.876. 0.85 takes a margin under the lowest observed.
-
-   Re-measure with tools/ if the deal bounds, MODULE, TOOTH_ADD or the bearing
-   range ever move, since all four change how tightly a serpentine packs. */
-const SERPENTINE_PACKING = 0.85;
-const GEARS_ACROSS = Math.max(1,
-  ...((CONF.PEOPLE || []).map(p => (p.links || []).length))) * SERPENTINE_PACKING;
+   That lands UNDER a real solve rather than over it, which is the property that
+   matters: the standard size is one term in a min() alongside the chain's own
+   span, so underestimating means a real chain is bound by itself and never by
+   this. Overestimating is what clamped the page before. */
+const NOMINAL_CHAIN = Math.max(1,
+  ...((CONF.PEOPLE || []).map(p => (p.links || []).length)));
 /* dealt further down, once the planetary's sizing rules exist to consult */
 
 /* Centre designs: two-level deal for maximum per-visit variety. FAMILIES are
@@ -967,6 +967,14 @@ function smallestBlankHolding(wantTwo) {
    wheel clears everything it is not meshed with, so this only has to propose a
    shape worth looking at. */
 const ANG_MIN = 14, ANG_MAX = 30, BAND_MAX = 62, ENDS_MAX = 26;
+/* Declared here rather than beside NOMINAL_CHAIN because it needs the bearing
+   range, and reading ANG_MIN/ANG_MAX before this line is a temporal dead zone.
+   See the note at NOMINAL_CHAIN for why every term is derived. */
+const NOMINAL_SPAN = (function () {
+  const r = MODULE * TEETH_MEAN / 2;
+  const foreshorten = Math.cos((ANG_MIN + ANG_MAX) / 2 * Math.PI / 180);
+  return 2 * r * (1 + (NOMINAL_CHAIN - 1) * foreshorten);
+})();
 (function dealAngles() {
   const rOf = (t) => MODULE * t.teeth / 2;
   const first = Math.random() < 0.5 ? 1 : -1;
@@ -1859,8 +1867,8 @@ class Component extends DCLogic {
        count test, and a one-wheel chain and a nine-wheel chain run exactly the
        same arithmetic. The rule is:
 
-         a gear is one GEARS_ACROSS of the long axis, and it shrinks below that
-         only when something physical says it must.
+         a gear is drawn as though a NOMINAL_SPAN chain were on stage, and it
+         shrinks below that only when something physical says it must.
 
        The three things that can say so:
          1. the chain itself is too long to fit the axis at that size
@@ -1870,7 +1878,8 @@ class Component extends DCLogic {
        Bounds 1 and 2 are what shipped before; the standard size and bound 3 are
        new. A long chain is bound by its own span, a short one by the standard
        size, and neither knows which it is -- they are terms in one min(), not
-       branches.
+       branches. NOMINAL_SPAN is computed from the module, the tooth count the
+       deal aims at and the bearing range, so no term here is a tuned number.
 
        #44's property is intact and unchanged in every state: the linked run still
        takes a CONSTANT fraction of the long axis at every width. A full chain
@@ -1884,15 +1893,19 @@ class Component extends DCLogic {
        display is 96.6% of the short axis. Bound 2 does not catch it -- it is
        written for a serpentine's vertical band, and when the solve IS one wheel it
        reduces to "a wheel may be 125% of the short axis", far above what the long
-       term asks for. Measured over 7 viewports the seven-wheel chain peaks at
-       57.6% of the short axis, so 70% never touches a real chain and engages only
-       on a display far wider than it is tall. */
-    const WHEEL_CROSS_MAX = 0.70;
+       term asks for.
+
+       1.0 is a DEFINITION, not a tuned value: a gear may not be wider than the
+       screen's short side. It is deliberately not set to a fraction chosen to
+       look right, because that would be exactly the kind of number that drifts.
+       With the standard size in the min it rarely binds at all -- it is the
+       backstop for an aspect ratio nothing else covers. */
+    const WHEEL_CROSS_MAX = 1.0;
     /* Matches what is drawn: gearSvg sizes each wheel (ro + 6) * 2. */
     const wheelSpan = TRAIN.reduce((m, t) => Math.max(m,
       (MODULE * (t.teeth / 2 + TOOTH_ADD) + 6) * 2), 0);
     const fit = Math.max(0.28, Math.min(
-      wheelSpan ? longAvail / (GEARS_ACROSS * wheelSpan) : Infinity,
+      LINK_SHARE * longAvail / NOMINAL_SPAN,
       LINK_SHARE * longAvail / longSolved,
       crossAvail * CROSS_BLEED / crossSolved,
       wheelSpan ? WHEEL_CROSS_MAX * crossAvail / wheelSpan : Infinity));

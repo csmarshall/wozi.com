@@ -21,6 +21,36 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **#72 — `SERPENTINE_PACKING` was a measured constant standing in for a
+  derivation.** #67 shipped it at 0.85, measured over 15 loads at 5 viewports,
+  with a comment that had to say *"re-measure if the deal bounds, `MODULE`,
+  `TOOTH_ADD` or the bearing range ever move"*. That is a description of drift,
+  not a defence against it — the same failure as the hand-written hue fields in
+  #12, the per-wheel `rim` values in #15 and the copied constant in #51.
+
+  What it stood in for was one missing term. The first attempt floored the span at
+  `MODULE × TEETH_MEAN × N`, which models the train as a **straight rack** and
+  ignores the bearings, putting seven wheels at 798.7 units against a real mean of
+  779.6. Centres actually advance by `(r1 + r2) × cos(bearing)`, and every bearing
+  is drawn from `[ANG_MIN, ANG_MAX]`, so the mean of that range is the honest
+  foreshortening. `NOMINAL_SPAN` is now one full wheel plus a foreshortened centre
+  distance per step after it, computed from values the page already defines —
+  change `MODULE`, the tooth target or the bearing range and it recomputes.
+
+  It lands *under* a real solve rather than over it, which is the property that
+  matters: the standard size sits in a `min()` beside the chain's own span, so
+  underestimating means a real chain is bound by itself and never by this.
+  Overestimating is what clamped the page in the first attempt.
+
+  `16.3` appeared as a literal in two derivations and is now `TEETH_MEAN`, named
+  once. `WHEEL_CROSS_MAX` went from a tuned 0.70 to **1.0** — a definition rather
+  than a number chosen to look right: a gear may not be wider than the screen's
+  short side.
+
+  The suite now **executes** the `NOMINAL_SPAN` derivation out of `index.html`
+  rather than repeating it, so the two cannot drift apart. 28/28, and 0 px against
+  the previous commit at both viewports.
+
 - **#67 — one-wheel escape runs crossed the short axis in portrait, and the
   sizing constant was arbitrary.** Two problems, both found by looking at the page
   rather than by any gate.

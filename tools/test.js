@@ -318,21 +318,23 @@ function fitRule() {
   ok(i > 0 && j > i, 'could not find the fit computation in index.html');
   const frag = SRC.slice(i, j);
   const LINK_SHARE = grabNumber('LINK_SHARE'), CROSS_BLEED = grabNumber('CROSS_BLEED');
-  /* GEARS_ACROSS is declared next to TEETH_SUM, not inside fitStage, so it is an
-     input to the sliced expression rather than part of it. Read out of the page
-     rather than repeated here. */
-  /* GEARS_ACROSS is config-derived now (longest chain x SERPENTINE_PACKING), so
-     it cannot be scraped as a literal. Recompute it the way the page does, from
-     the per-person link counts the extractor already reads. */
-  const GEARS_ACROSS = Math.max(...page.TRAIN_LENS) * grabNumber('SERPENTINE_PACKING');
-  const fn = new Function('MODULE', 'TOOTH_ADD', 'TRAIN', 'GEARS_ACROSS',
+  /* NOMINAL_SPAN is computed at module scope from the module, the tooth count the
+     deal aims at and the bearing range, so it is an input to the sliced
+     expression rather than part of it. EXECUTED out of index.html, not
+     re-typed -- if the derivation there changes, this follows it. */
+  const spanFn = new Function('MODULE', 'TEETH_MEAN', 'ANG_MIN', 'ANG_MAX',
+    'NOMINAL_CHAIN',
+    'return ' + grabBlock('const NOMINAL_SPAN =', '(', ')').replace(/^const NOMINAL_SPAN =\s*/, '') + '()');
+  const NOMINAL_SPAN = spanFn(page.MODULE, grabNumber('TEETH_MEAN'),
+    page.ANG_MIN, page.ANG_MAX, Math.max(...page.TRAIN_LENS));
+  const fn = new Function('MODULE', 'TOOTH_ADD', 'TRAIN', 'NOMINAL_SPAN',
     'longAvail', 'crossAvail', 'longSolved', 'crossSolved', `
     const LINK_SHARE = ${LINK_SHARE}, CROSS_BLEED = ${CROSS_BLEED};
     ${frag}
-    return { fit, wheelSpan, GEARS_ACROSS, WHEEL_CROSS_MAX };`);
+    return { fit, wheelSpan, NOMINAL_SPAN, WHEEL_CROSS_MAX };`);
   return (n, longAvail, crossAvail, longSolved, crossSolved) => {
     const train = Array.from({ length: n }, () => ({ teeth: page.TEETH_MAX }));
-    return fn(page.MODULE, page.TOOTH_ADD, train, GEARS_ACROSS,
+    return fn(page.MODULE, page.TOOTH_ADD, train, NOMINAL_SPAN,
       longAvail, crossAvail, longSolved, crossSolved);
   };
 }
