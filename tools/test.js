@@ -83,17 +83,36 @@ const page = (function build() {
      retired wheel is commented out rather than deleted and counting its slug
      would inflate the train's length. That length feeds TEETH_SUM, so the error
      would land in the geometry rather than anywhere obvious.
-     The count is taken over the WHOLE PEOPLE block, and the suite asserts below
-     that there is exactly one person -- so this stays honest, and the day a
-     second chain is added the assertion fails and forces this to be revisited
-     rather than silently summing two people's wheels into one train. */
+
+     COUNTED PER PERSON, NOT OVER THE WHOLE BLOCK. It used to be one count across
+     every chain, guarded by an assertion that there was exactly one -- which was
+     honest only while that held. A second chain means only ONE person is ever on
+     stage at a time, so summing them would measure a train the page never builds.
+     Every chain is now measured on its own, and the deal tests below run against
+     each of them: the geometry has to be legal for whoever is on stage, and the
+     shortest chain is the one that strains the bounds. */
   const peopleBlock = grabBlockFrom(CFG_SRC, 'config.js', 'PEOPLE:', '[', ']')
     .replace(/\/\*[\s\S]*?\*\//g, '');
+  /* Split on the top-level objects inside PEOPLE -- one per person. Depth is
+     walked rather than regexed because each person's `links` array holds objects
+     of its own, and a non-greedy brace match would end at the first inner one. */
+  const personBlocks = [];
+  {
+    let depth = 0, start = -1;
+    for (let k = 0; k < peopleBlock.length; k++) {
+      const c = peopleBlock[k];
+      if (c === '{') { if (depth === 0) start = k; depth++; }
+      else if (c === '}') { depth--; if (depth === 0) personBlocks.push(peopleBlock.slice(start, k + 1)); }
+    }
+  }
+  if (!personBlocks.length) throw new Error('no people found in config.js PEOPLE');
   /* Count `href:`, NOT `slug:` -- a person carries a slug of their own as well
      as one per link, so counting slugs would report one wheel too many per
      person and inflate TEETH_SUM. Only links have an href. */
-  const trainLen = (peopleBlock.match(/href:/g) || []).length;
-  if (!trainLen) throw new Error('no links found in config.js PEOPLE');
+  const trainLens = personBlocks.map(b => (b.match(/href:/g) || []).length);
+  trainLens.forEach((n, i) => {
+    if (!n) throw new Error('person ' + i + ' in config.js PEOPLE has no links');
+  });
   const src = decls + '\n'
     + grabBlock('const PLANETARY_FLAVOURS =', '[', ']') + ';\n'
     + grabBlock('const RAVIGNEAUX_MENU =', '[', ']') + ';\n'
@@ -102,8 +121,10 @@ const page = (function build() {
     + 'return { planetaryBore, planetaryMenuFor, RAVIGNEAUX_MENU, PLANETARY_FLAVOURS, '
     + consts.join(', ') + ' };';
   const built = new Function('enumeratePlanetaries', src)(enumeratePlanetaries);
-  built.TRAIN_LEN = trainLen;
-  built.TEETH_SUM = Math.round(16.3 * trainLen);
+  /* One entry per chain, in PEOPLE order. TEETH_SUM is the page's own derivation
+     -- read the same way it computes it, never scraped as a literal. */
+  built.TRAIN_LENS = trainLens;
+  built.TEETH_SUMS = trainLens.map(n => Math.round(16.3 * n));
   return built;
 })();
 
@@ -169,16 +190,22 @@ test('config.js is named in the deploy whitelist', () => {
   ok(/\bconfig\.js\b/.test(wf), 'config.js is not published by .github/workflows/deploy.yml');
 });
 
-test('exactly one person, or the wheel count needs revisiting', () => {
-  /* trainLen above counts every link across the WHOLE people list, which is
-     only the train's length while there is one chain on stage. The day a second
-     person is added this fails, which is the point: TEETH_SUM is derived from
-     the train's length, so summing two people's wheels would land the error in
-     the geometry rather than anywhere visible. */
+test('every chain is counted on its own, never summed across people', () => {
+  /* This replaces the old "exactly one person" tripwire, which fired the day
+     Harper was added and demanded exactly this: only one chain is ever on stage,
+     so a single count across the whole list would measure a train the page never
+     builds, and TEETH_SUM is derived from that length -- the error would land in
+     the geometry rather than anywhere visible.
+     The check is that the per-person split agrees with the independent
+     slug-minus-href headcount. If the brace walker ever mis-splits, these two
+     disagree and the deal tests below are silently measuring the wrong trains. */
   const block = grabBlockFrom(CFG_SRC, 'config.js', 'PEOPLE:', '[', ']')
     .replace(/\/\*[\s\S]*?\*\//g, '');
   const people = (block.match(/\bslug:/g) || []).length - (block.match(/\bhref:/g) || []).length;
-  eq(people, 1, 'more than one person in config.js — trainLen and TEETH_SUM must become per-person');
+  eq(page.TRAIN_LENS.length, people,
+    'the per-person split disagrees with the headcount in config.js');
+  eq(page.TRAIN_LENS.reduce((a, b) => a + b, 0), (block.match(/href:/g) || []).length,
+    'the per-person link counts do not add up to every link in PEOPLE');
 });
 
 test('an empty train does not throw — a missing config degrades, it does not blank', () => {
@@ -228,6 +255,55 @@ test('a service the active person does not have is never seated on a wheel', () 
     return Object.values(slugFor).filter(s => s && !SITES[s]);`).call({});
   eq(seated.length, 0,
     'seated services the active person does not have: ' + [...new Set(seated)].join(', '));
+});
+
+test('every wheel of every chain gets a service seated on it', () => {
+  /* The other half of #53, found when Harper's one-link chain was added. A wheel
+     with no slug does not crash -- it draws as a blank gear: no badge, no
+     engraved handle, no link. Silent, and a screenshot passes it.
+
+     The cause was PAIR_SLOTS naming wheel indices a short chain does not have.
+     [0,1] needs two wheels and [3,4] needs five, but an unreachable slot still
+     claimed its in-range index, so wheel 0 was withheld from singleSlots while no
+     pair could ever be seated there. A one-wheel train lost its only wheel.
+
+     Replays the real seating block against the REAL config -- every person, and
+     the actual PAIR_SLOTS/PAIRS/SINGLES -- rather than a fixture, because the
+     fixture is what let this through: it only ever modelled a five-wheel train. */
+  const conf = (function () {
+    const win = {};
+    new Function('window', CFG_SRC)(win);
+    return win.WOZI_CONFIG;
+  })();
+  const i = SRC.indexOf('if (!this._slugFor) {');
+  const j = SRC.indexOf('const g = [], strands = []', i);
+  ok(i > 0 && j > i, 'could not find the slug-seating block in index.html');
+  const frag = SRC.slice(i, j);
+  const bad = [];
+  (conf.PEOPLE || []).forEach((p) => {
+    const links = p.links || [];
+    const sites = {};
+    links.forEach(l => { sites[l.slug] = {}; });
+    const seat = new Function('PAIR_SLOTS', 'PAIRS', 'SINGLES', 'SITES', 'TRAIN', 'shuffle', `
+      ${frag}
+      return slugFor;`);
+    const slugFor = seat.call({}, conf.PAIR_SLOTS, conf.PAIRS, conf.SINGLES,
+      sites, links.map(l => ({ slug: l.slug })), (arr) => arr);
+    for (let k = 0; k < links.length; k++) {
+      if (!slugFor[k]) bad.push(p.slug + ': wheel ' + k + ' of ' + links.length
+        + ' has no service seated on it — it draws as a blank gear');
+    }
+    Object.keys(slugFor).forEach(k => {
+      if (slugFor[k] && !sites[slugFor[k]]) {
+        bad.push(p.slug + ': seated "' + slugFor[k] + '", which this person does not have');
+      }
+      if (+k >= links.length) {
+        bad.push(p.slug + ': seated a service on wheel ' + k + ', past the end of a '
+          + links.length + '-wheel train');
+      }
+    });
+  });
+  ok(bad.length === 0, bad.join('\n      '));
 });
 
 test('the fit scale has no constant ceiling on the ratio', () => {
@@ -442,23 +518,31 @@ test('no planet anywhere is under eight teeth', () => {
 
 /* ---- 8. the deals obey their own bounds ---------------------------------- */
 
-test('the tooth deal always produces a legal train', () => {
-  const { TEETH_MIN, TEETH_MAX, TEETH_SUM, TEETH_SLACK, TEETH_HOST, TRAIN_LEN } = page;
-  let found = 0;
-  for (let trial = 0; trial < 4000; trial++) {
-    const cut = Array.from({ length: TRAIN_LEN }, () =>
-      TEETH_MIN + Math.floor(Math.random() * (TEETH_MAX - TEETH_MIN + 1)));
-    if (Math.abs(cut.reduce((a, b) => a + b, 0) - TEETH_SUM) > TEETH_SLACK) continue;
-    if (Math.max.apply(null, cut) < TEETH_HOST) continue;
-    let twins = false;
-    for (let i = 1; i < cut.length; i++) if (cut[i] === cut[i - 1]) twins = true;
-    if (twins) continue;
-    found++;
-  }
-  ok(found > 0, 'the tooth deal bounds admit no legal train at all -- the deal '
-    + 'would fall through to its fallback every load');
-  ok(found > 40, 'only ' + found + '/4000 draws are legal; the deal will often '
-    + 'exhaust its tries and fall back');
+test('the tooth deal always produces a legal train, for every chain', () => {
+  /* Run per chain, not once: each person's train has its own length and
+     therefore its own TEETH_SUM, and a chain short enough to strain the bounds
+     would be invisible in a single averaged run. */
+  const { TEETH_MIN, TEETH_MAX, TEETH_SLACK, TEETH_HOST } = page;
+  const bad = [];
+  page.TRAIN_LENS.forEach((len, pi) => {
+    const TEETH_SUM = page.TEETH_SUMS[pi];
+    let found = 0;
+    for (let trial = 0; trial < 4000; trial++) {
+      const cut = Array.from({ length: len }, () =>
+        TEETH_MIN + Math.floor(Math.random() * (TEETH_MAX - TEETH_MIN + 1)));
+      if (Math.abs(cut.reduce((a, b) => a + b, 0) - TEETH_SUM) > TEETH_SLACK) continue;
+      if (Math.max.apply(null, cut) < TEETH_HOST) continue;
+      let twins = false;
+      for (let i = 1; i < cut.length; i++) if (cut[i] === cut[i - 1]) twins = true;
+      if (twins) continue;
+      found++;
+    }
+    if (found === 0) bad.push('chain ' + pi + ' (' + len + ' wheels): no legal draw at '
+      + 'all -- the deal would fall through to its fallback every load');
+    else if (found <= 40) bad.push('chain ' + pi + ' (' + len + ' wheels): only ' + found
+      + '/4000 draws are legal; the deal will often exhaust its tries and fall back');
+  });
+  ok(bad.length === 0, bad.join('\n      '));
 });
 
 test('the largest blank a deal guarantees can host a planetary', () => {
@@ -472,19 +556,24 @@ test('the bearing deal keeps the train a horizontal line', () => {
   const { ANG_MIN, ANG_MAX, BAND_MAX, ENDS_MAX, MODULE } = page;
   ok(ANG_MIN > 0 && ANG_MAX > ANG_MIN, 'bearing range is degenerate');
   ok(ANG_MAX <= 45, 'bearings past 45 degrees stack the wheels diagonally');
-  let legal = 0;
-  for (let trial = 0; trial < 2000; trial++) {
-    const first = Math.random() < 0.5 ? 1 : -1;
-    const ang = [0];
-    for (let i = 1; i < page.TRAIN_LEN; i++) ang.push(first * (i % 2 ? 1 : -1) * (ANG_MIN + Math.random() * (ANG_MAX - ANG_MIN)));
-    let y = 0, lo = 0, hi = 0;
-    for (let i = 1; i < page.TRAIN_LEN; i++) {
-      y += (MODULE * 16) * Math.sin(ang[i] * Math.PI / 180);   /* two mid-size wheels */
-      lo = Math.min(lo, y); hi = Math.max(hi, y);
+  const bad = [];
+  page.TRAIN_LENS.forEach((len, pi) => {
+    let legal = 0;
+    for (let trial = 0; trial < 2000; trial++) {
+      const first = Math.random() < 0.5 ? 1 : -1;
+      const ang = [0];
+      for (let i = 1; i < len; i++) ang.push(first * (i % 2 ? 1 : -1) * (ANG_MIN + Math.random() * (ANG_MAX - ANG_MIN)));
+      let y = 0, lo = 0, hi = 0;
+      for (let i = 1; i < len; i++) {
+        y += (MODULE * 16) * Math.sin(ang[i] * Math.PI / 180);   /* two mid-size wheels */
+        lo = Math.min(lo, y); hi = Math.max(hi, y);
+      }
+      if (hi - lo <= BAND_MAX && Math.abs(y) <= ENDS_MAX) legal++;
     }
-    if (hi - lo <= BAND_MAX && Math.abs(y) <= ENDS_MAX) legal++;
-  }
-  ok(legal > 0, 'no bearing draw satisfies the drift caps; every load would fall back');
+    if (!legal) bad.push('chain ' + pi + ' (' + len + ' wheels): no bearing draw '
+      + 'satisfies the drift caps; every load would fall back');
+  });
+  ok(bad.length === 0, bad.join('\n      '));
 });
 
 /* ---- report -------------------------------------------------------------- */

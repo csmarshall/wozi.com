@@ -96,6 +96,19 @@ window.WOZI_CONFIG = {
         { slug: 'mail',      path: 'charles@wozi.com',  href: 'mailto:charles@wozi.com' },
         { slug: 'reddit',    path: '/user/cs_marshall', href: 'https://www.reddit.com/user/cs_marshall/' }
       ]
+    },
+    {
+      slug: 'harper',
+      name: 'Harper',
+      /* harper.wozi.com is listed before it resolves, which costs nothing: a
+         host that matches nothing simply never selects this chain, and ?who=
+         reaches her either way. Making it live is an ACM SAN in us-east-1, an
+         alternate domain name on the distribution and a Route53 alias -- no
+         deploy change, per the note above. */
+      hosts: ['harper.wozi.com'],
+      links: [
+        { slug: 'mail', path: 'harper@wozi.com', href: 'mailto:harper@wozi.com' }
+      ]
     }
   ],
 

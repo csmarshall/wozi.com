@@ -209,33 +209,27 @@ async def cdp():
     # and is NOT moving is a failure.
     dash_ok = len(s1["dash"]) == 0 or dash_changed > 0
     real_errors = [e for e in errors if "favicon.ico" not in e]
-    # The icon count is the number of LINKED wheels, read from index.html rather
-    # than hardcoded -- it was pinned at 7 and started failing the moment an
-    # eighth link was added, which is a gate lying about a page that was fine.
-    import re as _re, pathlib as _pl
-    # TRAIN is derived from the active person's links now (#40), so the wheel
-    # count lives in config.js rather than in index.html.
-    _cfg = (_pl.Path(__file__).resolve().parent.parent / "config.js").read_text()
-    _i = _cfg.index("PEOPLE:")
-    _depth, _j = 0, _cfg.index("[", _i)
-    for _k in range(_j, len(_cfg)):
-        if _cfg[_k] == "[":
-            _depth += 1
-        elif _cfg[_k] == "]":
-            _depth -= 1
-            if _depth == 0:
-                _block = _cfg[_i:_k + 1]
-                break
-    # strip /* ... */ first: a RETIRED wheel is commented out, not deleted,
-    # and it would otherwise still be counted
-    _block = _re.sub(r"/\*.*?\*/", "", _block, flags=_re.S)
-    # count href, NOT slug -- a person carries a slug of their own as well as
-    # one per link, so slugs would report one wheel too many per person
-    _want = len(_re.findall(r"href:", _block))
+    # THE EXPECTATION IS MEASURED, NOT PARSED. This used to re-derive the wheel
+    # count by walking config.js and counting `href:` across the whole PEOPLE
+    # block -- a copy of page geometry living in a harness, which is the hazard
+    # this repo has been bitten by repeatedly. It was also wrong the moment a
+    # SECOND person existed: only one chain is ever on stage, so summing every
+    # person's links expected 8 icons on a 7-wheel page and reported CHECK ABOVE
+    # against a page that was fine.
+    #
+    # What CLAUDE.md actually asks is "each badge contains an <svg>", and both
+    # sides of that are on the page: count the badge links, count the ones with
+    # an icon inside, compare. No config parsing, correct for any chain, and it
+    # still catches the failure it was written for -- loadIcons() fetches the
+    # icons and swallows its own error, so a file:// open leaves empty badges.
+    _want = len(badges["badges"])
     ok = (rot_changed == len(s1["rot"]) and len(s1["rot"]) > 0
-          and dash_ok and not real_errors and worst < 2.0 and icons == _want)
-    if icons != _want:
-        print(f"hub icons          : {icons} injected, expected {_want} (one per linked wheel)")
+          and dash_ok and not real_errors and worst < 2.0
+          and _want > 0 and icons == _want)
+    if not _want:
+        print("hub icons          : no badge links on the page at all")
+    elif icons != _want:
+        print(f"hub icons          : {icons} injected, expected {_want} (one per badge link)")
     print("\nstrands            :",
           "none (correct for the direct-mesh train)" if not s1["dash"]
           else f"{len(s1['dash'])} present, {dash_changed} advancing")

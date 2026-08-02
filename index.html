@@ -1872,7 +1872,15 @@ class Component extends DCLogic {
        shuffle reads this.props.shuffle, and PAIR_SLOTS/SITES are declared
        further down the file than the colour deal is. */
     if (!this._slugFor) {
-    const pairSlots = PAIR_SLOTS, singleSlots = [];
+    /* A PAIR SLOT THE TRAIN CANNOT REACH IS NOT A PAIR SLOT. PAIR_SLOTS names
+       wheel indices, and a shorter chain simply does not have all of them --
+       [3,4] needs five wheels, [0,1] needs two. An unreachable slot used to go
+       on claiming its in-range index anyway, so that wheel was excluded from
+       singleSlots while no pair could ever be seated in it: the wheel drew with
+       no slug at all, meaning no badge, no engraved handle and no link. A
+       one-link chain lost its only wheel that way. Dropping the slot releases
+       its index to the singles, which is what an unpairable wheel is. */
+    const pairSlots = PAIR_SLOTS.filter(pr => pr.every(i => i < TRAIN.length)), singleSlots = [];
       TRAIN.forEach((t, i) => { if (!pairSlots.some(pr => pr.indexOf(i) >= 0)) singleSlots.push(i); });
       /* ONLY SEAT SERVICES THE ACTIVE PERSON ACTUALLY HAS (#53). config.js says
          "a service named here but absent from the active person's links is simply

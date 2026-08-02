@@ -5,7 +5,53 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ## Unreleased
 
+### Added
+
+- **Harper's chain.** A second person in `config.js`: `harper`, one link,
+  `mail` → `harper@wozi.com`. `harper.wozi.com` is listed as a host before it
+  resolves, which costs nothing — a hostname matching nothing simply never
+  selects the chain, and `?who=harper` reaches her either way. Making it live is
+  an ACM SAN in us-east-1, an alternate domain name on the distribution and a
+  Route53 alias; no deploy change.
+
+  The person picker appears by itself at two people, as designed — both entries
+  render in the corner menu with `aria-current` set. Charles remains `PEOPLE[0]`,
+  so the default page is unchanged, and the pixel gate agrees: **0 px differ**
+  against HEAD at 1440×900 and 390×844.
+
 ### Fixed
+
+- **#65 — a chain shorter than `PAIR_SLOTS` assumes leaves wheels blank.**
+  `PAIR_SLOTS` is `[[0,1],[3,4]]`, and those are wheel *indices*: `[0,1]` needs
+  two wheels, `[3,4]` needs five. `singleSlots` was built as "every index no pair
+  slot claims", so an unreachable slot went on claiming its in-range index
+  anyway. On a one-wheel train, wheel 0 was withheld from the singles while no
+  pair could ever be seated in it, and `slugFor` came out empty.
+
+  A wheel with no slug does not throw — it draws as a **blank gear**: no badge,
+  no engraved handle, no link. Harper's page was her one wheel, anonymous. This
+  is the other end of #53: that was a slug the person did not have, this is no
+  slug at all. A pair slot the train cannot reach is not a pair slot, so it is
+  filtered out and its index falls through to the singles — which is what an
+  unpairable wheel is.
+
+  Two harnesses had the matching fault, both counting `href:` across the *whole*
+  `PEOPLE` block — the train's length only while one chain exists. `tools/test.js`
+  had a deliberate tripwire for exactly this and it fired on the second chain;
+  `TRAIN_LEN`/`TEETH_SUM` are now per-chain, and both deal tests run against every
+  chain, since the shortest is the one that strains the bounds.
+  `tools/verify_motion.py` had no guard and simply went wrong, expecting 8 icons
+  on a 7-wheel page and reporting `CHECK ABOVE` against a page that was fine. It
+  now compares the icons to the badge links **on the page**, which is what this
+  rulebook actually asks for and needs no config parsing at all — one less
+  harness modelling page geometry (#64).
+
+  The suite's seating test only ever modelled a five-wheel train, which is how
+  this got through. It now replays the real seating block against the real
+  config — every person, the actual `PAIR_SLOTS`/`PAIRS`/`SINGLES` — and asserts
+  every wheel of every chain gets a service seated on it. Mutation-proved:
+  reverting the one-line fix fails it with `harper: wheel 0 of 1 has no service
+  seated on it`.
 
 - **#58 — `const flat = true` made about half of `gearSvg` unreachable.** The
   flag sat at the top of both `gearSvg` and `ghostSvg` guarding a modelled-metal
