@@ -310,19 +310,29 @@ test('every wheel of every chain gets a service seated on it', () => {
    index.html and run with inputs of our choosing. They are not a model of it --
    a copy of that formula here is exactly the drift this file exists to stop. */
 function fitRule() {
-  const i = SRC.indexOf('const NOMINAL_WHEELS =');
+  /* Anchored on WHEEL_CROSS_MAX, which exists once and only inside fitStage.
+     NOMINAL_WHEELS would match the module-level declaration beside TEETH_SUM
+     instead, and slice in a thousand lines of unrelated code. */
+  const i = SRC.indexOf('const WHEEL_CROSS_MAX =');
   const j = SRC.indexOf('const root = document.documentElement.style;', i);
   ok(i > 0 && j > i, 'could not find the fit computation in index.html');
   const frag = SRC.slice(i, j);
   const LINK_SHARE = grabNumber('LINK_SHARE'), CROSS_BLEED = grabNumber('CROSS_BLEED');
-  const fn = new Function('MODULE', 'TOOTH_ADD', 'TRAIN',
+  /* GEARS_ACROSS is declared next to TEETH_SUM, not inside fitStage, so it is an
+     input to the sliced expression rather than part of it. Read out of the page
+     rather than repeated here. */
+  /* GEARS_ACROSS is config-derived now (longest chain x SERPENTINE_PACKING), so
+     it cannot be scraped as a literal. Recompute it the way the page does, from
+     the per-person link counts the extractor already reads. */
+  const GEARS_ACROSS = Math.max(...page.TRAIN_LENS) * grabNumber('SERPENTINE_PACKING');
+  const fn = new Function('MODULE', 'TOOTH_ADD', 'TRAIN', 'GEARS_ACROSS',
     'longAvail', 'crossAvail', 'longSolved', 'crossSolved', `
     const LINK_SHARE = ${LINK_SHARE}, CROSS_BLEED = ${CROSS_BLEED};
     ${frag}
-    return { fit, wheelSpan, NOMINAL_SPAN, WHEEL_CROSS_MAX };`);
+    return { fit, wheelSpan, GEARS_ACROSS, WHEEL_CROSS_MAX };`);
   return (n, longAvail, crossAvail, longSolved, crossSolved) => {
     const train = Array.from({ length: n }, () => ({ teeth: page.TEETH_MAX }));
-    return fn(page.MODULE, page.TOOTH_ADD, train,
+    return fn(page.MODULE, page.TOOTH_ADD, train, GEARS_ACROSS,
       longAvail, crossAvail, longSolved, crossSolved);
   };
 }

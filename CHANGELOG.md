@@ -21,6 +21,55 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **#67 — one-wheel escape runs crossed the short axis in portrait, and the
+  sizing constant was arbitrary.** Two problems, both found by looking at the page
+  rather than by any gate.
+
+  `axisDeg` is measured from the first gear to the last. With one wheel those are
+  the same object, so it is `atan2(0, 0)` — which returns **0** rather than
+  failing, and 0° is horizontal in every orientation. On a 390×844 phone both runs
+  left by the 390px sides after one wheel each and the whole 844px of height sat
+  empty: exactly the failure #10 fixed for multi-wheel trains. The seven-wheel
+  chain was verified correct in portrait, so this was only ever the degenerate
+  case. A one-wheel train has no axis of its own, so it now falls back to the
+  stage's — `axisRot()`, which is 90 in portrait and 0 in landscape and *is* the
+  "chain follows the longest dimension" rule, reused rather than re-derived.
+
+  The wheel also looked jittery, and that turned out to be the same problem as
+  "too big". Sampling rotation in-page off rAF: the seven-wheel chain moves its
+  rim **1.21px** per moving frame, the one-wheel chain moved **2.01px** — 66%
+  further, because the wheel was 86% larger. `frameRate: 30` duplicates half of
+  every 59 frames by design, so a bigger wheel simply steps further per update.
+
+  And #66's `NOMINAL_WHEELS = 4` was wrong twice over. It was picked from
+  screenshots as a taste call when the requirement is a rule — a gear is the same
+  size wherever you meet it, so a solo page draws its wheel at the size a wheel
+  has on the main page and carries more outriggers. And it floored the solved span
+  against an *estimator* of something the solver already computes exactly:
+  `MODULE × 16.3 × N` models seven wheels as 798.7 units while a real solve
+  averages 779.6 and ranges either side, so the floor clamped some deals and not
+  others. The main page's own scale moved between visits, and a fixed-seed pixel
+  diff showed 107,664 changed pixels.
+
+  Restated in **gears across the long axis**, derived from a scan of every chain:
+  `GEARS_ACROSS = longest chain × SERPENTINE_PACKING`, and a gear is
+  `longAvail / GEARS_ACROSS` px. Adding people never needs a retune and every
+  chain matches the longest. `SERPENTINE_PACKING` exists because a chain of N
+  wheels does **not** span N gear widths — the bearings run 14–30° off axis and
+  the drawn span carries addendum and padding beyond the pitch circle. Measured
+  over 15 loads at 5 viewports, seven wheels occupy **6.134–6.855** gear widths,
+  so counting wheels overestimates by ~1.4× and would have shrunk every gear by
+  ~30%. The factor must stay at or below 6.134/7 = 0.876 for the standard size
+  never to clamp a real chain; 0.85 takes a margin under the lowest observed.
+
+  Worth knowing: stated this way, rendered size is `longAvail / GEARS_ACROSS`, so
+  `fit` and the wheel's own span **cancel** — a wheel is the same number of pixels
+  whatever tooth count it was dealt. Wheels *within* a chain still vary relative
+  to each other, because there the chain's own span binds instead.
+
+  **0 px against `047b5f0`** at 1440×900 and 390×844: the main page is genuinely
+  untouched, which #66's approach was not.
+
 - **#66 — a one-wheel chain scaled to fill the viewport, and no absolute px cap
   could fix it.** Both `fit` terms are ratios against the *solve*, so neither
   says anything about how big one wheel ends up. Fine while the solve is a chain;
