@@ -306,6 +306,97 @@ test('every wheel of every chain gets a service seated on it', () => {
   ok(bad.length === 0, bad.join('\n      '));
 });
 
+/* The three tests below all execute the REAL fit expression, sliced out of
+   index.html and run with inputs of our choosing. They are not a model of it --
+   a copy of that formula here is exactly the drift this file exists to stop. */
+function fitRule() {
+  const i = SRC.indexOf('const NOMINAL_WHEELS =');
+  const j = SRC.indexOf('const root = document.documentElement.style;', i);
+  ok(i > 0 && j > i, 'could not find the fit computation in index.html');
+  const frag = SRC.slice(i, j);
+  const LINK_SHARE = grabNumber('LINK_SHARE'), CROSS_BLEED = grabNumber('CROSS_BLEED');
+  const fn = new Function('MODULE', 'TOOTH_ADD', 'TRAIN',
+    'longAvail', 'crossAvail', 'longSolved', 'crossSolved', `
+    const LINK_SHARE = ${LINK_SHARE}, CROSS_BLEED = ${CROSS_BLEED};
+    ${frag}
+    return { fit, wheelSpan, NOMINAL_SPAN, WHEEL_CROSS_MAX };`);
+  return (n, longAvail, crossAvail, longSolved, crossSolved) => {
+    const train = Array.from({ length: n }, () => ({ teeth: page.TEETH_MAX }));
+    return fn(page.MODULE, page.TOOTH_ADD, train,
+      longAvail, crossAvail, longSolved, crossSolved);
+  };
+}
+
+test('the fit rule does not branch on how many gears are in the chain', () => {
+  /* The rule is "a gear has a standard size for this viewport, and shrinks only
+     when something physical says it must". Nothing in it may depend on the
+     wheel COUNT -- a one-wheel chain and a nine-wheel chain must run identical
+     arithmetic. Same solved extents and same largest wheel in, same scale out,
+     whatever the length of the array. */
+  const fit = fitRule();
+  const base = fit(1, 1440, 900, 900, 300).fit;
+  const bad = [];
+  for (let n = 1; n <= 12; n++) {
+    const got = fit(n, 1440, 900, 900, 300).fit;
+    if (got !== base) bad.push('chain of ' + n + ' gave fit ' + got + ', chain of 1 gave ' + base);
+  }
+  ok(bad.length === 0, bad.join('\n      '));
+});
+
+test('no chain renders a wheel past the cross-axis guard', () => {
+  /* #65. A one-wheel solve makes crossSolved a single diameter, so the band term
+     reduces to "a wheel may be CROSS_BLEED of the short axis" and never binds.
+     WHEEL_CROSS_MAX is the bound that does. Swept over real viewports and every
+     chain length, with the solved extents modelled BOTH as a long chain and as a
+     lone wheel, since the guard has to hold either way. */
+  const fit = fitRule();
+  const VIEWPORTS = [[390, 844], [844, 390], [768, 1024], [1440, 900],
+    [2560, 1440], [3440, 1440], [5120, 1440], [7680, 2160]];
+  const bad = [];
+  for (const [w, h] of VIEWPORTS) {
+    const longAvail = Math.max(w, h), crossAvail = Math.min(w, h);
+    for (let n = 1; n <= 12; n++) {
+      const lone = fit(n, longAvail, crossAvail, 150, 150);
+      const chain = fit(n, longAvail, crossAvail, page.MODULE * 16.3 * n, 210);
+      for (const r of [lone, chain]) {
+        const rendered = r.fit * r.wheelSpan;
+        /* The 0.28 floor is a FLOOR and outranks every bound, so it can lift a
+           wheel past the guard on an absurdly small cross axis. Assert the
+           guard everywhere the floor is not the binding term. */
+        if (r.fit <= 0.28) continue;
+        if (rendered > r.WHEEL_CROSS_MAX * crossAvail + 1e-6) {
+          bad.push(`${w}x${h}, ${n} wheels: rendered ${rendered.toFixed(1)}px `
+            + `exceeds ${(r.WHEEL_CROSS_MAX * crossAvail).toFixed(1)}px`);
+        }
+      }
+    }
+  }
+  ok(bad.length === 0, bad.slice(0, 6).join('\n      '));
+});
+
+test('the linked share of the long axis stays width-invariant', () => {
+  /* #44's property, which the NOMINAL_SPAN floor must not break. A full chain
+     takes LINK_SHARE of the long axis; a short one takes a smaller CONSTANT
+     share, with the escape runs covering the difference. What must never happen
+     is a share that FALLS as the viewport widens -- that is the 1/W failure that
+     shipped three times behind three different ratio ceilings. */
+  const fit = fitRule();
+  const bad = [];
+  for (const n of [1, 2, 4, 7, 9]) {
+    const span = n === 1 ? 150 : page.MODULE * 16.3 * n;
+    const shares = [1440, 2560, 3440].map(w => {
+      const r = fit(n, w, w * 0.5625, span, n === 1 ? 150 : 210);
+      return (r.fit * span) / w;
+    });
+    const spread = Math.max(...shares) - Math.min(...shares);
+    if (spread > 0.001) {
+      bad.push(`${n} wheels: share of the long axis varies with width `
+        + `(${shares.map(s => (s * 100).toFixed(1) + '%').join(', ')})`);
+    }
+  }
+  ok(bad.length === 0, bad.join('\n      '));
+});
+
 test('the fit scale has no constant ceiling on the ratio', () => {
   /* #44/#19. A cap on LINK_SHARE * longAvail / longSolved is crossed at SOME
      width, and past it the train is a fixed size whose share falls as 1/W. That

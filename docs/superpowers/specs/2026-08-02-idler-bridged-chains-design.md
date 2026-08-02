@@ -366,25 +366,42 @@ in us-east-1, an alternate domain name on the distribution, and a Route53 alias.
 new exposure — but it is a decision about someone else's address and should be a
 deliberate one.
 
-## The sizing fix
+## The sizing fix — DONE, shipped as #66
 
-Per `index.html:1739`, in Charles's own words after #19 and #44:
+This section is retained as the record of what was built. It did **not** land as
+the absolute px cap this spec originally called for, because the measurement
+disproved that approach.
 
-> If a size cap is ever wanted again it must be an ABSOLUTE wheel size in px, not
-> a multiplier on a ratio, or this recurs a fourth time.
+`index.html:1739` said any future cap must be an absolute wheel size in px.
+Measured over seven viewports off the svg **width attribute**, that cannot work:
+the seven-wheel chain peaks at **812px** (5120×1440) and the one-wheel chain
+bottoms at **486px** (390×844), so a full chain on an ultrawide renders larger
+wheels than a lone wheel does on a phone. No single pixel value spares one and
+catches the other.
 
-An absolute ceiling on rendered wheel diameter in pixels, applied after the
-existing `fit`. Not a ratio, not a multiplier — those were capped at 1.15, then
-1.55, then 1.25, each fixing the bug and reintroducing it further out, because a
-ratio grows with the viewport so any constant is crossed at *some* width.
+What shipped is **one rule, four bounds, no branch on chain length**:
 
-The 0.28 floor stays a floor. `LINK_SHARE` still binds at every width, preserving
-the width-invariance established in #44: the cap engages only when the solve is
-small enough that a wheel would otherwise exceed a sane physical size — precisely
-the short-chain case.
+> a gear has a standard size for this viewport, and it shrinks only when
+> something physical says it must
 
-**The value is measured, not chosen** — swept across viewports and chain lengths,
-and recorded with its measurement, the way the 2.6 sweep was.
+1. the chain is longer than nominal, so it must shrink to fit the axis
+2. the serpentine's band would overflow the short axis
+3. a single wheel would overflow the short axis
+
+"Standard size" and bound 1 are the same expression with different denominators,
+so they collapse to `LINK_SHARE * long / max(NOMINAL_SPAN, longSolved)`. A long
+chain is bound by its own span, a short one by the nominal span, and neither
+knows which it is — no conditional, no count test.
+
+#44's width-invariance survives: a one-wheel chain takes a constant 25.9–27.2% of
+the long axis from 390px to 5120px, escape runs covering the difference. Bound 3
+exists because that is still not enough — 27% of 5120px is 1391px, 96.6% of a
+1440px short axis — so `WHEEL_CROSS_MAX = 0.70` guards the aspect ratio the floor
+cannot. `NOMINAL_WHEELS = 4` was chosen from screenshots, not theory.
+
+**Consequence for this spec:** on the combined stage the solve is wide enough
+that the nominal floor never engages, so every chain renders at chain scale
+regardless of length. `NOMINAL_WHEELS` governs solo pages only.
 
 ## Testing
 

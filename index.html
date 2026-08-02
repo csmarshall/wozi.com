@@ -1737,7 +1737,18 @@ class Component extends DCLogic {
        axis -- and the 0.28 floor, which is a floor and not a ceiling.
 
        If a size cap is ever wanted again it must be an ABSOLUTE wheel size in
-       px, not a multiplier on a ratio, or this recurs a fourth time. */
+       px, not a multiplier on a ratio, or this recurs a fourth time.
+
+       THAT LAST PARAGRAPH WAS WRONG, and the measurement that disproved it is
+       below (#65). An absolute px cap cannot work here: a seven-wheel chain on a
+       5120x1440 display renders LARGER wheels (812px) than a one-wheel chain does
+       on a 390x844 phone (486px), so no single pixel value both spares a real
+       chain and catches a degenerate one. The sentence above is kept rather than
+       deleted because the reasoning it came from is still right -- a cap on a
+       ratio driven by the LONG axis is crossed at some width every time. What it
+       missed is that the SHORT axis does not have that property. The cap below is
+       a fraction of the short axis, which is the sentence's own words two
+       paragraphs up: "a wheel cannot exceed the short axis". */
     /* THE LINKED TRAIN TAKES A SHARE, NOT THE WHOLE. `solved` is the eight linked
        wheels only -- the outriggers are added afterwards, in fitEscapes -- so
        scaling `solved` to the full long axis leaves the icons spanning edge to
@@ -1752,8 +1763,91 @@ class Component extends DCLogic {
        -- the coverage comes from the chain being longer, never from the wheels
        being bigger. */
     const LINK_SHARE = 0.78;
-    const fit = Math.max(0.28, Math.min(LINK_SHARE * longAvail / longSolved,
-                                        crossAvail * CROSS_BLEED / crossSolved));
+    /* A SINGLE WHEEL MAY NOT EXCEED THE SHORT AXIS. Both terms above are ratios
+       against the SOLVE, so they say nothing about how big one wheel ends up.
+       That is fine while the solve is a chain -- solved.w is seven wheels, so
+       LINK_SHARE binds long before any wheel gets silly. It is not fine when the
+       solve IS one wheel: crossSolved is then a single diameter, the cross term
+       reduces to crossAvail * CROSS_BLEED, and the wheel renders at 125% of the
+       short axis at EVERY viewport. ?who=harper drew one gear cropped off the top
+       and bottom of the page.
+
+       Measured before choosing, over 7 viewports from 390x844 to 5120x1440:
+         the 7-wheel chain peaks at  70.8% of the short axis (1020px at 5120x1440)
+         the 1-wheel chain bottoms at 146.8% (686px at 390x844)
+       so the two separate cleanly as a FRACTION of the short axis, and not at all
+       in absolute pixels -- a full chain on an ultrawide renders BIGGER wheels
+       than a lone wheel does on a phone, so no absolute value can spare one and
+       catch the other. The note left at #44 asked for an absolute px cap; the
+       measurement says that cannot work, and this is why.
+
+       Why this is not the cap that #19 and #44 kept reintroducing: those capped a
+       ratio driven by the LONG axis, which grows without bound as the viewport
+       widens, so any constant is crossed at some width and the train becomes a
+       fixed size whose share falls as 1/W. This is bounded by the SHORT axis,
+       which is what physically bounds a wheel -- a gear cannot sensibly be taller
+       than the screen. Honest about its own limit: at 1440px tall it would begin
+       binding on the 7-wheel chain at roughly 6970px wide. No such display
+       exists, and a 7680x2160 desktop pushes it past 10000px, but it is the same
+       class of property and is written down rather than claimed immune. */
+    /* A SHORT CHAIN IS STILL SCALED AS A CHAIN. Capping the RESULT was the first
+       attempt and it produced the wrong picture: it makes a lone wheel as large
+       as it is allowed to be, so ?who=harper drew one enormous gear. What the
+       page wants is the opposite -- a wheel at ordinary size, with the escape
+       runs doing the filling, exactly as they do at both ends of a long chain.
+
+       ONE RULE, FOUR BOUNDS, NO SPECIAL CASE FOR CHAIN LENGTH. Nothing below
+       branches on how many wheels are linked -- there is no conditional and no
+       count test, and a one-wheel chain and a nine-wheel chain run exactly the
+       same arithmetic. The rule is:
+
+         a gear has a standard size for this viewport, and it shrinks only when
+         something physical says it must.
+
+       The three things that can say so:
+         1. the chain is longer than nominal, so it must shrink to fit the axis
+         2. the serpentine's band would overflow the short axis
+         3. a single wheel would overflow the short axis
+
+       Bounds 1 and 2 are what shipped before; this adds the standard size and
+       bound 3. Note that "standard size" and bound 1 are the SAME expression
+       with different denominators, so they collapse:
+         min(LINK_SHARE*long/NOMINAL_SPAN, LINK_SHARE*long/longSolved)
+           === LINK_SHARE*long / max(NOMINAL_SPAN, longSolved)
+       which is why this reads as a floor on the denominator rather than as a
+       separate case. A long chain is bound by its own span, a short one by the
+       nominal span, and neither knows which it is.
+
+       NOMINAL_WHEELS is the chain length the stage was composed around. The span
+       is derived the way TEETH_SUM is (16.3 teeth per wheel, times the module)
+       rather than pasted as a measured number -- a copy of solved.w would drift
+       the moment the deal bounds moved.
+
+       #44's property is intact and unchanged in every state: the linked run still
+       takes a CONSTANT fraction of the long axis at every width. A full chain
+       takes LINK_SHARE of it; a one-wheel chain measures 25.9-27.2% from 390px to
+       5120px, and the escape runs cover the difference. A different constant, not
+       a broken invariant -- "the coverage comes from the chain being longer,
+       never from the wheels being bigger".
+
+       Bound 3 exists because a constant share of a very WIDE screen is not a
+       constant share of a SHORT one: 27% of 5120px is 1391px, which on a 1440px
+       display is 96.6% of the short axis. Bound 2 does not catch it -- it is
+       written for a serpentine's vertical band, and when the solve IS one wheel it
+       reduces to "a wheel may be 125% of the short axis", far above what the long
+       term asks for. Measured over 7 viewports the seven-wheel chain peaks at
+       57.6% of the short axis, so 70% never touches a real chain and engages only
+       on a display far wider than it is tall. */
+    const NOMINAL_WHEELS = 4;
+    const NOMINAL_SPAN = MODULE * 16.3 * NOMINAL_WHEELS;
+    const WHEEL_CROSS_MAX = 0.70;
+    /* Matches what is drawn: gearSvg sizes each wheel (ro + 6) * 2. */
+    const wheelSpan = TRAIN.reduce((m, t) => Math.max(m,
+      (MODULE * (t.teeth / 2 + TOOTH_ADD) + 6) * 2), 0);
+    const fit = Math.max(0.28, Math.min(
+      LINK_SHARE * longAvail / Math.max(longSolved, NOMINAL_SPAN),
+      crossAvail * CROSS_BLEED / crossSolved,
+      wheelSpan ? WHEEL_CROSS_MAX * crossAvail / wheelSpan : Infinity));
     const root = document.documentElement.style;
     root.setProperty('--gsfit', fit.toFixed(3));
     /* THE WHEELS ARE DRAWN AT FINAL SIZE (#37). Everything inside the stage used

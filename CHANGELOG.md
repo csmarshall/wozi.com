@@ -21,6 +21,60 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **#66 — a one-wheel chain scaled to fill the viewport, and no absolute px cap
+  could fix it.** Both `fit` terms are ratios against the *solve*, so neither
+  says anything about how big one wheel ends up. Fine while the solve is a chain;
+  not fine when the solve **is** one wheel, because `crossSolved` becomes a single
+  diameter and the band term reduces to "a wheel may be `CROSS_BLEED` of the short
+  axis" — exactly 125%, at every viewport. `?who=harper` drew one gear cropped off
+  the top and bottom of the page.
+
+  The note at #44 said any future cap must be an absolute wheel size in px.
+  Measured over seven viewports, that cannot work: the seven-wheel chain peaks at
+  **812px** (5120×1440) while the one-wheel chain bottoms at **486px** (390×844),
+  so a full chain on an ultrawide renders *larger* wheels than a lone wheel does
+  on a phone and no single pixel value spares one while catching the other. The
+  note is kept rather than deleted — its reasoning about ratios driven by the
+  **long** axis is still right — with the measurement recorded beside it.
+
+  What shipped is one rule with four bounds and **no branch on chain length**: a
+  gear has a standard size for this viewport, and shrinks only when the chain is
+  too long to fit, when the serpentine's band would overflow the short axis, or
+  when a single wheel would. "Standard size" and the first bound are the same
+  expression with different denominators, so they collapse to
+  `LINK_SHARE * long / max(NOMINAL_SPAN, longSolved)` — a long chain is bound by
+  its own span, a short one by the nominal span, and neither knows which it is.
+
+  #44's width-invariance is intact in every state: a one-wheel chain takes a
+  constant 25.9–27.2% of the long axis from 390px to 5120px, with the escape runs
+  covering the difference. A different constant, not a broken invariant. The
+  fourth bound exists because that is still not enough — 27% of 5120px is 1391px,
+  which on a 1440px display is 96.6% of the short axis, so `WHEEL_CROSS_MAX = 0.70`
+  guards the aspect ratio the floor cannot. The seven-wheel chain peaks at 57.6%,
+  so it never engages on a real chain.
+
+  `NOMINAL_WHEELS = 4` was picked from screenshots at 3/4/5/7, not from theory —
+  at 7 a lone wheel is exactly one of the chain's and its engraving is too small;
+  at 3 it dominates the page.
+
+  Three tests added, each executing the **real** fit expression sliced out of
+  `index.html` rather than a copy of it: that the rule does not branch on gear
+  count (lengths 1–12, identical scale out), that no chain renders past the guard
+  (8 viewports × 12 lengths × both solve shapes), and that the linked share stays
+  width-invariant. Mutation-proved both ways — dropping the guard reports
+  `5120×1440, 1 wheels: rendered 1391.3px exceeds 1008.0px`, and adding a
+  `TRAIN.length > 3` branch trips the first.
+
+  **0 px** against the previous commit at 1440×900 and 390×844: a complete no-op
+  for the seven-wheel chain.
+
+  Method note worth keeping: the first measurement pass used
+  `getBoundingClientRect()` on **rotating** elements, which returns the
+  axis-aligned box of a spinning square — up to √2 too large, varying with phase.
+  It inflated every figure by up to 41% and briefly suggested the seven-wheel
+  chain rendered bigger wheels than the one-wheel chain. Measure the `width`
+  attribute, never the rect, on anything that turns.
+
 - **#65 — a chain shorter than `PAIR_SLOTS` assumes leaves wheels blank.**
   `PAIR_SLOTS` is `[[0,1],[3,4]]`, and those are wheel *indices*: `[0,1]` needs
   two wheels, `[3,4]` needs five. `singleSlots` was built as "every index no pair
