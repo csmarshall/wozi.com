@@ -339,6 +339,44 @@ function fitRule() {
   };
 }
 
+/* Executes the real TRAIN builder out of index.html rather than modelling it. */
+function buildTrain(links, personSlug) {
+  const i = SRC.indexOf('const TRAIN = ');
+  const j = SRC.indexOf(';', i);
+  ok(i > 0 && j > i, 'could not find the TRAIN builder in index.html');
+  const expr = SRC.slice(i + 'const TRAIN = '.length, j);
+  return new Function('WHO', 'return ' + expr)({ links: links, slug: personSlug });
+}
+
+test('every TRAIN entry names its parent, and the parents form one tree', () => {
+  const train = buildTrain([{ slug: 'a' }, { slug: 'b' }, { slug: 'c' }], 'p');
+  const roots = train.filter(t => t.parent === null || t.parent === undefined);
+  eq(roots.length, 1, 'a train must have exactly one root');
+  const bad = [];
+  train.forEach((t, i) => {
+    if (t.parent === null) return;
+    if (!(t.parent >= 0 && t.parent < train.length)) bad.push(`wheel ${i} parent ${t.parent} is out of range`);
+    if (t.parent === i) bad.push(`wheel ${i} is its own parent`);
+  });
+  /* Walk to the root from every wheel; a cycle never terminates. */
+  train.forEach((t, i) => {
+    let hops = 0, at = i;
+    while (train[at].parent !== null && hops <= train.length) { at = train[at].parent; hops++; }
+    if (hops > train.length) bad.push(`wheel ${i} does not reach the root — cycle`);
+  });
+  ok(bad.length === 0, bad.join('\n      '));
+});
+
+test('every TRAIN entry names its person and its role', () => {
+  const train = buildTrain([{ slug: 'a' }, { slug: 'b' }], 'harper');
+  const bad = [];
+  train.forEach((t, i) => {
+    if (t.person !== 'harper') bad.push(`wheel ${i} person is ${t.person}, want harper`);
+    if (t.role !== 'link') bad.push(`wheel ${i} role is ${t.role}, want link`);
+  });
+  ok(bad.length === 0, bad.join('\n      '));
+});
+
 test('the fit rule does not branch on how many gears are in the chain', () => {
   /* The rule is "a gear has a standard size for this viewport, and shrinks only
      when something physical says it must". Nothing in it may depend on the

@@ -377,7 +377,15 @@ const WHO = (function () {
    `prof.rim` sets the face radius on UNMARKED wheels only. Every wheel here is
    marked, and a marked wheel takes its face from the engraving band instead, so
    this is a default rather than a per-wheel choice. */
-const TRAIN = (WHO.links || []).map(l => ({ slug: l.slug, prof: { rim: 1.7 } }));
+const TRAIN = (WHO.links || []).map((l, i) => ({ slug: l.slug, prof: { rim: 1.7 },
+  /* THE PARENT IS EXPLICIT. It used to be implicit -- wheel i meshed wheel i-1,
+     and nothing said so -- which is why solve() carried x/y/dir/phase as running
+     state down the array. A chain is still a path, so every parent here is i-1
+     and nothing renders differently -- what changes is that a branch becomes
+     expressible at all. */
+  parent: i === 0 ? null : i - 1,
+  person: WHO.slug,
+  role: 'link' }));
 
 /* The tooth counts above are the seed, not the answer: they are dealt per load,
    so the machine has a different silhouette every visit rather than the same
@@ -2059,14 +2067,19 @@ class Component extends DCLogic {
     }
     const slugFor = this._slugFor;
     const g = [], strands = [];
-    let x = 0, y = 0, dir = 1, phase = 0;
     TRAIN.forEach((t, i) => {
       const prof = t.prof || {};
       const r = MODULE * t.teeth / 2;
       const ro = r + MODULE * TOOTH_ADD;
       let chainFrom = null;
-      if (i > 0) {
-        const prev = g[i - 1];
+      /* PER WHEEL, NOT CARRIED. These used to be declared outside the loop and
+         mutated, so wheel i's position was whatever the previous iteration left
+         behind -- the implicit path, written as shared state. Deriving each wheel
+         from its own parent is what makes a branch possible. The initial values
+         are the ones the old declaration held, so the root is unchanged. */
+      let x = 0, y = 0, dir = 1, phase = 0;
+      if (t.parent != null) {
+        const prev = g[t.parent];
         const linked = !!t.link;
         /* Distance is fixed by the drive type; the bearing is nudged until this wheel
            clears every wheel it is not meshed with by at least CLEARANCE. */
@@ -2080,7 +2093,7 @@ class Component extends DCLogic {
               const a = cand * Math.PI / 180;
               const px = prev.x + d * Math.cos(a), py = prev.y + d * Math.sin(a);
               let clash = g.some((o, oi) => {
-                if (oi === i - 1) return false;
+                if (oi === t.parent) return false;
                 /* The two ends of the train repel each other, so the run reads as a
                    line of machinery rather than a closed ring. */
                 const tight = this._tight || 1;
@@ -2099,7 +2112,7 @@ class Component extends DCLogic {
                 /* A chain or belt run may not cross another run, nor pass over a wheel. */
                 const s1 = { x: prev.x, y: prev.y }, s2 = { x: px, y: py };
                 clash = strands.some(st => segCross(s1, s2, st[0], st[1])) ||
-                  g.some((o, oi) => oi !== i - 1 && segDist({ x: o.x, y: o.y }, s1, s2) < o.ro + 10);
+                  g.some((o, oi) => oi !== t.parent && segDist({ x: o.x, y: o.y }, s1, s2) < o.ro + 10);
               }
               if (!clash) { ang = cand; x = px; y = py; placed = true; }
               if (step === 0) break;
@@ -2111,7 +2124,7 @@ class Component extends DCLogic {
         if (linked) {
           dir = prev.dir;
           phase = 0;
-          chainFrom = i - 1;
+          chainFrom = t.parent;
           strands.push([{ x: prev.x, y: prev.y }, { x: x, y: y }]);
         } else {
           dir = -prev.dir;
