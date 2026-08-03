@@ -380,6 +380,15 @@ const WHO = CHAIN_ORDER[0] || { slug: '', name: '', links: [] };
 const CHAIN_RANK = {};
 CHAIN_ORDER.forEach((p, k) => { CHAIN_RANK[p.slug] = k; });
 
+/* WHAT EACH CHAIN'S DATUM PLATE IS STAMPED WITH. The name config.js already
+   carries, verbatim -- its casing is the casing on the plate. An optional
+   `datum` on the person overrides it, for a plate that should not read as the
+   picker's label. Never uppercased, never abbreviated, never given a serial: a
+   plate that says something other than what the picker says is a second name
+   for the same person, and the whole point of the mark is that it names one. */
+const DATUM_PLATE = {};
+(CONF.PEOPLE || []).forEach(p => { DATUM_PLATE[p.slug] = p.datum || p.name || p.slug; });
+
 /* The SPINE is the longest chain -- it sets the scale, and it is the axis every
    other chain runs parallel to. */
 const SPINE_LEN = Math.max(1, ...STAGE.people.map(p => (p.links || []).length));
@@ -1548,6 +1557,61 @@ function shades(hex, soft) {
     : [mix(0.55, 255), mix(0.14, 255), mix(0.2, 0), mix(0.42, 0)];
 }
 
+/* WCAG relative luminance, and the contrast a colour reaches at a given alpha
+   over a given ground. The only thing on the stage that needs a contrast number
+   rather than a taste one is the datum mark: it has to hold ONE settled visual
+   weight across two palettes, and the alpha that does that is different in each
+   (see datumOpacity). Wheel tone stays with flatTones(), which is a taste
+   derivation and has no business knowing about ratios. */
+function relLum(c) {
+  const f = (v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+  return 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2]);
+}
+function rgbOf(hex) {
+  const n = parseInt(String(hex).trim().slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+/* `fg` painted at alpha `a` over `bg`, against `bg` itself. */
+function contrastAt(fg, bg, a) {
+  const l1 = relLum([0, 1, 2].map(i => bg[i] + (fg[i] - bg[i]) * a)), l2 = relLum(bg);
+  return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+}
+/* THE LIGHT PALETTE, READABLE WHICHEVER THEME IS ON. The dark tokens are an
+   override on `:root[data-theme="dark"]`, so getComputedStyle only ever reports
+   the palette currently in force -- and the datum's reference weight is the
+   LIGHT one, because that is the treatment that was mocked and judged. Read out
+   of the `:root` declaration itself, the same way gsRender() reads --gsfit
+   rather than repeating it: one source of truth, and changing a token in the
+   stylesheet moves the derivation with it.
+
+   ASKED LAZILY, AND MEMOISED ONLY ONCE IT HAS AN ANSWER. The page's own <style>
+   is not in document.styleSheets while this file is still being evaluated --
+   the markup is compiled and re-inserted first -- so a scan at load time finds
+   nothing, and caching that nothing would freeze the derivation at its fallback
+   for the life of the page. */
+let _lightVars = null;
+function lightVars() {
+  if (_lightVars) return _lightVars;
+  const out = {};
+  try {
+    const sheets = document.styleSheets;
+    for (let i = 0; i < sheets.length; i++) {
+      let rules = null;
+      try { rules = sheets[i].cssRules; } catch (e) { continue; }
+      for (let j = 0; rules && j < rules.length; j++) {
+        const r = rules[j];
+        if (!r.style || r.selectorText !== ':root') continue;
+        ['--bg', '--muted'].forEach(k => {
+          const v = (r.style.getPropertyValue(k) || '').trim();
+          if (v) out[k] = v;
+        });
+      }
+    }
+  } catch (e) {}
+  if (out['--bg'] && out['--muted']) _lightVars = out;
+  return out;
+}
+
 /* Per person now: a combined stage carries several chains and a service belongs
    to whoever's chain it sits on. Keyed person -> slug -> { label, path, href }. */
 const SITES = (function () {
@@ -1775,6 +1839,82 @@ class Component extends DCLogic {
     return order;
   }
 
+  /* THE CHAIN DATUM: where each chain's scribed reference line and stamped plate
+     go, in solve units. This is the half with a right answer -- which wheels are
+     stations, which end the plate rides, how far the mark reaches -- and
+     datumLayer() below is the half that draws it. Split so the suite can run
+     this against solves the shipped page never deals.
+
+     IT TAKES ITS AXIS FROM chainAxes(), and must never measure one of its own. A
+     one-wheel chain has no first-to-last vector: `head` and `tail` are the same
+     wheel, atan2(0, 0) returns 0, and 0 degrees is horizontal in every
+     orientation -- so a mark that derives its own direction collapses onto the
+     short axis in portrait and the whole thing reads as a stray rule across the
+     page. That is #67, and it is the second time the same zero-length vector has
+     had to be caught; chainAxes() already answers it, for the escape runs and
+     for this, in one place.
+
+     ONLY ON A SHARED STAGE. The datum exists to tell chains apart. A solo page
+     has one chain, so a line with a name on it would be furniture identifying
+     the only thing present -- and the mark is deliberately NOT colour, because a
+     person's hue preference must not reserve that hue and two chains may
+     legitimately come out looking alike. */
+  datumRuns(solved, ghosts) {
+    const axes = this.chainAxes(solved);
+    if (axes.length < 2) return [];
+    const mine = {};
+    (ghosts || []).forEach(g => {
+      if (g.person == null) return;
+      (mine[g.person] = mine[g.person] || []).push(g);
+    });
+    return axes.map(c => {
+      const a = c.deg * Math.PI / 180;
+      const ux = Math.cos(a), uy = Math.sin(a), nx = -uy, ny = ux;
+      /* CLEAR OF EVERY TOOTH THE CHAIN CARRIES, not merely of the first one. The
+         far edge of each wheel is measured along the normal, off the TIP radius
+         rather than the pitch radius -- the line has to miss the teeth, not the
+         circle they are cut on -- and the deepest of them sets the offset, plus
+         a module of air. A serpentine wanders perpendicular to its own axis by
+         most of a wheel, so an offset taken from the head alone puts the mark
+         straight through whichever wheel the deal happened to drop lowest. */
+      const off = Math.max.apply(null, c.wheels.map(g =>
+        (g.cx - c.head.cx) * nx + (g.cy - c.head.cy) * ny + g.ro)) + MODULE;
+      const o = { x: c.head.cx + nx * off, y: c.head.cy + ny * off };
+      /* Every wheel is projected onto the line, which is what makes this a
+         station index rather than a ruler: the marks cannot drift out of step
+         with the wheels they reference, because they ARE the wheels. */
+      const at = (g) => (g.cx - o.x) * ux + (g.cy - o.y) * uy;
+      /* A STATION IS A WHEEL YOU CAN REACH. Ghosts and idlers are spanned but
+         never indexed -- they are machinery, not parts. chainAxes() has already
+         dropped the idlers; this drops any link the active config seats no
+         service on, which is the same test the badges are filtered by. */
+      const stations = c.wheels
+        .filter(g => g.slug && SITES[g.person] && SITES[g.person][g.slug])
+        .map(at).sort((p, q) => p - q);
+      const own = mine[c.person] || [];
+      /* THE FULL BREADTH OF THE ASSEMBLY, background machinery included. The run
+         off the trailing edge is part of the machine this line references, so
+         the line goes where it goes. */
+      let d0 = Infinity, d1 = -Infinity;
+      c.wheels.concat(own).forEach(g => {
+        const d = at(g);
+        if (d < d0) d0 = d;
+        if (d > d1) d1 = d;
+      });
+      /* THE PLATE RIDES THE LAST LEADING GHOST -- the background wheel
+         immediately before the first real gear, so it reads as the placard at
+         the head of the run rather than as a caption floating off the end. `k`
+         counts outward from the chain, so the last one is k 0. A driven chain
+         has no leading run at all, because that is the end its bridge arrives
+         at, and it falls back to the head wheel rather than vanishing. */
+      const lead = own.filter(g => g.lead);
+      const anchor = lead.length ? lead.reduce((m, g) => (g.k < m.k ? g : m)) : c.head;
+      return { person: c.person, plate: DATUM_PLATE[c.person] || c.person,
+        deg: c.deg, ux: ux, uy: uy, nx: nx, ny: ny, o: o,
+        stations: stations, plateAt: at(anchor), d0: d0, d1: d1 };
+    });
+  }
+
   /* Background machinery: extra wheels seeded off each edge, meshed onto the visible
      train, dimmed and set behind it so they read as context rather than content. */
   fitEscapes() {
@@ -1832,14 +1972,20 @@ class Component extends DCLogic {
        missing its leading run at is the end its bridge arrives at, so the chain
        visibly receives its power there instead of trailing a second tail into the
        machinery that drives it. */
+    /* EACH HOST CARRIES WHOSE CHAIN IT CONTINUES, and which end of it. The runs
+       are that chain's own machinery, so the datum mark spans them with it
+       (rule 1) and rides its plate on the last LEADING one (rule 3) -- neither
+       is answerable from a wheel's position, because the two runs of the spine
+       leave in opposite directions and a driven chain has only the trailing
+       one. Recording it here is free; recovering it afterwards is not. */
     const axes = this.chainAxes(solved);
     const hosts = [];
     axes.forEach(c => {
       if (!c.spine) return;
-      hosts.push({ g: c.head, deg: c.deg + 180 });
-      hosts.push({ g: c.tail, deg: c.deg });
+      hosts.push({ g: c.head, deg: c.deg + 180, person: c.person, lead: true });
+      hosts.push({ g: c.tail, deg: c.deg, person: c.person, lead: false });
     });
-    axes.forEach(c => { if (!c.spine) hosts.push({ g: c.tail, deg: c.deg }); });
+    axes.forEach(c => { if (!c.spine) hosts.push({ g: c.tail, deg: c.deg, person: c.person, lead: false }); });
     /* How far a heading travels before it leaves the viewport. */
     const reachAlong = (px, py, deg) => {
       const a = deg * Math.PI / 180, dx = Math.cos(a), dy = Math.sin(a);
@@ -1894,7 +2040,10 @@ class Component extends DCLogic {
              rnd() draws feeding nothing -- and because they consumed the
              sequence, deleting them deals a different set of background wheels.
              That is not a regression: these are re-dealt on every load anyway. */
-          ro: r + MODULE * 0.95, i: 'gh' + ei + k };
+          ro: r + MODULE * 0.95, i: 'gh' + ei + k,
+          /* whose run this is, which end of that chain it leaves by, and how far
+             along it -- k 0 is the wheel in mesh with the chain itself */
+          person: host.person, lead: host.lead, k: k };
         ghosts.push(g);
         reached += d;
         prev = g;
@@ -3102,7 +3251,52 @@ class Component extends DCLogic {
      and an idler drawn without it came out around 5.5:1 against the pale page --
      darker and higher in contrast than any of the linked wheels the machine is
      actually about, which is the opposite of what a ghost is for. */
-  ghostOpacity() { return this.state.theme === 'dark' ? 0.17 : 0.46; }
+  ghostOpacity(theme) { return (theme || this.state.theme) === 'dark' ? 0.17 : 0.46; }
+
+  /* HOW HARD THE DATUM MARK IS DRAWN, solved rather than carried per theme.
+
+     The ghost layer's pair does not transfer, and the reason is measurable: 0.46
+     and 0.17 both put the BACKGROUND MACHINERY at the same weight -- a ghost
+     wheel lands at 1.34:1 against the page in light and 1.38:1 in dark -- but
+     the datum is not drawn in the ghost greys. It is drawn in --muted, which is
+     a far firmer colour against the light page (#6B7E7C on #E8EAE5) than against
+     the dark one (#93A5A3 on #1E2226, within a whisker of the ghost grey's own
+     luminance). So the same alpha means two different marks: 0.46 in light gives
+     1.69:1, while 0.17 in dark gives 1.38:1 -- the scribe drops back into the
+     machinery it is supposed to be the reference for.
+
+     The LIGHT treatment is the reference, because that is the one that was
+     mocked and judged, and dark solves for the alpha that reaches the same
+     contrast ratio. In light this returns 0.46 exactly, by construction. In dark
+     it lands at 0.28 -- not the mock's guessed 0.34, which overshoots to 1.89:1
+     and reads as annotation rather than as a scribed line. Nothing here is a
+     number to re-measure when a token moves: change --muted or --bg in either
+     block and the solve follows it.
+
+     Bisection, not algebra: composite luminance is monotonic in alpha but not
+     invertible in closed form through the sRGB transfer curve, and 24 halvings
+     of 0..1 settle it far below the two decimal places that reach the markup. */
+  datumOpacity() {
+    if (!this._datumOp) this._datumOp = {};
+    const theme = this.state.theme;
+    if (this._datumOp[theme] !== undefined) return this._datumOp[theme];
+    const lv = lightVars();
+    /* No reference palette to read yet means no derivation yet. The ghost
+       layer's own alpha stands in, and NOTHING IS CACHED, so the next render
+       asks again rather than holding the fallback for good. */
+    if (!lv['--bg'] || !lv['--muted']) return this.ghostOpacity();
+    const css = getComputedStyle(document.documentElement);
+    const bg = rgbOf(css.getPropertyValue('--bg')), fg = rgbOf(css.getPropertyValue('--muted'));
+    const want = contrastAt(rgbOf(lv['--muted']), rgbOf(lv['--bg']), this.ghostOpacity('light'));
+    let lo = 0, hi = 1;
+    for (let i = 0; i < 24; i++) {
+      const mid = (lo + hi) / 2;
+      if (contrastAt(fg, bg, mid) < want) lo = mid; else hi = mid;
+    }
+    const a = Math.round((lo + hi) * 50) / 100;
+    this._datumOp[theme] = a;
+    return a;
+  }
 
   /* Cheap stand-in for the background wheels: body, web and hub, no masks or turning
      marks — they are blurred and dim, so the detail would be wasted frames. */
@@ -4251,6 +4445,134 @@ class Component extends DCLogic {
     );
   }
 
+  /* THE DATUM MARK, DRAWN: one scribed line and one stamped plate per chain, the
+     reference a fitter follows along a real machine.
+
+     EVERY CHAIN'S MARK IS IN ONE LAYER, and that layer is the first thing the
+     stage paints -- beneath the ghosts, beneath the cast shadows, beneath every
+     wheel. Painting each mark immediately before its own chain is the
+     arrangement the mock got wrong first: the following chain's ghost run then
+     covered the previous chain's plate.
+
+     EVERY SIZE IS A MODULE MULTIPLE times the render scale, so the mark grows
+     and shrinks with the machine it references rather than being fixed furniture
+     stuck on the front of it. The hairline is the one exception, and it is a
+     rendered-pixel intent (#61): under a device-independent pixel the rasteriser
+     turns a scribe into a grey wash instead of a line.
+
+     `box` is the ghost layer's own union, in rendered pixels. The line is run to
+     the edge of it and a little past, which is what makes it leave the drawing
+     the way a scribed datum runs past the parts it references -- derived from
+     what is actually on stage rather than from a guessed length. */
+  datumLayer(solved, S, box) {
+    const h = React.createElement;
+    const runs = this.datumRuns(solved, this.state.ghosts);
+    if (!runs.length) return null;
+    const HAIR = Math.max(1, MODULE * 0.13 * S);
+    const MAJOR = MODULE * 1.2 * S, MINOR = MODULE * 0.5 * S, PAST = MODULE * 2 * S;
+    const PLATE_H = MODULE * 2 * S, PLATE_F = MODULE * 1.3 * S;
+    const MONO = "ui-monospace, Menlo, 'DejaVu Sans Mono', monospace";
+    const els = [];
+    let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+    const mk = (x, y) => {
+      if (x < bx0) bx0 = x;
+      if (x > bx1) bx1 = x;
+      if (y < by0) by0 = y;
+      if (y > by1) by1 = y;
+    };
+    const seg = (key, ax, ay, zx, zy) => {
+      mk(ax, ay); mk(zx, zy);
+      els.push(h('line', { key: key, x1: ax.toFixed(2), y1: ay.toFixed(2),
+        x2: zx.toFixed(2), y2: zy.toFixed(2),
+        style: { stroke: 'var(--muted)', strokeWidth: HAIR.toFixed(2) + 'px' } }));
+    };
+    /* WHERE THE LINE ENTERS AND LEAVES THE DRAWN AREA, by slab clipping. An axis
+       the line runs very nearly parallel to does not bound it at all, and taking
+       that axis' crossing anyway is how a datum a fraction of a degree off
+       horizontal ended up thirty-six thousand pixels long. */
+    const span = (px, py, dx, dy) => {
+      let lo = -Infinity, hi = Infinity;
+      [[px, dx, box.x0, box.x1], [py, dy, box.y0, box.y1]].forEach(s => {
+        if (Math.abs(s[1]) < 1e-6) return;
+        const a = (s[2] - s[0]) / s[1], b = (s[3] - s[0]) / s[1];
+        lo = Math.max(lo, Math.min(a, b));
+        hi = Math.min(hi, Math.max(a, b));
+      });
+      return [isFinite(lo) ? lo : 0, isFinite(hi) ? hi : 0];
+    };
+    runs.forEach((r, ri) => {
+      const ox = r.o.x * S, oy = r.o.y * S;
+      const at = (d, t) => ({ x: ox + r.ux * d + r.nx * t, y: oy + r.uy * d + r.ny * t });
+      const edge = span(ox, oy, r.ux, r.uy);
+      const d0 = Math.min(r.d0 * S, edge[0]) - PAST;
+      const d1 = Math.max(r.d1 * S, edge[1]) + PAST;
+      const a = at(d0, 0), z = at(d1, 0);
+      seg('s' + ri, a.x, a.y, z.x, z.y);
+      /* THE TICKS ARE NOT NUMBERED, and that was measured rather than assumed.
+         A numeral set as a module multiple, like everything else here, renders
+         at 11.4 CSS px on a 1440-wide display, 6.7 on a 390 phone and 4.4 on a
+         320 one -- a five-fold spread, and at the small end a two-digit group is
+         two grey blobs at any pixel ratio. Dropping them below a floor was the
+         alternative, and there is no floor here to derive one from: the page's
+         only stated lettering floor is MIN_ENGRAVE, which is scale-free and
+         sits about four times below the numeral at every viewport, so it never
+         fires. Anything that did fire would be a number picked to make one
+         screenshot look right and re-measured the next time the fit rule moves.
+         The tick IS the index -- the numbering belongs on the drawing, not on
+         the bed -- and losing it takes the loudest ink out of a mark whose whole
+         requirement is to stay quiet in both themes. */
+      r.stations.forEach((sd, k) => {
+        const d = sd * S;
+        const p = at(d, 0), q = at(d, MAJOR);
+        seg('t' + ri + '_' + k, p.x, p.y, q.x, q.y);
+        /* Minor ticks subdivide the gap between stations, which is what gives
+           the line its scale without inventing a spacing to give it one. */
+        if (k === r.stations.length - 1) return;
+        const nd = r.stations[k + 1] * S;
+        for (let m = 1; m < 4; m++) {
+          const dm = d + (nd - d) * (m / 4);
+          const mp = at(dm, 0), mq = at(dm, MINOR);
+          seg('m' + ri + '_' + k + '_' + m, mp.x, mp.y, mq.x, mq.y);
+        }
+      });
+      /* The plate: stamped metal, so --hair for the body and --muted for the
+         letters, and its width is MEASURED at the size it is set rather than
+         guessed from a per-character average -- the same lesson the hover pill
+         cost, where an estimate clipped the longest label on the first try. */
+      const label = r.plate;
+      const font = '600 ' + PLATE_F.toFixed(2) + 'px ' + MONO;
+      const track = PLATE_F * 0.09;
+      const pw = this.textWidth(label, font) + track * Math.max(0, label.length - 1) + PLATE_H * 0.8;
+      const c = at(r.plateAt * S, 0);
+      [[-pw / 2, -PLATE_H / 2], [pw / 2, -PLATE_H / 2], [pw / 2, PLATE_H / 2], [-pw / 2, PLATE_H / 2]]
+        .forEach(p => mk(c.x + r.ux * p[0] + r.nx * p[1], c.y + r.uy * p[0] + r.ny * p[1]));
+      els.push(h('g', { key: 'p' + ri,
+        transform: 'translate(' + c.x.toFixed(2) + ',' + c.y.toFixed(2) + ') rotate(' + r.deg.toFixed(2) + ')' },
+        h('rect', { x: (-pw / 2).toFixed(2), y: (-PLATE_H / 2).toFixed(2),
+          width: pw.toFixed(2), height: PLATE_H.toFixed(2), rx: (PLATE_H * 0.1).toFixed(2),
+          style: { fill: 'var(--hair)', stroke: 'var(--muted)', strokeWidth: HAIR.toFixed(2) + 'px' } }),
+        /* Offset by a share of the font size, not by `dominant-baseline`:
+           WebKit puts `central` somewhere Blink and Gecko do not, which is what
+           left the rim engraving off centre in Safari (#26). */
+        h('text', { x: 0, y: (PLATE_F * 0.35).toFixed(2), textAnchor: 'middle',
+          style: { fill: 'var(--muted)', font: font, letterSpacing: track.toFixed(2) + 'px' } },
+          label)));
+    });
+    /* THE LAYER MUST CONTAIN WHAT IT PAINTS (#21). It carries an opacity, and an
+       opacity below 1 makes the subtree one composited group: WebKit rasterises
+       that group at the element's BOX while Blink uses the union of its
+       children, so a box smaller than its contents is clipped in Safari and not
+       in Chrome. The viewBox is the box, so the coordinates above stay absolute
+       and nothing has to be shifted to match. */
+    const pad = PLATE_H;
+    bx0 -= pad; by0 -= pad; bx1 += pad; by1 += pad;
+    return h('svg', { key: 'datum', width: (bx1 - bx0).toFixed(2), height: (by1 - by0).toFixed(2),
+      viewBox: [bx0, by0, bx1 - bx0, by1 - by0].map(v => v.toFixed(2)).join(' '),
+      style: { position: 'absolute', left: bx0.toFixed(2) + 'px', top: by0.toFixed(2) + 'px',
+        opacity: this.datumOpacity(), zIndex: 0, pointerEvents: 'none', overflow: 'visible' } },
+      els);
+  }
+
   renderVals() {
     const h = React.createElement;
     const solved = this.solve();
@@ -4333,6 +4655,12 @@ class Component extends DCLogic {
        that one declaration is what made Safari soft: everything below it was laid
        out small and then stretched as a bitmap by the compositor. */
     const gearArt = h('div', { 'aria-hidden': 'true', style: { position: 'absolute', left: 0, top: 0, width: (solved.w * S) + 'px', height: (solved.h * S) + 'px' } },
+      /* FIRST, so every chain's datum is beneath EVERY wheel rather than only
+         beneath its own. Painted per chain, the next chain's ghost run buries
+         the previous chain's plate. It reads the same union box the ghost layer
+         sizes itself to, so the line leaves the drawing rather than stopping at
+         the edge of the linked wheels. */
+      this.datumLayer(solved, S, { x0: _gx0, y0: _gy0, x1: _gx1, y1: _gy1 }),
       ghosts,
       /* One cast-shadow layer behind every wheel, so a wheel's shadow can never fall
          on top of the neighbour it meshes with (#18). Static — never touched by the

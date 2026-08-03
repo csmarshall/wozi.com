@@ -804,7 +804,10 @@ test('a bridge idler is drawn at the same opacity as every other ghost', () => {
      page, darker and higher in contrast than any of the linked wheels the
      machine is actually about. The number must be the SAME number, not a second
      opinion about it. */
-  ok(/ghostOpacity\(\)\s*\{/.test(SRC), 'there is no single source for the ghost opacity');
+  /* The parameter is optional and names a theme: the datum's own opacity is
+     solved against the LIGHT treatment's contrast whichever theme is on, and it
+     asks this for the reference alpha rather than repeating 0.46 beside it. */
+  ok(/ghostOpacity\((?:theme)?\)\s*\{/.test(SRC), 'there is no single source for the ghost opacity');
   const ghosts = SRC.slice(SRC.indexOf("h('div', { key: 'ghosts'"), SRC.indexOf("key: 'shadows'"));
   ok(/opacity: this\.ghostOpacity\(\)/.test(ghosts),
     'the ghost layer no longer takes its opacity from ghostOpacity()');
@@ -1040,6 +1043,233 @@ test('the bridges come out of solve(), and stay distinct from the drawn strands'
   ok(solved.bridgeRuns.every(s => s.every(p => p.cx >= 0 && p.cy >= 0)),
     'the bridge runs were published in the pre-centring frame, so they do not '
     + 'line up with the gears\' cx/cy');
+});
+
+/* THE REAL datumRuns, lifted out of the page and run against a solve of the
+   test's choosing. It reads nothing from the DOM at all -- the drawing is a
+   separate method -- so only the chain axis it consumes has to be handed in, and
+   that is the page's own chainAxes() built the same way the escape-run harness
+   builds it. `ghosts` is the escape-run list the page would have in state. */
+function datumRunsOn(solved, axisRot, spineSlug, ghosts, sites, plates) {
+  const fn = new Function('MODULE', 'SITES', 'DATUM_PLATE',
+    'return function ' + grabBlock('  datumRuns(solved, ghosts) {', '{', '}') + ';')(
+    page.MODULE, sites || {}, plates || {});
+  const ctx = {
+    _axisRot: axisRot,
+    chainAxes: new Function('WHO',
+      'return function ' + grabBlock('  chainAxes(solved) {', '{', '}') + ';')(
+      { slug: spineSlug })
+  };
+  return fn.call(ctx, solved, ghosts || []);
+}
+/* runSolve seats no service slugs -- PAIR_SLOTS, PAIRS and SINGLES are handed in
+   empty, so slugFor is empty and every wheel comes back with slug null. The
+   harness supplies what the page's own seating supplies: one slug per linked
+   wheel, and the SITES table that resolves it. Returns that table. */
+function seatSlugs(solved) {
+  const sites = {};
+  solved.gears.forEach(g => {
+    if (g.role !== 'link' || g.person == null) return;
+    g.slug = 'w' + g.i;
+    (sites[g.person] = sites[g.person] || {})[g.slug] = {};
+  });
+  return sites;
+}
+/* Where the datum source lives, so an assertion about it cannot drift onto some
+   other mention of the word. `datum` appears in chainAxes' rationale first. */
+const DATUM_SRC = SRC.slice(SRC.indexOf('  datumRuns(solved, ghosts) {'),
+  SRC.indexOf('  fitEscapes() {'));
+const DATUM_DRAW = SRC.slice(SRC.indexOf('  datumLayer(solved, S, box) {'),
+  SRC.indexOf('  renderVals() {'));
+
+test('the datum takes its axis from the chain, never its own copy', () => {
+  /* #67, twice over. A one-wheel chain has no first-to-last vector: head and
+     tail are the same wheel, atan2(0, 0) returns 0, and 0 degrees is horizontal
+     in every orientation -- so a mark that derives its own direction lies across
+     the SHORT axis in portrait. chainAxes() already answers this for the escape
+     runs, and a second copy of the answer is how the escape runs and the bridge
+     came to disagree in the first place. */
+  ok(DATUM_SRC.length > 0, 'no datum is drawn at all');
+  ok(/this\.chainAxes\(/.test(DATUM_SRC),
+    'the datum derives its own axis instead of sharing the chain axis');
+  ok(!/Math\.atan2/.test(DATUM_SRC),
+    'the datum measures an angle of its own — the axis must come from chainAxes()');
+  const bad = [];
+  [0, 90].forEach(rot => {
+    const { solved, order } = runSolve(THREE, { axisRot: rot });
+    const spineSlug = order[0].slug;
+    const axes = chainAxesOf(solved, rot, spineSlug);
+    const runs = datumRunsOn(solved, rot, spineSlug, [], seatSlugs(solved));
+    eq(runs.length, axes.length, 'rot ' + rot + ': not every chain gets a datum');
+    runs.forEach((r, k) => {
+      if (Math.abs(r.deg - axes[k].deg) > 1e-9)
+        bad.push(`rot ${rot}: ${r.person}'s datum runs at ${r.deg.toFixed(2)}, `
+          + `its chain at ${axes[k].deg.toFixed(2)}`);
+      /* The one-wheel chain is the case that collapses. Its mark must still have
+         length, and must lie on the stage axis rather than on the horizontal. */
+      if (axes[k].wheels.length === 1) {
+        if (axisOff(r.deg, rot) > 1e-9)
+          bad.push(`rot ${rot}: a one-wheel chain's datum lies at ${r.deg} instead `
+            + `of on the stage axis (${rot}) — #67 again`);
+        if (!(r.d1 - r.d0 >= 0) || !isFinite(r.d0) || !isFinite(r.d1))
+          bad.push(`rot ${rot}: a one-wheel chain's datum has no extent`);
+      }
+    });
+  });
+  ok(bad.length === 0, bad.join('\n      '));
+});
+
+test('a datum station is a clickable gear, never a ghost or an idler', () => {
+  /* Ghosts and idlers are spanned but never indexed: they are machinery, not
+     parts you can reach. chainAxes() has already dropped the idlers; the station
+     filter is what drops a link the active config seats no service on. */
+  ok(/\.slug/.test(DATUM_SRC),
+    'the datum indexes every wheel rather than only the clickable ones');
+  const bad = [];
+  [0, 90].forEach(rot => {
+    const { solved, order } = runSolve(THREE, { axisRot: rot });
+    const sites = seatSlugs(solved);
+    const runs = datumRunsOn(solved, rot, order[0].slug, [], sites);
+    runs.forEach(r => {
+      const want = THREE.find(p => p.slug === r.person).links.length;
+      if (r.stations.length !== want)
+        bad.push(`rot ${rot}: ${r.person} has ${r.stations.length} stations for `
+          + `${want} clickable wheels`);
+      /* Every station must land on one of that chain's own linked wheels, and on
+         nothing else the stage carries. An idler projected onto the line would
+         sit between two of them and pass a count-only check. */
+      const own = solved.gears.filter(g => g.person === r.person && g.role === 'link');
+      const at = (g) => (g.cx - r.o.x) * r.ux + (g.cy - r.o.y) * r.uy;
+      const mine = own.map(at).sort((a, b) => a - b);
+      r.stations.forEach((d, k) => {
+        if (Math.abs(d - mine[k]) > 1e-9)
+          bad.push(`rot ${rot}: ${r.person}'s station ${k} is not one of its own links`);
+      });
+      /* And the mark must clear the teeth of every wheel it indexes, not only
+         the first: a serpentine wanders perpendicular by most of a wheel. */
+      own.forEach(g => {
+        const perp = (g.cx - r.o.x) * r.nx + (g.cy - r.o.y) * r.ny;
+        if (perp > -g.ro)
+          bad.push(`rot ${rot}: ${r.person}'s datum passes through a wheel `
+            + `(clearance ${(-perp - g.ro).toFixed(1)})`);
+      });
+    });
+    /* NOT ASSERTED: that no idler projects onto a station. A bridge runs
+       perpendicular to the chain it feeds, so the idler that feeds a one-wheel
+       chain lands on exactly that wheel's position along the axis -- a
+       coincidence of projection, not an index. What binds the rule is above:
+       the station list IS that chain's own linked wheels, in order. */
+    /* And the predicate is the badges' own, not merely `role === 'link'`: take
+       one service out of SITES and its station must go with it, because a wheel
+       whose service the active config does not seat is not a part you can
+       reach. */
+    const one = runs.find(r => r.stations.length > 1);
+    const drop = Object.keys(sites[one.person])[0];
+    const thin = JSON.parse(JSON.stringify(sites));
+    delete thin[one.person][drop];
+    const after = datumRunsOn(solved, rot, order[0].slug, [], thin)
+      .find(r => r.person === one.person);
+    if (after.stations.length !== one.stations.length - 1)
+      bad.push(`rot ${rot}: a wheel with no service seated on it is still indexed`);
+  });
+  ok(bad.length === 0, bad.join('\n      '));
+});
+
+test('the datum plate defaults to the person name, untransformed', () => {
+  /* The casing config.js carries is the casing on the plate. Never uppercased,
+     abbreviated or given a serial: a plate that says something other than what
+     the picker says is a second name for the same person. */
+  ok(!/toUpperCase\(\)/.test(DATUM_SRC + DATUM_DRAW),
+    'the datum plate transforms the configured name');
+  ok(/p\.datum \|\| p\.name/.test(SRC),
+    'the plate string is not the configured name with an optional `datum` override');
+  ok(/datum\s+optional/.test(CFG_SRC),
+    'config.js does not document the optional per-person `datum` key');
+  const { solved, order } = runSolve(THREE, { axisRot: 0 });
+  const runs = datumRunsOn(solved, 0, order[0].slug, [], seatSlugs(solved),
+    { spine: 'A. Name', mid: 'b' });
+  eq(runs.find(r => r.person === 'spine').plate, 'A. Name',
+    'the plate does not come from the configured string');
+  eq(runs.find(r => r.person === 'tiny').plate, 'tiny',
+    'a person with no plate string configured gets no plate at all');
+});
+
+test('a datum spans its chain\'s ghosts and rides its plate on the last leading one', () => {
+  /* Rule 1 and rule 3. The run off the trailing edge is part of the machine the
+     line references, so the line goes where it goes; the plate sits alongside
+     the background wheel immediately before the first real gear, which is the
+     placard at the head of the run. A driven chain has no leading run at all --
+     that is the end its bridge arrives at -- and falls back to the head wheel
+     rather than vanishing. */
+  const bad = [];
+  [0, 90].forEach(rot => {
+    const { solved, order } = runSolve(THREE, { axisRot: rot });
+    const sites = seatSlugs(solved);
+    const spineSlug = order[0].slug;
+    const axes = chainAxesOf(solved, rot, spineSlug);
+    const spine = axes.find(c => c.spine);
+    const bare = datumRunsOn(solved, rot, spineSlug, [], sites);
+    /* Two ghosts off the leading end and two off the trailing end of the spine,
+       placed on its own axis at real escape-run distances so the projection has
+       to do the work rather than agreeing by construction. */
+    const step = spine.head.ro * 3;
+    const ghosts = [0, 1].map(k => ({ person: spineSlug, lead: true, k: k,
+      cx: spine.head.cx - Math.cos(spine.deg * Math.PI / 180) * step * (k + 1),
+      cy: spine.head.cy - Math.sin(spine.deg * Math.PI / 180) * step * (k + 1) }))
+      .concat([0, 1].map(k => ({ person: spineSlug, lead: false, k: k,
+        cx: spine.tail.cx + Math.cos(spine.deg * Math.PI / 180) * step * (k + 1),
+        cy: spine.tail.cy + Math.sin(spine.deg * Math.PI / 180) * step * (k + 1) })));
+    const runs = datumRunsOn(solved, rot, spineSlug, ghosts, sites);
+    const r = runs.find(x => x.person === spineSlug);
+    const b = bare.find(x => x.person === spineSlug);
+    if (!(r.d0 < b.d0 - 1) || !(r.d1 > b.d1 + 1))
+      bad.push(`rot ${rot}: the datum stops at the linked wheels — the background `
+        + `machinery is not spanned (${b.d0.toFixed(0)}..${b.d1.toFixed(0)} vs `
+        + `${r.d0.toFixed(0)}..${r.d1.toFixed(0)})`);
+    const lead0 = ghosts[0];
+    const want = (lead0.cx - r.o.x) * r.ux + (lead0.cy - r.o.y) * r.uy;
+    if (Math.abs(r.plateAt - want) > 1e-9)
+      bad.push(`rot ${rot}: the plate is not at the LAST leading ghost`);
+    /* Every other chain has no leading run, so its plate falls back to the head. */
+    runs.filter(x => x.person !== spineSlug).forEach(x => {
+      const c = axes.find(a => a.person === x.person);
+      const head = (c.head.cx - x.o.x) * x.ux + (c.head.cy - x.o.y) * x.uy;
+      if (Math.abs(x.plateAt - head) > 1e-9)
+        bad.push(`rot ${rot}: ${x.person} has no leading ghost and lost its plate `
+          + `rather than falling back to the head of the run`);
+    });
+  });
+  ok(bad.length === 0, bad.join('\n      '));
+});
+
+test('no datum is drawn while one chain is on stage, and none is painted per chain', () => {
+  /* The datum exists to tell chains apart. On a solo page there is nothing to
+     tell apart, so the mark would be furniture identifying the only thing
+     present -- and the shipped default page is exactly that case, which is why
+     it is pixel-identical across this change. */
+  const solo = [{ slug: 'only', links: [{ slug: 'a' }, { slug: 'b' }, { slug: 'c' }] }];
+  const { solved, order } = runSolve(solo, { axisRot: 0 });
+  eq(datumRunsOn(solved, 0, order[0].slug, [], seatSlugs(solved)).length, 0,
+    'a solo page draws a datum, which identifies nothing and moves shipped pixels');
+  /* RULE 6: one layer, beneath EVERY wheel. Painted per chain, the following
+     chain's ghost run buries the previous chain's plate — which is what the mock
+     did first. */
+  const art = SRC.slice(SRC.indexOf('const gearArt = h(\'div\''));
+  const iDatum = art.indexOf('this.datumLayer(');
+  ok(iDatum > 0 && iDatum < art.indexOf('ghosts,') && iDatum < art.indexOf("key: 'shadows'"),
+    'the datum layer is not the first thing the stage paints, so a chain\'s '
+    + 'machinery can cover another chain\'s plate');
+  /* RULE 5: tokens, never invented greys. */
+  ok(!/#[0-9A-Fa-f]{3,6}/.test(DATUM_DRAW),
+    'the datum draws itself in a literal colour instead of --muted and --hair');
+  ok(/var\(--muted\)/.test(DATUM_DRAW) && /var\(--hair\)/.test(DATUM_DRAW),
+    'the datum does not take its scribe and plate colours from the theme tokens');
+  /* The dark alpha is SOLVED against the light treatment's contrast, not carried
+     as a second number beside the ghost layer's pair. */
+  const op = SRC.slice(SRC.indexOf('  datumOpacity() {'), SRC.indexOf('  ghostSvg(g, S) {'));
+  ok(/contrastAt\(/.test(op) && !/0\.3[0-9]/.test(op),
+    'the datum\'s dark opacity is a number someone measured once rather than one '
+    + 'the page solves from its own tokens');
 });
 
 test('the end-drift floor clears the widest step the deal can actually produce', () => {

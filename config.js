@@ -65,6 +65,16 @@ window.WOZI_CONFIG = {
                  slug   which service
                  path   engraved on the wheel's band — the handle, not the URL
                  href   where the badge links to
+       datum   optional. What this chain's datum plate is stamped with on a
+               combined stage — the scribed reference line each chain is drawn
+               against, which is how one chain is told from another. Defaults to
+               `name`, verbatim, casing and all. Set it only when the plate
+               should read as something other than the picker's label; it is
+               never uppercased, abbreviated or given a serial, and no datum is
+               drawn at all while one chain is on stage, because there is then
+               nothing to tell apart. Identity deliberately does NOT live in
+               colour: a person's hue preference must not reserve that hue, so
+               two chains may legitimately come out looking alike.
        bridge  optional, default true. On a combined stage every chain but the
                longest is driven off it through a short run of plain idler
                wheels, which is also what sets the gap between the two. Set
