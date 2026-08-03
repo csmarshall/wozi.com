@@ -833,6 +833,52 @@ const axisOff = (a, b) => {
   return d > 90 ? 180 - d : d;
 };
 
+/* The page's own crossing predicate, so a test that asks "does this cross that"
+   asks it the same way the solver does. */
+const segCrossJs = new Function(
+  'return ' + grabBlock('function segCross(', '{', '}'))();
+
+/* THE REAL fitEscapes, lifted out of the page and run against a solve of the
+   test's choosing. It reads the DOM through exactly two holes -- the stage's
+   bounding rect and the viewport size -- so both are handed in and the runs it
+   places are the runs the page would place. Scale is deliberately 1: solve units
+   and screen pixels then coincide, and a segment can be compared against
+   solved.bridgeRuns without a second conversion rule to get wrong.
+
+   GHOST_COLORS is a stand-in of length one. The draw that picks a colour consumes
+   one rnd() whatever the array holds, so the geometry downstream of it is
+   identical; nothing here looks at a colour. */
+function fitEscapesOn(solved, axisRot, spineSlug, margin) {
+  margin = margin || 300;
+  const fn = new Function('window', 'MODULE', 'GHOST_COLORS', 'segCross',
+    'return function ' + grabBlock('  fitEscapes() {', '{', '}') + ';')(
+    { innerWidth: solved.w + margin * 2, innerHeight: solved.h + margin * 2 },
+    page.MODULE, ['#000'],
+    new Function('return ' + grabBlock('function segCross(', '{', '}'))());
+  const ctx = {
+    _axisRot: axisRot,
+    _stageRef: { current: { getBoundingClientRect: () => (
+      { width: solved.w, height: solved.h, left: margin, top: margin }) } },
+    solve: () => solved,
+    chainAxes: new Function('WHO',
+      'return function ' + grabBlock('  chainAxes(solved) {', '{', '}') + ';')(
+      { slug: spineSlug }),
+    rnd: new Function('return function ' + grabBlock('  rnd() {', '{', '}') + ';')(),
+    setState: function (s) { this.ghosts = s.ghosts; }
+  };
+  ctx.ghosts = [];
+  fn.call(ctx);
+  /* The ghosts are already in solve units -- each run is meshed onto its host
+     wheel and grows from its centre. Grouped by the host that spawned it:
+     fitEscapes names its wheels 'gh<host><k>'. */
+  const runs = {};
+  ctx.ghosts.forEach(g => {
+    const ei = g.i.slice(2, 3);
+    (runs[ei] = runs[ei] || []).push({ cx: g.cx, cy: g.cy });
+  });
+  return runs;
+}
+
 test('escape runs follow each chain axis, never its bridge axis', () => {
   /* A branch has TWO directions: the bridge runs perpendicular to set spacing,
      then the chain runs parallel to the spine. A run that followed the bridge
@@ -892,6 +938,108 @@ test('a chain axis is measured from its own linked wheels, never its idlers', ()
     });
   });
   ok(bad.length === 0, bad.join('\n      '));
+});
+
+test('an escape run refuses to cross a bridge, not only another escape run', () => {
+  /* `taken` held escape runs only, so a bridge was the ONE run on the page that
+     an escape run could be laid straight across without anything noticing --
+     bridgeRuns existed, but inside solve(), and never came out. It does not fire
+     on any shipped viewport, because a branch's one run leaves the end its bridge
+     does NOT arrive at. That is an argument from the current composition, and the
+     non-crossing rule is the thing the solver exists to enforce, so this forces
+     the geometry instead of trusting the argument: run the real fitEscapes twice
+     on the same solve, once with no bridges and once with a bridge laid
+     deliberately across the branch's own run, and the run must move.
+
+     Step 3 is what stops this passing vacuously -- it asserts the planted bridge
+     really does lie across the run that was placed without it. */
+  const bad = [];
+  const seg = (p) => ({ x: p.cx, y: p.cy });
+  [0, 90].forEach(rot => {
+    const { solved, order } = runSolve(THREE, { axisRot: rot });
+    const spineSlug = order[0].slug;
+    const branches = chainAxesOf(solved, rot, spineSlug).filter(c => !c.spine);
+    const clear = fitEscapesOn(Object.assign({}, solved, { bridgeRuns: [] }), rot, spineSlug);
+    branches.forEach((c, bi) => {
+      /* Which host index this branch's run got: the hosts are the spine's two,
+         then one per branch in chainAxes order. */
+      const ei = String(2 + bi);
+      const run = clear[ei];
+      if (!run || !run.length) { bad.push(`rot ${rot}: ${c.person} got no escape run at all`); return; }
+      const a = { x: c.tail.cx, y: c.tail.cy };
+      const b = { x: run[run.length - 1].cx, y: run[run.length - 1].cy };
+      const L = Math.hypot(b.x - a.x, b.y - a.y);
+      /* THE BLOCKER IS A REAL BRIDGE, moved -- its length is one this stage
+         actually solved, not a number chosen to make the test pass. A bridge is a
+         couple of wheel diameters and a run is five to seven wheels, so it spans
+         roughly the middle third of the run: wide enough that the chain's own
+         axis is refused, narrow enough that the search has somewhere to go. Every
+         bridge on the stage is tried, so this is not one lucky length. */
+      solved.bridgeRuns.forEach((real, k) => {
+        const half = Math.hypot(real[1].cx - real[0].cx, real[1].cy - real[0].cy) / 2;
+        const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+        const px = -(b.y - a.y) * half / L, py = (b.x - a.x) * half / L;
+        const blocker = [{ cx: mx - px, cy: my - py }, { cx: mx + px, cy: my + py }];
+        const where = `rot ${rot}: ${c.person} against bridge ${k}`;
+        if (!segCrossJs(a, b, seg(blocker[0]), seg(blocker[1]))) {
+          bad.push(`${where}: the planted bridge does not lie across the run that was `
+            + `placed without it — this case cannot fail as written`);
+          return;
+        }
+        const blocked = fitEscapesOn(Object.assign({}, solved, { bridgeRuns: [blocker] }),
+          rot, spineSlug);
+        const moved = blocked[ei];
+        if (!moved || !moved.length) {
+          bad.push(`${where}: the run was dropped rather than re-aimed`);
+        } else if (JSON.stringify(moved) === JSON.stringify(run)) {
+          bad.push(`${where}: the run is unchanged by a bridge laid straight across it `
+            + `— fitEscapes never sees solved.bridgeRuns`);
+        }
+        /* NOT ASSERTED: that the DRAWN run clears the bridge. The search tests a
+           straight ray at the candidate heading, but each wheel of the run is then
+           wobbled up to 20 degrees off it, and seven wheels of that wander well
+           away from the ray -- so a run whose ray cleared can still bend back
+           across the segment. That is how the crossing rule has worked since #10,
+           for escape runs against each other as much as against a bridge, and it
+           is not this change's to alter: tightening it moves runs on the shipped
+           page. Measured, not assumed -- rot 0's one-wheel chain does exactly this.
+           What IS asserted is the property the seeding adds: the bridge is
+           consulted, and the heading it blocks is refused. */
+        /* The spine's runs, which the planted bridge is nowhere near, must not
+           have moved: the seeding refuses a crossing, it does not perturb the lot. */
+        ['0', '1'].forEach(s => {
+          if (JSON.stringify(blocked[s]) !== JSON.stringify(clear[s]))
+            bad.push(`${where}: the spine's run ${s} moved for a bridge it never crosses`);
+        });
+      });
+    });
+  });
+  ok(bad.length === 0, bad.join('\n      '));
+});
+
+test('the bridges come out of solve(), and stay distinct from the drawn strands', () => {
+  /* Two different classes of run, and Task 6 kept them apart deliberately:
+     `chains` is the dormant chain-and-belt capability's list and IS drawn, a
+     bridge is meshed metal that draws nothing. Merging them would put a strand
+     on screen wherever a chain is bridged. */
+  const ret = SRC.slice(SRC.indexOf('this._solved = { gears: g'));
+  ok(/bridgeRuns: bridges/.test(ret.slice(0, 200)),
+    'solve() still keeps its bridge runs to itself, so nothing placed after the '
+    + 'fit can refuse to cross one');
+  ok(/chains: chains/.test(ret.slice(0, 200)),
+    'the drawn strand list is gone or renamed — bridges and strands must stay '
+    + 'separately addressable');
+  const { solved } = runSolve(THREE, { axisRot: 0 });
+  eq(solved.bridgeRuns.length, THREE.length - 1,
+    'a solve of three chains does not publish one bridge run per driven chain');
+  ok(solved.bridgeRuns.every(s => s.length === 2
+      && s.every(p => Number.isFinite(p.cx) && Number.isFinite(p.cy))),
+    'a published bridge run is not a finite two-point segment in stage units');
+  /* Stage units, not raw solve coordinates: every wheel sits at cx >= 0 after
+     the centring shift, and so must every bridge endpoint. */
+  ok(solved.bridgeRuns.every(s => s.every(p => p.cx >= 0 && p.cy >= 0)),
+    'the bridge runs were published in the pre-centring frame, so they do not '
+    + 'line up with the gears\' cx/cy');
 });
 
 test('the end-drift floor clears the widest step the deal can actually produce', () => {

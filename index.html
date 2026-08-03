@@ -1794,7 +1794,21 @@ class Component extends DCLogic {
     const vw = window.innerWidth, vh = window.innerHeight;
     const ghosts = [];
     this._seed = 20260729;
-    const taken = [];
+    /* SEEDED WITH THE BRIDGES, so the crossing search that already refuses to lay
+       one escape run across another refuses to lay one across a bridge too. They
+       are the same kind of fault -- a line drawn through metal that is meant to be
+       driving something -- and they were tested for separately only because
+       `bridgeRuns` lived inside solve() and never came out. It does not fire on
+       any shipped viewport: a branch's one run leaves the end its bridge does NOT
+       arrive at. But that is an argument from the current composition, and the
+       non-crossing rule is the thing the solver exists to enforce; a config whose
+       bridge lands near a chain's trailing end would have crossed silently.
+
+       Converted to screen space here, like every other segment in this list --
+       solve units are what the stage is drawn from, and `gs` is the scale it is
+       ACTUALLY drawn at right now (see above). */
+    const taken = (solved.bridgeRuns || []).map(s => s.map(p => (
+      { x: rect.left + p.cx * gs, y: rect.top + p.cy * gs })));
     /* Uses the module-level segCross (#57). This was a second copy, identical
        character-for-character including its inner helper, shadowing a perfectly
        good function three lines above where it is used -- exactly the drift
@@ -2914,8 +2928,20 @@ class Component extends DCLogic {
     minY = hubMidY - halfY; maxY = hubMidY + halfY;
     g.forEach(k => { k.cx = k.x - minX; k.cy = k.y - minY; });
     const chains = g.filter(k => k.chainFrom !== null && k.chainFrom !== undefined).map(k => ({ a: g[gi[k.chainFrom]], b: k }));
+    /* THE BRIDGES, AS RUNS, in the same normalised space the gears' cx/cy are in
+       -- built above in raw solve coordinates, so they are shifted here with
+       everything else rather than by a second copy of the centring rule.
+
+       KEPT SEPARATE FROM `chains`, which is the dormant chain-and-belt
+       capability's list and is DRAWN. A bridge is meshed metal and draws nothing:
+       this is the line the metal occupies, published so that anything placing a
+       run afterwards can refuse to cross it. fitEscapes is the caller that needs
+       it -- a branch's escape run is solved in screen space, after the fit, and
+       until now it was tested against other escape runs only, so a bridge was
+       the one run on the page it could cross without anything noticing. */
+    const bridges = bridgeRuns.map(s => s.map(p => ({ cx: p.x - minX, cy: p.y - minY })));
     /* The wordmark hangs from the lowest wheel on two cords, clear of every gear. */
-    this._solved = { gears: g, chains: chains, w: maxX - minX, h: maxY - minY };
+    this._solved = { gears: g, chains: chains, bridgeRuns: bridges, w: maxX - minX, h: maxY - minY };
     return this._solved;
   }
 
