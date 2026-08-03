@@ -1,0 +1,220 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Whose chain is whose — subtle options</title>
+<style>
+  body { margin: 0; padding: 28px 32px 64px; background: #EDEEEA; color: #1E2A2E;
+         font: 15px/1.55 'Manrope', system-ui, -apple-system, sans-serif; }
+  h1 { font-size: 20px; margin: 0 0 6px; letter-spacing: -.01em; }
+  .lede { max-width: 62ch; color: #4A5559; margin: 0 0 30px; }
+  .opt { background: #F4F5F2; border: 1px solid #DCDED8; border-radius: 12px;
+         padding: 18px 20px 10px; margin: 0 0 22px; }
+  .opt h2 { font-size: 15px; margin: 0 0 2px; }
+  .opt p { margin: 0 0 12px; color: #4A5559; max-width: 74ch; font-size: 13.5px; }
+  .opt .cost { color: #7A5B00; }
+  .opt .risk { color: #8A3B32; }
+  svg { display: block; width: 100%; height: auto; }
+  .n { font: 600 11px/1 'Manrope', system-ui, sans-serif; fill: #6B7579; letter-spacing: .04em; }
+</style>
+
+<h1>Whose chain is whose — subtle options</h1>
+<p class="lede">Two chains on one stage. Charles has seven wheels, Harper has one.
+Every option below is drawn at honest proportions — module 7, teeth 13–19, the
+same engraving band the page uses. None of them adds text furniture to the stage
+unless it says so.</p>
+
+<script>
+const MODULE = 7, TOOTH_ADD = 1, S = 1.9;   /* S: mock render scale */
+
+/* Involute-ish tooth outline, close enough to judge a treatment against.
+   Same construction the page uses: pitch radius = MODULE * teeth / 2. */
+function gear(cx, cy, teeth, fill, line, opts) {
+  opts = opts || {};
+  const r = MODULE * teeth / 2 * S, ro = r + MODULE * TOOTH_ADD * S;
+  const ri = r - MODULE * 1.25 * S;
+  let d = '';
+  for (let i = 0; i < teeth; i++) {
+    const a0 = (i / teeth) * Math.PI * 2, step = Math.PI * 2 / teeth;
+    const p = (rad, t) => [cx + rad * Math.cos(a0 + t * step), cy + rad * Math.sin(a0 + t * step)];
+    const A = p(ri, 0.00), B = p(ro, 0.16), C = p(ro, 0.36), D = p(ri, 0.52), E = p(ri, 1.00);
+    d += (i ? 'L' : 'M') + A + 'L' + B + 'L' + C + 'L' + D + 'L' + E;
+  }
+  d += 'Z';
+  const g = [`<path d="${d}" fill="${fill}" stroke="${line}" stroke-width="1.1"
+      stroke-linejoin="round"/>`];
+  /* engraving band: an annulus inside the tooth roots, as on the page */
+  const bandOut = r - MODULE * 0.55 * S, bandIn = bandOut - MODULE * 1.6 * S;
+  g.push(`<circle cx="${cx}" cy="${cy}" r="${bandOut}" fill="none" stroke="${line}" stroke-opacity=".45"/>`);
+  g.push(`<circle cx="${cx}" cy="${cy}" r="${bandIn}" fill="none" stroke="${line}" stroke-opacity=".45"/>`);
+  if (opts.band) {
+    const rr = (bandOut + bandIn) / 2, id = 'p' + Math.round(cx) + '_' + Math.round(cy);
+    g.push(`<defs><path id="${id}" fill="none" d="M ${cx - rr} ${cy} a ${rr} ${rr} 0 1 1 ${rr * 2} 0"/></defs>`);
+    g.push(`<text font-size="${Math.max(6, rr * 0.26)}" fill="${line}" fill-opacity=".85"
+      font-family="ui-monospace, Menlo, monospace" letter-spacing=".5">
+      <textPath href="#${id}" startOffset="50%" text-anchor="middle">${opts.band}</textPath></text>`);
+  }
+  /* web: the centre family — holes, spokes, or a hex core */
+  const web = opts.web || 'holes', rw = bandIn * 0.92;
+  if (web === 'holes') {
+    for (let k = 0; k < 5; k++) {
+      const a = k / 5 * Math.PI * 2 - Math.PI / 2;
+      g.push(`<circle cx="${cx + rw * 0.55 * Math.cos(a)}" cy="${cy + rw * 0.55 * Math.sin(a)}"
+        r="${rw * 0.26}" fill="#EDEEEA" stroke="${line}" stroke-opacity=".5"/>`);
+    }
+  } else if (web === 'spokes') {
+    for (let k = 0; k < 6; k++) {
+      const a = k / 6 * Math.PI * 2;
+      g.push(`<line x1="${cx + rw * 0.28 * Math.cos(a)}" y1="${cy + rw * 0.28 * Math.sin(a)}"
+        x2="${cx + rw * 0.92 * Math.cos(a)}" y2="${cy + rw * 0.92 * Math.sin(a)}"
+        stroke="${line}" stroke-opacity=".5" stroke-width="${rw * 0.16}" stroke-linecap="round"/>`);
+    }
+  } else if (web === 'hex') {
+    for (let ring = 1; ring <= 2; ring++) {
+      const n = ring * 6, rad = rw * (ring / 2.6);
+      for (let k = 0; k < n; k++) {
+        const a = k / n * Math.PI * 2 + ring * 0.3;
+        const hx = cx + rad * Math.cos(a), hy = cy + rad * Math.sin(a), hr = rw * 0.15;
+        let hd = '';
+        for (let v = 0; v < 6; v++) {
+          const va = v / 6 * Math.PI * 2;
+          hd += (v ? 'L' : 'M') + (hx + hr * Math.cos(va)) + ',' + (hy + hr * Math.sin(va));
+        }
+        g.push(`<path d="${hd}Z" fill="none" stroke="${line}" stroke-opacity=".42"/>`);
+      }
+    }
+  }
+  g.push(`<circle cx="${cx}" cy="${cy}" r="${rw * 0.26}" fill="#EDEEEA" stroke="${line}" stroke-opacity=".55"/>`);
+  if (opts.mark) {
+    g.push(`<text x="${cx}" y="${cy + rw * 0.09}" text-anchor="middle"
+      font-size="${rw * 0.30}" font-family="ui-monospace, Menlo, monospace"
+      fill="${line}" fill-opacity=".8">${opts.mark}</text>`);
+  }
+  return g.join('');
+}
+
+/* A ghost wheel — the background machinery palette. */
+function ghost(cx, cy, teeth) { return gear(cx, cy, teeth, '#C6CAC6', '#AAAFAB', { web: 'holes' }); }
+
+/* Lay a chain out left to right on a gentle serpentine, meshing by construction. */
+function chain(x0, y0, spec) {
+  let x = x0, y = y0, out = '', prev = null;
+  spec.forEach((w, i) => {
+    const r = MODULE * w.teeth / 2 * S;
+    if (prev) {
+      const ang = (i % 2 ? -1 : 1) * 17 * Math.PI / 180;
+      const d = prev.r + r;
+      x = prev.x + d * Math.cos(ang); y = prev.y + d * Math.sin(ang);
+    }
+    out += w.ghost ? ghost(x, y, w.teeth)
+                   : gear(x, y, w.teeth, w.fill, w.line, w);
+    prev = { x, y, r };
+  });
+  return out;
+}
+function board(inner, h) {
+  return `<svg viewBox="0 0 980 ${h}" role="img">${inner}</svg>`;
+}
+function write(html) { document.write(html); }
+</script>
+
+<div class="opt">
+  <h2>A — Per-person colour family <span class="cost">(this is issue #68)</span></h2>
+  <p>Each chain draws from its own region of the hue wheel. No new element type,
+  nothing added to the stage, and it stays entirely inside the machine's existing
+  language. Distinguishes chains instantly; says <em>who</em> only via the
+  engraved handles.</p>
+  <script>
+    const cool = [{teeth:17,fill:'#8CB8F2',line:'#3E6CA8'},{teeth:14,fill:'#6ECFA6',line:'#2E7D5C'},
+                  {teeth:19,fill:'#4A90E2',line:'#2A5E9E'},{teeth:15,fill:'#54BFB6',line:'#2A7972'},
+                  {teeth:18,fill:'#8CB8F2',line:'#3E6CA8'}];
+    const warm = [{teeth:16,fill:'#F2C14E',line:'#9A7415'}];
+    write(board(
+      `<text class="n" x="8" y="16">CHARLES — cool family</text>` +
+      chain(120, 78, cool) +
+      `<text class="n" x="8" y="182">HARPER — warm family</text>` +
+      chain(120, 236, warm), 300));
+  </script>
+</div>
+
+<div class="opt">
+  <h2>B — A different centre family per person</h2>
+  <p>The page already deals five centre families: holes, spokes, hex core,
+  planetary, ravigneaux. Bias each person toward one. Extremely idiomatic — it
+  looks like two batches of parts from different machines — but it competes with
+  the planetary showpiece, which is dealt once per load on merit.</p>
+  <script>
+    const a = [{teeth:17,fill:'#8CB8F2',line:'#3E6CA8',web:'holes'},{teeth:14,fill:'#6ECFA6',line:'#2E7D5C',web:'holes'},
+               {teeth:19,fill:'#4A90E2',line:'#2A5E9E',web:'holes'},{teeth:15,fill:'#54BFB6',line:'#2A7972',web:'holes'},
+               {teeth:18,fill:'#9B8CE0',line:'#5C4FA8',web:'holes'}];
+    const b = [{teeth:16,fill:'#F2C14E',line:'#9A7415',web:'spokes'}];
+    write(board(
+      `<text class="n" x="8" y="16">CHARLES — drilled webs</text>` +
+      chain(120, 78, a) +
+      `<text class="n" x="8" y="182">HARPER — spoked webs</text>` +
+      chain(120, 236, b), 300));
+  </script>
+</div>
+
+<div class="opt">
+  <h2>C — An owner's stamp in the engraving band</h2>
+  <p>The band already carries a build marking on some wheels
+  (<code>M7 Z18 · 17-4PH DMLS</code>). Add the owner as part of that stamp, so it
+  reads as a manufacturing mark rather than a caption. Subtlest of the lot, and
+  legible only close up — which may be exactly right, or may be too quiet.</p>
+  <script>
+    const a = [{teeth:17,fill:'#8CB8F2',line:'#3E6CA8',band:'M7 Z17 · CM'},{teeth:14,fill:'#6ECFA6',line:'#2E7D5C',band:'M7 Z14 · CM'},
+               {teeth:19,fill:'#4A90E2',line:'#2A5E9E',band:'M7 Z19 · CM'},{teeth:15,fill:'#54BFB6',line:'#2A7972',band:'M7 Z15 · CM'}];
+    const b = [{teeth:16,fill:'#F2C14E',line:'#9A7415',band:'M7 Z16 · HM'}];
+    write(board(
+      `<text class="n" x="8" y="16">CHARLES — stamped CM</text>` +
+      chain(120, 78, a) +
+      `<text class="n" x="8" y="182">HARPER — stamped HM</text>` +
+      chain(120, 236, b), 300));
+  </script>
+</div>
+
+<div class="opt">
+  <h2>D — A monogram on the hub cap of the lead wheel only</h2>
+  <p>One wheel per chain carries an initial where a service icon would sit. Reads
+  as the drive gear being marked. Cheap and unambiguous — but it consumes a hub
+  cap, and every hub cap currently carries a service icon that is also a link.</p>
+  <script>
+    const a = [{teeth:17,fill:'#8CB8F2',line:'#3E6CA8',mark:'C'},{teeth:14,fill:'#6ECFA6',line:'#2E7D5C'},
+               {teeth:19,fill:'#4A90E2',line:'#2A5E9E'},{teeth:15,fill:'#54BFB6',line:'#2A7972'}];
+    const b = [{teeth:16,fill:'#F2C14E',line:'#9A7415',mark:'H'}];
+    write(board(
+      `<text class="n" x="8" y="16">CHARLES</text>` + chain(120, 78, a) +
+      `<text class="n" x="8" y="182">HARPER</text>` + chain(120, 236, b), 300));
+  </script>
+</div>
+
+<div class="opt">
+  <h2>E — Nothing at all <span class="cost">(the current design)</span></h2>
+  <p>The bands already carry each person's handles — <code>/csmarshall</code>,
+  <code>charles@wozi.com</code>, <code>harper@wozi.com</code>. Identity is present
+  for anyone who looks, and the machine is not captioned. Shown here so the others
+  have something honest to be compared against.</p>
+  <script>
+    const a = [{teeth:17,fill:'#8CB8F2',line:'#3E6CA8',band:'/csmarshall'},{teeth:14,fill:'#6ECFA6',line:'#2E7D5C',band:'charles@wozi.com'},
+               {teeth:19,fill:'#4A90E2',line:'#2A5E9E',band:'/cs_marshall'},{teeth:15,fill:'#54BFB6',line:'#2A7972',band:'charles.wozi.com'}];
+    const b = [{teeth:16,fill:'#F2C14E',line:'#9A7415',band:'harper@wozi.com'}];
+    write(board(chain(120, 78, a) + chain(120, 236, b), 300));
+  </script>
+</div>
+
+<div class="opt">
+  <h2>F — Colour family plus the owner's stamp <span class="cost">(A + C)</span></h2>
+  <p>Distinguishable at a glance from the palette, identifiable close up from the
+  stamp. Two quiet signals rather than one loud one. Costs both changes, but the
+  stamp is a string change inside an engraving that already exists.</p>
+  <script>
+    const a = [{teeth:17,fill:'#8CB8F2',line:'#3E6CA8',band:'M7 Z17 · CM'},{teeth:14,fill:'#6ECFA6',line:'#2E7D5C',band:'M7 Z14 · CM'},
+               {teeth:19,fill:'#4A90E2',line:'#2A5E9E',band:'M7 Z19 · CM'},{teeth:15,fill:'#54BFB6',line:'#2A7972',band:'M7 Z15 · CM'},
+               {teeth:18,fill:'#8CB8F2',line:'#3E6CA8',band:'M7 Z18 · CM'}];
+    const b = [{teeth:16,fill:'#F2C14E',line:'#9A7415',band:'M7 Z16 · HM'}];
+    write(board(chain(120, 78, a) + chain(120, 236, b), 300));
+  </script>
+</div>
+
+<p class="lede" style="margin-top:34px">
+Not published — <code>docs/</code> is not in the deploy whitelist, so this page
+never reaches the web.</p>
