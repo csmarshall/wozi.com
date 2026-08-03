@@ -1447,6 +1447,14 @@ function dealColours(n, parentOf) {
       const t = idx[i]; idx[i] = idx[j]; idx[j] = t;
     }
     const pick = idx.slice(0, Math.min(n, idx.length));
+    /* MORE WHEELS THAN COLOURS still deals every wheel, and every wheel dealt is
+       still SCORED. The call site used to close the gap itself, with
+       `WHEEL_DEAL[i % WHEEL_DEAL.length]` -- so past the end of the pool the
+       wrap handed out a colour the 40-degree rule (#12) had never looked at, and
+       two wheels in mesh could come out the same hue with nothing to catch it.
+       Repeating the shuffled pool HERE puts those slots inside the scored array
+       instead: the score can then see the repeat and another shuffle is tried. */
+    while (idx.length && pick.length < n) pick.push(idx[pick.length % idx.length]);
     /* Score MESHING pairs. Wheels are only confused with the ones beside them,
        and beside means meshed -- on a tree that is the parent, not the previous
        slot in this array. */
@@ -1461,7 +1469,32 @@ function dealColours(n, parentOf) {
   }
   return best.map(i => WHEEL_POOL[i].c);
 }
-const WHEEL_DEAL = dealColours(TRAIN.length, (i) => TRAIN[i].parent);
+/* THE DEAL IS SIZED AND SCORED OVER THE WHEELS THAT ACTUALLY TAKE A COLOUR, and
+   those are the LINKED ones. It used to be sized to TRAIN.length, which counts
+   the bridge idlers -- and an idler's dealt colour is then thrown away two lines
+   below, overpainted from GHOST_COLORS. Two consequences, both silent. The deal
+   spent pool entries on wheels that never wear them, so the day the train grows
+   past the pool it is the LINKS that run out first. And a chain head arriving
+   over a bridge was hue-scored against its parent idler -- against a colour
+   nobody ever draws -- so the one comparison the #12 rule exists to make was
+   made against a phantom.
+
+   THE INDEX IS THE DEAL SLOT, NOT THE TRAIN SLOT, throughout: `DEALT` is the
+   train indices that take a colour, in train order, and `DEAL_SLOT` maps back. */
+const DEALT = [];
+TRAIN.forEach((t, i) => { if (t.role !== 'idler') DEALT.push(i); });
+const DEAL_SLOT = {};
+DEALT.forEach((i, k) => { DEAL_SLOT[i] = k; });
+const WHEEL_DEAL = dealColours(DEALT.length, (k) => {
+  /* A CHAIN HEAD PAST A BRIDGE HAS NO COLOURED NEIGHBOUR, and saying so is the
+     honest answer rather than walking up to the nearest one. It meshes with an
+     idler, and an idler is a whole wheel of background palette standing between
+     it and the last coloured thing on that side -- so there is nothing there to
+     confuse it with, and scoring it against a wheel it does not touch would
+     spend the 40-degree budget on a pair nobody can see together. */
+  const p = TRAIN[DEALT[k]].parent;
+  return p == null || DEAL_SLOT[p] === undefined ? null : DEAL_SLOT[p];
+});
 TRAIN.forEach((t, i) => {
   /* AN IDLER IS ANONYMOUS BY DESIGN LANGUAGE, and that is the whole reason a
      bridge is made of them rather than of an unowned coloured wheel: a coloured
@@ -1470,7 +1503,7 @@ TRAIN.forEach((t, i) => {
      anyone having to be told. */
   t.color = t.role === 'idler'
     ? GHOST_COLORS[i % GHOST_COLORS.length]
-    : WHEEL_DEAL[i % WHEEL_DEAL.length];
+    : WHEEL_DEAL[DEAL_SLOT[i]];
 });
 
 /* Sibling services sit on neighbouring wheels of the train. */
@@ -1927,6 +1960,20 @@ class Component extends DCLogic {
       const off = Math.max.apply(null, c.wheels.map(g =>
         (g.cx - c.head.cx) * nx + (g.cy - c.head.cy) * ny + g.ro)) + MODULE;
       const o = { x: c.head.cx + nx * off, y: c.head.cy + ny * off };
+      /* THE SAME DATUM, SCRIBED ON THE OTHER SIDE. A reference line may be laid
+         either side of the parts it references -- both clear every tooth by the
+         same module of air, both project the same stations, and neither is more
+         correct than the other. Only ONE of them is on the page, though: the
+         stage is allowed to bleed CROSS_BLEED past the cross axis, so a chain
+         sitting near that edge puts its mark and its plate over the fold, and
+         "off the page is invisible" is the one thing the note above says this
+         mark may not be. datumLayer() picks between the two, because the choice
+         needs the plate's MEASURED width and the viewport, and neither of those
+         belongs in here. Mirroring is a translation along the normal only, so
+         every station, every extent and the plate's own anchor are unchanged. */
+      const offAlt = Math.min.apply(null, c.wheels.map(g =>
+        (g.cx - c.head.cx) * nx + (g.cy - c.head.cy) * ny - g.ro)) - MODULE;
+      const alt = { x: c.head.cx + nx * offAlt, y: c.head.cy + ny * offAlt };
       /* Every wheel is projected onto the line, which is what makes this a
          station index rather than a ruler: the marks cannot drift out of step
          with the wheels they reference, because they ARE the wheels. */
@@ -1957,7 +2004,7 @@ class Component extends DCLogic {
       const lead = own.filter(g => g.lead);
       const anchor = lead.length ? lead.reduce((m, g) => (g.k < m.k ? g : m)) : c.head;
       return { person: c.person, plate: DATUM_PLATE[c.person] || c.person,
-        deg: c.deg, ux: ux, uy: uy, nx: nx, ny: ny, o: o,
+        deg: c.deg, ux: ux, uy: uy, nx: nx, ny: ny, o: o, alt: alt,
         stations: stations, plateAt: at(anchor), d0: d0, d1: d1 };
     });
   }
@@ -1979,6 +2026,19 @@ class Component extends DCLogic {
        ghost set, the two never settled and the render loop never ended. */
     const gs = rect.width / solved.w;
     const vw = window.innerWidth, vh = window.innerHeight;
+    /* WHAT THE PAGE CAN ACTUALLY SHOW, in the stage's own rendered pixels --
+       which is the space every absolutely positioned layer inside the stage is
+       drawn in, the datum included. Published from here rather than measured
+       again downstream because this is the one place that already holds both
+       halves of the conversion: the stage's rect and the viewport it sits in.
+       It is also the one place that is guaranteed fresh -- fitStage() runs it on
+       mount, on every resize and out of componentDidUpdate, which is exactly the
+       set of moments the stage can have moved.
+
+       The wheels do NOT read this. The fit deliberately lets the machine bleed
+       past the cross axis (CROSS_BLEED), because a machine that continues past
+       the frame is the composition. This is for the marks that may not. */
+    this._vpBox = { x0: -rect.left, y0: -rect.top, x1: vw - rect.left, y1: vh - rect.top };
     const ghosts = [];
     this._seed = 20260729;
     /* SEEDED WITH THE BRIDGES, so the crossing search that already refuses to lay
@@ -2291,11 +2351,16 @@ class Component extends DCLogic {
      a viewport very slightly taller than it is wide stays in landscape while
      max/min called its height the long axis -- and this function would then have
      been measuring the bridge across the axis the stage does not run along.
-     Asking the rotation itself makes the two agree by construction. */
+     Asking the rotation itself makes the two agree by construction.
+
+     AND IT MEASURES THE VIEWPORT THE WAY axisRot() DOES. This read the VISUAL
+     viewport while the rotation it defers to reads innerWidth/innerHeight, so
+     the two were handed different numbers whenever they differ -- which on iOS
+     is exactly the toolbar collapsing, the moment this is re-run. Near-miss
+     rather than a live fault at 390x844, and free to make consistent: one
+     measurement feeding both halves of one decision. */
   idlerCount() {
-    const vv = window.visualViewport;
-    const w = (vv && vv.width) || window.innerWidth;
-    const h = (vv && vv.height) || window.innerHeight;
+    const w = window.innerWidth, h = window.innerHeight;
     const turned = this.axisRot() !== 0;
     const longAvail = turned ? h : w, crossAvail = turned ? w : h;
     const scale = LINK_SHARE * longAvail / NOMINAL_SPAN;
@@ -3155,7 +3220,13 @@ class Component extends DCLogic {
      is identical on every wheel; the arc sweep is then derived from the actual text length
      and the band's circumference, shrinking the type only if a long handle would not fit. */
   engraving(g, r, m, bandOut) {
-    const site = g.slug ? SITES[g.person][g.slug] : null;
+    /* GUARDED LIKE EVERY OTHER READ OF THIS TABLE (#53). `SITES` is keyed by
+       person, and a wheel whose person has no table at all makes the inner
+       lookup throw rather than return undefined -- which is not a missing
+       engraving, it is a blank page, because this runs inside the render. The
+       four other derefs on the page already guard; this was the last one that
+       did not. */
+    const site = (g.slug && SITES[g.person] && SITES[g.person][g.slug]) || null;
     const raw = site ? site.path : '';
     /* Just the handle: everything after the last slash. */
     const handle = raw.indexOf('/') >= 0 ? raw.slice(raw.lastIndexOf('/') + 1) : raw;
@@ -3309,6 +3380,22 @@ class Component extends DCLogic {
      darker and higher in contrast than any of the linked wheels the machine is
      actually about, which is the opposite of what a ghost is for. */
   ghostOpacity(theme) { return (theme || this.state.theme) === 'dark' ? 0.17 : 0.46; }
+
+  /* HOW HEAVY ONE WHEEL IS DRAWN, in one place, because two layers have to agree
+     about it and one of them cannot simply inherit it. An idler is emitted from
+     solved.gears rather than from the ghost layer -- it has to MESH, and that
+     layer is parallax-scaled 0.94 -- so the layer's dimming has to travel with
+     the wheel instead, and it must be the SAME number rather than a second
+     opinion about it. `null` means the wheel carries no opacity of its own,
+     which is every linked wheel: the machine is drawn at full weight.
+
+     THE CAST SHADOWS DERIVE FROM THIS RATHER THAN REPEATING IT. A full-strength
+     shadow under a wheel drawn at ghost opacity reads as heavier than the wheel
+     casting it, which puts the eye on the drive instead of on the services it
+     connects -- so the rule is "a wheel drawn at reduced weight casts nothing",
+     and the shadow layer asks that question here rather than testing the role a
+     second time and drifting away from this one. */
+  wheelOpacity(g) { return g.role === 'idler' ? this.ghostOpacity() : null; }
 
   /* HOW HARD THE DATUM MARK IS DRAWN, solved rather than carried per theme.
 
@@ -4529,6 +4616,97 @@ class Component extends DCLogic {
     );
   }
 
+  /* WHERE THE PLATE SITS, AND THEREFORE WHICH SIDE THE DATUM IS SCRIBED ON.
+
+     THE MARK MAY NOT LEAVE THE PAGE. datumRuns() already says so in as many
+     words -- "off the page is invisible, and invisible is the one thing this
+     mark may not be" -- and then nothing enforced it. The plate is placed after
+     fitStage(), so it is outside all three limbs of the fit: WHEEL_CROSS_MAX
+     bounds a wheel and CROSS_BLEED bounds the band, and both of them
+     deliberately let the machine bleed past the cross axis, which is exactly the
+     edge the mark then falls over. Measured unseeded, the shipped page put
+     Harper's plate wholly below the fold on 2 of 20 loads at 1440x900 and off
+     the left edge on 1 of 20 at 390x844 -- and the seeded pixel gate cannot see
+     it, because it is one deal out of the many the page draws.
+
+     IT IS NOT FOLDED INTO THE FIT, and that is a choice. Shrinking the whole
+     machine so a placard fits inverts the composition: the train is the subject
+     and the mark references it, so the mark is what moves. Nor is the plate
+     simply clamped to the edge -- a plate off its own line is a caption, and the
+     line is the reference.
+
+     SO IT SPENDS THE TWO FREEDOMS A SCRIBED DATUM ACTUALLY HAS, in order:
+       1. WHICH SIDE. A reference line may be laid either side of the parts it
+          references; datumRuns() hands both origins over, clear of every tooth
+          by the same module of air.
+       2. WHERE ALONG IT. The plate rides an anchor, and sliding it to another
+          station on the same line is a placement, not a compromise.
+     The natural side and the natural station win every tie, so a load that was
+     already right is untouched -- and the smaller slide wins otherwise, so the
+     mark moves as little as the page allows.
+
+     NEITHER SIDE FITTING IS REPORTED, NOT HIDDEN. It cannot happen while the
+     plate is smaller than the viewport and the chain is on stage, but "cannot
+     happen" is what the crossing bridge was said to be too: the console is the
+     only place a composition failure can announce itself. */
+  plateSeat(r, S, pw, ph) {
+    const want = r.plateAt * S;
+    const nat = { ox: r.o.x * S, oy: r.o.y * S };
+    const vp = this._vpBox;
+    /* Before the first fitEscapes() there is no measured viewport, and guessing
+       one would be a second opinion about where the stage is. The natural side
+       stands for that one frame; the fit runs out of componentDidUpdate, so the
+       next one is measured. */
+    if (!vp) return { ox: nat.ox, oy: nat.oy, at: want };
+    /* The plate turns with its chain, so what has to fit inside the viewport is
+       the axis-aligned box of a ROTATED rectangle -- half its width along the
+       run plus half its height across it, resolved onto each screen axis. */
+    const hx = Math.abs(r.ux) * pw / 2 + Math.abs(r.nx) * ph / 2;
+    const hy = Math.abs(r.uy) * pw / 2 + Math.abs(r.ny) * ph / 2;
+    /* The stations at which the WHOLE plate is on the page, by the same slab
+       clip the line itself uses: an axis the run is parallel to does not bound
+       it, and taking that axis' crossing anyway is what made a datum a fraction
+       of a degree off horizontal thirty-six thousand pixels long. Here the
+       parallel axis instead decides the interval outright -- either the run
+       already sits inside that slab, or no station on it ever will. */
+    const window_ = (O) => {
+      let lo = -Infinity, hi = Infinity;
+      [[O.ox, r.ux, vp.x0 + hx, vp.x1 - hx], [O.oy, r.uy, vp.y0 + hy, vp.y1 - hy]]
+        .forEach(s => {
+          if (s[2] > s[3]) { lo = Infinity; hi = -Infinity; return; }
+          if (Math.abs(s[1]) < 1e-6) {
+            if (s[0] < s[2] || s[0] > s[3]) { lo = Infinity; hi = -Infinity; }
+            return;
+          }
+          const a = (s[2] - s[0]) / s[1], b = (s[3] - s[0]) / s[1];
+          lo = Math.max(lo, Math.min(a, b));
+          hi = Math.min(hi, Math.max(a, b));
+        });
+      return lo <= hi ? [lo, hi] : null;
+    };
+    const alt = { ox: r.alt.x * S, oy: r.alt.y * S };
+    let best = null;
+    [nat, alt].forEach(O => {
+      const iv = window_(O);
+      if (!iv) return;
+      const at = Math.max(iv[0], Math.min(iv[1], want));
+      const slide = Math.abs(at - want);
+      /* Strictly smaller, so the natural side keeps every tie -- including the
+         zero-slide tie, which is the case that must not move. */
+      if (!best || slide < best.slide) best = { ox: O.ox, oy: O.oy, at: at, slide: slide };
+    });
+    if (!best) {
+      if (!this._plateWarned) this._plateWarned = {};
+      if (!this._plateWarned[r.person]) {
+        this._plateWarned[r.person] = true;
+        console.warn('wozi: neither side of chain "' + r.person + '" has room for its '
+          + 'datum plate — the mark is drawn where it falls');
+      }
+      return { ox: nat.ox, oy: nat.oy, at: want };
+    }
+    return best;
+  }
+
   /* THE DATUM MARK, DRAWN: one scribed line and one stamped plate per chain, the
      reference a fitter follows along a real machine.
 
@@ -4555,7 +4733,14 @@ class Component extends DCLogic {
     const HAIR = Math.max(1, MODULE * 0.13 * S);
     const MAJOR = MODULE * 1.2 * S, MINOR = MODULE * 0.5 * S, PAST = MODULE * 2 * S;
     const PLATE_H = MODULE * 2 * S, PLATE_F = MODULE * 1.3 * S;
-    const MONO = "ui-monospace, Menlo, 'DejaVu Sans Mono', monospace";
+    /* A WINDOWS FACE IN THE STACK. ui-monospace covers Apple, Menlo is the older
+       macOS name and DejaVu Sans Mono is what Linux ships -- and nothing here
+       named anything a Windows machine has, so the generic `monospace` resolved
+       to Courier New: a lighter, narrower face at the same size, on the one mark
+       that carries the identity and is already the smallest lettering on the
+       page. Consolas has shipped with Windows since Vista and Office 2007; the
+       generic stays behind it. */
+    const MONO = "ui-monospace, Menlo, Consolas, 'DejaVu Sans Mono', monospace";
     const els = [];
     let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
     const mk = (x, y) => {
@@ -4585,7 +4770,17 @@ class Component extends DCLogic {
       return [isFinite(lo) ? lo : 0, isFinite(hi) ? hi : 0];
     };
     runs.forEach((r, ri) => {
-      const ox = r.o.x * S, oy = r.o.y * S;
+      /* The plate is MEASURED before anything is placed, because its width is
+         what decides which side of the assembly this whole mark is scribed on --
+         see plateSeat(). The stamped metal itself is drawn last, under the rim
+         engravings, but nothing about where the line goes can be settled until
+         the thing it has to carry has been measured. */
+      const label = r.plate;
+      const font = '600 ' + PLATE_F.toFixed(2) + 'px ' + MONO;
+      const track = PLATE_F * 0.09;
+      const pw = this.textWidth(label, font) + track * Math.max(0, label.length - 1) + PLATE_H * 0.8;
+      const seat = this.plateSeat(r, S, pw, PLATE_H);
+      const ox = seat.ox, oy = seat.oy;
       const at = (d, t) => ({ x: ox + r.ux * d + r.nx * t, y: oy + r.uy * d + r.ny * t });
       const edge = span(ox, oy, r.ux, r.uy);
       const d0 = Math.min(r.d0 * S, edge[0]) - PAST;
@@ -4622,12 +4817,9 @@ class Component extends DCLogic {
       /* The plate: stamped metal, so --hair for the body and --muted for the
          letters, and its width is MEASURED at the size it is set rather than
          guessed from a per-character average -- the same lesson the hover pill
-         cost, where an estimate clipped the longest label on the first try. */
-      const label = r.plate;
-      const font = '600 ' + PLATE_F.toFixed(2) + 'px ' + MONO;
-      const track = PLATE_F * 0.09;
-      const pw = this.textWidth(label, font) + track * Math.max(0, label.length - 1) + PLATE_H * 0.8;
-      const c = at(r.plateAt * S, 0);
+         cost, where an estimate clipped the longest label on the first try.
+         Measured above, with the rest of the placement it decides. */
+      const c = at(seat.at, 0);
       [[-pw / 2, -PLATE_H / 2], [pw / 2, -PLATE_H / 2], [pw / 2, PLATE_H / 2], [-pw / 2, PLATE_H / 2]]
         .forEach(p => mk(c.x + r.ux * p[0] + r.nx * p[1], c.y + r.uy * p[0] + r.ny * p[1]));
       els.push(h('g', { key: 'p' + ri,
@@ -4762,9 +4954,11 @@ class Component extends DCLogic {
          ghost palette, and the escape runs -- the other ghosts on the page -- cast
          nothing either. A full-strength shadow under a wheel drawn at ghost
          opacity reads as heavier than the wheel casting it, which puts the eye on
-         the drive rather than on the services it connects. */
+         the drive rather than on the services it connects. Asked of
+         wheelOpacity() rather than tested here, so the two cannot drift: a wheel
+         drawn at reduced weight is exactly the wheel that casts nothing. */
       h('div', { key: 'shadows', style: { position: 'absolute', left: 0, top: 0, width: (solved.w * S) + 'px', height: (solved.h * S) + 'px', zIndex: 0, pointerEvents: 'none' } },
-        solved.gears.filter(g => g.role !== 'idler').map(g => h('div', { key: g.i, style: {
+        solved.gears.filter(g => this.wheelOpacity(g) == null).map(g => h('div', { key: g.i, style: {
           position: 'absolute', left: ((g.cx - g.ro * 1.12) * S) + 'px', top: ((g.cy - g.ro * 1.12 + 5) * S) + 'px',
           width: (g.ro * 2.24 * S) + 'px', height: (g.ro * 2.24 * S) + 'px',
           /* Softer in daylight. A light environment throws a weaker, more diffuse
@@ -4791,8 +4985,10 @@ class Component extends DCLogic {
                that layer -- the layer is parallax-scaled and this wheel has to
                mesh -- so the layer's dimming has to travel with it instead. Drawn
                without it, ghostSvg's palette alone left an idler the darkest,
-               highest-contrast object on the page: see ghostOpacity(). */
-            opacity: g.role === 'idler' ? this.ghostOpacity() : null
+               highest-contrast object on the page: see ghostOpacity(). One rule,
+               named once in wheelOpacity(), so the cast shadows can derive from
+               the same answer instead of re-deciding it. */
+            opacity: this.wheelOpacity(g)
           } },
           /* A BRIDGE IDLER IS DRAWN AS A GHOST. It is structural -- solved with
              the train, because it is what decides where a chain sits -- but it
@@ -4840,8 +5036,24 @@ class Component extends DCLogic {
          watched turn back from a pill. */
       const on = hov === g.slug || this._badgeDragging === g.slug;
       const bo = this._badgeOff[g.slug];
+      /* WHOSE MAILBOX. `label` is the anchor's accessible name, and on the
+         combined stage two people's chains can carry the same service -- two
+         links, two different destinations, both announced "Mail". The only thing
+         that told them apart was the datum plate, which lives inside gearArt and
+         is aria-hidden, so a screen reader was handed a tab order with a
+         duplicate in it and no way to resolve it.
+
+         Qualified with the SAME name the plate is stamped with, so the audible
+         differentiator and the visible one are one string rather than two
+         opinions. The visible pill still shows the service alone, and it is a
+         prefix of this, which is what WCAG 2.5.3 asks of a name that extends its
+         own label. A solo page has one chain and no ambiguity to resolve, so its
+         name is left exactly as it was. */
+      const named = STAGE.mode === 'all' && DATUM_PLATE[g.person]
+        ? site.label + ', ' + DATUM_PLATE[g.person]
+        : site.label;
       return {
-        label: site.label, path: site.path, href: site.href,
+        label: named, path: site.path, href: site.href,
         badgeDown: (e) => this.badgeGrab(e, g.slug),
         noDrag: (e) => e.preventDefault(),
         clickGuard: (e) => {
@@ -4868,9 +5080,11 @@ class Component extends DCLogic {
            appears inside it, so one object changes shape rather than a second
            object appearing next to the first.
 
-           The name is aria-hidden because the anchor already carries the same
-           string as its aria-label -- visible text plus the label would
-           announce the service twice. */
+           The name is aria-hidden because the anchor already carries this string
+           in its aria-label -- visible text plus the label would announce the
+           service twice. On a combined stage the label carries the person after
+           it as well, so what is announced is this name extended, never a
+           different one. */
         tipEl: h('span', {
           'aria-hidden': 'true',
           style: {

@@ -270,15 +270,29 @@ test('the person picker is drawn only on the combined stage', () => {
      Charles's page, and a menu listing every other person on the domain is a
      disclosure the visitor did not ask for. The existing rule -- hidden while
      there is one person -- extends to "or while the view is deliberately one
-     person", and both halves have to be in the same condition. */
-  const i = SRC.indexOf('THE PERSON PICKER LIVES HERE');
-  ok(i > 0, 'could not find the person picker block in index.html');
-  const end = SRC.indexOf('})();', i);
-  ok(end > i, 'the person picker block does not close');
-  const frag = SRC.slice(i, end);
-  ok(/people\.length > 1/.test(frag), 'the picker no longer hides itself at one person');
-  ok(/STAGE\.mode === 'all'/.test(frag),
-    'the picker does not check STAGE.mode — a solo page would list every person on the domain');
+     person", and both halves have to be in the same condition.
+
+     THE LIST IS BUILT, NOT READ. This used to be two regexes over the source of
+     the block, which is a check on the spelling of a condition rather than on
+     what it decides: moving the live test into the comment beside it leaves the
+     suite green while the disclosure ships. The block is a plain IIFE over CONF
+     and STAGE, so it runs here with both handed in. */
+  const src = grabBlock('const togPeople = (function () {', '{', '}') + ')();';
+  const run = (n, mode) => new Function('CONF', 'STAGE', src + '\n return togPeople;')(
+    { PEOPLE: Array.from({ length: n }, (_, k) => ({ slug: 'p' + k, name: 'Person ' + k })) },
+    { mode: mode });
+  eq(run(3, 'all').length, 3, 'the combined stage does not offer every person');
+  eq(run(3, 'all').map(p => p.href).join(','), '?who=p0,?who=p1,?who=p2',
+    'the picker does not link each person by ?who=');
+  eq(run(3, 'solo').length, 0,
+    'a solo page lists every person on the domain — the disclosure #68 exists to stop');
+  eq(run(1, 'all').length, 0, 'the picker draws with nobody to pick');
+  eq(run(1, 'solo').length, 0, 'the picker draws on a one-person solo page');
+  /* NOBODY IS CURRENT on the combined stage: every entry is a link away from
+     what is being looked at, so marking one would tell a screen reader it is
+     viewing a person while the page shows the household. */
+  ok(run(3, 'all').every(p => p.current === 'false'),
+    'the picker marks an entry current on a stage that is showing everyone');
 });
 
 test('the rule between the people and the gears is not a link', () => {
@@ -914,21 +928,60 @@ test('a bridge idler is drawn at the same opacity as every other ghost', () => {
      a factor measured UNDERNEATH that opacity: about 5.5:1 against the pale
      page, darker and higher in contrast than any of the linked wheels the
      machine is actually about. The number must be the SAME number, not a second
-     opinion about it. */
-  /* The parameter is optional and names a theme: the datum's own opacity is
+     opinion about it.
+
+     RUN, NOT READ. This used to be four regexes over the render, which is a
+     check on how an expression is spelled: rewrite `this.ghostOpacity()` as the
+     literal beside it and every one of them still passes while the two numbers
+     start drifting apart. The rule has a name now -- wheelOpacity() -- and both
+     the ghost layer and the cast shadows derive from it, so it can be lifted and
+     ASKED, in both themes, for every kind of wheel the solve produces.
+
+     The theme parameter is optional and names one: the datum's own opacity is
      solved against the LIGHT treatment's contrast whichever theme is on, and it
-     asks this for the reference alpha rather than repeating 0.46 beside it. */
-  ok(/ghostOpacity\((?:theme)?\)\s*\{/.test(SRC), 'there is no single source for the ghost opacity');
-  const ghosts = SRC.slice(SRC.indexOf("h('div', { key: 'ghosts'"), SRC.indexOf("key: 'shadows'"));
-  ok(/opacity: this\.ghostOpacity\(\)/.test(ghosts),
-    'the ghost layer no longer takes its opacity from ghostOpacity()');
-  const art = SRC.slice(SRC.indexOf("key: 'shadows'"));
-  ok(/role === 'idler' \? this\.ghostOpacity\(\)/.test(art),
-    'a bridge idler is drawn without the ghost layer\'s opacity, so it reads as '
-    + 'the most prominent wheel on the page');
-  ok(/filter\(g => g\.role !== 'idler'\)/.test(art),
-    'the cast-shadow layer still draws under the idlers — background machinery '
-    + 'that casts a full-strength shadow reads heavier than the wheel casting it');
+     asks ghostOpacity() for that reference alpha rather than repeating 0.46. */
+  const fns = (theme) => {
+    const ctx = {
+      state: { theme: theme },
+      ghostOpacity: new Function('return function ' + grabBlock('  ghostOpacity(theme) {', '{', '}') + ';')(),
+      wheelOpacity: new Function('return function ' + grabBlock('  wheelOpacity(g) {', '{', '}') + ';')()
+    };
+    return ctx;
+  };
+  const bad = [];
+  ['dark', 'light'].forEach(theme => {
+    const c = fns(theme);
+    const ghost = c.ghostOpacity.call(c);
+    ok(typeof ghost === 'number' && ghost > 0 && ghost < 1,
+      theme + ': ghostOpacity() is not an alpha');
+    /* An idler is drawn at the ghost layer's own number, not near it. */
+    const idler = c.wheelOpacity.call(c, { role: 'idler' });
+    if (idler !== ghost) {
+      bad.push(`${theme}: an idler is drawn at ${idler} while the ghost layer is at `
+        + `${ghost} — a second opinion about how dim a ghost is`);
+    }
+    /* A linked wheel carries no opacity of its own: the machine is full weight. */
+    ['link', undefined].forEach(role => {
+      if (c.wheelOpacity.call(c, { role: role }) != null) {
+        bad.push(`${theme}: a wheel with role ${role} is dimmed like background machinery`);
+      }
+    });
+    /* And the shadow layer's own question, asked the way the render asks it:
+       reduced weight casts nothing, full weight casts. */
+    if (c.wheelOpacity.call(c, { role: 'idler' }) == null) {
+      bad.push(theme + ': an idler passes the cast-shadow filter, so background '
+        + 'machinery throws a full-strength shadow — heavier than the wheel casting it');
+    }
+    if (c.wheelOpacity.call(c, { role: 'link' }) != null) {
+      bad.push(theme + ': a linked wheel is excluded from the cast-shadow layer');
+    }
+  });
+  /* The two themes must not resolve to the same alpha, or the whole per-theme
+     derivation above is measuring one number twice. */
+  const d = fns('dark'), l = fns('light');
+  ok(d.ghostOpacity.call(d) !== l.ghostOpacity.call(l),
+    'the ghost opacity is the same in both themes, so this test cannot tell them apart');
+  ok(bad.length === 0, bad.join('\n      '));
 });
 
 /* chainAxes() lifted out of the page and run against a solve of the test's
@@ -988,7 +1041,12 @@ function fitEscapesOn(solved, axisRot, spineSlug, margin) {
   const runs = {};
   ctx.ghosts.forEach(g => {
     const ei = g.i.slice(2, 3);
-    (runs[ei] = runs[ei] || []).push({ cx: g.cx, cy: g.cy });
+    /* `person`, `lead` and `k` come along because fitEscapes records them for the
+       datum mark, and a test asking WHICH chain a run belongs to and which end
+       it left by would otherwise have to infer it from geometry it is trying to
+       measure. */
+    (runs[ei] = runs[ei] || []).push({ cx: g.cx, cy: g.cy,
+      person: g.person, lead: g.lead, k: g.k });
   });
   return runs;
 }
@@ -996,22 +1054,78 @@ function fitEscapesOn(solved, axisRot, spineSlug, margin) {
 test('escape runs follow each chain axis, never its bridge axis', () => {
   /* A branch has TWO directions: the bridge runs perpendicular to set spacing,
      then the chain runs parallel to the spine. A run that followed the bridge
-     would leave by the short axis -- the #10 and #67 failure. */
-  const i = SRC.indexOf('fitEscapes()');
-  const j = SRC.indexOf('applyRotation()', i);
-  const frag = SRC.slice(i, j);
-  ok(!/solved\.gears\[solved\.gears\.length - 1\]/.test(frag)
-     || /chainAxis|perChain/.test(frag),
-    'fitEscapes still takes the first and last gear of the whole train as its ends');
-  ok(/this\.chainAxes\(/.test(frag),
-    'fitEscapes derives its own axis instead of reading the one chainAxes() states');
-  /* The spine keeps both runs; every other chain gets ONE, on the same side. The
-     missing leading run is where the bridge attaches, so a driven chain visibly
-     receives its power there. */
-  ok(/if \(!c\.spine\) return;[\s\S]{0,220}?hosts\.push\([\s\S]{0,120}?hosts\.push\(/.test(frag),
-    'the spine no longer gets both a leading and a trailing run');
-  ok(/if \(!c\.spine\) hosts\.push\(/.test(frag),
-    'a driven chain gets no escape run of its own, or gets more than one');
+     would leave by the short axis -- the #10 and #67 failure.
+
+     RUN, NOT READ. This used to be four regexes over the body of fitEscapes,
+     including one that matched the ORDER of two `hosts.push(` calls -- which
+     asserts how the function is written, not what it places, and passes intact
+     through any rewrite that keeps the words. fitEscapesOn() has run the real
+     thing since the crossing test was written; this asks it the same questions.
+
+     THE HOST WHEEL IS THE ORIGIN, not the first ghost: the run is a random walk
+     of up to seven wheels dealt within 20 degrees of each other, so the heading
+     that matters is the one from the wheel it meshes with to where it ended up. */
+  const bad = [];
+  [0, 90].forEach(rot => {
+    const { solved, order } = runSolve(THREE, { axisRot: rot });
+    const spineSlug = order[0].slug;
+    const axes = chainAxesOf(solved, rot, spineSlug);
+    const spine = axes.find(c => c.spine);
+    const branches = axes.filter(c => !c.spine);
+    const runs = fitEscapesOn(solved, rot, spineSlug);
+    /* The spine keeps both runs; every other chain gets ONE, on the same side.
+       The missing leading run is where the bridge attaches, so a driven chain
+       visibly receives its power there. */
+    const byPerson = {};
+    Object.keys(runs).forEach(ei => {
+      const r = runs[ei];
+      (byPerson[r[0].person] = byPerson[r[0].person] || []).push(r);
+    });
+    const spineRuns = byPerson[spine.person] || [];
+    if (spineRuns.length !== 2) {
+      bad.push(`rot ${rot}: the spine got ${spineRuns.length} escape runs, not a leading `
+        + 'and a trailing one');
+    } else if (spineRuns.filter(r => r[0].lead).length !== 1) {
+      bad.push(`rot ${rot}: the spine's two runs do not leave by opposite ends`);
+    }
+    branches.forEach(c => {
+      const mine = byPerson[c.person] || [];
+      if (mine.length !== 1) {
+        bad.push(`rot ${rot}: driven chain ${c.person} got ${mine.length} escape runs, not one`);
+      } else if (mine[0][0].lead) {
+        bad.push(`rot ${rot}: driven chain ${c.person}'s run leaves by the LEADING end, `
+          + 'which is the end its bridge arrives at');
+      }
+    });
+    /* And the heading of every run, against its OWN chain's axis rather than
+       against one axis for the whole array. The bridge runs at 90 degrees to it,
+       which is what a run measured first-to-last across the whole train used to
+       follow. */
+    axes.forEach(c => {
+      const home = {};
+      solved.gears.forEach(g => { home[g.i] = g; });
+      (byPerson[c.person] || []).forEach(r => {
+        const host = r[0].lead ? c.head : c.tail;
+        const last = r[r.length - 1];
+        const deg = Math.atan2(last.cy - host.cy, last.cx - host.cx) * 180 / Math.PI;
+        if (axisOff(deg, c.deg) >= axisOff(deg, c.deg + 90)) {
+          bad.push(`rot ${rot}: ${c.person}'s ${r[0].lead ? 'leading' : 'trailing'} run `
+            + `leaves at ${deg.toFixed(1)}°, closer to its bridge axis `
+            + `(${axisOff(deg, c.deg + 90).toFixed(1)}°) than to its own chain axis `
+            + `(${axisOff(deg, c.deg).toFixed(1)}°)`);
+        }
+        /* Which WAY along that axis, not merely along it: the leading run has to
+           run backwards off the head and the trailing one onwards off the tail,
+           or the spine grows both tails out of the same end. */
+        const want = r[0].lead ? c.deg + 180 : c.deg;
+        if (Math.cos((deg - want) * Math.PI / 180) <= 0) {
+          bad.push(`rot ${rot}: ${c.person}'s ${r[0].lead ? 'leading' : 'trailing'} run `
+            + `leaves at ${deg.toFixed(1)}° when its end points ${want.toFixed(1)}°`);
+        }
+      });
+    });
+  });
+  ok(bad.length === 0, bad.join('\n      '));
 });
 
 test('a chain axis is measured from its own linked wheels, never its idlers', () => {
@@ -1591,14 +1705,116 @@ test('the idler count and the stage rotation agree on which axis is long', () =>
   /* idlerCount() took max/min of the two viewport dimensions while axisRot()
      only turns the stage past h > w * 1.05. Between 1.00 and 1.05 they
      disagreed, and the bridge was then measured across the axis the stage does
-     not run along. Asking the rotation itself makes them agree by construction. */
-  const i = SRC.indexOf('  idlerCount() {');
-  const frag = SRC.slice(i, SRC.indexOf('\n  }', i));
-  ok(/this\.axisRot\(\)/.test(frag),
-    'idlerCount() does not derive its long axis from axisRot()');
-  ok(!/Math\.max\(w, h\)/.test(frag),
-    'idlerCount() still calls the larger dimension the long axis, which axisRot() '
-    + 'does not between 1.00 and 1.05');
+     not run along. Asking the rotation itself makes them agree by construction.
+
+     RUN, NOT READ. Asserting that the source says `this.axisRot()` is a check on
+     a spelling, and it passes just as happily while the two are handed DIFFERENT
+     VIEWPORTS -- which is the second half of the same bug: this read the visual
+     viewport while the rotation it defers to reads innerWidth/innerHeight, so an
+     iOS toolbar collapse put them back into disagreement by another route.
+
+     No formula is repeated here. The real idlerCount() is run with the rotation
+     FORCED, which is the only way to ask a function whether it is listening: a
+     count that derives its own axis gives the same answer whatever it is told,
+     and that is exactly the defect. So the first thing asserted is that some
+     viewport exists where forcing 0 and forcing 90 give DIFFERENT counts.
+
+     WHAT IS NOT ASSERTED, AND WHY. There is no case in the 1.00-1.05 band where
+     the two readings differ NUMERICALLY: swept at 10px over 200-3000px, the
+     count comes out the same whichever axis is called long, because the cross
+     term the bridge asks for is ~0.95 of the long term at three chains and the
+     band only reaches 0.952. So the band cannot discriminate today -- which is
+     luck, not a property, and it moves the moment a person is added or the
+     module changes. The band is pinned to the landscape reading instead, which
+     is what "agree with axisRot" means there. */
+  const STAGE_CROSS = new Function('MODULE', 'TEETH_MEAN', 'STAGE',
+    grabDecl('const STAGE_CROSS =') + '\n return STAGE_CROSS;')(
+    page.MODULE, page.TEETH_MEAN, { people: THREE });
+  const IDLERS_FOR = new Function('MIN_IDLERS', 'MAX_IDLERS',
+    grabDecl('const IDLERS_FOR =') + '\n return IDLERS_FOR;')(
+    grabNumber('MIN_IDLERS'), grabNumber('MAX_IDLERS'));
+  /* NOMINAL_SPAN is the page's own derivation, executed, exactly as fitRule()
+     does it -- a copy of that formula here is the drift this file exists to
+     stop. */
+  const NOMINAL_SPAN = new Function('MODULE', 'TEETH_MEAN', 'ANG_MIN', 'ANG_MAX', 'NOMINAL_CHAIN',
+    'return ' + grabBlock('const NOMINAL_SPAN =', '(', ')')
+      .replace(/^const NOMINAL_SPAN =\s*/, '') + '()')(
+    page.MODULE, page.TEETH_MEAN, page.ANG_MIN, page.ANG_MAX, Math.max(...page.TRAIN_LENS));
+  const countOn = (win) => new Function('window', 'LINK_SHARE', 'NOMINAL_SPAN',
+    'STAGE_CROSS', 'MODULE', 'TEETH_MEAN', 'IDLERS_FOR', 'MAX_IDLERS',
+    'return function ' + grabBlock('  idlerCount() {', '{', '}') + ';')(
+    win, grabNumber('LINK_SHARE'), NOMINAL_SPAN, STAGE_CROSS,
+    page.MODULE, page.TEETH_MEAN, IDLERS_FOR, grabNumber('MAX_IDLERS'));
+  const rotOn = (win) => new Function('window',
+    'return function ' + grabBlock('  axisRot() {', '{', '}') + ';')(win);
+  const bad = [];
+  /* THE COUNT MUST LISTEN. Somewhere, telling it 0 and telling it 90 has to give
+     two different answers -- otherwise it is deriving its own axis and this whole
+     test is measuring nothing. */
+  let listens = 0;
+  for (let w = 200; w <= 3000 && !listens; w += 10) {
+    for (let h = 200; h <= 3000 && !listens; h += 10) {
+      const c = countOn({ innerWidth: w, innerHeight: h });
+      if (c.call({ _idlerN: 2, axisRot: () => 0 }) !== c.call({ _idlerN: 2, axisRot: () => 90 })) {
+        listens++;
+      }
+    }
+  }
+  ok(listens > 0, 'forcing axisRot() to 0 and to 90 gives the same idler count at every '
+    + 'viewport, so the count is deriving its own long axis and ignoring the rotation');
+  /* Straddling the 1.05 hinge from both sides in 5px steps -- the band the two
+     used to disagree in -- plus a genuine phone, tablet and desktop. */
+  const shapes = [[390, 844], [844, 390], [1440, 900], [2560, 1080], [744, 1133]];
+  for (let w = 700; w <= 1500; w += 25) {
+    for (let h = w; h <= Math.round(w * 1.10); h += 5) shapes.push([w, h]);
+  }
+  shapes.forEach(([w, h]) => {
+    const win = { innerWidth: w, innerHeight: h };
+    const count = countOn(win), rot = rotOn(win)();
+    [1, 2].forEach(held => {
+      const live = count.call({ _idlerN: held, axisRot: rotOn(win) });
+      const asRot = count.call({ _idlerN: held, axisRot: () => rot });
+      if (live !== asRot) {
+        bad.push(`${w}x${h} holding ${held}: the count does not follow axisRot() — `
+          + `it says ${rot}deg and forcing that gives ${asRot}, but the live call gave ${live}`);
+      }
+      /* Inside the band the stage has NOT turned, so the count may not read the
+         taller side as the long one however close the two are. */
+      if (h > w && h <= w * 1.05) {
+        const asLandscape = count.call({ _idlerN: held, axisRot: () => 0 });
+        if (live !== asLandscape) {
+          bad.push(`${w}x${h} holding ${held}: taller than wide but under the 1.05 hinge, `
+            + `so the stage is still landscape — the count says ${live}, landscape says ${asLandscape}`);
+        }
+      }
+    });
+  });
+  /* AND BOTH HALVES MEASURE THE SAME WINDOW. A visual viewport shorter than the
+     layout one is the iOS toolbar collapsing; axisRot() cannot see it, so
+     neither may this. Calibrated rather than asserted blind: a pair of sizes
+     that genuinely give different counts is searched for first, and the visual
+     viewport is then set to the OTHER one. */
+  let pair = null;
+  for (let h = 400; h <= 1400 && !pair; h += 10) {
+    for (let h2 = 400; h2 <= 1400 && !pair; h2 += 10) {
+      const a = countOn({ innerWidth: 900, innerHeight: h });
+      const b = countOn({ innerWidth: 900, innerHeight: h2 });
+      if (a.call({ _idlerN: 2, axisRot: rotOn({ innerWidth: 900, innerHeight: h }) })
+        !== b.call({ _idlerN: 2, axisRot: rotOn({ innerWidth: 900, innerHeight: h2 }) })) {
+        pair = [h, h2];
+      }
+    }
+  }
+  ok(pair, 'no two viewport heights give different idler counts, so the visual-viewport '
+    + 'check below would be vacuous');
+  const layout = { innerWidth: 900, innerHeight: pair[0] };
+  const spoofed = { innerWidth: 900, innerHeight: pair[0],
+    visualViewport: { width: 900, height: pair[1] } };
+  eq(countOn(spoofed).call({ _idlerN: 2, axisRot: rotOn(spoofed) }),
+    countOn(layout).call({ _idlerN: 2, axisRot: rotOn(layout) }),
+    'a visual viewport of a different size moves the idler count, which axisRot() '
+    + 'cannot see — the two are measuring different windows again');
+  ok(bad.length === 0, bad.join('\n      '));
 });
 
 test('a combined stage seats every person, each within its own slot range', () => {

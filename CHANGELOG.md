@@ -98,6 +98,104 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **#80 — `CLAUDE.md` described an attachment search that does not exist, in the
+  section added to close the #59 class.** It said the search "*prefers a clear
+  band of the cross axis and rejects every anchor that does not give one*".
+  `search()` has no cross-axis band test: it rejects on foul, pass-over and
+  bridge-crossing, and the cross axis is bounded elsewhere, by `idlerCount()`. The
+  neighbouring paragraph about the search's refusal-to-refuse was accurate
+  throughout, which is what made the wrong sentence read as checked. Rewritten to
+  what the code does.
+
+- **#79 — the datum plate's font stack named no face a Windows machine has.**
+  `ui-monospace, Menlo, 'DejaVu Sans Mono', monospace` covers Apple and Linux and
+  falls through to Courier New everywhere else — a lighter, narrower face at the
+  same size, on the one mark that carries the identity and already the smallest
+  lettering on the page. `Consolas` is now in the stack, ahead of the generic.
+  The plate's *size* is untouched and is Charles's call: it measures 4.8 px at
+  320×568, 7.5 at 390×844 and 12.5 at 1440×900, against tick numerals that were
+  dropped at 4.4/6.7/11.4 for being illegible.
+
+- **#78 — `idlerCount()` measured a different window from the `axisRot()` it
+  defers to.** It read `visualViewport`; the rotation reads
+  `innerWidth`/`innerHeight`. The two differ exactly when the iOS toolbar
+  collapses, which is the moment the fit re-runs — the same disagreement #67's
+  fix removed, arriving by a second route. Near-miss rather than a live fault at
+  390×844, and free to make consistent: one measurement now feeds both halves of
+  one decision.
+
+- **#77 — four "invariant" tests asserted source text, so the guard the ledger
+  cited as proof was not a guard.** The person-picker test was two regexes over a
+  slice of `index.html`: move the live condition into the comment beside it and
+  the suite stays 65/65 while the disclosure defect ships. The idler-count,
+  ghost-opacity and escape-run tests were the same shape. All four now **execute**
+  the page's own functions — `togPeople` against a synthetic `CONF` and `STAGE`,
+  `idlerCount()` with the rotation forced so the test can tell whether it is
+  listening at all, `wheelOpacity()` in both themes, and the real `fitEscapes` via
+  the `fitEscapesOn` harness that already existed. Each was checked by mutating
+  `index.html` and confirming it goes red; each carries its own non-vacuity
+  assertion.
+
+  The opacity rule got a name to be asked by: `wheelOpacity(g)`, which the cast
+  shadow layer now derives from instead of testing `role` a second time — "a
+  wheel drawn at reduced weight casts nothing" in one place.
+
+- **#76 — the last unguarded `SITES[g.person][g.slug]`.** Four other derefs
+  guard; `engraving()` did not, and it runs inside the render, so a person with no
+  table at all is a blank page rather than a missing engraving. That is #53's
+  exact failure mode. Unreachable with today's config; guarded anyway.
+
+- **#75 — the colour deal was sized before the idlers existed.** It was dealt over
+  `TRAIN.length`, which counts the bridge idlers — whose colours are then thrown
+  away and overpainted from `GHOST_COLORS`. So the deal spent pool entries on
+  wheels that never wear them (the *links* run out first when the train grows),
+  and a chain head arriving over a bridge was hue-scored against a colour nobody
+  draws. It is now sized and scored over the linked wheels only, and a head past a
+  bridge is scored against nothing at all — honest, because a whole idler of
+  background palette stands between it and the nearest coloured wheel.
+
+  `dealColours` also repeats its shuffled pool when there are more wheels than
+  colours, so those slots are inside the scored array. The call site used to close
+  that gap itself with `WHEEL_DEAL[i % len]`, which handed out colours the 40°
+  rule of #12 had never looked at. `WHEEL_POOL` is 10 and the train is exactly 10
+  today: one more link and it would have wrapped.
+
+- **#74 — two focusable links shared the accessible name "Mail".** New with the
+  combined stage: two people, two mailboxes, one string. The only differentiator
+  was the datum plate, which lives inside the `aria-hidden` gear art. `a11y_audit`
+  passing was not evidence — it counted *unlabelled* focusables, not ambiguous
+  ones. On the combined stage a badge is now named `"<service>, <person>"`, using
+  the same name the plate is stamped with so the audible differentiator and the
+  visible one are one string. The solo page is unchanged, and the visible pill
+  still reads the service alone — a prefix of the name, which is what WCAG 2.5.3
+  asks. `a11y_audit` grew a duplicate-accessible-name check (same name, different
+  destination) and was confirmed to go red on the unqualified label.
+
+- **#73 — the datum plate fell off the viewport on a random fraction of loads.**
+  `datumLayer` runs *after* `fitStage`, so the plate sat outside all three limbs
+  of the fit: `WHEEL_CROSS_MAX` bounds a wheel, `CROSS_BLEED` bounds the band, and
+  both deliberately let the machine bleed past the cross axis — which is the edge
+  the mark then went over. Measured unseeded over 20 loads per viewport: **2/20**
+  put Harper's plate at y 913–930 against a 900 px viewport at 1440×900, and
+  **1/20** put it at x −18…−9 at 390×844. The seeded pixel gate structurally
+  cannot see it; it photographs one deal.
+
+  `datumRuns()` already said "off the page is invisible, and invisible is the one
+  thing this mark may not be", and nothing enforced it. It now hands over **both**
+  origins — a scribed datum may be laid either side of the parts it references,
+  and both clear every tooth by the same module of air — and `plateSeat()` spends
+  the two freedoms a datum actually has, in order: which side, then which station
+  along it. The natural side and the natural station win every tie, so a load that
+  was already right is untouched, and the smaller slide wins otherwise. Neither
+  side fitting is a `console.warn`, not a silent give-up.
+
+  The fit is deliberately *not* changed. Shrinking the machine so a placard fits
+  inverts the composition: the train is the subject and the mark references it, so
+  the mark is what moves.
+
+  Re-measured unseeded at 40 loads per viewport, 160 plate placements: **0
+  clipped**, worst margins −3.5 px at 1440×900 and −0.1 px at 390×844.
+
 - **#72 — `SERPENTINE_PACKING` was a measured constant standing in for a
   derivation.** #67 shipped it at 0.85, measured over 15 loads at 5 viewports,
   with a comment that had to say *"re-measure if the deal bounds, `MODULE`,

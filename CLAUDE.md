@@ -142,8 +142,11 @@ places wheels in `TRAIN` order and a bridge may only hang off a wheel already
 placed, so a chain can only ever be driven from one earlier in the list. The
 spine is `CHAIN_ORDER[0]` and growth goes one way.
 
-The attachment search *prefers* a clear band of the cross axis and rejects every
-anchor that does not give one. What it does **not** do is refuse: when nothing
+The attachment search ranks every anchor and takes the first that clears three
+tests: the bridge and the whole chain behind it must foul no wheel, the bridge
+run must pass over none, and it must cross no other bridge. There is no
+cross-axis band test — the cross axis is bounded elsewhere, by `idlerCount()`.
+What the search does **not** do is refuse: when nothing
 clears, the last-ditch path takes the best-ranked anchor and plants the chain
 anyway — `console.warn`, "which may clash" — because a chain that is simply
 absent is worse than one standing too close. A separate pass then measures every

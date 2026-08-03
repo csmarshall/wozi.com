@@ -69,8 +69,28 @@ MANUAL = r"""
   /* Focusable things and whether they show a focus ring. */
   const foc = [...document.querySelectorAll('a[href],button,[tabindex]:not([tabindex="-1"])')];
   out.focusable = foc.length;
-  out.focusableNoLabel = foc.filter(e =>
-      !e.getAttribute('aria-label') && !e.getAttribute('title') && !e.textContent.trim()).length;
+  const accName = e => (e.getAttribute('aria-label')
+                     || e.getAttribute('title')
+                     || e.textContent.trim() || '').replace(/\s+/g, ' ').trim();
+  out.focusableNoLabel = foc.filter(e => !accName(e)).length;
+
+  /* TWO FOCUSABLES THAT SOUND IDENTICAL AND GO SOMEWHERE DIFFERENT. Counting
+     UNLABELLED elements, which is the check above, passes a page where every
+     control has a name and two of them are the same name -- and that is exactly
+     what a combined stage produces, because two people can carry the same
+     service and "Mail" then names two different mailboxes. A screen reader gets
+     a tab order with no way to tell them apart; the datum plate that
+     distinguishes them on screen is inside the aria-hidden gear art.
+     Same name AND same href is not a finding: that is one destination reachable
+     twice, which is a navigation choice, not an ambiguity. */
+  const byName = {};
+  foc.forEach(e => {
+    const n = accName(e);
+    if (!n) return;
+    (byName[n] = byName[n] || []).push(e.getAttribute('href') || e.tagName);
+  });
+  out.dupNames = Object.keys(byName).filter(n =>
+      new Set(byName[n]).size > 1).map(n => [n, byName[n].length]);
 
   /* Does anything define a visible focus indicator? */
   let outlineRules = 0;
@@ -184,6 +204,7 @@ async def main():
                 print(f"   headings on page        : {m['headings']}  (h1: {m['h1']})")
                 print(f"   skip link               : {'yes' if m['skipLink'] else 'none'}")
                 print(f"   focusable elements      : {m['focusable']}  (unlabelled: {m['focusableNoLabel']})")
+                print(f"   duplicate accessible names: {m['dupNames'] or 'none'}")
                 print(f"   :focus style rules       : {m['focusRules']}")
                 print(f"   prefers-reduced-motion   : {m['reducedMotionInCSS']} rules")
                 print(f"   SVG elements             : {m['svgTotal']}  (hidden from a11y tree: {m['svgHidden']})")
@@ -201,6 +222,10 @@ async def main():
                     _FAILURES.append("no <main> landmark")
                 if m["focusableNoLabel"]:
                     _FAILURES.append(f"{m['focusableNoLabel']} focusable element(s) with no accessible name")
+                for name, n in m["dupNames"]:
+                    _FAILURES.append(
+                        f'{n} focusables share the accessible name "{name}" and do not '
+                        f"share a destination (WCAG 2.4.4/4.1.2)")
     proc.kill()
     # AN EXIT CODE, so this is a gate rather than a printout (#47). It ended at
     # asyncio.run(main()) with main() returning None, so it exited 0 whatever it
