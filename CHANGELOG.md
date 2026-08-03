@@ -46,10 +46,28 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
   One real defect fell out of making the picker visible. The rule between the
   people and the gear families was drawn as its own menu entry: an `<a>` with an
   empty `href` and no text, which the menu template cannot hide from the
-  accessibility tree. Free while the picker never rendered, a **focusable element
-  with no accessible name** the moment the apex drew it. The rule now hangs off
-  the first gear entry as a `border-top` — same hairline, no extra node, no stop
-  in the tab order. `a11y_audit` went from FAIL to PASS on that count.
+  accessibility tree — a **focusable element with no accessible name**.
+
+  **It was shipping, not latent.** The claim that it cost nothing until the apex
+  drew the picker was wrong: at `439c9ba` the picker's gate was already
+  `people.length > 1` alone, and `PEOPLE` had had two entries since Harper was
+  added. The panel's `display:none` hides nothing from the audit, which counts
+  `a[href]` straight out of the DOM. It was on the live page.
+
+  The rule is now its own `<div>` between two lists, guarded by `sc-if` — the
+  1px hairline it always was, inset 10px, floating in 6px of gap, and unable to
+  take focus. It is **not** a `border-top` on the first gear entry: that entry is
+  a 9px-rounded pill filled with `--accent` on any page without a `?kind=`, so a
+  border there draws on the top edge of a block of colour, at the entry's full
+  width rather than the rule's inset one. `a11y_audit` went from FAIL to PASS.
+
+  **The pageview beacon reports the scope now, not the spine.** It sent
+  `view/` + `WHO.slug`, and `WHO` is `CHAIN_ORDER[0]` — so every visit to the
+  combined stage reported `view/charles` and was indistinguishable in the
+  analytics from a visit to `charles.wozi.com`. The same spine-versus-selection
+  confusion as the `aria-current` above, in the one place where being wrong
+  produces a plausible-looking number instead of a visible fault. It sends
+  `view/all` on the combined stage.
 
   `CLAUDE.md` gained the host model and four invariants this branch had been
   relying on without naming: the bridge as structure versus escape runs as

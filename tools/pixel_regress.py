@@ -220,6 +220,15 @@ def main():
                     help="query string appended to the page, e.g. '?who=charles'")
     a = ap.parse_args()
 
+    # It is appended to a bare directory URL, so without the '?' it becomes a
+    # PATH: 'who=charles' asks for a file of that name and gets a 404 on both
+    # sides, which compare cleanly and print '0 px differ'. A gate that passes by
+    # photographing two error pages is worse than one that fails.
+    if a.query and not a.query.startswith("?"):
+        print(f"FATAL: --query must start with '?' (got {a.query!r}); "
+              f"without it the shot is a 404, and two 404s agree perfectly")
+        return 2
+
     vps = [tuple(int(n) for n in v.lower().split("x")) for v in a.viewport] \
         or [(1440, 900), (390, 844)]
 

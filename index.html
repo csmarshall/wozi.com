@@ -175,6 +175,12 @@ a:focus-visible,button:focus-visible,[tabindex]:focus-visible{outline:3px solid 
 
   <nav aria-label="Table of gears" style="{{ togPanelStyle }}">
     <div style="font:700 11px/1 'Manrope',system-ui,sans-serif;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);padding:4px 12px 8px;">Table of Gears</div>
+    <sc-for list="{{ togPeople }}" as="pp">
+      <a href="{{ pp.href }}" aria-current="{{ pp.current }}" style="{{ pp.style }}">{{ pp.label }}</a>
+    </sc-for>
+    <sc-if value="{{ togSep }}">
+      <div aria-hidden="true" style="{{ togSepStyle }}"></div>
+    </sc-if>
     <sc-for list="{{ togList }}" as="tg">
       <a href="{{ tg.href }}" aria-current="{{ tg.current }}" style="{{ tg.style }}">{{ tg.label }}</a>
     </sc-for>
@@ -2528,10 +2534,20 @@ class Component extends DCLogic {
   }
 
   componentDidMount() {
-    /* One beacon per load, naming only which chain was shown -- never a handle,
+    /* One beacon per load, naming only which SCOPE was drawn -- never a handle,
        never a referrer. Fires from mount rather than from the top of the file so
-       it counts a page that actually rendered. */
-    if (AN.pageview !== false) track('view/' + (WHO.slug || 'unknown'));
+       it counts a page that actually rendered.
+
+       IT REPORTS THE SELECTION, NOT THE SPINE. WHO is CHAIN_ORDER[0], which on
+       the combined stage is whichever chain happens to be longest -- so sending
+       WHO.slug made every apex visit report `view/charles` and left it
+       indistinguishable from charles.wozi.com. The analytics would have been
+       silently wrong in the one way nobody reads out of the data: a number that
+       looks plausible. This is the same spine-versus-selection confusion the
+       person picker's aria-current already had to settle. */
+    if (AN.pageview !== false) {
+      track('view/' + (STAGE.mode === 'all' ? 'all' : (WHO.slug || 'unknown')));
+    }
     this.loadIcons();
     this.startPhysics();
     this.fitStage();
@@ -4935,6 +4951,45 @@ class Component extends DCLogic {
       };
     });
 
+    /* THE PERSON PICKER LIVES HERE, and only appears when there is someone
+       to pick. With one chain configured this list is empty, so the page is
+       byte-identical to what it was before people existed -- which is the whole
+       reason the picker was built now rather than later: adding a person
+       becomes a config edit, with no page work.
+
+       AND ONLY ON THE COMBINED STAGE. The picker is a way to move around a
+       shared page, not a directory of the domain: a link to charles.wozi.com,
+       or a ?who= someone was sent, is deliberately one person, and listing
+       everybody else beside it discloses the household to a visitor who asked
+       for one member of it. The old rule -- hidden while there is one person --
+       is the same rule with the scope left out.
+
+       Plain `?who=` links, exactly like the gear entries below, because the
+       hostname already decides the default. Switching person is a navigation,
+       not state -- the tooth deal, the colour deal and the centre deal all run
+       at load, so a fresh document is the correct way to change which chain is
+       on stage.
+
+       It is its own list rather than the head of the gear list because the rule
+       that separates the two has to be a non-link, and the template renders one
+       tag per entry. */
+    const togPeople = (function () {
+      const people = CONF.PEOPLE || [];
+      if (!(people.length > 1 && STAGE.mode === 'all')) return [];
+      /* NOBODY IS CURRENT HERE. The block only draws on the combined stage,
+         and on a combined stage every one of these is a link AWAY from what
+         is being looked at -- so marking the spine would say "you are
+         viewing Charles" to a screen reader while the page shows everyone.
+         WHO is the spine, not the selection, and the two stopped being the
+         same thing when the apex became the whole household. */
+      return people.map(p => ({
+        href: '?who=' + p.slug, label: p.name, current: 'false',
+        style: { display: 'block', padding: '7px 12px', borderRadius: '9px',
+          textDecoration: 'none', font: "700 13px/1.3 'Manrope',system-ui,sans-serif",
+          color: 'var(--ink)', background: 'transparent' }
+      }));
+    })();
+
     return {
       gearArt: gearArt,
       links: links,
@@ -4980,6 +5035,24 @@ class Component extends DCLogic {
         zIndex: 30, background: 'var(--chip)', border: '1px solid var(--hair)',
         borderRadius: '14px', padding: '10px 6px', boxShadow: 'var(--shadow)', minWidth: '190px'
       },
+      togPeople: togPeople,
+      /* THE RULE BETWEEN THE PEOPLE AND THE GEARS IS ITS OWN ELEMENT, AND NOT A
+         LINK. It used to be a menu entry -- a hairline drawn as an <a> with an
+         empty href and no text, which the template has no way to hide from the
+         accessibility tree, so it was a focusable element with no accessible
+         name, and `a11y_audit` counts `a[href]` out of the DOM whether or not
+         the panel is displayed. It was therefore FAILING on the shipped page,
+         not waiting to: the picker's old gate was `people.length > 1` alone, and
+         there have been two people since Harper was added.
+
+         It is a bare <div>, drawn between the two lists rather than on the edge
+         of either, so it is the rule it always was: a 1px hairline inset 10px
+         from the panel's text, floating in 6px of gap. Hanging it off the first
+         gear entry as a border-top instead put it on the top edge of a filled,
+         rounded, ACTIVE pill -- which is what that entry is whenever no ?kind=
+         is forced -- and stretched it the full width of the entry's box. */
+      togSep: togPeople.length > 0,
+      togSepStyle: { height: '1px', margin: '6px 10px', background: 'var(--hair)' },
       togList: (function () {
         const names = { spokes: 'Spoke slots', holes: 'Lightening drills', pockets: 'Kidney pockets',
           spiral: 'Curved spokes', iris: 'Iris blades', star: 'Star truss', honeycomb: 'Honeycomb',
@@ -4997,57 +5070,8 @@ class Component extends DCLogic {
               background: active ? 'var(--accent)' : 'transparent' }
           };
         };
-        /* THE PERSON PICKER LIVES HERE, and only appears when there is someone
-           to pick. With one chain configured this loop adds nothing at all, so
-           the page is byte-identical to what it was before people existed --
-           which is the whole reason the picker was built now rather than later:
-           adding a person becomes a config edit, with no page work.
-
-           AND ONLY ON THE COMBINED STAGE. The picker is a way to move around a
-           shared page, not a directory of the domain: a link to
-           charles.wozi.com, or a ?who= someone was sent, is deliberately one
-           person, and listing everybody else beside it discloses the household
-           to a visitor who asked for one member of it. The old rule -- hidden
-           while there is one person -- is the same rule with the scope left out.
-
-           Plain `?who=` links, exactly like the gear entries above, because the
-           hostname already decides the default. Switching person is a
-           navigation, not state -- the tooth deal, the colour deal and the
-           centre deal all run at load, so a fresh document is the correct way
-           to change which chain is on stage. */
-        const people = CONF.PEOPLE || [];
         const out = [];
-        if (people.length > 1 && STAGE.mode === 'all') {
-          /* NOBODY IS CURRENT HERE. The block only draws on the combined stage,
-             and on a combined stage every one of these is a link AWAY from what
-             is being looked at -- so marking the spine would say "you are
-             viewing Charles" to a screen reader while the page shows everyone.
-             WHO is the spine, not the selection, and the two stopped being the
-             same thing when the apex became the whole household. */
-          people.forEach(p => {
-            out.push({
-              href: '?who=' + p.slug, label: p.name, current: 'false',
-              style: { display: 'block', padding: '7px 12px', borderRadius: '9px',
-                textDecoration: 'none', font: "700 13px/1.3 'Manrope',system-ui,sans-serif",
-                color: 'var(--ink)', background: 'transparent' }
-            });
-          });
-        }
-        /* THE RULE BETWEEN THE PEOPLE AND THE GEARS IS A BORDER, NOT AN ENTRY.
-           It used to be its own list item -- a hairline drawn as an <a> with an
-           empty href and no text, which the menu template has no way to hide
-           from the accessibility tree, so it was a focusable element with no
-           accessible name. That cost nothing while the picker was hidden on
-           every shipped page, and became a real defect the moment the apex
-           started drawing it. Hanging the rule off the first gear entry instead
-           says the same thing to the eye and nothing at all to a screen
-           reader. */
-        const firstGear = item(null, 'Mixed deal (default)');
-        if (out.length) Object.assign(firstGear.style, {
-          marginTop: '7px', paddingTop: '14px',
-          borderTop: '1px solid var(--hair)'
-        });
-        out.push(firstGear);
+        out.push(item(null, 'Mixed deal (default)'));
         CENTRE_FAMILIES.forEach(f => {
           out.push(item(f.type, names[f.type] || f.type));
           /* The double row rides directly under the single, since it is the same

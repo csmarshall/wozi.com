@@ -213,10 +213,17 @@ test('stage hosts and solo hosts are disjoint, and every person has a solo host'
   ok(Array.isArray(conf.STAGE_HOSTS) && conf.STAGE_HOSTS.length,
     'config.js defines no STAGE_HOSTS, so nothing selects the combined stage');
   const bad = [];
+  /* And no two people may claim the same solo host. The resolver takes the FIRST
+     match in PEOPLE order, so the second claimant's subdomain silently serves
+     somebody else's chain -- a typo in one character of a copied line, and the
+     only symptom is a page that looks entirely correct for the wrong person. */
+  const claimed = {};
   (conf.PEOPLE || []).forEach(p => {
     if (!(p.hosts || []).length) bad.push(`${p.slug} has no solo host`);
     (p.hosts || []).forEach(h => {
       if (conf.STAGE_HOSTS.indexOf(h) >= 0) bad.push(`${h} is both a stage host and ${p.slug}'s solo host`);
+      if (claimed[h]) bad.push(`${h} is a solo host for both ${claimed[h]} and ${p.slug}`);
+      else claimed[h] = p.slug;
     });
   });
   ok(bad.length === 0, bad.join('\n      '));
@@ -245,6 +252,17 @@ test('a hostname matching nothing falls back to the combined stage', () => {
   eq(solo.people[0].slug, conf.PEOPLE[0].slug, "a person's own host selects the wrong person");
   eq(run(conf.STAGE_HOSTS[0], '?who=' + conf.PEOPLE[1].slug).people[0].slug, conf.PEOPLE[1].slug,
     '?who= does not override a stage host');
+  /* A ?who= NAMING NOBODY DEFERS TO THE HOSTNAME. It is the one precedence path
+     with two defensible answers, so it is the one worth pinning: a stale link,
+     a renamed slug or a typed guess should land on whatever that hostname would
+     have drawn anyway, not on a fallback that ignores it. A solo host still
+     draws its own person; a stage host still draws everyone. */
+  const staleSolo = run((conf.PEOPLE[0].hosts || [])[0], '?who=nobody-by-that-name');
+  eq(staleSolo.mode, 'solo', 'an unknown ?who= stops a solo host drawing its person');
+  eq(staleSolo.people[0].slug, conf.PEOPLE[0].slug,
+    'an unknown ?who= makes a solo host draw the wrong person');
+  eq(run(conf.STAGE_HOSTS[0], '?who=nobody-by-that-name').mode, 'all',
+    'an unknown ?who= stops a stage host drawing the combined stage');
 });
 
 test('the person picker is drawn only on the combined stage', () => {
@@ -255,10 +273,42 @@ test('the person picker is drawn only on the combined stage', () => {
      person", and both halves have to be in the same condition. */
   const i = SRC.indexOf('THE PERSON PICKER LIVES HERE');
   ok(i > 0, 'could not find the person picker block in index.html');
-  const frag = SRC.slice(i, SRC.indexOf("out.push(item(null,", i));
+  const end = SRC.indexOf('})();', i);
+  ok(end > i, 'the person picker block does not close');
+  const frag = SRC.slice(i, end);
   ok(/people\.length > 1/.test(frag), 'the picker no longer hides itself at one person');
   ok(/STAGE\.mode === 'all'/.test(frag),
     'the picker does not check STAGE.mode — a solo page would list every person on the domain');
+});
+
+test('the rule between the people and the gears is not a link', () => {
+  /* IT WAS ONE, AND IT WAS FAILING ON THE SHIPPED PAGE. The separator used to be
+     a menu entry -- an <a> with an empty href and no text -- and the menu
+     template renders one <a> per entry, so there was no way for it to be
+     anything else. `a11y_audit` reads `a[href]` out of the DOM, which the
+     panel's display:none does not remove, so it counted as a focusable element
+     with no accessible name from the day a second person made the picker draw
+     at all.
+     Two things have to hold and neither is visible in a screenshot of the closed
+     panel: the separator must not be produced by either list, and the template
+     must render it as something that cannot take focus. */
+  const nav = SRC.slice(SRC.indexOf('<nav aria-label="Table of gears"'),
+    SRC.indexOf('</nav>'));
+  ok(/<sc-if value="\{\{ togSep \}\}">/.test(nav),
+    'the table of gears no longer guards its separator with sc-if');
+  const sep = nav.slice(nav.indexOf('<sc-if'), nav.indexOf('</sc-if>'));
+  ok(/<div\b/.test(sep) && !/<a\b/.test(sep),
+    'the separator between the people and the gears is a link again — it has no '
+    + 'accessible name, so it is a focusable element with nothing to announce');
+  ok(/aria-hidden="true"/.test(sep), 'the separator is not hidden from the accessibility tree');
+  /* And it floats in the gap rather than riding an entry's edge: the gear list
+     entries are 9px-rounded pills that are FILLED whenever their kind is the
+     active one, and the first of them is active on any page without ?kind=. A
+     border on that pill is a line across the top of a block of accent colour,
+     not a rule between two groups. */
+  ok(!/borderTop/.test(SRC.slice(SRC.indexOf('togList: (function'), SRC.indexOf('toggleMotion:'))),
+    'a gear entry carries a borderTop again — the rule belongs in the gap between '
+    + 'the lists, not on the edge of a filled pill');
 });
 
 test('every chain is counted on its own, never summed across people', () => {

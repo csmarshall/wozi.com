@@ -135,12 +135,24 @@ absolute screen degrees and the bridge stays horizontal while the train turns
 upright, sending it across the **short** axis. That is the #67 class of failure,
 and it has now been made twice by two different pieces of geometry.
 
-**Chains are laid out longest first, and may not overlap.** `CHAIN_ORDER` sorts
-by link count, ties breaking to `PEOPLE` order, and that is the *layout* order,
-not merely the emission order: `solve()` places wheels in `TRAIN` order and a
-bridge may only hang off a wheel already placed, so a chain can only ever be
-driven from one earlier in the list. The spine is `CHAIN_ORDER[0]`, growth goes
-one way, and every chain gets its own clear band of the cross axis.
+**Chains are laid out longest first, and overlap is a reported failure — not an
+impossible one.** `CHAIN_ORDER` sorts by link count, ties breaking to `PEOPLE`
+order, and that is the *layout* order, not merely the emission order: `solve()`
+places wheels in `TRAIN` order and a bridge may only hang off a wheel already
+placed, so a chain can only ever be driven from one earlier in the list. The
+spine is `CHAIN_ORDER[0]` and growth goes one way.
+
+The attachment search *prefers* a clear band of the cross axis and rejects every
+anchor that does not give one. What it does **not** do is refuse: when nothing
+clears, the last-ditch path takes the best-ranked anchor and plants the chain
+anyway — `console.warn`, "which may clash" — because a chain that is simply
+absent is worse than one standing too close. A separate pass then measures every
+cross-chain pair and warns `wozi: chains overlap — …` with the wheels and the
+overlap in pixels. So overlap is *detected and announced*, never silently
+prevented: if that warning is in the console, the composition has failed and the
+console is the only place it says so. **A crossing bridge is the thing that is
+actually impossible** — see below — and that is a stronger guarantee than this
+one on purpose.
 
 **A bridge that cannot be placed cleanly refuses.** When no anchor clears the
 non-crossing rule, the bridge is abandoned and the chain is placed *unbridged* —
