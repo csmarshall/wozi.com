@@ -2417,6 +2417,10 @@ class Component extends DCLogic {
     if (this._bridgeAtN !== nIdle) { this._bridgeAt = null; this._bridgeAtN = nIdle; }
     const parked = new Array(TRAIN.length).fill(false);
     const parentOf = TRAIN.map(t => t.parent);
+    /* Chain heads whose bridge was refused, and the anchor they stand off
+       instead. Filled in when the refusal is discovered -- at the bridge's first
+       idler, which the loop reaches before the head. */
+    const refusedAt = {};
     /* Which position an idler holds within its own bridge. Only the ones below
        MIN_IDLERS are guaranteed to be in mesh at every viewport, and the
        attachment search filters on that -- see bridgeAnchor. */
@@ -2529,10 +2533,6 @@ class Component extends DCLogic {
         });
       const a = bridgeBase * Math.PI / 180;
       const tight = this._tight || 1;
-      /* No idlers means an unbridged chain: its one step carries the gap the
-         idlers would have made, so `bridge: false` changes the drive and not the
-         position. */
-      const bridgeWheels = b.idlers.slice(0, nIdle);
       /* THE WHOLE CHAIN IS TRIED, NOT JUST THE BRIDGE. The run used to be checked
          as far as the chain head and no further, so an anchor could be accepted
          whose chain then walked straight through another one -- and the only
@@ -2543,60 +2543,93 @@ class Component extends DCLogic {
          the anchor rather than a hope about the nudge. */
       const chain = [];
       for (let k = b.head; k < TRAIN.length && TRAIN[k].person === b.person; k++) chain.push(k);
-      const wheels = bridgeWheels.concat(chain);
-      const gap = b.idlers.length ? 0 : nIdle * MODULE * TEETH_MEAN;
-      let choice = cands.length ? cands[0] : null, found = false;
-      /* Why each candidate was rejected, so the warning below can say. */
-      const why = { foul: 0, over: 0, cross: 0 };
-      for (let c = 0; c < cands.length; c++) {
-        const from = g[gi[cands[c]]];
-        let px = from.x, py = from.y, pr = from.r, clear = true;
-        const pts = [];
-        wheels.forEach((k, wi) => {
-          const rr = MODULE * TRAIN[k].teeth / 2;
-          /* The bridge runs on the bridge bearing, wheel by wheel, as far as the
-             chain head; past it the chain runs on the bearings it was dealt. */
-          const onBridge = wi <= bridgeWheels.length;
-          const ang = onBridge ? a : (TRAIN[k].angle + (this._axisRot || 0)) * Math.PI / 180;
-          const d = pr + rr + (onBridge ? gap : 0);
-          px += d * Math.cos(ang); py += d * Math.sin(ang);
-          pts.push({ x: px, y: py, ro: rr + MODULE * TOOTH_ADD });
-          pr = rr;
-        });
-        pts.forEach((p, k) => g.forEach(o => {
-          if (k === 0 && o.i === cands[c] && !gap) return;   /* the wheel it meshes */
-          if (Math.hypot(p.x - o.x, p.y - o.y) < o.ro + p.ro + CLEARANCE * tight) clear = false;
-        }));
-        if (!clear) { why.foul++; continue; }
-        /* The bridge RUN is anchor to chain head. Measured to the far end of the
-           chain instead it would be a line straight through the chain's own
-           wheels, and every candidate would read as passing over something. */
-        const s1 = { x: from.x, y: from.y }, s2 = pts[bridgeWheels.length];
-        clear = !g.some(o => o.i !== cands[c]
-          && segDist({ x: o.x, y: o.y }, s1, s2) < o.ro);
-        if (!clear) { why.over++; continue; }
-        clear = !bridgeRuns.some(st => segCross(s1, s2, st[0], st[1]));
-        if (!clear) { why.cross++; continue; }
-        choice = cands[c]; found = true; break;
-      }
-      if (!found) {
-        /* LOUD, BECAUSE THE FALLBACK IS A COMPROMISE. Every candidate was
-           rejected, so the anchor kept here is one that fouls something: the
-           per-wheel nudge gets one bounded pass at it and may still plant a
-           wheel in a clash. The brief for this bridge said to STOP AND REPORT
-           rather than loosen the non-crossing rule -- and this path loosens it,
-           so at the very least it may not do so in silence. Whether it should
-           refuse to place the chain at all instead is a composition decision,
-           and not one this function gets to make on its own. */
+      /* One pass over the candidates for one shape of arrival: `bw` is the idlers
+         that would be in mesh (none, when the bridge is being refused) and `gap`
+         is the empty space that stands in for them. Returns the first candidate
+         that clears everything, and a tally of why the others did not. */
+      const search = (bw) => {
+        const wheels = bw.concat(chain);
+        const gap = bw.length ? 0 : nIdle * MODULE * TEETH_MEAN;
+        const why = { foul: 0, over: 0, cross: 0 };
+        for (let c = 0; c < cands.length; c++) {
+          const from = g[gi[cands[c]]];
+          let px = from.x, py = from.y, pr = from.r, clear = true;
+          const pts = [];
+          wheels.forEach((k, wi) => {
+            const rr = MODULE * TRAIN[k].teeth / 2;
+            /* The bridge runs on the bridge bearing, wheel by wheel, as far as
+               the chain head; past it the chain runs on the bearings it was
+               dealt. */
+            const onBridge = wi <= bw.length;
+            const ang = onBridge ? a : (TRAIN[k].angle + (this._axisRot || 0)) * Math.PI / 180;
+            const d = pr + rr + (onBridge ? gap : 0);
+            px += d * Math.cos(ang); py += d * Math.sin(ang);
+            pts.push({ x: px, y: py, ro: rr + MODULE * TOOTH_ADD });
+            pr = rr;
+          });
+          pts.forEach((p, k) => g.forEach(o => {
+            if (k === 0 && o.i === cands[c] && !gap) return;   /* the wheel it meshes */
+            if (Math.hypot(p.x - o.x, p.y - o.y) < o.ro + p.ro + CLEARANCE * tight) clear = false;
+          }));
+          if (!clear) { why.foul++; continue; }
+          /* The bridge RUN is anchor to chain head. Measured to the far end of
+             the chain instead it would be a line straight through the chain's
+             own wheels, and every candidate would read as passing over
+             something. */
+          const s1 = { x: from.x, y: from.y }, s2 = pts[bw.length];
+          clear = !g.some(o => o.i !== cands[c]
+            && segDist({ x: o.x, y: o.y }, s1, s2) < o.ro);
+          if (!clear) { why.over++; continue; }
+          clear = !bridgeRuns.some(st => segCross(s1, s2, st[0], st[1]));
+          if (!clear) { why.cross++; continue; }
+          return { at: cands[c], found: true, why: why };
+        }
+        return { at: null, found: false, why: why };
+      };
+      const tally = (w) => w.foul + ' fouled a wheel, ' + w.over
+        + ' passed over one, ' + w.cross + ' crossed another bridge';
+      /* No idlers already means an unbridged chain (`bridge: false`): its one
+         step carries the gap the idlers would have made, so that setting changes
+         the drive and not the position. There is nothing to refuse. */
+      const wanted = b.idlers.slice(0, nIdle);
+      let out = search(wanted), bridged = wanted.length > 0;
+      if (!out.found && wanted.length) {
+        /* THE BRIDGE REFUSES RATHER THAN CROSSING (Charles, 2026-08-02). Every
+           candidate was rejected, and the old code kept the best-ranked one
+           anyway -- an anchor known to foul, handed to a nudge loop bounded at
+           BRIDGE_SWING, which then planted the wheel wherever it ran out. That
+           quietly loosened the one rule this solver exists to enforce. A chain
+           that turns up undriven now and then is a cost; a bridge drawn across
+           another run is not, because it is the rule itself failing.
+
+           So the chain is placed WITHOUT its bridge, which is not a new
+           behaviour to get wrong -- it is exactly what `bridge: false` produces,
+           down to the gap: the idlers are parked, the head becomes a root, and
+           it stands at the distance the idlers would have set. It is searched
+           for again in that shape, because the reasons a bridge is rejected are
+           mostly the idlers' own: two wheels of metal that an empty gap does not
+           put there. */
         console.warn('wozi: no clear bridge anchor for chain "' + b.person
-          + '" — all ' + cands.length + ' candidates rejected (' + why.foul
-          + ' fouled a wheel, ' + why.over + ' passed over one, ' + why.cross
-          + ' crossed another bridge); falling back to '
-          + (choice == null ? 'no anchor at all' : 'wheel ' + choice)
-          + ', which may clash');
+          + '" — all ' + cands.length + ' candidates rejected (' + tally(out.why)
+          + '); refusing to bridge it, and placing it undriven instead');
+        bridged = false;
+        out = search([]);
       }
-      this._bridgeAt[b.person] = choice;
-      return choice;
+      if (!out.found) {
+        /* Not even the empty gap fits, so there is nowhere clear for this chain
+           at all. It still has to go somewhere -- ordering and non-overlap are
+           the composition, and a chain that is simply absent is worse than one
+           standing too close -- so it takes the best-ranked anchor. What may
+           clash is a WHEEL. There is no bridge by this point either way, so
+           nothing that could be drawn across another run. */
+        console.warn('wozi: chain "' + b.person + '" has no clear position at all'
+          + ' (' + tally(out.why) + '); placing it '
+          + (cands.length ? 'off wheel ' + cands[0] : 'at the origin')
+          + ', which may clash');
+        out.at = cands.length ? cands[0] : null;
+      }
+      this._bridgeAt[b.person] = { at: out.at, bridged: bridged };
+      return this._bridgeAt[b.person];
     };
     TRAIN.forEach((t, i) => {
       if (parked[i]) return;
@@ -2617,10 +2650,26 @@ class Component extends DCLogic {
          EVERY non-first root needs real coordinates: without this they all
          resolve to (0,0) and the second chain draws on top of the first. */
       const starts = BRIDGE_FROM[i];
-      let rootFrom = null;
+      let rootFrom = refusedAt[i] === undefined ? null : refusedAt[i];
       if (starts) {
-        const at = bridgeAnchor(starts);
-        if (at != null) { if (starts.idlers.length) parentOf[i] = at; else rootFrom = at; }
+        const chosen = bridgeAnchor(starts);
+        /* A REFUSED BRIDGE IS PARKED WHOLE. The search found nowhere its idlers
+           could go without crossing something, so there are no idlers: every one
+           of them is parked exactly as a surplus idler is, the chain head stops
+           being their child and becomes a root, and it is placed off the same
+           anchor at the gap they would have made. This wheel IS one of those
+           idlers -- the bridge starts here -- so there is nothing left to do for
+           it. Identical in every respect to `bridge: false` on this chain, which
+           is why it needs no drawing code of its own. */
+        if (starts.idlers.length && !chosen.bridged) {
+          starts.idlers.forEach(ix => { parked[ix] = true; });
+          parentOf[starts.head] = null;
+          refusedAt[starts.head] = chosen.at;
+          return;
+        }
+        if (chosen.at != null) {
+          if (starts.idlers.length) parentOf[i] = chosen.at; else rootFrom = chosen.at;
+        }
       }
       const free = rootFrom != null && parentOf[i] == null;
       const host = free ? rootFrom : parentOf[i];
@@ -2678,17 +2727,27 @@ class Component extends DCLogic {
         if (!placed) {
           const a = base * Math.PI / 180;
           x = prev.x + d * Math.cos(a); y = prev.y + d * Math.sin(a);
-          /* THE ONE WAY A SOLVED STAGE CAN OVERLAP. Every other position above
-             is one the clash test accepted; this one is planted because the
-             swing ran out, and it may sit on top of something. It used to be
-             silent, which made the overlap it causes look like a layout choice.
-             The attachment search now walks the whole chain before accepting an
-             anchor, so a bridged chain should never reach here -- if it does,
-             that simulation and this loop have drifted apart. */
+          /* THE ONE WAY A SOLVED STAGE CAN STILL OVERLAP, and it is a WHEEL that
+             does it, never a bridge. Every other position above is one the clash
+             test accepted; this one is planted because the swing ran out, and it
+             may sit on top of something. It used to be silent, which made the
+             overlap it caused look like a layout choice.
+
+             NO IDLER CAN REACH HERE ANY MORE. An idler is only placed at all
+             once the attachment search has walked its whole bridge and the chain
+             behind it and found the run clear -- so its step-zero bearing is
+             clear by construction and the loop above accepts it on the first
+             try. When the search finds nothing, the bridge is refused rather
+             than nudged: the idlers are parked and the chain arrives undriven
+             (Charles, 2026-08-02). If an idler ever names itself here, the
+             search and this loop have drifted apart, and that is a defect
+             rather than a tight fit. */
           console.warn('wozi: wheel ' + i + ' ('
             + (TRAIN[i].person || 'idler for ' + TRAIN[i].bridge)
             + ') found no clear bearing within ' + maxStep
-            + '° of ' + base.toFixed(1) + '°; planted anyway, and may clash');
+            + '° of ' + base.toFixed(1) + '°; planted anyway, and may clash'
+            + (t.role === 'idler' ? ' — AND IT IS AN IDLER, which the refusal '
+              + 'above should have made impossible' : ''));
         }
         if (linked) {
           dir = prev.dir;
@@ -2726,8 +2785,11 @@ class Component extends DCLogic {
          it. Kept separate from `strands`, which is the dormant chain-and-belt
          capability's list and is drawn -- a bridge is meshed metal, not a strand. */
       const arrived = BRIDGE_HEAD[i];
-      if (arrived && this._bridgeAt) {
-        const at = this._bridgeAt[arrived.person];
+      if (arrived && this._bridgeAt && this._bridgeAt[arrived.person]) {
+        /* Recorded whether or not the bridge was refused: the empty gap an
+           undriven chain stands at is still a run across the composition, and
+           the next bridge may not cross it either. */
+        const at = this._bridgeAt[arrived.person].at;
         if (at != null && gi[at] >= 0) {
           bridgeRuns.push([{ x: g[gi[at]].x, y: g[gi[at]].y }, { x: x, y: y }]);
         }

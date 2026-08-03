@@ -712,19 +712,58 @@ test('no chain head is ever dropped at the origin', () => {
   ok(bad.length === 0, [...new Set(bad)].join('\n      '));
 });
 
-test('an exhausted anchor search says so instead of loosening the rule', () => {
-  /* `let choice = cands.length ? cands[0] : null` is KEPT when no candidate
-     passes, so an anchor that fouls is used anyway and the bridge gets one
-     bounded nudge at it. The brief said to stop and report rather than loosen
-     the non-crossing rule; what it must never do is loosen it in silence.
-     Forced by asking for a clearance nothing can satisfy. */
-  const { warns } = runSolve(THREE, { tight: 400 });
+test('an exhausted anchor search refuses to bridge, and says so', () => {
+  /* Charles, 2026-08-02: a bridge that cannot be placed without crossing another
+     run REFUSES -- the chain is placed undriven instead, exactly as `bridge:
+     false` places it. The old code kept `cands[0]` whatever happened: an anchor
+     known to foul, handed to a nudge bounded at BRIDGE_SWING, which then planted
+     the wheel wherever it ran out. That is the one rule this solver exists to
+     enforce, loosened in silence. A chain turning up undriven is the acceptable
+     cost; a bridge drawn across another run is not.
+     Forced by asking for a clearance nothing can satisfy, so EVERY candidate is
+     rejected for every chain. */
+  const { solved, train, bridges, warns } = runSolve(THREE, { tight: 400 });
+
   const anchor = warns.filter(w => /no clear bridge anchor/.test(w));
   ok(anchor.length > 0,
     'every candidate was rejected and nothing was said: ' + (warns[0] || '(silence)'));
   ok(/candidates rejected/.test(anchor[0]) && /fouled a wheel/.test(anchor[0]),
     'the warning does not say why the candidates were rejected: ' + anchor[0]);
   ok(/chain "/.test(anchor[0]), 'the warning does not name the chain: ' + anchor[0]);
+  ok(/refusing to bridge/.test(anchor[0]),
+    'the warning does not say the bridge was refused: ' + anchor[0]);
+
+  /* NO BRIDGE GEOMETRY IS EMITTED. Not a parked surplus idler -- none at all. */
+  const idlers = solved.gears.filter(w => w.role === 'idler');
+  eq(idlers.length, 0,
+    'a refused bridge still drew ' + idlers.length + ' idler(s): '
+    + idlers.map(w => 'wheel ' + w.i).join(', '));
+
+  /* AND THE CHAIN IS STILL PLACED. Refusing the bridge must not cost the chain
+     its position: every wheel of every chain is on stage, and no head fell back
+     to the origin the way an unplaced root does. */
+  const placed = {};
+  solved.gears.forEach(w => { placed[w.i] = w; });
+  const bad = [];
+  train.forEach((t, i) => {
+    if (t.role !== 'link') return;
+    const w = placed[i];
+    if (!w) return bad.push(`${t.person} wheel ${i} was not placed at all`);
+    if (!isFinite(w.x) || !isFinite(w.y)) bad.push(`${t.person} wheel ${i} is at (${w.x}, ${w.y})`);
+  });
+  bridges.forEach(b => {
+    const w = placed[b.head];
+    if (w && Math.hypot(w.x, w.y) < 1e-9) {
+      bad.push(`chain ${b.person}'s head fell back to the origin`);
+    }
+  });
+  ok(bad.length === 0, bad.join('\n      '));
+
+  /* AND IT IS PLACED CLEAR. Measured against the REAL tip circles, not the
+     absurd clearance that forced the refusal -- the point of refusing is that
+     what arrives is a composition, not a pile. */
+  const fouls = crossChainFouls(train, solved);
+  ok(fouls.length === 0, 'refused chains overlap: ' + fouls.join('; '));
 });
 
 test('a bridge anchor survives the idler count dropping under it', () => {
@@ -738,17 +777,19 @@ test('a bridge anchor survives the idler count dropping under it', () => {
   for (let trial = 0; trial < 20; trial++) {
     const ctx = {};
     runSolve(THREE, { axisRot: 0, idlerN: 2, ctx });
-    const { solved, train, warns } = runSolve(THREE, { axisRot: 0, idlerN: 1, ctx });
+    const { solved, train, bridges, warns } = runSolve(THREE, { axisRot: 0, idlerN: 1, ctx });
     warns.forEach(w => bad.push('after the drop to one idler: ' + w));
     crossChainFouls(train, solved).forEach(f => bad.push('after the drop: ' + f));
     Object.keys(ctx._bridgeAt || {}).forEach(person => {
-      const k = ctx._bridgeAt[person];
+      const k = ctx._bridgeAt[person] && ctx._bridgeAt[person].at;
       if (k == null) return;
-      if (train[k].role === 'idler') {
-        const b = train.filter(t => t.role === 'idler').indexOf(train[k]);
-        if (b >= grabNumber('MIN_IDLERS')) {
-          bad.push(`chain ${person} is anchored on idler slot ${b}, which parks`);
-        }
+      if (train[k].role !== 'idler') return;
+      /* which position it holds within its own bridge -- only the ones below
+         MIN_IDLERS stay in mesh at every viewport */
+      const b = bridges.filter(br => br.idlers.indexOf(k) >= 0)[0];
+      const slot = b ? b.idlers.indexOf(k) : -1;
+      if (slot >= grabNumber('MIN_IDLERS')) {
+        bad.push(`chain ${person} is anchored on idler slot ${slot}, which parks`);
       }
     });
   }
