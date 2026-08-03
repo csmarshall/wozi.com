@@ -356,8 +356,8 @@ function write(html) { document.write(html); }
                 {teeth:18,fill:'#EC8C4E',line:'#96521E'}];
     const ib = [{teeth:16,fill:'#54BFB6',line:'#2A7972'}];
     write(board(
-      datum(centres(120, 150, ia), 'scribe', 'CM-01') + chain(120, 150, ia) +
-      datum(centres(120, 360, ib), 'scribe', 'HM-01', 0) + chain(120, 360, ib), 500));
+      datum(centres(120, 150, ia), 'scribe', 'Charles') + chain(120, 150, ia) +
+      datum(centres(120, 360, ib), 'scribe', 'Harper', 0) + chain(120, 360, ib), 500));
 })();</script>
 </div>
 
@@ -376,8 +376,8 @@ function write(html) { document.write(html); }
     const wrap = (s) => `<g opacity="${OP}">${s.split('#B4BAB4').join(LI)
       .split('#DDE0DB').join(PL).split('#6E7671').join(LI)}</g>`;
     write(board(
-      wrap(datum(centres(120,150,a),'scribe','CM-01')) + chain(120,150,a) +
-      wrap(datum(centres(120,360,b),'scribe','HM-01',0)) + chain(120,360,b), 500));
+      wrap(datum(centres(120,150,a),'scribe','Charles')) + chain(120,150,a) +
+      wrap(datum(centres(120,360,b),'scribe','Harper',0)) + chain(120,360,b), 500));
   })();</script>
 </div>
 
@@ -397,8 +397,8 @@ function write(html) { document.write(html); }
     const wrap = (s) => `<g opacity="${OP}">${s.split('#B4BAB4').join(LI)
       .split('#DDE0DB').join(PL).split('#6E7671').join(LI)}</g>`;
     write(board(
-      wrap(datum(centres(120,150,a),'scribe','CM-01')) + chain(120,150,a) +
-      wrap(datum(centres(120,360,b),'scribe','HM-01',0)) + chain(120,360,b), 500));
+      wrap(datum(centres(120,150,a),'scribe','Charles')) + chain(120,150,a) +
+      wrap(datum(centres(120,360,b),'scribe','Harper',0)) + chain(120,360,b), 500));
   })();</script>
   <p style="color:#93A5A3;font-size:12.5px">Note the opacity is <code>0.34</code>
   here, not the ghost layer's <code>0.17</code>. At 0.17 a one-pixel scribe on a
@@ -421,8 +421,8 @@ function write(html) { document.write(html); }
                {teeth:18,fill:'#EC8C4E',line:'#96521E'}];
     const b = [{teeth:16,fill:'#54BFB6',line:'#2A7972'}];
     write(board(
-      datum(centres(120,150,a),'stations','CM-01') + chain(120,150,a) +
-      datum(centres(120,360,b),'stations','HM-01',0) + chain(120,360,b), 500));
+      datum(centres(120,150,a),'stations','Charles') + chain(120,150,a) +
+      datum(centres(120,360,b),'stations','Harper',0) + chain(120,360,b), 500));
   })();</script>
 </div>
 
