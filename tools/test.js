@@ -393,6 +393,14 @@ test('no deal decides adjacency by array index', () => {
   ok(bad.length === 0, bad.join('\n      '));
 });
 
+test('the ends-apart rule is expressed in leaves, not array positions', () => {
+  /* "The two ends of the train repel each other, so the run reads as a line of
+     machinery rather than a closed ring." A tree has more than two ends. */
+  ok(!/oi === 0 && i === TRAIN\.length - 1/.test(SRC),
+    'ENDS_APART still tests the first and last array positions');
+  ok(/isLeaf/.test(SRC), 'solve() does not compute leaves for the ends-apart rule');
+});
+
 test('the fit rule does not branch on how many gears are in the chain', () => {
   /* The rule is "a gear has a standard size for this viewport, and shrinks only
      when something physical says it must". Nothing in it may depend on the

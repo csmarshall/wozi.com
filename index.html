@@ -2085,6 +2085,13 @@ class Component extends DCLogic {
     }
     const slugFor = this._slugFor;
     const g = [], strands = [];
+    /* A TREE HAS MORE THAN TWO ENDS. The rule is that the machine's extremities
+       push apart so the run reads as a line rather than a closed ring; with one
+       chain that is the first and last wheel, but a branch adds an end. Leaves
+       and the root are the extremities. */
+    const hasChild = new Array(TRAIN.length).fill(false);
+    TRAIN.forEach(t => { if (t.parent != null) hasChild[t.parent] = true; });
+    const isLeaf = (i) => !hasChild[i];
     TRAIN.forEach((t, i) => {
       const prof = t.prof || {};
       const r = MODULE * t.teeth / 2;
@@ -2115,7 +2122,8 @@ class Component extends DCLogic {
                 /* The two ends of the train repel each other, so the run reads as a
                    line of machinery rather than a closed ring. */
                 const tight = this._tight || 1;
-                const need = o.ro + ro + CLEARANCE * tight + (oi === 0 && i === TRAIN.length - 1 ? ENDS_APART * tight : 0);
+                const need = o.ro + ro + CLEARANCE * tight
+                  + ((isLeaf(oi) || oi === 0) && isLeaf(i) && oi !== t.parent ? ENDS_APART * tight : 0);
                 return Math.hypot(px - o.x, py - o.y) < need;
               });
               if (!clash && linked && g.length > 1) {
