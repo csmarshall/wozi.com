@@ -1713,6 +1713,180 @@ test('the fit scale has no constant ceiling on the ratio', () => {
   ok(/crossAvail/.test(line), 'the cross-axis guard is missing from the fit');
 });
 
+test('the configured chains still clear the legibility floors', () => {
+  /* WHEELS SHRINK AS CHAINS ARE ADDED. That is accepted -- it is what putting
+     more than one person on stage costs. What is not accepted is that the layout
+     goes on WORKING long after the page has stopped being READABLE, with nothing
+     failing anywhere in between. Three things go before the geometry does: the
+     engraving band is module-derived, so it shrinks with the wheel and takes the
+     lettering down with it; the epicyclic inside a wheel is dealt against
+     MIN_MODULE, so its teeth are the first marks to stop reading as teeth; and
+     the hub badge has an ABSOLUTE 30px floor in a page where everything else
+     scales, so it is the one mark that grows relative to the bore it sits in.
+
+     WHERE THE FLOORS COME FROM, because a legibility gate that invents its own
+     thresholds computes its own answer and agrees with itself forever:
+
+       THE SCALE FLOOR is read out of gearSvg's own px(want, lo, hi) calls. Those
+       are #61's rendered-pixel intents: `want` is a number of RENDERED pixels and
+       the clamp turns it into solve units by dividing by S. Below S = want/hi the
+       ceiling binds instead, and the feature is drawn THINNER than the pixels it
+       says it needs. The largest want/hi in gearSvg is therefore the scale at
+       which the page can no longer honour a floor it states in rendered pixels.
+       Derived from the page, not chosen here.
+
+       THE CROSS-AXIS FLOOR is the page's own rule, stated at LINK_SHARE and
+       enforced by idlerCount(): the bleed "exists so a serpentine may run off the
+       top and bottom of a wide screen, not so a bridge may hang off the side" --
+       CROSS_BLEED costs a serpentine nothing, because its top and bottom are
+       ghost runs, and costs a stacked composition a person's badge. So the
+       stacked composition's own cross demand, STAGE_CROSS, has to fit crossAvail
+       WITHOUT spending the bleed.
+
+     NO RENDERED-PIXEL FLOOR EXISTS IN THE PAGE FOR THE BAND OR FOR THE EPICYCLIC
+     MODULE, and this test does not invent one. MIN_ENGRAVE (0.30 modules) and
+     MIN_MODULE (1.8 solve units) are both scale-free, which is exactly what #61
+     established a legibility floor cannot be -- at the shipped two-chain portrait
+     scale both are already under their own number when read as pixels, so
+     asserting them as pixels would fail the configuration Charles has approved.
+     What IS sourced is the scale below which the page's stated rendered-pixel
+     intents stop being satisfiable; and since the band, its lettering and the
+     epicyclic module are all solve-unit constants multiplied by that same scale,
+     it bounds all three. Their measured pixel sizes are reported in the failure
+     so it names the thing you would actually see, not only the scale.
+
+     EVERY INPUT IS EXECUTED OUT OF index.html: the fit expression through
+     fitRule(), NOMINAL_SPAN read back out of it, STAGE_CROSS and IDLERS_FOR as
+     the page's own declarations, axisRot() and idlerCount() as the page's own
+     methods against a stub window, the 1% quantisation as the page's own line,
+     and the badge size as the page's own three lines. Nothing here is a model of
+     the page; a copy would pass while the page was broken.
+
+     BOTH ESTIMATES ERR TOWARD PASSING, deliberately. NOMINAL_SPAN "lands UNDER a
+     real solve rather than over it", and STAGE_CROSS is an estimate the page uses
+     to choose an idler count rather than a measurement of the finished solve --
+     it understates what is really on stage, which carries badges and datum plates
+     as well as wheels. So the scale computed here is an UPPER bound on the real
+     one and the cross extent a LOWER bound: anything this gate fires on, the real
+     page cannot beat.
+
+     PORTRAIT IS IN THE SWEEP because it has roughly half the cross axis of a
+     laptop and a bridge is paid for in cross axis. It is the orientation that
+     goes first, and 1440x900 on its own would not see it. */
+  const fit = fitRule();
+  const people = page.TRAIN_LENS.length;
+  const spine = Math.max(...page.TRAIN_LENS);
+
+  /* The scale floor, out of gearSvg's own rendered-pixel intents. */
+  const intents = [...grabBlock('gearSvg(g, S) {', '{', '}')
+    .matchAll(/\bpx\(\s*([0-9.]+)\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)\s*\)/g)]
+    .map(m => ({ want: +m[1], hi: +m[3] }));
+  /* A gate that extracts nothing passes vacuously, which is worse than no gate. */
+  ok(intents.length >= 4, 'found only ' + intents.length + ' px() rendered-pixel '
+    + 'intents in gearSvg — the extraction is broken, not the page');
+  const S_MIN = Math.max(...intents.map(p => p.want / p.hi));
+
+  /* The page's own cross-axis demand, idler rule, rotation test and quantisation. */
+  const STAGE_CROSS = new Function('MODULE', 'TEETH_MEAN', 'STAGE',
+    grabDecl('const STAGE_CROSS =') + ' return STAGE_CROSS;')(
+    page.MODULE, page.TEETH_MEAN, { people: new Array(people).fill(0) });
+  const IDLERS_FOR = new Function('MIN_IDLERS', 'MAX_IDLERS',
+    grabDecl('const IDLERS_FOR =') + ' return IDLERS_FOR;')(
+    grabNumber('MIN_IDLERS'), grabNumber('MAX_IDLERS'));
+  const rotAt = new Function('window',
+    'const o = { ' + grabBlock('axisRot() {', '{', '}') + ' }; return o.axisRot();');
+  /* `this._idlerN` is undefined on a stub, which is the fresh-load branch of the
+     hysteresis: one nominal wheel of cross axis must be SPARE to take the second
+     idler. That is the branch that takes fewer idlers, so it asks for less cross
+     axis — the generous direction, consistent with the rest of this test. */
+  const idlersAt = new Function('window', 'MODULE', 'TEETH_MEAN', 'LINK_SHARE',
+    'NOMINAL_SPAN', 'STAGE_CROSS', 'MAX_IDLERS', 'MIN_IDLERS', 'IDLERS_FOR',
+    'const o = { ' + grabBlock('axisRot() {', '{', '}') + ', '
+    + grabBlock('idlerCount() {', '{', '}') + ' }; return o.idlerCount();');
+  /* Quantised DOWN to 1% before anything is drawn at it, so the scale the marks
+     are actually rasterised at is this one, not the raw fit. */
+  const quantise = new Function('fit', grabDecl('const gsr =') + ' return gsr;');
+
+  /* The handle's type size and the epicyclic's module, both as the page writes
+     them: `fit(handle, mid, m * 0.80)` in engraving(), and m2 = 2*bore/(Zr+4)
+     inside planetaryMenuFor(), executed rather than re-typed. */
+  const handleEm = (SRC.match(/fit\(handle,\s*mid,\s*m\s*\*\s*([0-9.]+)\)/) || [])[1];
+  ok(handleEm, 'could not find the handle type size in engraving()');
+  const m2Of = new Function('bore', 's', grabDecl('const m2 = 2 * bore') + ' return m2;');
+  /* The tightest epicyclic set the page can deal, over every blank it will
+     actually seat one on. `fallback` blanks hold no set at all — an honest
+     answer, and the deal never seats an epicyclic there. */
+  let worstM2 = Infinity, worstAt = 0;
+  const holds = [];
+  for (let t = page.TEETH_MIN; t <= page.TEETH_MAX; t++) {
+    const menu = page.planetaryMenuFor(t);
+    if (menu.fallback) continue;
+    holds.push(t);
+    const bore = page.planetaryBore(t);
+    menu.one.forEach(v => {
+      const m = m2Of(bore, { Zr: v.pg[2] });
+      if (m < worstM2) { worstM2 = m; worstAt = t; }
+    });
+    menu.two.forEach(v => {
+      const m = m2Of(bore, { Zr: v.pg2[3] });
+      if (m < worstM2) { worstM2 = m; worstAt = t; }
+    });
+  }
+  ok(holds.length > 0, 'no blank in the deal can hold an epicyclic at all');
+
+  /* The badge, as the render builds it: an absolute 30px floor inside a min()
+     against the axle cap. The floor is the reason this is checked at all — it is
+     the one size on the wheel that does not shrink with the machine. */
+  const badgeSize = new Function('g', 'S',
+    SRC.slice(SRC.indexOf('const epicyclic = g.kind ==='),
+      SRC.indexOf(';', SRC.indexOf('const size = Math.min(cap * S')) + 1)
+    + ' return size;');
+
+  const bad = [];
+  [[390, 844], [1440, 900]].forEach(([w, h]) => {
+    const win = { innerWidth: w, innerHeight: h };
+    const turned = rotAt(win) !== 0;
+    const longAvail = turned ? h : w, crossAvail = turned ? w : h;
+    /* NOMINAL_SPAN is computed inside the rule from the page's own line; read it
+       back out rather than deriving a second copy here. It is also what
+       longSolved is set to: on a stacked stage the linked run along the long axis
+       IS the spine, and the page's own estimate of its span is that line. */
+    const NOMINAL_SPAN = fit(spine, longAvail, crossAvail, 1, 1).NOMINAL_SPAN;
+    const idlers = idlersAt(win, page.MODULE, page.TEETH_MEAN, grabNumber('LINK_SHARE'),
+      NOMINAL_SPAN, STAGE_CROSS, grabNumber('MAX_IDLERS'), grabNumber('MIN_IDLERS'),
+      IDLERS_FOR);
+    const crossSolved = STAGE_CROSS(idlers);
+    const S = quantise.call({ props: {} },
+      fit(spine, longAvail, crossAvail, NOMINAL_SPAN, crossSolved).fit);
+
+    const bandPx = S * page.MODULE * page.BAND_DEPTH;
+    const typePx = S * page.MODULE * parseFloat(handleEm);
+    const at = `${w}x${h}, ${people} chain${people === 1 ? '' : 's'}`;
+    if (S < S_MIN) {
+      bad.push(`${at}: the stage renders at ${S.toFixed(2)}x, under the ${S_MIN.toFixed(2)}x `
+        + `at which gearSvg's own rendered-pixel floors (#61) stop being satisfiable — `
+        + `the engraving band lands at ${bandPx.toFixed(1)}px carrying ${typePx.toFixed(1)}px `
+        + `lettering, and the tightest epicyclic set the deal can reach (${worstAt} teeth) `
+        + `renders its module at ${(worstM2 * S).toFixed(2)}px against MIN_MODULE ${page.MIN_MODULE}`);
+    }
+    if (crossSolved * S > crossAvail) {
+      bad.push(`${at}: the composition wants ${(crossSolved * S).toFixed(0)}px of cross axis `
+        + `at ${S.toFixed(2)}x and the viewport has ${crossAvail}px — a stacked stage may not `
+        + `spend CROSS_BLEED (see LINK_SHARE and idlerCount): the bleed is for a serpentine's `
+        + `ghost runs, and here it hangs a person's badge off the edge`);
+    }
+    holds.forEach(t => {
+      const badge = badgeSize({ kind: 'planetary', r: page.MODULE * t / 2 }, S);
+      const bore = 2 * page.planetaryBore(t) * S;
+      if (badge >= bore) {
+        bad.push(`${at}: on a ${t}-tooth blank the hub badge is ${badge.toFixed(1)}px across `
+          + `and the bore it sits in is ${bore.toFixed(1)}px — the works vanish behind the cap`);
+      }
+    });
+  });
+  ok(bad.length === 0, bad.join('\n      '));
+});
+
 /* ---- 1. the page and its constants --------------------------------------- */
 
 test('index.html parses and exposes its geometry constants', () => {
