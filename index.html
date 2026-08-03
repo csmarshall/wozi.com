@@ -362,7 +362,25 @@ const WHO = STAGE.people.slice().sort((a, b) =>
   (b.links || []).length - (a.links || []).length)[0] || { slug: '', name: '', links: [] };
 
 /* One entry per wheel across every chain on stage. Each person's first wheel is
-   a root for now; Task 6 gives it a bridge to hang from. */
+   a root for now; Task 6 gives it a bridge to hang from.
+
+   IT CARRIES NO TOOTH COUNTS AND NO ANGLES, deliberately. Both are dealt fresh
+   every load -- dealTeeth() draws each wheel uniformly from [TEETH_MIN,
+   TEETH_MAX] and then filters the draw, and the bearing deal below it does the
+   same for angles -- so every wheel's values are overwritten before anything
+   reads them. The old hand-written numbers here were seeds inherited from the
+   original fixed list and were dead the day dealing was introduced: nothing
+   between this builder and dealTeeth() reads .teeth or .angle at all. Writing
+   them out again would only invite someone to tune a number that has no effect.
+
+   Nor is there a placeholder: dealTeeth() and the bearing deal ASSIGN these
+   properties, they never read them, so seeding with TEETH_MIN would not even
+   parse here -- that constant is declared further down and would be in its
+   temporal dead zone.
+
+   `prof.rim` sets the face radius on UNMARKED wheels only. Every wheel here is
+   marked, and a marked wheel takes its face from the engraving band instead, so
+   this is a default rather than a per-wheel choice. */
 const TRAIN = (function () {
   const out = [];
   STAGE.people.forEach(p => {
@@ -2078,9 +2096,22 @@ class Component extends DCLogic {
         const pairSlots = PAIR_SLOTS.filter(pr => pr.every(k => k < idx.length));
         const singleSlots = [];
         idx.forEach((_, k) => { if (!pairSlots.some(pr => pr.indexOf(k) >= 0)) singleSlots.push(k); });
+        /* ONLY SEAT SERVICES THIS PERSON ACTUALLY HAS (#53, now checked per person
+           rather than per page). config.js says "a service named here but absent
+           from a person's links is simply skipped" -- it was not, and a second
+           person crashed the page 2000 times out of 2000, because renderVals()
+           reads SITES[g.slug].label unguarded. That matters now rather than later:
+           the picker is built and adding a person is documented as a config edit.
+           Filtering here, against this person's own slice of SITES, keeps the
+           promise where the seating happens, instead of leaving every consumer to
+           guard a slug that should never have existed. */
         const has = (slug) => Object.prototype.hasOwnProperty.call(SITES[person] || {}, slug);
         const pairs = shuffle(PAIRS.filter(pr => pr.every(has)).map(pr => shuffle(pr.slice())));
         const singles = shuffle(SINGLES.filter(has));
+        /* Both guards are needed and for different reasons: PAIRS empty gave
+           pairs[NaN] -> a TypeError, while SINGLES empty merely left the slug null
+           and the badge filtered out later. Same shape, two outcomes, three lines
+           apart -- so treat them the same. */
         if (pairs.length) pairSlots.forEach((pr, k) => {
           const pair = pairs[k % pairs.length];
           slugFor[idx[pr[0]]] = pair[0]; slugFor[idx[pr[1]]] = pair[1];
