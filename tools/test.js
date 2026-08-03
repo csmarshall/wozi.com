@@ -1081,6 +1081,56 @@ const DATUM_SRC = SRC.slice(SRC.indexOf('  datumRuns(solved, ghosts) {'),
   SRC.indexOf('  fitEscapes() {'));
 const DATUM_DRAW = SRC.slice(SRC.indexOf('  datumLayer(solved, S, box) {'),
   SRC.indexOf('  renderVals() {'));
+const DATUM_OP = SRC.slice(SRC.indexOf('  datumOpacity() {'),
+  SRC.indexOf('  ghostSvg(g, S) {'));
+
+/* THE REAL COLOUR MATHS, lifted out of the page. datumOpacity() is the one part
+   of the datum that cannot be judged from a still or from a solve: it reads the
+   theme tokens through getComputedStyle and turns them into the alpha the mark
+   is drawn at. Stubbing that one read is the only way a static suite gets to
+   watch what the page does when the palette comes back EMPTY, or comes back
+   holding something that is not a colour -- and both of those used to end at an
+   invisible mark, which is indistinguishable from the feature not existing. */
+const colour = new Function(
+  grabBlock('function relLum(', '{', '}') + '\n'
+  + grabBlock('function rgbOf(', '{', '}') + '\n'
+  + grabBlock('function contrastAt(', '{', '}') + '\n'
+  + 'return { relLum: relLum, rgbOf: rgbOf, contrastAt: contrastAt };')();
+
+const GHOST_ALPHA = (function () {
+  const o = new Function('return {' + grabBlock('  ghostOpacity(theme) {', '{', '}') + '};')();
+  return { light: o.ghostOpacity('light'), dark: o.ghostOpacity('dark') };
+})();
+
+/* Runs the page's own datumOpacity() over a palette of the test's choosing. A
+   token the object does not carry reads back as '', which is what a browser
+   hands over for a custom property that is not declared. */
+function datumOpacityOn(tokens, theme) {
+  const warned = [];
+  const obj = new Function('rgbOf', 'contrastAt', 'getComputedStyle', 'document', 'console',
+    'return {\n' + grabBlock('  datumOpacity() {', '{', '}') + ',\n'
+    + grabBlock('  ghostOpacity(theme) {', '{', '}') + '\n};')(
+    colour.rgbOf, colour.contrastAt,
+    () => ({ getPropertyValue: (k) => (tokens[k] === undefined ? '' : tokens[k]) }),
+    { documentElement: {} }, { warn: (m) => warned.push(m) });
+  obj.state = { theme: theme };
+  return { alpha: obj.datumOpacity(), warned: warned };
+}
+
+/* The palettes come OUT OF THE STYLESHEET, so a token that moves moves the test
+   with it rather than leaving it asserting a colour the page stopped using. */
+const CSS_ROOT = SRC.slice(SRC.indexOf(':root{'), SRC.indexOf('@supports (top:env('));
+const CSS_DARK = SRC.slice(SRC.indexOf(':root[data-theme="dark"]{'), SRC.indexOf('html,body{'));
+function cssVar(block, name) {
+  const m = new RegExp('(?:^|[;{\\s])' + name + '\\s*:\\s*([^;]+);').exec(block);
+  return m ? m[1].trim() : null;
+}
+const TOKENS = {
+  light: { '--ref-bg': cssVar(CSS_ROOT, '--ref-bg'), '--ref-muted': cssVar(CSS_ROOT, '--ref-muted'),
+    '--bg': cssVar(CSS_ROOT, '--ref-bg'), '--muted': cssVar(CSS_ROOT, '--ref-muted') },
+  dark: { '--ref-bg': cssVar(CSS_ROOT, '--ref-bg'), '--ref-muted': cssVar(CSS_ROOT, '--ref-muted'),
+    '--bg': cssVar(CSS_DARK, '--bg'), '--muted': cssVar(CSS_DARK, '--muted') }
+};
 
 test('the datum takes its axis from the chain, never its own copy', () => {
   /* #67, twice over. A one-wheel chain has no first-to-last vector: head and
@@ -1191,7 +1241,8 @@ test('the datum plate defaults to the person name, untransformed', () => {
   eq(runs.find(r => r.person === 'spine').plate, 'A. Name',
     'the plate does not come from the configured string');
   eq(runs.find(r => r.person === 'tiny').plate, 'tiny',
-    'a person with no plate string configured gets no plate at all');
+    'a person with no plate string configured loses the fallback to their slug '
+    + 'and gets no plate at all');
 });
 
 test('a datum spans its chain\'s ghosts and rides its plate on the last leading one', () => {
@@ -1266,10 +1317,135 @@ test('no datum is drawn while one chain is on stage, and none is painted per cha
     'the datum does not take its scribe and plate colours from the theme tokens');
   /* The dark alpha is SOLVED against the light treatment's contrast, not carried
      as a second number beside the ghost layer's pair. */
-  const op = SRC.slice(SRC.indexOf('  datumOpacity() {'), SRC.indexOf('  ghostSvg(g, S) {'));
-  ok(/contrastAt\(/.test(op) && !/0\.3[0-9]/.test(op),
+  ok(/contrastAt\(/.test(DATUM_OP) && !/0\.3[0-9]/.test(DATUM_OP),
     'the datum\'s dark opacity is a number someone measured once rather than one '
     + 'the page solves from its own tokens');
+});
+
+test('a datum that cannot read its palette fails visible, never invisible', () => {
+  /* THE ONE OUTCOME THIS MARK MAY NOT HAVE IS "ABSENT". It is the identity
+     signal, so a scribe drawn at an alpha nobody can see looks exactly like the
+     feature never having been built, and leaves nothing on the page to diagnose
+     it from. Two ways of losing the palette both used to end there.
+
+     The reference colours were read by scanning document.styleSheets for a rule
+     whose selectorText was ':root' EXACTLY -- so wrapping that block in a @media
+     or an @supports, writing it ':root, :host', or shipping a second sheet that
+     declares --muted finds nothing. The fallback was then ghostOpacity() for the
+     CURRENT theme, which in dark is the ghost alpha: precisely the weight the
+     mock proved makes the scribe disappear. Nothing surfaced it, and no static
+     suite could see it, because the mechanism only exists in a browser. */
+  /* Comments stripped, because the mechanism being ruled out is NAMED in the
+     rationale that replaced it -- an assertion that could not tell the two apart
+     would fail on its own explanation. */
+  ok(!/styleSheets|cssRules|selectorText/.test(SRC.replace(/\/\*[\s\S]*?\*\//g, '')),
+    'the page reads its own stylesheet back through CSSOM, which finds nothing '
+    + 'the moment the :root block is wrapped or its selector is joined');
+  ok(!/ghostOpacity\(\)/.test(DATUM_OP),
+    'the datum falls back to the CURRENT theme\'s ghost alpha — in dark that is '
+    + GHOST_ALPHA.dark + ', the alpha that makes the scribe vanish');
+  /* The reference palette is two tokens the dark block does not override, and
+     the light declarations are aliases of them, so each colour is still written
+     in exactly one place. */
+  ok(TOKENS.light['--ref-bg'] && TOKENS.light['--ref-muted'],
+    'the light reference palette is not declared in :root, so nothing under dark '
+    + 'can reach the treatment the datum is solved against');
+  ok(!cssVar(CSS_DARK, '--ref-bg') && !cssVar(CSS_DARK, '--ref-muted'),
+    'the dark block overrides the reference palette, so the datum solves for the '
+    + 'contrast it already has and every theme returns the same alpha');
+  ok(/--bg:\s*var\(--ref-bg\)/.test(CSS_ROOT) && /--muted:\s*var\(--ref-muted\)/.test(CSS_ROOT),
+    'the light --bg/--muted are written out again beside the reference tokens '
+    + 'instead of aliasing them, so the two can drift apart');
+  /* Solved, both palettes. Light is the reference and returns its alpha by
+     construction; dark must reach the SAME contrast, which is what makes its
+     answer a derivation rather than a number with a story attached. */
+  const light = datumOpacityOn(TOKENS.light, 'light').alpha;
+  const dark = datumOpacityOn(TOKENS.dark, 'dark').alpha;
+  eq(light, GHOST_ALPHA.light,
+    'the light palette no longer returns the reference alpha by construction');
+  const at = (t, a) => colour.contrastAt(colour.rgbOf(t['--muted']), colour.rgbOf(t['--bg']), a);
+  const want = at(TOKENS.light, GHOST_ALPHA.light);
+  ok(Math.abs(at(TOKENS.dark, dark) - want) < 0.02,
+    `the dark alpha ${dark} reaches ${at(TOKENS.dark, dark).toFixed(3)}:1, not the `
+    + `light treatment's ${want.toFixed(3)}:1`);
+  ok(dark > GHOST_ALPHA.dark,
+    'the dark scribe is drawn no harder than a ghost wheel, which is the weight '
+    + 'the mock proved it disappears at');
+  /* NOW TAKE THE PALETTE AWAY, one token at a time, in the theme where being
+     wrong is invisible. Every refusal has to land at or above the reference
+     alpha: too strong for a dark page, obviously so to anyone looking, present. */
+  ['--bg', '--muted', '--ref-bg', '--ref-muted'].forEach(k => {
+    const t = Object.assign({}, TOKENS.dark);
+    delete t[k];
+    const got = datumOpacityOn(t, 'dark').alpha;
+    ok(got >= GHOST_ALPHA.light,
+      `with ${k} unreadable the dark datum is drawn at ${got} — a mark nobody can `
+      + 'see is indistinguishable from the feature not being there');
+  });
+  /* A palette that is present but has no answer in it. --muted and --bg at the
+     same luminance means no alpha reaches `want`, and an unguarded bisection
+     drives hi to 1 and hands back a FULL-OPACITY scribe -- the loudest mark on a
+     page whose whole requirement is a quiet one. */
+  const flat = Object.assign({}, TOKENS.dark, { '--muted': TOKENS.dark['--bg'] });
+  const got = datumOpacityOn(flat, 'dark').alpha;
+  ok(got < 1, `a palette with no solution in it draws the scribe at ${got}`);
+  eq(got, GHOST_ALPHA.light,
+    'a palette with no solution in it does not fall back to the reference weight');
+});
+
+test('the datum reads every colour form a token can carry, and refuses the rest', () => {
+  /* `parseInt(hex.slice(1), 16)` had one exit and it was the bad one. #abc
+     parses to 2748 and yields channels nothing asked for; a named colour or an
+     rgb() string yields NaN -- and NaN is worse than wrong, because it is
+     SILENT: contrastAt returns NaN, `NaN < want` is false, so the bisection
+     drives hi to zero and settles at ~0. That is an invisible datum, cached for
+     the life of the theme. "The solve follows the token" only held while every
+     token stayed a six-digit hex, which nothing in the stylesheet promises. */
+  const R = colour.rgbOf;
+  const j = (v) => JSON.stringify(v);
+  eq(j(R('#abc')), '[170,187,204]', 'a three-digit hex is not expanded');
+  eq(j(R('#AABBCC')), '[170,187,204]', 'a six-digit hex is not read case-insensitively');
+  eq(j(R('  #6b7e7c  ')), '[107,126,124]', 'a padded token is not trimmed');
+  eq(j(R('rgb(107, 126, 124)')), '[107,126,124]', 'a comma-separated rgb() is not read');
+  eq(j(R('rgb(107 126 124 / 0.5)')), '[107,126,124]', 'a space-separated rgb() is not read');
+  eq(j(R('rgba(107,126,124,1)')), '[107,126,124]', 'an rgba() is not read');
+  const pc = R('rgb(50% 20% 30%)');
+  ok(pc && pc.length === 3 && [127.5, 51, 76.5].every((v, i) => Math.abs(pc[i] - v) < 1e-6),
+    'rgb() percentages are not read as 0-255 (got ' + j(pc) + ')');
+  /* Everything else must be null, NOT a number: null stops the derivation and
+     the caller draws at the reference alpha. An eight-digit hex is refused on
+     purpose -- dropping its alpha would compute the wrong contrast quietly. */
+  ['teal', '', '   ', '#12345', '#11223344', 'var(--nope)', 'currentColor', null, undefined]
+    .forEach(v => eq(R(v), null, `rgbOf(${j(v)}) returned a colour instead of refusing`));
+  /* And the solve genuinely follows the token, whichever form it is written in:
+     the same colour as #rgb, as #rrggbb and as rgb() must give one alpha. */
+  const long = Object.assign({}, TOKENS.dark, { '--muted': '#99AABB' });
+  const short = Object.assign({}, TOKENS.dark, { '--muted': '#9AB' });
+  const rgbForm = Object.assign({}, TOKENS.dark, { '--muted': 'rgb(153, 170, 187)' });
+  eq(datumOpacityOn(short, 'dark').alpha, datumOpacityOn(long, 'dark').alpha,
+    'the same colour written three-digit and six-digit solves to two alphas');
+  eq(datumOpacityOn(rgbForm, 'dark').alpha, datumOpacityOn(long, 'dark').alpha,
+    'the same colour written rgb() and hex solves to two alphas');
+  /* The NaN trap itself: a token the page cannot read must not resolve to zero,
+     and must say so rather than going quiet. */
+  ['teal', 'rgb(a, b, c)', '#11223344'].forEach(v => {
+    const t = Object.assign({}, TOKENS.dark, { '--muted': v });
+    const r = datumOpacityOn(t, 'dark');
+    ok(r.alpha >= GHOST_ALPHA.light,
+      `--muted: ${v} draws the scribe at ${r.alpha} — the NaN collapse is back`);
+    eq(r.warned.length, 1,
+      `--muted: ${v} is unreadable and the page says nothing about it`);
+  });
+  /* A token that is simply not there YET is not a fault: the page's own <style>
+     is compiled and re-inserted, so the first render can read '' before it
+     lands. That path stays quiet, and stays uncached so the next render asks
+     again rather than holding the fallback for the life of the page. */
+  const empty = Object.assign({}, TOKENS.dark, { '--muted': '' });
+  eq(datumOpacityOn(empty, 'dark').warned.length, 0,
+    'a palette that has not been applied yet is reported as a broken one');
+  ok(!/this\._datumOp\[theme\]\s*=/.test(DATUM_OP.slice(0, DATUM_OP.indexOf('const want'))),
+    'the datum caches a fallback alpha, so one early render freezes the mark at '
+    + 'the wrong weight for the life of the page');
 });
 
 test('the end-drift floor clears the widest step the deal can actually produce', () => {

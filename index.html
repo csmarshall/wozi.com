@@ -26,7 +26,21 @@
      almost nothing to separate from (1.12:1). At 0.817 the badges lift to 1.21:1
      and the ink still clears 11:1. --muted darkens with it so the wordmark TLD,
      which is large text on this colour, stays above the 3:1 floor (#16). */
-  --bg:#E8EAE5; --ink:#20302E; --muted:#6B7E7C; --hair:#D5DAD6; --chip:#FFFFFF;
+  /* THE LIGHT PALETTE IS THE DATUM'S REFERENCE, AND HAS TO STAY READABLE WITH
+     DARK ON. datumOpacity() solves for the alpha that gives the scribe the same
+     contrast in whichever palette is in force as it has in light -- the
+     treatment that was mocked and judged -- so it needs the light --bg and
+     --muted while the dark block is overriding both, and getComputedStyle only
+     ever reports the palette in force. These two carry them; the dark block
+     never overrides them, and the two light declarations below are ALIASES of
+     them, so there is still exactly one place each colour is written.
+     Reading them is then one getComputedStyle call. It used to be a scan of
+     document.styleSheets for a rule whose selector text was ':root' exactly --
+     which finds nothing the moment that block is wrapped in a @media, written
+     ':root, :host', or joined by a second sheet, and a datum with no reference
+     is a datum nobody can see. */
+  --ref-bg:#E8EAE5; --ref-muted:#6B7E7C;
+  --bg:var(--ref-bg); --ink:#20302E; --muted:var(--ref-muted); --hair:#D5DAD6; --chip:#FFFFFF;
   --accent:#3B7DE8; --shadow:0 1px 2px rgba(20,40,38,.06);
   /* THE METAL AND BRASS RAMPS, kept as a comment rather than as declarations
      (#57). Both sets were referenced ZERO times -- 16 declarations, no var()
@@ -95,6 +109,8 @@
         --safe-b:env(safe-area-inset-bottom,0px);--safe-l:env(safe-area-inset-left,0px);}
 }
 :root[data-theme="dark"]{
+  /* --ref-bg and --ref-muted are deliberately NOT overridden here: they are the
+     reference palette the datum's alpha is solved against, not a theme colour. */
   --bg:#1E2226; --ink:#EEF1F0; --muted:#93A5A3; --hair:#373E3D; --chip:#2A3034;
   --accent:#7FA9F0; --shadow:0 1px 2px rgba(0,0,0,.35);
   /* metal/brass ramps: see the light-mode block above (#57) */
@@ -1567,8 +1583,35 @@ function relLum(c) {
   const f = (v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
   return 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2]);
 }
-function rgbOf(hex) {
-  const n = parseInt(String(hex).trim().slice(1), 16);
+/* A CUSTOM PROPERTY'S VALUE COMES BACK AS WRITTEN, so this reads the three forms
+   a colour token is realistically written in -- #rgb, #rrggbb, and rgb()/rgba()
+   with numbers or percentages -- and returns NULL for anything else rather than
+   a guess.
+
+   `parseInt(hex.slice(1), 16)` alone was a trap with one exit and it was the bad
+   one. `#abc` parses to 2748 and yields channels nothing asked for; a named
+   colour or an rgb() string yields NaN, and NaN is worse than wrong here,
+   because it is SILENT: contrastAt returns NaN, `NaN < want` is false, so the
+   bisection in datumOpacity drives `hi` to zero and settles on an alpha of ~0.
+   That is an INVISIBLE datum -- the exact failure a mark whose whole job is to
+   be seen must never fall into, and one that looks from the outside like the
+   feature was simply never built. Null stops the derivation instead, and the
+   caller draws at the reference alpha: too strong for a dark page, but
+   unmistakably there. An 8-digit #rrggbbaa is refused on purpose, because
+   dropping its alpha would compute the wrong contrast quietly, which is the
+   thing being fixed. */
+function rgbOf(css) {
+  const s = String(css == null ? '' : css).trim();
+  const m = /^rgba?\(([^)]*)\)$/i.exec(s);
+  if (m) {
+    const p = m[1].split(/[\s,/]+/).filter(v => v !== '').slice(0, 3)
+      .map(v => /%$/.test(v) ? parseFloat(v) * 2.55 : parseFloat(v));
+    if (p.length !== 3 || !p.every(v => isFinite(v))) return null;
+    return p.map(v => Math.max(0, Math.min(255, v)));
+  }
+  if (!/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(s)) return null;
+  const hex = s.length === 4 ? s[1] + s[1] + s[2] + s[2] + s[3] + s[3] : s.slice(1);
+  const n = parseInt(hex, 16);
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 /* `fg` painted at alpha `a` over `bg`, against `bg` itself. */
@@ -1576,42 +1619,6 @@ function contrastAt(fg, bg, a) {
   const l1 = relLum([0, 1, 2].map(i => bg[i] + (fg[i] - bg[i]) * a)), l2 = relLum(bg);
   return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
 }
-/* THE LIGHT PALETTE, READABLE WHICHEVER THEME IS ON. The dark tokens are an
-   override on `:root[data-theme="dark"]`, so getComputedStyle only ever reports
-   the palette currently in force -- and the datum's reference weight is the
-   LIGHT one, because that is the treatment that was mocked and judged. Read out
-   of the `:root` declaration itself, the same way gsRender() reads --gsfit
-   rather than repeating it: one source of truth, and changing a token in the
-   stylesheet moves the derivation with it.
-
-   ASKED LAZILY, AND MEMOISED ONLY ONCE IT HAS AN ANSWER. The page's own <style>
-   is not in document.styleSheets while this file is still being evaluated --
-   the markup is compiled and re-inserted first -- so a scan at load time finds
-   nothing, and caching that nothing would freeze the derivation at its fallback
-   for the life of the page. */
-let _lightVars = null;
-function lightVars() {
-  if (_lightVars) return _lightVars;
-  const out = {};
-  try {
-    const sheets = document.styleSheets;
-    for (let i = 0; i < sheets.length; i++) {
-      let rules = null;
-      try { rules = sheets[i].cssRules; } catch (e) { continue; }
-      for (let j = 0; rules && j < rules.length; j++) {
-        const r = rules[j];
-        if (!r.style || r.selectorText !== ':root') continue;
-        ['--bg', '--muted'].forEach(k => {
-          const v = (r.style.getPropertyValue(k) || '').trim();
-          if (v) out[k] = v;
-        });
-      }
-    }
-  } catch (e) {}
-  if (out['--bg'] && out['--muted']) _lightVars = out;
-  return out;
-}
-
 /* Per person now: a combined stage carries several chains and a service belongs
    to whoever's chain it sits on. Keyed person -> slug -> { label, path, href }. */
 const SITES = (function () {
@@ -1876,7 +1883,22 @@ class Component extends DCLogic {
          circle they are cut on -- and the deepest of them sets the offset, plus
          a module of air. A serpentine wanders perpendicular to its own axis by
          most of a wheel, so an offset taken from the head alone puts the mark
-         straight through whichever wheel the deal happened to drop lowest. */
+         straight through whichever wheel the deal happened to drop lowest.
+
+         THE CHAIN'S GHOSTS ARE DELIBERATELY NOT IN THIS MAX, though they are in
+         the extent below. A datum crossing a ghost is not a collision: the whole
+         layer is painted beneath every wheel INCLUDING the ghosts, so the
+         background wheel draws over the line, which is what rule 6 asks for.
+         Folding them in costs two things that matter more. An escape run is a
+         random walk -- up to seven wheels, each dealt within 20 degrees of the
+         last -- so the outermost ghost, not the chain, would decide where the
+         line sits: measured at six viewports the offset stops tracking the
+         chain's own breadth and parks at ~22 modules on every one of them, and
+         the mark stops being positioned by the thing it references. And it
+         pushes the line 29-155 rendered px further outboard, on a stage where
+         the outermost chain's plate has already been measured landing within a
+         pixel or two of a portrait viewport's edge. Off the page is invisible,
+         and invisible is the one thing this mark may not be. */
       const off = Math.max.apply(null, c.wheels.map(g =>
         (g.cx - c.head.cx) * nx + (g.cy - c.head.cy) * ny + g.ro)) + MODULE;
       const o = { x: c.head.cx + nx * off, y: c.head.cy + ny * off };
@@ -3255,14 +3277,16 @@ class Component extends DCLogic {
 
   /* HOW HARD THE DATUM MARK IS DRAWN, solved rather than carried per theme.
 
-     The ghost layer's pair does not transfer, and the reason is measurable: 0.46
-     and 0.17 both put the BACKGROUND MACHINERY at the same weight -- a ghost
-     wheel lands at 1.34:1 against the page in light and 1.38:1 in dark -- but
-     the datum is not drawn in the ghost greys. It is drawn in --muted, which is
-     a far firmer colour against the light page (#6B7E7C on #E8EAE5) than against
-     the dark one (#93A5A3 on #1E2226, within a whisker of the ghost grey's own
-     luminance). So the same alpha means two different marks: 0.46 in light gives
-     1.69:1, while 0.17 in dark gives 1.38:1 -- the scribe drops back into the
+     The ghost layer's pair does not transfer, and measuring it says why. It is
+     not a contrast-matched pair to begin with: sampled on the rendered page over
+     the eight tones ghostSvg deals, a ghost body composites to roughly 1.9:1
+     against the light page at 0.46 and roughly 1.25:1 against the dark one at
+     0.17. Those two alphas are a judgement about filled, blurred WHEELS, not a
+     weight anything else can inherit -- and the datum is not drawn in the ghost
+     greys anyway. It is drawn in --muted, which is a far firmer colour against
+     the light page (#6B7E7C on #E8EAE5) than against the dark one (#93A5A3 on
+     #1E2226). So the same alpha means two different marks: 0.46 in light gives
+     1.67:1, while 0.17 in dark gives 1.35:1 -- the scribe drops back into the
      machinery it is supposed to be the reference for.
 
      The LIGHT treatment is the reference, because that is the one that was
@@ -3275,23 +3299,48 @@ class Component extends DCLogic {
 
      Bisection, not algebra: composite luminance is monotonic in alpha but not
      invertible in closed form through the sRGB transfer curve, and 24 halvings
-     of 0..1 settle it far below the two decimal places that reach the markup. */
+     of 0..1 settle it far below the two decimal places that reach the markup.
+
+     EVERY WAY OUT OF HERE IS VISIBLE. This is the identity signal, so the one
+     outcome it must never have is "absent": an alpha of 0, or the ghost layer's
+     dark 0.17, is indistinguishable from the feature not existing, and leaves
+     nothing on the page to diagnose it from. So each refusal below returns the
+     REFERENCE alpha -- too strong for a dark page, obviously so to anyone
+     looking, and present. */
   datumOpacity() {
     if (!this._datumOp) this._datumOp = {};
     const theme = this.state.theme;
     if (this._datumOp[theme] !== undefined) return this._datumOp[theme];
-    const lv = lightVars();
-    /* No reference palette to read yet means no derivation yet. The ghost
-       layer's own alpha stands in, and NOTHING IS CACHED, so the next render
-       asks again rather than holding the fallback for good. */
-    if (!lv['--bg'] || !lv['--muted']) return this.ghostOpacity();
     const css = getComputedStyle(document.documentElement);
-    const bg = rgbOf(css.getPropertyValue('--bg')), fg = rgbOf(css.getPropertyValue('--muted'));
-    const want = contrastAt(rgbOf(lv['--muted']), rgbOf(lv['--bg']), this.ghostOpacity('light'));
+    const raw = ['--bg', '--muted', '--ref-bg', '--ref-muted']
+      .map(k => (css.getPropertyValue(k) || '').trim());
+    const c = raw.map(rgbOf);
+    /* NOTHING IS CACHED ON THIS PATH, so the next render asks again rather than
+       holding a fallback for the life of the page. Two ways to get here, and
+       only one of them is a fault: an empty token string means the page's own
+       <style> has not been applied yet -- the markup is compiled and re-inserted
+       before it lands -- and the next render will have it. A token that IS there
+       and still will not read is a broken palette, and says so, once. */
+    if (c.some(v => !v)) {
+      if (raw.every(v => v) && !this._datumWarned) {
+        this._datumWarned = true;
+        console.warn('datum: cannot read ' + raw.join(' / ')
+          + ' as colours; drawing the scribe at the light reference alpha');
+      }
+      return this.ghostOpacity('light');
+    }
+    const want = contrastAt(c[3], c[2], this.ghostOpacity('light'));
+    /* A PALETTE WHERE THE TARGET IS OUT OF REACH gets the reference alpha too.
+       With --muted and --bg at the same luminance no alpha reaches `want`, and
+       the bisection would drive `hi` to 1 and hand back a full-opacity scribe --
+       the loudest mark on a page whose whole requirement is a quiet one, drawn
+       in a colour that cannot be seen against its ground anyway. There is no
+       answer in that palette; the reference weight is the honest stand-in. */
+    if (contrastAt(c[1], c[0], 1) < want) return this.ghostOpacity('light');
     let lo = 0, hi = 1;
     for (let i = 0; i < 24; i++) {
       const mid = (lo + hi) / 2;
-      if (contrastAt(fg, bg, mid) < want) lo = mid; else hi = mid;
+      if (contrastAt(c[1], c[0], mid) < want) lo = mid; else hi = mid;
     }
     const a = Math.round((lo + hi) * 50) / 100;
     this._datumOp[theme] = a;
