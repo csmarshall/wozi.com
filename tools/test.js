@@ -377,6 +377,22 @@ test('every TRAIN entry names its person and its role', () => {
   ok(bad.length === 0, bad.join('\n      '));
 });
 
+test('no deal decides adjacency by array index', () => {
+  /* Wheels are only ever confused with the ones they MESH, and on a tree that is
+     the parent, not the previous array slot. Each of these three lines is a place
+     where i-1 used to stand in for "next to me". */
+  const bad = [];
+  const checks = [
+    ['dealTeeth twins rule', /cut\[i\]\s*===\s*cut\[i\s*-\s*1\]/],
+    ['dealAngles drift walk', /rOf\(TRAIN\[i\s*-\s*1\]\)/],
+    ['dealColours hue separation', /pick\[i\s*-\s*1\]/]
+  ];
+  checks.forEach(([what, re]) => {
+    if (re.test(SRC)) bad.push(what + ' still compares against index i-1');
+  });
+  ok(bad.length === 0, bad.join('\n      '));
+});
+
 test('the fit rule does not branch on how many gears are in the chain', () => {
   /* The rule is "a gear has a standard size for this viewport, and shrinks only
      when something physical says it must". Nothing in it may depend on the

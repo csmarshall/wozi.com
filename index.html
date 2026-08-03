@@ -946,8 +946,14 @@ function smallestBlankHolding(wantTwo) {
     const cut = TRAIN.map(() => floor + Math.floor(Math.random() * span));
     if (Math.abs(cut.reduce((a, b) => a + b, 0) - TEETH_SUM) > TEETH_SLACK && floor === TEETH_MIN) continue;
     if (Math.max.apply(null, cut) < host) continue;
+    /* Two identical wheels side by side read as a mistake rather than a choice --
+       and "side by side" means MESHING, which on a tree is the parent, not the
+       previous array slot. */
     let twins = false;
-    for (let i = 1; i < cut.length; i++) if (cut[i] === cut[i - 1]) twins = true;
+    for (let i = 0; i < cut.length; i++) {
+      const p = TRAIN[i].parent;
+      if (p != null && cut[i] === cut[p]) twins = true;
+    }
     if (twins && span > 1) continue;
     TRAIN.forEach((t, i) => { t.teeth = cut[i]; });
     return;
@@ -991,14 +997,19 @@ const NOMINAL_SPAN = (function () {
     for (let i = 1; i < TRAIN.length; i++) {
       ang.push(first * (i % 2 ? 1 : -1) * (ANG_MIN + Math.random() * (ANG_MAX - ANG_MIN)));
     }
-    let y = 0, lo = 0, hi = 0;
+    /* Walk parents, not indices: on a tree the offset of a wheel is its parent's
+       offset plus this step, and the array order is not the chain order. */
+    const yOf = new Array(TRAIN.length).fill(0);
+    let lo = 0, hi = 0, last = 0;
     for (let i = 1; i < TRAIN.length; i++) {
-      y += (rOf(TRAIN[i - 1]) + rOf(TRAIN[i])) * Math.sin(ang[i] * Math.PI / 180);
-      if (y < lo) lo = y;
-      if (y > hi) hi = y;
+      const p = TRAIN[i].parent;
+      yOf[i] = yOf[p] + (rOf(TRAIN[p]) + rOf(TRAIN[i])) * Math.sin(ang[i] * Math.PI / 180);
+      if (yOf[i] < lo) lo = yOf[i];
+      if (yOf[i] > hi) hi = yOf[i];
+      last = yOf[i];
     }
     if (hi - lo > BAND_MAX) continue;
-    if (Math.abs(y) > ENDS_MAX) continue;
+    if (Math.abs(last) > ENDS_MAX) continue;
     TRAIN.forEach((t, i) => { t.angle = +ang[i].toFixed(2); });
     return;
   }
@@ -1130,7 +1141,7 @@ const hueOf = (hex) => {
   return h < 0 ? h + 360 : h;
 };
 const WHEEL_POOL = (CONF.WHEEL_POOL || []).map(c => ({ c: c, h: hueOf(c) }));
-function dealColours(n) {
+function dealColours(n, parentOf) {
   const dist = (a, b) => Math.min(Math.abs(a - b), 360 - Math.abs(a - b));
   let best = null, bestScore = -1;
   for (let tries = 0; tries < 80; tries++) {
@@ -1140,14 +1151,21 @@ function dealColours(n) {
       const t = idx[i]; idx[i] = idx[j]; idx[j] = t;
     }
     const pick = idx.slice(0, Math.min(n, idx.length));
+    /* Score MESHING pairs. Wheels are only confused with the ones beside them,
+       and beside means meshed -- on a tree that is the parent, not the previous
+       slot in this array. */
     let score = 360;
-    for (let i = 1; i < pick.length; i++) score = Math.min(score, dist(WHEEL_POOL[pick[i - 1]].h, WHEEL_POOL[pick[i]].h));
+    for (let i = 0; i < pick.length; i++) {
+      const p = parentOf(i);
+      if (p == null || p >= pick.length) continue;
+      score = Math.min(score, dist(WHEEL_POOL[pick[i]].h, WHEEL_POOL[pick[p]].h));
+    }
     if (score > bestScore) { bestScore = score; best = pick; }
     if (score >= 40) break;
   }
   return best.map(i => WHEEL_POOL[i].c);
 }
-const WHEEL_DEAL = dealColours(TRAIN.length);
+const WHEEL_DEAL = dealColours(TRAIN.length, (i) => TRAIN[i].parent);
 TRAIN.forEach((t, i) => {
   t.color = WHEEL_DEAL[i % WHEEL_DEAL.length];
 });
