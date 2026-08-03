@@ -158,7 +158,14 @@ window.WOZI_CONFIG = {
          per the note above. */
       hosts: ['harper.wozi.com'],
       links: [
-        { slug: 'mail', path: 'harper@wozi.com', href: 'mailto:harper@wozi.com' }
+        /* HER ADDRESS IS DELIBERATELY NOT PUBLISHED YET. config.js is served to
+           the web, so an href here is public in plain text no matter what the
+           band is engraved with -- a harvester reads the file, not the artwork.
+           Until Charles has settled how her mail should be published, the wheel
+           points at his address: the chain is complete, the badge works, and
+           nothing of hers reaches the bucket. Swapping it back is this one line,
+           with no code change anywhere. */
+        { slug: 'mail', path: 'harper',          href: 'mailto:charles@wozi.com' }
       ]
     }
   ],
