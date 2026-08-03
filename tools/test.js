@@ -350,20 +350,35 @@ function fitRule() {
   };
 }
 
+/* One `const NAME = ...;` declaration, verbatim from index.html. For the
+   one-line derivations the builder closes over: executing the page's line is
+   the difference between measuring what ships and measuring a copy of it. */
+function grabDecl(decl) {
+  const i = SRC.indexOf(decl);
+  if (i < 0) throw new Error('declaration not found in index.html: ' + decl);
+  const j = SRC.indexOf(';', i);
+  if (j < 0) throw new Error('unterminated declaration: ' + decl);
+  return SRC.slice(i, j + 1);
+}
+
 /* Executes the real TRAIN builder out of index.html rather than modelling it.
    Returns the bridges it filled in as well as the wheels: the two are built
    together, and a test that only saw the array could not tell an idler apart
    from the chain it feeds. Every value the builder closes over is handed in
    from the page rather than re-typed -- MAX_IDLERS is read out of index.html,
-   and SPINE_LEN is derived from the fixture exactly as the page derives it. */
+   and CHAIN_ORDER and SPINE_LEN are the page's OWN LINES, executed against the
+   fixture. SPINE_LEN used to be re-derived here, which is the one thing this
+   file forbids: a suite holding its own copy of a derivation passes happily
+   while the page computes something else. */
 function buildTrain(people) {
   const expr = grabBlock('const TRAIN = (function', '(', ')');
   const bridges = [];
-  const spineLen = Math.max(1, ...people.map(p => (p.links || []).length));
-  const train = new Function('STAGE', 'SPINE_LEN', 'MAX_IDLERS', 'BRIDGES',
-    'return ' + expr.replace(/^const TRAIN = /, '') + '()')(
-    { people: people }, spineLen, grabNumber('MAX_IDLERS'), bridges);
-  return { train, bridges };
+  const built = new Function('STAGE', 'MAX_IDLERS', 'BRIDGES',
+    grabDecl('const CHAIN_ORDER =') + '\n'
+    + grabDecl('const SPINE_LEN =') + '\n'
+    + 'return { train: ' + expr.replace(/^const TRAIN = /, '') + '(), order: CHAIN_ORDER };')(
+    { people: people }, grabNumber('MAX_IDLERS'), bridges);
+  return { train: built.train, bridges, order: built.order };
 }
 
 test('every TRAIN entry names its parent, and the parents form one tree', () => {
@@ -524,6 +539,283 @@ test('a chain that opts out of bridging is a root, and keeps no idlers', () => {
   ok(/const free = /.test(SRC),
     'solve() has no branch for a root that is not the first wheel, so it would '
     + 'resolve to (0,0) on top of the spine');
+});
+
+/* ---- the real solver, executed against a stage of our choosing ------------ */
+
+/* EXECUTES solve() ITSELF, sliced out of index.html. Everything above tests the
+   TRAIN builder, which is a tree; where two chains END UP is a question only the
+   solver can answer, and "chains do not overlap" is a statement about exactly
+   that. It closes over nothing the page does not hand it: the deals, the two
+   bridge lookups and the segment helpers are all executed out of index.html too.
+   No DOM is touched -- solve() reads the viewport only through _axisRot and
+   _idlerN, and both are supplied, which is the same thing fitStage() does. */
+function runSolve(people, opts) {
+  opts = opts || {};
+  const { train, bridges, order } = buildTrain(people);
+  const MODULE = page.MODULE, TEETH_MEAN = grabNumber('TEETH_MEAN');
+  /* Real deals, so the geometry under test is geometry the page can produce. */
+  new Function('TRAIN', 'TEETH_MIN', 'TEETH_MAX', 'TEETH_SLACK', 'TEETH_HOST',
+    'TEETH_MEAN', 'FORCE_FAMILY', 'smallestBlankHolding',
+    grabBlock('(function dealTeeth()', '{', '}') + ')();')(
+    train, page.TEETH_MIN, page.TEETH_MAX, page.TEETH_SLACK, page.TEETH_HOST,
+    TEETH_MEAN, null, () => page.TEETH_MIN);
+  new Function('TRAIN', 'MODULE', 'ANG_MIN', 'ANG_MAX', 'BAND_MAX', 'endsCapFor',
+    grabBlock('(function dealAngles()', '{', '}') + ')();')(
+    train, MODULE, page.ANG_MIN, page.ANG_MAX, page.BAND_MAX, page.endsCapFor);
+
+  const lookups = grabDecl('const BRIDGE_FROM =') + '\n'
+    + grabBlockFrom(SRC, 'index.html', 'BRIDGES.forEach(b => {', '{', '}') + ');';
+  const body = grabBlock('  solve() {', '{', '}').replace(/^\s*solve\(\)\s*/, '');
+  /* CHAIN_RANK is the page's own line too, run against the order buildTrain got
+     from executing the page's CHAIN_ORDER -- not a second sort of the fixture. */
+  const CHAIN_RANK = new Function('CHAIN_ORDER',
+    grabDecl('const CHAIN_RANK =') + '\n'
+    + grabBlockFrom(SRC, 'index.html', 'CHAIN_ORDER.forEach((p, k) =>', '{', '}')
+    + ');\n return CHAIN_RANK;')(order);
+  const sites = {};
+  people.forEach(p => (p.links || []).forEach(l => {
+    (sites[p.slug] = sites[p.slug] || {})[l.slug] = {};
+  }));
+  const solve = new Function('TRAIN', 'BRIDGES', 'MODULE', 'TOOTH_ADD',
+    'TEETH_MEAN', 'MIN_IDLERS', 'MAX_IDLERS', 'CLEARANCE', 'ENDS_APART',
+    'ANG_MIN', 'ANG_MAX', 'CHAIN_RANK', 'WHO', 'PAIR_SLOTS', 'PAIRS', 'SINGLES',
+    'SITES', 'console', `
+    ${grabBlock('function segCross(', '{', '}')}
+    ${grabBlock('function segDist(', '{', '}')}
+    ${lookups}
+    return function () ${body};`);
+  const warns = [];
+  const ctx = opts.ctx || {};
+  ctx.props = { shuffle: false };
+  ctx.state = { theme: 'light' };
+  ctx._axisRot = opts.axisRot || 0;
+  ctx._idlerN = opts.idlerN === undefined ? grabNumber('MAX_IDLERS') : opts.idlerN;
+  ctx._tight = opts.tight === undefined ? 1 : opts.tight;
+  ctx._spreadBoost = 1;
+  ctx._solved = null;
+  const solved = solve(train, bridges, MODULE, page.TOOTH_ADD, TEETH_MEAN,
+    grabNumber('MIN_IDLERS'), grabNumber('MAX_IDLERS'), grabNumber('CLEARANCE'),
+    grabNumber('ENDS_APART'), page.ANG_MIN, page.ANG_MAX, CHAIN_RANK,
+    order[0] || { slug: '' }, [], [], [], sites,
+    { warn: (m) => warns.push(m), error: (m) => warns.push(m) }).call(ctx);
+  return { solved, train, bridges, warns, ctx, order };
+}
+
+/* Which chain a placed wheel belongs to: an idler belongs to the chain it
+   feeds, which is where it sits in the layout. */
+const chainOfWheel = (train, w) => w.person != null ? w.person : train[w.i].bridge;
+
+/* Every pair of wheels from DIFFERENT chains that are not meshed, and by how
+   much their tip circles interpenetrate. Meshed pairs are excluded by their
+   parentage, not by chain: a bridge idler meshes the wheel it hangs off, and
+   that wheel is on another chain by definition. */
+function crossChainFouls(train, solved) {
+  const g = solved.gears, out = [];
+  const parent = {};
+  g.forEach(w => { parent[w.i] = train[w.i].parent; });
+  for (let p = 0; p < g.length; p++) {
+    for (let q = p + 1; q < g.length; q++) {
+      if (chainOfWheel(train, g[p]) === chainOfWheel(train, g[q])) continue;
+      const d = Math.hypot(g[p].x - g[q].x, g[p].y - g[q].y);
+      if (d >= g[p].ro + g[q].ro) continue;
+      /* meshed, by whichever direction the parentage runs -- including the
+         re-parenting solve() does when an idler is parked */
+      if (Math.abs(d - (g[p].r + g[q].r)) < 0.5) continue;
+      out.push(`${chainOfWheel(train, g[p])} wheel ${g[p].i} × `
+        + `${chainOfWheel(train, g[q])} wheel ${g[q].i} overlap by `
+        + (g[p].ro + g[q].ro - d).toFixed(1));
+    }
+  }
+  return out;
+}
+
+/* Three chains whose PEOPLE order is deliberately NOT their length order, so a
+   layout that follows config order sorts differently from one that follows
+   chain length. Four when the cascade itself is under test. */
+const THREE = [
+  { slug: 'mid', links: [{ slug: 'a' }, { slug: 'b' }, { slug: 'c' }] },
+  { slug: 'tiny', links: [{ slug: 'd' }] },
+  { slug: 'spine', links: [1, 2, 3, 4, 5, 6, 7].map(n => ({ slug: 's' + n })) }
+];
+
+test('chains are laid out longest first, in order, across the cross axis', () => {
+  /* Charles, 2026-08-02: "lay them out in order of how many entries they have,
+     longest first, then descending, top to bottom in landscape, and the
+     equivalent along the cross axis in portrait". PEOPLE order is arbitrary the
+     moment there are three chains, and until this rule the second and third
+     both hung off the spine and arrived in the SAME row, ordered by nothing.
+     Measured along the bridge direction, which is what "top to bottom" means
+     once the stage rotates: the bridges all run one way, perpendicular to the
+     spine and relative to it. */
+  const bad = [];
+  [0, 90].forEach(rot => {
+    const { solved, train, order } = runSolve(THREE, { axisRot: rot });
+    eq(order.map(p => p.slug).join(','), 'spine,mid,tiny',
+      'CHAIN_ORDER is not longest-first');
+    const dir = (rot + 90) * Math.PI / 180;
+    const along = {};
+    solved.gears.forEach(w => {
+      if (w.person == null) return;                 /* idlers span two rows */
+      (along[w.person] = along[w.person] || []).push(w.x * Math.cos(dir) + w.y * Math.sin(dir));
+    });
+    let last = -Infinity, lastSlug = 'the top edge';
+    order.forEach(p => {
+      const v = along[p.slug].reduce((a, b) => a + b, 0) / along[p.slug].length;
+      if (!(v > last)) {
+        bad.push(`at axisRot ${rot}: ${p.slug} (${(p.links || []).length} wheels) `
+          + `sits at ${v.toFixed(0)} along the bridge axis, not past ${lastSlug} `
+          + `at ${last.toFixed(0)}`);
+      }
+      last = v; lastSlug = p.slug;
+    });
+  });
+  ok(bad.length === 0, bad.join('\n      '));
+});
+
+test('no wheel of one chain ever overlaps a wheel of another', () => {
+  /* Charles, 2026-08-02: "they shouldn't overlap right". Nothing guaranteed it
+     across chains -- the attachment search checked as far as the chain head and
+     no further, and the per-wheel nudge plants a wheel wherever it ran out of
+     swing. Run against real deals, many times, because the teeth and the
+     bearings are what decide whether a chain fits where the anchor put it. */
+  const bad = [];
+  for (let trial = 0; trial < 60 && bad.length === 0; trial++) {
+    [0, 90].forEach(rot => {
+      [1, 2].forEach(n => {
+        const { solved, train, warns } = runSolve(THREE, { axisRot: rot, idlerN: n });
+        crossChainFouls(train, solved).forEach(f =>
+          bad.push(`axisRot ${rot}, ${n} idler(s): ` + f));
+        warns.forEach(w => bad.push(`axisRot ${rot}, ${n} idler(s): warned "${w}"`));
+      });
+    });
+  }
+  ok(bad.length === 0, bad.slice(0, 5).join('\n      '));
+});
+
+test('no chain head is ever dropped at the origin', () => {
+  /* The cascade path the bridge exists to remove: a head whose host is not on
+     stage keeps x = y = 0 and draws on top of the spine's first wheel. Only
+     TRAIN[0] belongs at the origin. */
+  const bad = [];
+  for (let trial = 0; trial < 40; trial++) {
+    const { solved, bridges } = runSolve(THREE, { axisRot: trial % 2 ? 90 : 0 });
+    const at = {};
+    solved.gears.forEach(w => { at[w.i] = w; });
+    bridges.forEach(b => {
+      const w = at[b.head];
+      if (!w) return bad.push(`chain ${b.person}'s head is not placed at all`);
+      if (!isFinite(w.x) || !isFinite(w.y)) bad.push(`chain ${b.person}'s head is at (${w.x}, ${w.y})`);
+      if (Math.hypot(w.x, w.y) < 1e-9) bad.push(`chain ${b.person}'s head fell back to the origin`);
+    });
+  }
+  ok(bad.length === 0, [...new Set(bad)].join('\n      '));
+});
+
+test('an exhausted anchor search says so instead of loosening the rule', () => {
+  /* `let choice = cands.length ? cands[0] : null` is KEPT when no candidate
+     passes, so an anchor that fouls is used anyway and the bridge gets one
+     bounded nudge at it. The brief said to stop and report rather than loosen
+     the non-crossing rule; what it must never do is loosen it in silence.
+     Forced by asking for a clearance nothing can satisfy. */
+  const { warns } = runSolve(THREE, { tight: 400 });
+  const anchor = warns.filter(w => /no clear bridge anchor/.test(w));
+  ok(anchor.length > 0,
+    'every candidate was rejected and nothing was said: ' + (warns[0] || '(silence)'));
+  ok(/candidates rejected/.test(anchor[0]) && /fouled a wheel/.test(anchor[0]),
+    'the warning does not say why the candidates were rejected: ' + anchor[0]);
+  ok(/chain "/.test(anchor[0]), 'the warning does not name the chain: ' + anchor[0]);
+});
+
+test('a bridge anchor survives the idler count dropping under it', () => {
+  /* _bridgeAt is decided once and cached across resizes (#55), while nIdle falls
+     to one on a narrow cross axis. An anchor on a SECOND idler therefore named a
+     wheel that is no longer placed after the flip: gi[host] === -1, and the chain
+     hanging off it resolved to (0,0) -- the overlap this bridge removes, arriving
+     by the back door. Anchors are chosen with two idlers in mesh, then the same
+     instance is re-solved with one, exactly as fitStage does it. */
+  const bad = [];
+  for (let trial = 0; trial < 20; trial++) {
+    const ctx = {};
+    runSolve(THREE, { axisRot: 0, idlerN: 2, ctx });
+    const { solved, train, warns } = runSolve(THREE, { axisRot: 0, idlerN: 1, ctx });
+    warns.forEach(w => bad.push('after the drop to one idler: ' + w));
+    crossChainFouls(train, solved).forEach(f => bad.push('after the drop: ' + f));
+    Object.keys(ctx._bridgeAt || {}).forEach(person => {
+      const k = ctx._bridgeAt[person];
+      if (k == null) return;
+      if (train[k].role === 'idler') {
+        const b = train.filter(t => t.role === 'idler').indexOf(train[k]);
+        if (b >= grabNumber('MIN_IDLERS')) {
+          bad.push(`chain ${person} is anchored on idler slot ${b}, which parks`);
+        }
+      }
+    });
+  }
+  ok(bad.length === 0, [...new Set(bad)].slice(0, 5).join('\n      '));
+});
+
+test('a bridge idler is drawn at the same opacity as every other ghost', () => {
+  /* An idler is emitted from solved.gears, NOT from the ghosts layer -- it has
+     to mesh, and that layer is parallax-scaled 0.94. So it missed the layer's
+     own opacity and was drawn at 1.0 over ghostSvg's palette, which is dimmed by
+     a factor measured UNDERNEATH that opacity: about 5.5:1 against the pale
+     page, darker and higher in contrast than any of the linked wheels the
+     machine is actually about. The number must be the SAME number, not a second
+     opinion about it. */
+  ok(/ghostOpacity\(\)\s*\{/.test(SRC), 'there is no single source for the ghost opacity');
+  const ghosts = SRC.slice(SRC.indexOf("h('div', { key: 'ghosts'"), SRC.indexOf("key: 'shadows'"));
+  ok(/opacity: this\.ghostOpacity\(\)/.test(ghosts),
+    'the ghost layer no longer takes its opacity from ghostOpacity()');
+  const art = SRC.slice(SRC.indexOf("key: 'shadows'"));
+  ok(/role === 'idler' \? this\.ghostOpacity\(\)/.test(art),
+    'a bridge idler is drawn without the ghost layer\'s opacity, so it reads as '
+    + 'the most prominent wheel on the page');
+  ok(/filter\(g => g\.role !== 'idler'\)/.test(art),
+    'the cast-shadow layer still draws under the idlers — background machinery '
+    + 'that casts a full-strength shadow reads heavier than the wheel casting it');
+});
+
+test('the end-drift floor clears the widest step the deal can actually produce', () => {
+  /* endsCapFor's floor was the NOMINAL wheel: 27.6 units. The wheels are dealt,
+     not nominal, and two 19-tooth blanks stand 133 apart -- their shallowest
+     step is 32.2, so an odd-step chain dealt at the top of the range still
+     missed the cap and fell through to the closest-draw fallback. Runs the real
+     dealAngles on the widest two-wheel chain the deal can produce and asserts
+     the result is LEGAL, not merely assigned. */
+  const fn = grabBlock('(function dealAngles()', '{', '}');
+  const bad = [];
+  for (let trial = 0; trial < 200 && bad.length === 0; trial++) {
+    const train = [
+      { teeth: page.TEETH_MAX, parent: null, person: 'a', role: 'link' },
+      { teeth: page.TEETH_MAX - 1, parent: 0, person: 'a', role: 'link' }
+    ];
+    new Function('TRAIN', 'MODULE', 'ANG_MIN', 'ANG_MAX', 'BAND_MAX', 'endsCapFor',
+      `${fn})();`)(train, page.MODULE, page.ANG_MIN, page.ANG_MAX, page.BAND_MAX,
+      page.endsCapFor);
+    const d = page.MODULE * (train[0].teeth + train[1].teeth) / 2;
+    const drift = Math.abs(d * Math.sin(train[1].angle * Math.PI / 180));
+    if (drift > page.endsCapFor(2) + 1e-9) {
+      bad.push(`a ${train[0].teeth}+${train[1].teeth} chain drifts ${drift.toFixed(1)}, `
+        + `past its own cap of ${page.endsCapFor(2).toFixed(1)} — the deal fell `
+        + `through to its fallback draw`);
+    }
+  }
+  ok(bad.length === 0, bad.join('\n      '));
+});
+
+test('the idler count and the stage rotation agree on which axis is long', () => {
+  /* idlerCount() took max/min of the two viewport dimensions while axisRot()
+     only turns the stage past h > w * 1.05. Between 1.00 and 1.05 they
+     disagreed, and the bridge was then measured across the axis the stage does
+     not run along. Asking the rotation itself makes them agree by construction. */
+  const i = SRC.indexOf('  idlerCount() {');
+  const frag = SRC.slice(i, SRC.indexOf('\n  }', i));
+  ok(/this\.axisRot\(\)/.test(frag),
+    'idlerCount() does not derive its long axis from axisRot()');
+  ok(!/Math\.max\(w, h\)/.test(frag),
+    'idlerCount() still calls the larger dimension the long axis, which axisRot() '
+    + 'does not between 1.00 and 1.05');
 });
 
 test('a combined stage seats every person, each within its own slot range', () => {

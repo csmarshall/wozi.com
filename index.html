@@ -356,14 +356,32 @@ const STAGE = (function () {
            || people[0];
   return { mode: 'solo', people: [one] };
 })();
+/* THE ORDER THE CHAINS ARE LAID OUT IN: longest first, then descending. Ties
+   break by PEOPLE order -- Array.prototype.sort is stable, so a tie keeps the
+   order config.js wrote, which is the rule the spine was already chosen by.
+
+   IT IS THE LAYOUT ORDER, NOT MERELY THE EMISSION ORDER (Charles, 2026-08-02).
+   solve() places wheels in TRAIN order and a bridge may only hang off a wheel
+   ALREADY placed, so a chain can only ever be driven from one earlier in this
+   list -- and every bridge runs the same way off the spine, so "earlier" is
+   also "nearer the top" in landscape and "nearer the leading edge of the cross
+   axis" in portrait. Sorting once, here, is what makes that ordering a property
+   of the composition rather than of the order people happen to appear in
+   config.js, which is arbitrary the moment there are three chains. */
+const CHAIN_ORDER = STAGE.people.slice().sort((a, b) =>
+  (b.links || []).length - (a.links || []).length);
 /* Kept so everything reading a single active person still works: on a combined
    stage it is the spine, which is the chain the composition is built around. */
-const WHO = STAGE.people.slice().sort((a, b) =>
-  (b.links || []).length - (a.links || []).length)[0] || { slug: '', name: '', links: [] };
+const WHO = CHAIN_ORDER[0] || { slug: '', name: '', links: [] };
+/* Where each chain sits in that order, by slug: 0 is the spine. The bridge
+   attachment search ranks its candidates by it, so a chain hangs off the
+   LONGEST chain with room for it and the shorter ones stack away from the
+   spine, rather than reaching back past a chain that should be below them. */
+const CHAIN_RANK = {};
+CHAIN_ORDER.forEach((p, k) => { CHAIN_RANK[p.slug] = k; });
 
 /* The SPINE is the longest chain -- it sets the scale, and it is the axis every
-   other chain runs parallel to. Ties break by PEOPLE order, which is exactly how
-   WHO picks it above. */
+   other chain runs parallel to. */
 const SPINE_LEN = Math.max(1, ...STAGE.people.map(p => (p.links || []).length));
 
 /* HOW MANY IDLERS BRIDGE A CHAIN TO THE ONE THAT DRIVES IT. Never zero -- two
@@ -417,15 +435,14 @@ const BRIDGES = [];
    this is a default rather than a per-wheel choice. */
 const TRAIN = (function () {
   const out = [];
-  /* THE SPINE IS EMITTED FIRST, whatever its position in PEOPLE, and every
-     bridge hangs off a wheel already on the array. solve() derives a wheel's
-     position from g[t.parent] out of the wheels it has ALREADY placed, so a
-     parent that appears later than its child reads as undefined and the whole
-     branch lands wherever the last iteration happened to leave it. Sorting the
-     same way WHO does keeps the two in agreement by construction. */
-  const order = STAGE.people.slice().sort((a, b) =>
-    (b.links || []).length - (a.links || []).length);
-  order.forEach(p => {
+  /* EMITTED IN CHAIN_ORDER -- longest first -- whatever the order in PEOPLE, so
+     every bridge hangs off a wheel already on the array. solve() derives a
+     wheel's position from g[t.parent] out of the wheels it has ALREADY placed,
+     so a parent that appears later than its child reads as undefined and the
+     whole branch lands wherever the last iteration happened to leave it. Reading
+     the one shared order keeps this, WHO and the attachment search in agreement
+     by construction rather than by three sorts that have to match. */
+  CHAIN_ORDER.forEach(p => {
     const links = p.links || [];
     if (!links.length) return;
     /* A chain bridges unless its own config entry says otherwise. `bridge:
@@ -1099,18 +1116,33 @@ const ANG_MIN = 14, ANG_MAX = 30, BAND_MAX = 62, ENDS_MAX = 26;
    A serpentine alternates its bearings, so consecutive steps cancel: a chain
    with an EVEN number of steps can return to its own baseline, and one with an
    ODD number cannot -- whatever the draw, it is left holding a single
-   uncancelled step. The shallowest step the deal can draw is already 27.6 units
-   at the nominal wheel, against an ENDS_MAX of 26, so a TWO-wheel chain (one
-   step) could never satisfy the cap: with the caps applied per chain, the deal
-   would have exhausted every try and assigned no bearings at all, and every
-   wheel's `angle` would have read undefined.
+   uncancelled step. The shallowest step the deal can draw is already past an
+   ENDS_MAX of 26, so a TWO-wheel chain (one step) could never satisfy the cap:
+   with the caps applied per chain, the deal would have exhausted every try and
+   assigned no bearings at all, and every wheel's `angle` would have read
+   undefined.
 
-   Derived from the deal's own bounds and the nominal wheel, so it follows them
-   rather than needing to be re-measured. Even-step chains are untouched, which
-   is every chain shipped today. */
+   IT IS A TWO-WHEEL CHAIN THAT IS THE CASE, not every odd-step chain. Three
+   steps or more alternate, so their signed sum can be brought to either side of
+   the baseline whatever the draw, and ENDS_MAX is reachable and binds. With
+   exactly ONE step there is nothing to trade against: the drift IS the bearing,
+   and any cap tighter than the bearing bounds themselves rejects draws the deal
+   is required to make.
+
+   SO THE FLOOR IS THE WIDEST STEP THAT PAIR CAN TAKE, not the shallowest.
+   Written as the shallowest it was a target of measure zero -- the draw is
+   uniform over [ANG_MIN, ANG_MAX] and never lands on the endpoint, so all 500
+   tries were rejected and the closest-draw fallback ran every time. Written
+   against TEETH_MEAN it was wrong twice over: the wheels are dealt, not nominal,
+   and two 19-tooth blanks stand 133 apart rather than 114. The widest pair is
+   two TEETH_MAX blanks, or -- since a two-wheel chain's total is its own tooth
+   target plus slack -- that, whichever is smaller. Every term is the deal's own,
+   so this follows the bounds rather than needing to be re-measured, and no chain
+   shipped today is a two-wheel chain. */
 function endsCapFor(n) {
-  const step = MODULE * TEETH_MEAN * Math.sin(ANG_MIN * Math.PI / 180);
-  return ((n - 1) % 2) ? Math.max(ENDS_MAX, step) : ENDS_MAX;
+  if (n !== 2) return ENDS_MAX;
+  const pair = Math.min(2 * TEETH_MAX, Math.round(TEETH_MEAN * n) + TEETH_SLACK);
+  return Math.max(ENDS_MAX, MODULE * pair / 2 * Math.sin(ANG_MAX * Math.PI / 180));
 }
 /* Declared here rather than beside NOMINAL_CHAIN because it needs the bearing
    range, and reading ANG_MIN/ANG_MAX before this line is a temporal dead zone.
@@ -1138,19 +1170,27 @@ const NOMINAL_SPAN = (function () {
    the bridge reads it too: idlerCount() has to know the scale the long axis is
    asking for before there is a solve to measure. */
 const LINK_SHARE = 0.78;
-/* HOW MUCH CROSS AXIS A BRIDGED COMPOSITION WANTS, in solve units, for a bridge
+/* HOW MUCH CROSS AXIS A BRIDGED COMPOSITION WANTS, in solve units, for bridges
    of n idlers. One wheel for the spine's own diameter, plus one centre distance
-   for every step of the bridge -- n idlers is n+1 steps, spine to chain head.
-   Every term is the nominal wheel, so nothing here needs re-measuring when the
-   module or the deal moves.
+   for every step of every bridge -- n idlers is n+1 steps, and there is one
+   bridge per chain after the first. Every term is the nominal wheel, so nothing
+   here needs re-measuring when the module or the deal moves.
 
-   HONEST ABOUT ITS RANGE: it assumes each bridge hangs off the spine, which is
-   the attachment solve()'s search prefers, and understates the case where one
-   cascades onto a chain that is itself bridged. It does not have to be exact --
-   it only chooses between one idler and two, and the real cross extent is
-   measured off the finished solve by fitStage(), which binds either way. */
+   IT USED TO ASSUME EVERY BRIDGE HUNG OFF THE SPINE, and said so in as many
+   words: it "understates the case where one cascades onto a chain that is itself
+   bridged". Since the chains are laid out longest-first down the cross axis,
+   each hanging off the one above it, that case is now the normal one -- and the
+   understatement is a whole bridge per chain. A third chain was pushed off the
+   bottom of a laptop by it: the fit's own CROSS_BLEED allows the linked train
+   to overhang by a quarter, which costs a serpentine nothing (its top and bottom
+   are ghost runs) and costs a stacked composition a person's badge.
+
+   It still does not have to be exact -- it only chooses between one idler and
+   two, and the real cross extent is measured off the finished solve by
+   fitStage(). It has to be honest about which way it is wrong, and it was
+   wrong in the direction that clips. */
 const STAGE_CROSS = (n) => MODULE * TEETH_MEAN
-  * (1 + (STAGE.people.length > 1 ? n + 1 : 0));
+  * (1 + Math.max(0, STAGE.people.length - 1) * (n + 1));
 (function dealAngles() {
   const rOf = (t) => MODULE * t.teeth / 2;
   const first = Math.random() < 0.5 ? 1 : -1;
@@ -1966,12 +2006,20 @@ class Component extends DCLogic {
      HYSTERESIS, or a drag across the threshold adds and removes a whole wheel on
      every pixel: one nominal wheel of cross axis must be spare to TAKE the second
      idler, and none to keep it. The gap between the two thresholds is a wheel,
-     which is the thing being added -- not a percentage someone picked. */
+     which is the thing being added -- not a percentage someone picked.
+
+     WHICH AXIS IS THE LONG ONE COMES FROM axisRot(), not from max/min. They
+     disagreed between 1.00 and 1.05: axisRot only rotates past h > w * 1.05, so
+     a viewport very slightly taller than it is wide stays in landscape while
+     max/min called its height the long axis -- and this function would then have
+     been measuring the bridge across the axis the stage does not run along.
+     Asking the rotation itself makes the two agree by construction. */
   idlerCount() {
     const vv = window.visualViewport;
     const w = (vv && vv.width) || window.innerWidth;
     const h = (vv && vv.height) || window.innerHeight;
-    const longAvail = Math.max(w, h), crossAvail = Math.min(w, h);
+    const turned = this.axisRot() !== 0;
+    const longAvail = turned ? h : w, crossAvail = turned ? w : h;
     const scale = LINK_SHARE * longAvail / NOMINAL_SPAN;
     const want = STAGE_CROSS(MAX_IDLERS) * scale;
     const spare = this._idlerN === MAX_IDLERS ? 0 : MODULE * TEETH_MEAN * scale;
@@ -2357,10 +2405,24 @@ class Component extends DCLogic {
        skipped rather than spliced out of TRAIN (see MIN_IDLERS), and the chain a
        bridge feeds re-parents onto the last idler still in mesh. */
     const nIdle = Math.max(MIN_IDLERS, Math.min(MAX_IDLERS, this._idlerN || MIN_IDLERS));
+    /* THE ANCHORS ARE ONLY VALID FOR THE BRIDGE LENGTH THEY WERE SOLVED AT.
+       They are cached across resizes on purpose (#55) -- a bridge free to
+       re-choose walks along the spine while a window edge is dragged -- but a
+       bridge one idler shorter reaches one wheel less far, and every chain
+       hanging off it lands somewhere the search never looked: measured, two
+       chains overlapped and a third's idler ran out of swing. The count is the
+       one input the anchor cannot survive a change in, and it changes at most
+       once per drag, because idlerCount() has its own hysteresis. So key the
+       cache on it rather than pretending it is constant. */
+    if (this._bridgeAtN !== nIdle) { this._bridgeAt = null; this._bridgeAtN = nIdle; }
     const parked = new Array(TRAIN.length).fill(false);
     const parentOf = TRAIN.map(t => t.parent);
+    /* Which position an idler holds within its own bridge. Only the ones below
+       MIN_IDLERS are guaranteed to be in mesh at every viewport, and the
+       attachment search filters on that -- see bridgeAnchor. */
+    const idlerSlot = {};
     BRIDGES.forEach(b => {
-      b.idlers.forEach((ix, k) => { if (k >= nIdle) parked[ix] = true; });
+      b.idlers.forEach((ix, k) => { idlerSlot[ix] = k; if (k >= nIdle) parked[ix] = true; });
       if (b.idlers.length) parentOf[b.head] = b.idlers[Math.min(nIdle, b.idlers.length) - 1];
     });
     /* PERPENDICULAR TO THE SPINE, RELATIVE TO IT. The stage rotates the whole
@@ -2397,39 +2459,107 @@ class Component extends DCLogic {
     const isEnd = (i) => TRAIN[i].person === WHO.slug
       && (isLeaf(i) || TRAIN[i].parent == null);
     /* WHERE A BRIDGE HANGS FROM IS SOLVED, NOT PLACED. Candidates are tried from
-       the middle of the spine outward, so a branch balances the run rather than
-       hanging off one end, and then -- cascading -- onto the wheels of chains
-       already on stage, which is how a third chain arrives once the spine has no
-       clear bearing left. A candidate is rejected when any wheel of the bridge
-       would foul a wheel already placed, when the run would pass over one, or
-       when it would cross a bridge already run.
+       the middle of the chain immediately above this one outward, so a branch
+       balances the run it hangs from rather than hanging off one end, and then
+       -- falling back -- onto the chains above that one and finally the spine,
+       which is how a chain still arrives once the one above it has no clear
+       bearing left. A candidate is rejected when any wheel of the bridge OR OF
+       THE CHAIN IT FEEDS would foul a wheel already placed, when the run would
+       pass over one, or when it would cross a bridge already run.
 
        DECIDED ONCE AND CACHED ON THE INSTANCE, exactly as the slug seating above
        is and for the same reason (#55): solve() re-runs at every quantised resize
        step, and a bridge free to re-choose would walk along the spine while a
-       window edge was being dragged. */
+       window edge was being dragged. The one input it cannot survive a change in
+       is the number of idlers, which is why the cache is keyed on that above. */
     const bridgeAnchor = (b) => {
       if (!this._bridgeAt) this._bridgeAt = {};
       if (this._bridgeAt[b.person] !== undefined) return this._bridgeAt[b.person];
-      const mid = (SPINE_LEN - 1) / 2;
-      const rank = (k) => (TRAIN[k].person === WHO.slug ? 0 : 1000)
-        + (TRAIN[k].role === 'link' ? 0 : 500) + Math.abs(k - mid);
-      const cands = g.map(o => o.i).sort((p, q) => rank(p) - rank(q));
+      /* RANKED IN TIERS COMPARED IN ORDER, not added up. The weights here were
+         1000 and 500 laid over |k - mid|, which is a tier ordering only while
+         that last term stays under 500 -- true of every stage shipped today and
+         silently untrue of a longer one, at which point a distant spine wheel
+         would outrank a near one on the wrong chain. Comparing the tiers in
+         sequence leaves nothing to hold:
+
+           1. THE CHAIN IMMEDIATELY ABOVE THIS ONE, which is the LAST chain
+              placed -- CHAIN_ORDER descending. Every bridge runs the same way,
+              so hanging each chain off the one before it is what lays them out
+              longest-first from the top in landscape, and from the leading edge
+              of the cross axis in portrait (Charles, 2026-08-02). Ranked the
+              other way round, every chain hangs off the spine and they all
+              arrive in the SAME row, ordered by nothing. If the chain above has
+              no clear bearing the search falls back through the ones above it,
+              which is a chain out of order but never one on top of another.
+           2. a linked wheel before an idler -- a bridge should hang off a
+              machine, not off another bridge;
+           3. nearest the middle of ITS OWN chain, so a branch balances the run
+              it hangs from rather than hanging off one end. Measured against the
+              spine's middle this was meaningless for a cascade, which is the
+              only case it is ever asked about.
+
+         An idler ranks with the chain it feeds: that is where it sits in the
+         layout, one row nearer the spine than that chain. */
+      const midOf = (k) => {
+        if (TRAIN[k].person == null) return k;          /* an idler is its own middle */
+        const b = BRIDGES.filter(bb => bb.person === TRAIN[k].person)[0];
+        const head = b ? b.head : 0;
+        let n = 0;
+        while (TRAIN[head + n] && TRAIN[head + n].person === TRAIN[k].person) n++;
+        return head + (n - 1) / 2;
+      };
+      const tiers = (k) => [
+        -CHAIN_RANK[TRAIN[k].person != null ? TRAIN[k].person : TRAIN[k].bridge],
+        TRAIN[k].role === 'link' ? 0 : 1,
+        Math.abs(k - midOf(k))
+      ];
+      /* AN IDLER THAT CAN BE PARKED IS NOT A CANDIDATE. nIdle drops to one when
+         the cross axis tightens, and the anchor is cached across resizes (#55) --
+         so an anchor on a second idler names a wheel that is no longer placed
+         after the next flip, its dependent chain finds gi[host] === -1, and it
+         resolves to (0,0) on top of the spine. That is exactly the overlap the
+         bridge exists to remove, arriving by the back door. Only the idlers
+         MIN_IDLERS guarantees are always in mesh may be anchored on. */
+      const cands = g.map(o => o.i)
+        .filter(k => idlerSlot[k] === undefined || idlerSlot[k] < MIN_IDLERS)
+        .sort((p, q) => {
+          const u = tiers(p), v = tiers(q);
+          for (let k = 0; k < u.length; k++) if (u[k] !== v[k]) return u[k] - v[k];
+          return p - q;
+        });
       const a = bridgeBase * Math.PI / 180;
       const tight = this._tight || 1;
       /* No idlers means an unbridged chain: its one step carries the gap the
          idlers would have made, so `bridge: false` changes the drive and not the
          position. */
-      const wheels = b.idlers.slice(0, nIdle).concat([b.head]);
+      const bridgeWheels = b.idlers.slice(0, nIdle);
+      /* THE WHOLE CHAIN IS TRIED, NOT JUST THE BRIDGE. The run used to be checked
+         as far as the chain head and no further, so an anchor could be accepted
+         whose chain then walked straight through another one -- and the only
+         thing between that and two overlapping machines was the per-wheel nudge,
+         which gives up after a bounded swing and plants the wheel anyway. Walking
+         the chain here, at the bearings it was dealt and by the rule the nudge
+         uses at step zero, is what makes "chains do not overlap" a property of
+         the anchor rather than a hope about the nudge. */
+      const chain = [];
+      for (let k = b.head; k < TRAIN.length && TRAIN[k].person === b.person; k++) chain.push(k);
+      const wheels = bridgeWheels.concat(chain);
       const gap = b.idlers.length ? 0 : nIdle * MODULE * TEETH_MEAN;
-      let choice = cands.length ? cands[0] : null;
+      let choice = cands.length ? cands[0] : null, found = false;
+      /* Why each candidate was rejected, so the warning below can say. */
+      const why = { foul: 0, over: 0, cross: 0 };
       for (let c = 0; c < cands.length; c++) {
         const from = g[gi[cands[c]]];
         let px = from.x, py = from.y, pr = from.r, clear = true;
         const pts = [];
-        wheels.forEach(k => {
-          const rr = MODULE * TRAIN[k].teeth / 2, d = pr + rr + gap;
-          px += d * Math.cos(a); py += d * Math.sin(a);
+        wheels.forEach((k, wi) => {
+          const rr = MODULE * TRAIN[k].teeth / 2;
+          /* The bridge runs on the bridge bearing, wheel by wheel, as far as the
+             chain head; past it the chain runs on the bearings it was dealt. */
+          const onBridge = wi <= bridgeWheels.length;
+          const ang = onBridge ? a : (TRAIN[k].angle + (this._axisRot || 0)) * Math.PI / 180;
+          const d = pr + rr + (onBridge ? gap : 0);
+          px += d * Math.cos(ang); py += d * Math.sin(ang);
           pts.push({ x: px, y: py, ro: rr + MODULE * TOOTH_ADD });
           pr = rr;
         });
@@ -2437,11 +2567,33 @@ class Component extends DCLogic {
           if (k === 0 && o.i === cands[c] && !gap) return;   /* the wheel it meshes */
           if (Math.hypot(p.x - o.x, p.y - o.y) < o.ro + p.ro + CLEARANCE * tight) clear = false;
         }));
-        const s1 = { x: from.x, y: from.y }, s2 = pts[pts.length - 1];
-        if (clear) clear = !g.some(o => o.i !== cands[c]
+        if (!clear) { why.foul++; continue; }
+        /* The bridge RUN is anchor to chain head. Measured to the far end of the
+           chain instead it would be a line straight through the chain's own
+           wheels, and every candidate would read as passing over something. */
+        const s1 = { x: from.x, y: from.y }, s2 = pts[bridgeWheels.length];
+        clear = !g.some(o => o.i !== cands[c]
           && segDist({ x: o.x, y: o.y }, s1, s2) < o.ro);
-        if (clear) clear = !bridgeRuns.some(st => segCross(s1, s2, st[0], st[1]));
-        if (clear) { choice = cands[c]; break; }
+        if (!clear) { why.over++; continue; }
+        clear = !bridgeRuns.some(st => segCross(s1, s2, st[0], st[1]));
+        if (!clear) { why.cross++; continue; }
+        choice = cands[c]; found = true; break;
+      }
+      if (!found) {
+        /* LOUD, BECAUSE THE FALLBACK IS A COMPROMISE. Every candidate was
+           rejected, so the anchor kept here is one that fouls something: the
+           per-wheel nudge gets one bounded pass at it and may still plant a
+           wheel in a clash. The brief for this bridge said to STOP AND REPORT
+           rather than loosen the non-crossing rule -- and this path loosens it,
+           so at the very least it may not do so in silence. Whether it should
+           refuse to place the chain at all instead is a composition decision,
+           and not one this function gets to make on its own. */
+        console.warn('wozi: no clear bridge anchor for chain "' + b.person
+          + '" — all ' + cands.length + ' candidates rejected (' + why.foul
+          + ' fouled a wheel, ' + why.over + ' passed over one, ' + why.cross
+          + ' crossed another bridge); falling back to '
+          + (choice == null ? 'no anchor at all' : 'wheel ' + choice)
+          + ', which may clash');
       }
       this._bridgeAt[b.person] = choice;
       return choice;
@@ -2523,7 +2675,21 @@ class Component extends DCLogic {
           }
           if (!placed) d *= 1.12;
         }
-        if (!placed) { const a = base * Math.PI / 180; x = prev.x + d * Math.cos(a); y = prev.y + d * Math.sin(a); }
+        if (!placed) {
+          const a = base * Math.PI / 180;
+          x = prev.x + d * Math.cos(a); y = prev.y + d * Math.sin(a);
+          /* THE ONE WAY A SOLVED STAGE CAN OVERLAP. Every other position above
+             is one the clash test accepted; this one is planted because the
+             swing ran out, and it may sit on top of something. It used to be
+             silent, which made the overlap it causes look like a layout choice.
+             The attachment search now walks the whole chain before accepting an
+             anchor, so a bridged chain should never reach here -- if it does,
+             that simulation and this loop have drifted apart. */
+          console.warn('wozi: wheel ' + i + ' ('
+            + (TRAIN[i].person || 'idler for ' + TRAIN[i].bridge)
+            + ') found no clear bearing within ' + maxStep
+            + '° of ' + base.toFixed(1) + '°; planted anyway, and may clash');
+        }
         if (linked) {
           dir = prev.dir;
           phase = 0;
@@ -2545,6 +2711,16 @@ class Component extends DCLogic {
           if (u < 0) u += 1;
           phase = ang + 180 - (0.5 - u) * pThis;
         }
+      } else if (host != null) {
+        /* A WHEEL WHOSE HOST IS NOT ON STAGE keeps x = y = 0 and is drawn at the
+           origin, on top of the spine's first wheel -- the exact overlap this
+           bridge was built to remove, arriving from the other direction. The
+           anchor search can no longer name a parkable idler, so nothing should
+           reach here; if something does, it is a real defect and not a layout
+           quirk, and it says so. */
+        console.warn('wozi: wheel ' + i + ' is parented to wheel ' + host
+          + ', which is not on stage — it would be drawn at the origin, '
+          + 'on top of the spine');
       }
       /* Record the finished run, so the next bridge can be rejected for crossing
          it. Kept separate from `strands`, which is the dormant chain-and-belt
@@ -2560,6 +2736,30 @@ class Component extends DCLogic {
       g.push({ i: i, teeth: t.teeth, color: t.color, cv: t.cv || null, crot: t.crot || 0, slug: slugFor[i] || null, person: t.person, role: t.role, belt: t.link || null, kind: t.kind || 'holes', arms: t.arms || 5, prof: prof, chainFrom: chainFrom,
         r: r, ro: ro, x: x, y: y, dir: dir, phase: phase });
     });
+    /* NO TWO CHAINS OVERLAP -- said out loud rather than argued for (Charles,
+       2026-08-02). Every position above is either one a clearance test accepted
+       or one the warning beside it announced, so this cannot fire without one of
+       those having fired first. That is an argument, and arguments rot; this is
+       the check that notices when it has. Cheap enough to leave in: solve() is
+       cached per quantised layout, and a stage is a couple of dozen wheels.
+       WHEELS WITHIN A CHAIN ARE NOT COMPARED. They mesh, so their tip circles
+       interpenetrate by two addenda by construction -- and the wheel a bridge
+       hangs off meshes the first idler across a chain boundary, so meshing pairs
+       are excluded by their parentage rather than by whose chain they are in. */
+    const chainOf = (k) => k.person != null ? k.person : TRAIN[k.i].bridge;
+    const foul = [];
+    for (let p = 0; p < g.length; p++) {
+      for (let q = p + 1; q < g.length; q++) {
+        if (chainOf(g[p]) === chainOf(g[q])) continue;
+        if (parentOf[g[p].i] === g[q].i || parentOf[g[q].i] === g[p].i) continue;
+        const d = Math.hypot(g[p].x - g[q].x, g[p].y - g[q].y);
+        if (d < g[p].ro + g[q].ro) {
+          foul.push(chainOf(g[p]) + ' wheel ' + g[p].i + ' × ' + chainOf(g[q])
+            + ' wheel ' + g[q].i + ' overlap by ' + (g[p].ro + g[q].ro - d).toFixed(1));
+        }
+      }
+    }
+    if (foul.length) console.warn('wozi: chains overlap — ' + foul.join('; '));
     let minX = Math.min.apply(null, g.map(k => k.x - k.ro)) - 6;
     let minY = Math.min.apply(null, g.map(k => k.y - k.ro)) - 6;
     let maxX = Math.max.apply(null, g.map(k => k.x + k.ro)) + 6;
@@ -2732,6 +2932,21 @@ class Component extends DCLogic {
   ringPath(rad) {
     return 'M' + rad + ',0 A' + rad + ',' + rad + ' 0 1 0 ' + (-rad) + ',0 A' + rad + ',' + rad + ' 0 1 0 ' + rad + ',0 Z';
   }
+
+  /* HOW FAR BACK A GHOST SITS, in one place because two things need it and they
+     are not in the same layer. The escape-run outriggers get it as a single
+     opacity on the whole layer they live in; a bridge idler CANNOT live in that
+     layer -- it is parallax-scaled 0.94, and a wheel that has to mesh with the
+     train must be drawn at the train's own scale -- so it takes the same number
+     per wheel instead.
+
+     It is not a second opinion about how dim a ghost should be: it is the same
+     number, so an idler and an outrigger composite to the same tone and read as
+     the same class of object. dimK below was measured UNDERNEATH this factor,
+     and an idler drawn without it came out around 5.5:1 against the pale page --
+     darker and higher in contrast than any of the linked wheels the machine is
+     actually about, which is the opposite of what a ghost is for. */
+  ghostOpacity() { return this.state.theme === 'dark' ? 0.17 : 0.46; }
 
   /* Cheap stand-in for the background wheels: body, web and hub, no masks or turning
      marks — they are blurred and dim, so the detail would be wasted frames. */
@@ -3942,7 +4157,7 @@ class Component extends DCLogic {
          out to both edges rather than trailing off a corner. Still well behind the
          train — they imply the machine continues, they do not compete with it. Dark
          mode is unchanged; the same greys read correctly against #1E2226. */
-      transform: this.props.parallax ? 'scale(0.94)' : null, transformOrigin: 'center', opacity: this.state.theme === 'dark' ? 0.17 : 0.46, zIndex: 0, pointerEvents: 'none' } },
+      transform: this.props.parallax ? 'scale(0.94)' : null, transformOrigin: 'center', opacity: this.ghostOpacity(), zIndex: 0, pointerEvents: 'none' } },
       /* offset by the layer's own origin, so widening the box moves nothing */
       _gl.map(g => h('div', { key: g.i, style: { position: 'absolute', left: (g.cx * S - _gx0) + 'px', top: (g.cy * S - _gy0) + 'px', width: 0, height: 0 } },
         /* Guard on `el`, not just on the array: React calls a detached ref with
@@ -3975,8 +4190,13 @@ class Component extends DCLogic {
          belongs under the object and should show *through* the gaps between teeth,
          which is also what makes the teeth read as teeth rather than as a hole in a
          halo. Invisible in dark mode either way, which is why it survived this long. */
+      /* NOT UNDER THE IDLERS. A bridge idler is background machinery drawn in the
+         ghost palette, and the escape runs -- the other ghosts on the page -- cast
+         nothing either. A full-strength shadow under a wheel drawn at ghost
+         opacity reads as heavier than the wheel casting it, which puts the eye on
+         the drive rather than on the services it connects. */
       h('div', { key: 'shadows', style: { position: 'absolute', left: 0, top: 0, width: (solved.w * S) + 'px', height: (solved.h * S) + 'px', zIndex: 0, pointerEvents: 'none' } },
-        solved.gears.map(g => h('div', { key: g.i, style: {
+        solved.gears.filter(g => g.role !== 'idler').map(g => h('div', { key: g.i, style: {
           position: 'absolute', left: ((g.cx - g.ro * 1.12) * S) + 'px', top: ((g.cy - g.ro * 1.12 + 5) * S) + 'px',
           width: (g.ro * 2.24 * S) + 'px', height: (g.ro * 2.24 * S) + 'px',
           /* Softer in daylight. A light environment throws a weaker, more diffuse
@@ -3998,7 +4218,13 @@ class Component extends DCLogic {
            layout size was not its display size (#37). Now they are the same. */
         h('div', { ref: (el) => { if (this._spinEls) this._spinEls[g.i] = el; },
           style: {
-            transform: 'rotate(' + g.phase.toFixed(2) + 'deg)', willChange: 'transform'
+            transform: 'rotate(' + g.phase.toFixed(2) + 'deg)', willChange: 'transform',
+            /* AND AT THE GHOST LAYER'S OWN OPACITY, per wheel. It cannot be in
+               that layer -- the layer is parallax-scaled and this wheel has to
+               mesh -- so the layer's dimming has to travel with it instead. Drawn
+               without it, ghostSvg's palette alone left an idler the darkest,
+               highest-contrast object on the page: see ghostOpacity(). */
+            opacity: g.role === 'idler' ? this.ghostOpacity() : null
           } },
           /* A BRIDGE IDLER IS DRAWN AS A GHOST. It is structural -- solved with
              the train, because it is what decides where a chain sits -- but it
