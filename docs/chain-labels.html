@@ -1,0 +1,521 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Whose chain is whose — subtle options</title>
+<style>
+  body { margin: 0; padding: 28px 32px 64px; background: #EDEEEA; color: #1E2A2E;
+         font: 15px/1.55 'Manrope', system-ui, -apple-system, sans-serif; }
+  h1 { font-size: 20px; margin: 0 0 6px; letter-spacing: -.01em; }
+  .lede { max-width: 62ch; color: #4A5559; margin: 0 0 30px; }
+  .opt { background: #F4F5F2; border: 1px solid #DCDED8; border-radius: 12px;
+         padding: 18px 20px 10px; margin: 0 0 22px; }
+  .opt h2 { font-size: 15px; margin: 0 0 2px; }
+  .opt p { margin: 0 0 12px; color: #4A5559; max-width: 74ch; font-size: 13.5px; }
+  .opt .cost { color: #7A5B00; }
+  .opt .risk { color: #8A3B32; }
+  svg { display: block; width: 100%; height: auto; }
+  .n { font: 600 11px/1 'Manrope', system-ui, sans-serif; fill: #6B7579; letter-spacing: .04em; }
+</style>
+
+<h1>Whose chain is whose — subtle options</h1>
+<p class="lede">Two chains on one stage. Charles has seven wheels, Harper has one.
+Every option below is drawn at honest proportions — module 7, teeth 13–19, the
+same engraving band the page uses. None of them adds text furniture to the stage
+unless it says so.</p>
+
+<script>
+const MODULE = 7, TOOTH_ADD = 1, S = 1.15;  /* S: mock render scale — a five-wheel
+   chain must fit the 980-wide board, so 5 x 2r must stay under ~760px. */
+
+/* Involute-ish tooth outline, close enough to judge a treatment against.
+   Same construction the page uses: pitch radius = MODULE * teeth / 2. */
+function gear(cx, cy, teeth, fill, line, opts) {
+  opts = opts || {};
+  const r = MODULE * teeth / 2 * S, ro = r + MODULE * TOOTH_ADD * S;
+  const ri = r - MODULE * 1.25 * S;
+  let d = '';
+  for (let i = 0; i < teeth; i++) {
+    const a0 = (i / teeth) * Math.PI * 2, step = Math.PI * 2 / teeth;
+    const p = (rad, t) => [cx + rad * Math.cos(a0 + t * step), cy + rad * Math.sin(a0 + t * step)];
+    const A = p(ri, 0.00), B = p(ro, 0.16), C = p(ro, 0.36), D = p(ri, 0.52), E = p(ri, 1.00);
+    d += (i ? 'L' : 'M') + A + 'L' + B + 'L' + C + 'L' + D + 'L' + E;
+  }
+  d += 'Z';
+  const g = [`<path d="${d}" fill="${fill}" stroke="${line}" stroke-width="1.1"
+      stroke-linejoin="round"/>`];
+  /* engraving band: an annulus inside the tooth roots, as on the page */
+  const bandOut = r - MODULE * 0.55 * S, bandIn = bandOut - MODULE * 1.6 * S;
+  g.push(`<circle cx="${cx}" cy="${cy}" r="${bandOut}" fill="none" stroke="${line}" stroke-opacity=".45"/>`);
+  g.push(`<circle cx="${cx}" cy="${cy}" r="${bandIn}" fill="none" stroke="${line}" stroke-opacity=".45"/>`);
+  if (opts.band) {
+    const rr = (bandOut + bandIn) / 2, id = 'p' + Math.round(cx) + '_' + Math.round(cy);
+    g.push(`<defs><path id="${id}" fill="none" d="M ${cx - rr} ${cy} a ${rr} ${rr} 0 1 1 ${rr * 2} 0"/></defs>`);
+    g.push(`<text font-size="${Math.max(6, rr * 0.26)}" fill="${line}" fill-opacity=".85"
+      font-family="ui-monospace, Menlo, monospace" letter-spacing=".5">
+      <textPath href="#${id}" startOffset="50%" text-anchor="middle">${opts.band}</textPath></text>`);
+  }
+  /* web: the centre family — holes, spokes, or a hex core */
+  const web = opts.web || 'holes', rw = bandIn * 0.92;
+  if (web === 'holes') {
+    for (let k = 0; k < 5; k++) {
+      const a = k / 5 * Math.PI * 2 - Math.PI / 2;
+      g.push(`<circle cx="${cx + rw * 0.55 * Math.cos(a)}" cy="${cy + rw * 0.55 * Math.sin(a)}"
+        r="${rw * 0.26}" fill="#EDEEEA" stroke="${line}" stroke-opacity=".5"/>`);
+    }
+  } else if (web === 'spokes') {
+    for (let k = 0; k < 6; k++) {
+      const a = k / 6 * Math.PI * 2;
+      g.push(`<line x1="${cx + rw * 0.28 * Math.cos(a)}" y1="${cy + rw * 0.28 * Math.sin(a)}"
+        x2="${cx + rw * 0.92 * Math.cos(a)}" y2="${cy + rw * 0.92 * Math.sin(a)}"
+        stroke="${line}" stroke-opacity=".5" stroke-width="${rw * 0.16}" stroke-linecap="round"/>`);
+    }
+  } else if (web === 'hex') {
+    for (let ring = 1; ring <= 2; ring++) {
+      const n = ring * 6, rad = rw * (ring / 2.6);
+      for (let k = 0; k < n; k++) {
+        const a = k / n * Math.PI * 2 + ring * 0.3;
+        const hx = cx + rad * Math.cos(a), hy = cy + rad * Math.sin(a), hr = rw * 0.15;
+        let hd = '';
+        for (let v = 0; v < 6; v++) {
+          const va = v / 6 * Math.PI * 2;
+          hd += (v ? 'L' : 'M') + (hx + hr * Math.cos(va)) + ',' + (hy + hr * Math.sin(va));
+        }
+        g.push(`<path d="${hd}Z" fill="none" stroke="${line}" stroke-opacity=".42"/>`);
+      }
+    }
+  }
+  g.push(`<circle cx="${cx}" cy="${cy}" r="${rw * 0.26}" fill="#EDEEEA" stroke="${line}" stroke-opacity=".55"/>`);
+  if (opts.mark) {
+    g.push(`<text x="${cx}" y="${cy + rw * 0.09}" text-anchor="middle"
+      font-size="${rw * 0.30}" font-family="ui-monospace, Menlo, monospace"
+      fill="${line}" fill-opacity=".8">${opts.mark}</text>`);
+  }
+  return g.join('');
+}
+
+/* A ghost wheel — the background machinery palette. */
+function ghost(cx, cy, teeth) { return gear(cx, cy, teeth, '#C6CAC6', '#AAAFAB', { web: 'holes' }); }
+
+/* Where each wheel of a chain sits — meshing by construction, gentle serpentine. */
+function centres(x0, y0, spec) {
+  let x = x0, y = y0, prev = null; const pts = [];
+  spec.forEach((w, i) => {
+    const r = MODULE * w.teeth / 2 * S;
+    if (prev) {
+      const ang = (i % 2 ? -1 : 1) * 17 * Math.PI / 180;
+      const d = prev.r + r;
+      x = prev.x + d * Math.cos(ang); y = prev.y + d * Math.sin(ang);
+    }
+    pts.push({ x, y, r });
+    prev = { x, y, r };
+  });
+  return pts;
+}
+
+/* THE DATUM AS CHARLES SPECIFIED IT.
+     - the line spans the ENTIRE BREADTH of the assembly it references, ghosts
+       included, and runs off the page on the trailing side
+     - a station tick sits at the centre of each CLICKABLE gear only; the ghosts
+       are machinery, not stations, so they are spanned but not indexed
+     - the plate sits alongside the LAST LEADING GHOST, i.e. immediately before
+       the first real gear -- so it reads as the placard at the head of the run
+   Everything is derived from the solved centres; nothing here is spaced by hand. */
+function datumRun(pts, spec, plate, boardW, axisDeg) {
+  const first = pts[0], last = pts[pts.length - 1];
+  const dx = last.x - first.x, dy = last.y - first.y, L = Math.hypot(dx, dy);
+  const fb = (axisDeg == null ? 0 : axisDeg) * Math.PI / 180;
+  const ux = L < 1e-6 ? Math.cos(fb) : dx / L;
+  const uy = L < 1e-6 ? Math.sin(fb) : dy / L;
+  const nx = -uy, ny = ux;
+  /* Offset below the axis by the biggest wheel, so the line clears every tooth. */
+  const off = Math.max.apply(null, pts.map(q => q.r)) * 1.28;
+  const ax = first.x + nx * off, ay = first.y + ny * off;
+  const proj = (q) => (q.x + nx * off - ax) * ux + (q.y + ny * off - ay) * uy;
+  /* Run past both ends of the board: the assembly continues off the page and the
+     datum continues with it. */
+  const t0 = -ax / (ux || 1e-6), t1 = (boardW + 60 - ax) / (ux || 1e-6);
+  const x1 = ax + ux * Math.min(t0, -40), y1 = ay + uy * Math.min(t0, -40);
+  const x2 = ax + ux * Math.max(t1, boardW), y2 = ay + uy * Math.max(t1, boardW);
+  const out = [`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"
+    stroke="#B4BAB4" stroke-width="1.3"/>`];
+  const linked = [];
+  spec.forEach((w, i) => { if (!w.ghost) linked.push(i); });
+  linked.forEach((i, k) => {
+    const d = proj(pts[i]);
+    const px = ax + ux * d, py = ay + uy * d;
+    out.push(`<line x1="${px}" y1="${py}" x2="${px + nx * 9}" y2="${py + ny * 9}"
+      stroke="#B4BAB4" stroke-width="1.4"/>`);
+    out.push(`<text x="${px + nx * 19}" y="${py + ny * 19}" text-anchor="middle"
+      font-family="ui-monospace, Menlo, monospace" font-size="9"
+      fill="#B4BAB4">${String(k + 1).padStart(2, '0')}</text>`);
+    if (k < linked.length - 1) {
+      const dn = proj(pts[linked[k + 1]]);
+      for (let m = 1; m < 4; m++) {
+        const dm = d + (dn - d) * (m / 4);
+        const mx = ax + ux * dm, my = ay + uy * dm;
+        out.push(`<line x1="${mx}" y1="${my}" x2="${mx + nx * 3.5}" y2="${my + ny * 3.5}"
+          stroke="#B4BAB4" stroke-width=".8"/>`);
+      }
+    }
+  });
+  /* The plate rides at the LAST LEADING GHOST -- the one immediately before the
+     first clickable gear. With no leading ghost it falls back to the head of the
+     run rather than vanishing. */
+  const firstLinked = linked[0];
+  const anchor = firstLinked > 0 ? pts[firstLinked - 1] : pts[0];
+  const dp = proj(anchor);
+  const w = plate.length * 7.4 + 14;
+  const px = ax + ux * dp - ux * w / 2, py = ay + uy * dp - uy * w / 2;
+  out.push(`<g transform="translate(${px},${py}) rotate(${Math.atan2(uy, ux) * 180 / Math.PI})">
+    <rect x="0" y="-11" rx="2" width="${w}" height="22" fill="#DDE0DB" stroke="#B4BAB4"/>
+    <text x="${w / 2}" y="4" text-anchor="middle" font-family="ui-monospace, Menlo, monospace"
+      font-size="11.5" letter-spacing="1" fill="#6E7671">${plate}</text></g>`);
+  return out.join('');
+}
+
+function chain(x0, y0, spec) {
+  const pts = centres(x0, y0, spec);
+  return spec.map((w, i) => w.ghost ? ghost(pts[i].x, pts[i].y, w.teeth)
+    : gear(pts[i].x, pts[i].y, w.teeth, w.fill, w.line, w)).join('');
+}
+
+/* A DATUM MARK: the reference a fitter would follow along a real machine.
+   Drawn BEHIND the wheels, in the same muted family as the background
+   machinery, extending past both ends the way a scribed line runs past the
+   parts it references.
+     kind 'scribe' — a thin scribed line with tick marks
+     kind 'track'  — a ground/milled band the chain sits on
+     plate         — a stamped designation plate at the leading end   */
+function datum(pts, kind, plate, axisDeg) {
+  const a = pts[0], z = pts[pts.length - 1];
+  const dx = z.x - a.x, dy = z.y - a.y, L = Math.hypot(dx, dy);
+  /* A ONE-WHEEL CHAIN HAS NO AXIS OF ITS OWN — first and last are the same wheel,
+     so this vector is zero-length and everything downstream collapses to a point.
+     That is the #67 failure again in another guise (there it was atan2(0,0)
+     returning 0, i.e. horizontal in every orientation). The datum must therefore
+     take the STAGE axis, exactly as the escape runs now do — which means the
+     shipped version has to SHARE the chain-axis computation rather than derive
+     its own second copy of it. */
+  const fallback = (axisDeg == null ? 0 : axisDeg) * Math.PI / 180;
+  const ux = L < 1e-6 ? Math.cos(fallback) : dx / L;
+  const uy = L < 1e-6 ? Math.sin(fallback) : dy / L;
+  const nx = -uy, ny = ux;
+  const off = a.r * 1.32;                       /* below the chain's axis */
+  const x1 = a.x - ux * 120 + nx * off, y1 = a.y - uy * 120 + ny * off;
+  const x2 = z.x + ux * 150 + nx * off, y2 = z.y + uy * 150 + ny * off;
+  const out = [];
+  if (kind === 'track') {
+    const w = a.r * 0.46;
+    out.push(`<path d="M${x1 - nx * w},${y1 - ny * w} L${x2 - nx * w},${y2 - ny * w}
+      L${x2 + nx * w},${y2 + ny * w} L${x1 + nx * w},${y1 + ny * w}Z"
+      fill="#D9DCD7" stroke="none"/>`);
+    for (let t = 0; t <= 1.0001; t += 1 / 46) {
+      const px = x1 + (x2 - x1) * t, py = y1 + (y2 - y1) * t;
+      out.push(`<line x1="${px - nx * w}" y1="${py - ny * w}" x2="${px + nx * w}" y2="${py + ny * w}"
+        stroke="#CBCFC9" stroke-width=".9"/>`);
+    }
+  } else {
+    out.push(`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"
+      stroke="#B4BAB4" stroke-width="1.3"/>`);
+    if (kind === 'stations') {
+      /* MAJOR TICKS ARE THE WHEEL CENTRES. Each wheel is projected onto the datum
+         and marked, so the line is a station index -- the thing a machine bed
+         actually carries -- rather than an arbitrary ruler. Derived from the
+         solve, so it cannot drift out of step with the wheels it references.
+         Minor ticks subdivide the gap between stations, which is what gives the
+         line its scale without inventing a spacing. */
+      const span = Math.hypot(x2 - x1, y2 - y1);
+      const at = (px, py) => ((px - x1) * ux + (py - y1) * uy) / span;
+      const ts = pts.map(q => at(q.x + nx * off, q.y + ny * off));
+      ts.forEach((t, k) => {
+        const px = x1 + (x2 - x1) * t, py = y1 + (y2 - y1) * t;
+        out.push(`<line x1="${px}" y1="${py}" x2="${px + nx * 9}" y2="${py + ny * 9}"
+          stroke="#B4BAB4" stroke-width="1.4"/>`);
+        out.push(`<text x="${px + nx * 19}" y="${py + ny * 19}" text-anchor="middle"
+          font-family="ui-monospace, Menlo, monospace" font-size="9"
+          fill="#B4BAB4">${String(k + 1).padStart(2, '0')}</text>`);
+        if (k < ts.length - 1) {
+          for (let m = 1; m < 4; m++) {
+            const tm = t + (ts[k + 1] - t) * (m / 4);
+            const mx = x1 + (x2 - x1) * tm, my = y1 + (y2 - y1) * tm;
+            out.push(`<line x1="${mx}" y1="${my}" x2="${mx + nx * 3.5}" y2="${my + ny * 3.5}"
+              stroke="#B4BAB4" stroke-width=".8"/>`);
+          }
+        }
+      });
+    } else {
+      const n = pts.length * 4 + 8;
+      for (let k = 0; k <= n; k++) {
+        const t = k / n, px = x1 + (x2 - x1) * t, py = y1 + (y2 - y1) * t;
+        const big = k % 4 === 0, len = big ? 7 : 3.5;
+        out.push(`<line x1="${px}" y1="${py}" x2="${px + nx * len}" y2="${py + ny * len}"
+          stroke="#B4BAB4" stroke-width="${big ? 1.2 : .8}"/>`);
+      }
+    }
+  }
+  if (plate) {
+    const px = x1 + ux * 8, py = y1 + uy * 8;
+    out.push(`<g transform="translate(${px},${py}) rotate(${Math.atan2(uy, ux) * 180 / Math.PI})">
+      <rect x="0" y="-11" rx="2" width="${plate.length * 7.4 + 14}" height="22"
+        fill="#DDE0DB" stroke="#B4BAB4"/>
+      <text x="${(plate.length * 7.4 + 14) / 2}" y="4" text-anchor="middle"
+        font-family="ui-monospace, Menlo, monospace" font-size="11.5"
+        letter-spacing="1" fill="#6E7671">${plate}</text></g>`);
+  }
+  return out.join('');
+}
+function board(inner, h) {
+  return `<svg viewBox="0 0 980 ${h}" role="img">${inner}</svg>`;
+}
+function write(html) { document.write(html); }
+</script>
+
+<div class="opt">
+  <h2>A — Per-person colour family <span class="cost">(this is issue #68)</span></h2>
+  <p>Each chain draws from its own region of the hue wheel. No new element type,
+  nothing added to the stage, and it stays entirely inside the machine's existing
+  language. Distinguishes chains instantly; says <em>who</em> only via the
+  engraved handles.</p>
+  <script>(function(){
+    const cool = [{teeth:17,fill:'#8CB8F2',line:'#3E6CA8'},{teeth:14,fill:'#6ECFA6',line:'#2E7D5C'},
+                  {teeth:19,fill:'#4A90E2',line:'#2A5E9E'},{teeth:15,fill:'#54BFB6',line:'#2A7972'},
+                  {teeth:18,fill:'#8CB8F2',line:'#3E6CA8'}];
+    const warm = [{teeth:16,fill:'#F2C14E',line:'#9A7415'}];
+    write(board(
+      `<text class="n" x="8" y="26">CHARLES — cool family</text>` +
+      chain(120, 150, cool) +
+      `<text class="n" x="8" y="256">HARPER — warm family</text>` +
+      chain(120, 360, warm), 500));
+})();</script>
+</div>
+
+<div class="opt">
+  <h2>B — A different centre family per person</h2>
+  <p>The page already deals five centre families: holes, spokes, hex core,
+  planetary, ravigneaux. Bias each person toward one. Extremely idiomatic — it
+  looks like two batches of parts from different machines — but it competes with
+  the planetary showpiece, which is dealt once per load on merit.</p>
+  <script>(function(){
+    const a = [{teeth:17,fill:'#8CB8F2',line:'#3E6CA8',web:'holes'},{teeth:14,fill:'#6ECFA6',line:'#2E7D5C',web:'holes'},
+               {teeth:19,fill:'#4A90E2',line:'#2A5E9E',web:'holes'},{teeth:15,fill:'#54BFB6',line:'#2A7972',web:'holes'},
+               {teeth:18,fill:'#9B8CE0',line:'#5C4FA8',web:'holes'}];
+    const b = [{teeth:16,fill:'#F2C14E',line:'#9A7415',web:'spokes'}];
+    write(board(
+      `<text class="n" x="8" y="26">CHARLES — drilled webs</text>` +
+      chain(120, 150, a) +
+      `<text class="n" x="8" y="256">HARPER — spoked webs</text>` +
+      chain(120, 360, b), 500));
+})();</script>
+</div>
+
+<div class="opt">
+  <h2>C — An owner's stamp in the engraving band</h2>
+  <p>The band already carries a build marking on some wheels
+  (<code>M7 Z18 · 17-4PH DMLS</code>). Add the owner as part of that stamp, so it
+  reads as a manufacturing mark rather than a caption. Subtlest of the lot, and
+  legible only close up — which may be exactly right, or may be too quiet.</p>
+  <script>(function(){
+    const a = [{teeth:17,fill:'#8CB8F2',line:'#3E6CA8',band:'M7 Z17 · CM'},{teeth:14,fill:'#6ECFA6',line:'#2E7D5C',band:'M7 Z14 · CM'},
+               {teeth:19,fill:'#4A90E2',line:'#2A5E9E',band:'M7 Z19 · CM'},{teeth:15,fill:'#54BFB6',line:'#2A7972',band:'M7 Z15 · CM'}];
+    const b = [{teeth:16,fill:'#F2C14E',line:'#9A7415',band:'M7 Z16 · HM'}];
+    write(board(
+      `<text class="n" x="8" y="26">CHARLES — stamped CM</text>` +
+      chain(120, 150, a) +
+      `<text class="n" x="8" y="256">HARPER — stamped HM</text>` +
+      chain(120, 360, b), 500));
+})();</script>
+</div>
+
+<div class="opt">
+  <h2>D — A monogram on the hub cap of the lead wheel only</h2>
+  <p>One wheel per chain carries an initial where a service icon would sit. Reads
+  as the drive gear being marked. Cheap and unambiguous — but it consumes a hub
+  cap, and every hub cap currently carries a service icon that is also a link.</p>
+  <script>(function(){
+    const a = [{teeth:17,fill:'#8CB8F2',line:'#3E6CA8',mark:'C'},{teeth:14,fill:'#6ECFA6',line:'#2E7D5C'},
+               {teeth:19,fill:'#4A90E2',line:'#2A5E9E'},{teeth:15,fill:'#54BFB6',line:'#2A7972'}];
+    const b = [{teeth:16,fill:'#F2C14E',line:'#9A7415',mark:'H'}];
+    write(board(
+      `<text class="n" x="8" y="26">CHARLES</text>` + chain(120, 150, a) +
+      `<text class="n" x="8" y="256">HARPER</text>` + chain(120, 360, b), 500));
+})();</script>
+</div>
+
+<div class="opt">
+  <h2>E — Nothing at all <span class="cost">(the current design)</span></h2>
+  <p>The bands already carry each person's handles — <code>/csmarshall</code>,
+  <code>charles@wozi.com</code>, <code>harper@wozi.com</code>. Identity is present
+  for anyone who looks, and the machine is not captioned. Shown here so the others
+  have something honest to be compared against.</p>
+  <script>(function(){
+    const a = [{teeth:17,fill:'#8CB8F2',line:'#3E6CA8',band:'/csmarshall'},{teeth:14,fill:'#6ECFA6',line:'#2E7D5C',band:'charles@wozi.com'},
+               {teeth:19,fill:'#4A90E2',line:'#2A5E9E',band:'/cs_marshall'},{teeth:15,fill:'#54BFB6',line:'#2A7972',band:'charles.wozi.com'}];
+    const b = [{teeth:16,fill:'#F2C14E',line:'#9A7415',band:'harper@wozi.com'}];
+    write(board(chain(120, 150, a) + chain(120, 360, b), 500));
+})();</script>
+</div>
+
+<div class="opt">
+  <h2>F — Colour family plus the owner's stamp <span class="cost">(A + C)</span></h2>
+  <p>Distinguishable at a glance from the palette, identifiable close up from the
+  stamp. Two quiet signals rather than one loud one. Costs both changes, but the
+  stamp is a string change inside an engraving that already exists.</p>
+  <script>(function(){
+    const a = [{teeth:17,fill:'#8CB8F2',line:'#3E6CA8',band:'M7 Z17 · CM'},{teeth:14,fill:'#6ECFA6',line:'#2E7D5C',band:'M7 Z14 · CM'},
+               {teeth:19,fill:'#4A90E2',line:'#2A5E9E',band:'M7 Z19 · CM'},{teeth:15,fill:'#54BFB6',line:'#2A7972',band:'M7 Z15 · CM'},
+               {teeth:18,fill:'#8CB8F2',line:'#3E6CA8',band:'M7 Z18 · CM'}];
+    const b = [{teeth:16,fill:'#F2C14E',line:'#9A7415',band:'M7 Z16 · HM'}];
+    write(board(chain(120, 150, a) + chain(120, 360, b), 500));
+})();</script>
+</div>
+
+<div class="opt">
+  <h2>G1 — A scribed datum line behind each chain</h2>
+  <p>The reference a fitter follows along a real machine: a scribed line with tick
+  marks, running past both ends the way a datum does past the parts it references.
+  Sits in the background layer with the ghost machinery, so it reads as part of the
+  frame rather than as annotation. <span class="cost">Identity comes from the
+  stamped plate at the leading end.</span></p>
+  <script>(function(){
+    const ga = [{teeth:17,fill:'#8CB8F2',line:'#3E6CA8'},{teeth:14,fill:'#6ECFA6',line:'#2E7D5C'},
+                {teeth:19,fill:'#4A90E2',line:'#2A5E9E'},{teeth:15,fill:'#54BFB6',line:'#2A7972'},
+                {teeth:18,fill:'#9B8CE0',line:'#5C4FA8'}];
+    const gb = [{teeth:16,fill:'#F2C14E',line:'#9A7415'}];
+    const pa = centres(120, 150, ga), pb = centres(120, 360, gb);
+    write(board(
+      datum(pa, 'scribe', 'C. MARSHALL') + chain(120, 150, ga) +
+      datum(pb, 'scribe', 'H. MARSHALL') + chain(120, 360, gb), 500));
+})();</script>
+</div>
+
+<div class="opt">
+  <h2>G2 — A ground track the chain runs along</h2>
+  <p>Same idea, heavier: a milled band the wheels sit on, cross-hatched the way a
+  ground surface is. Stronger separation between chains — you can see at a glance
+  that these are two assemblies — but it puts a lot more ink on the stage, and the
+  page currently has nothing behind the wheels except soft ghosts and one shadow
+  layer. <span class="risk">Risk: reads as a UI panel rather than as machining.</span></p>
+  <script>(function(){
+    const ha = [{teeth:17,fill:'#8CB8F2',line:'#3E6CA8'},{teeth:14,fill:'#6ECFA6',line:'#2E7D5C'},
+                {teeth:19,fill:'#4A90E2',line:'#2A5E9E'},{teeth:15,fill:'#54BFB6',line:'#2A7972'}];
+    const hb = [{teeth:16,fill:'#F2C14E',line:'#9A7415'}];
+    write(board(
+      datum(centres(120, 150, ha), 'track', 'DRIVE A') + chain(120, 150, ha) +
+      datum(centres(120, 360, hb), 'track', 'DRIVE B', 0) + chain(120, 360, hb), 500));
+})();</script>
+</div>
+
+<div class="opt">
+  <h2>G3 — Datum line, plate only, no colour split <span class="cost">(recommended pairing)</span></h2>
+  <p>Both chains keep the ordinary random palette — no hue is reserved to anyone —
+  and identity lives entirely in the machined reference. This is the version that
+  survives the colour requirement below: because a person's hue preference must not
+  remove that hue from anyone else's deal, two chains can legitimately come out
+  looking alike, so <strong>colour cannot be the thing that tells them apart.</strong>
+  The datum can.</p>
+  <script>(function(){
+    const ia = [{teeth:17,fill:'#F2C14E',line:'#9A7415'},{teeth:14,fill:'#6ECFA6',line:'#2E7D5C'},
+                {teeth:19,fill:'#4A90E2',line:'#2A5E9E'},{teeth:15,fill:'#DB79B8',line:'#8E3F72'},
+                {teeth:18,fill:'#EC8C4E',line:'#96521E'}];
+    const ib = [{teeth:16,fill:'#54BFB6',line:'#2A7972'}];
+    write(board(
+      datum(centres(120, 150, ia), 'scribe', 'Charles') + chain(120, 150, ia) +
+      datum(centres(120, 360, ib), 'scribe', 'Harper', 0) + chain(120, 360, ib), 500));
+})();</script>
+</div>
+
+<div class="opt" style="background:#E8EAE5;border-color:#D5DAD6">
+  <h2>H — The chosen treatment, LIGHT theme</h2>
+  <p>Datum drawn from the page's own tokens rather than an invented grey:
+  <code>--muted #6B7E7C</code> for the scribe and plate text, <code>--hair #D5DAD6</code>
+  for the plate body, at the opacity the ghost layer already uses in light
+  (<code>0.46</code>). The plate string comes from config, not from code.</p>
+  <script>(function(){
+    const LI = '#6B7E7C', PL = '#D5DAD6', OP = 0.46;
+    const a = [{teeth:17,fill:'#8CB8F2',line:'#3E6CA8'},{teeth:14,fill:'#6ECFA6',line:'#2E7D5C'},
+               {teeth:19,fill:'#4A90E2',line:'#2A5E9E'},{teeth:15,fill:'#DB79B8',line:'#8E3F72'},
+               {teeth:18,fill:'#EC8C4E',line:'#96521E'}];
+    const b = [{teeth:16,fill:'#54BFB6',line:'#2A7972'}];
+    const wrap = (s) => `<g opacity="${OP}">${s.split('#B4BAB4').join(LI)
+      .split('#DDE0DB').join(PL).split('#6E7671').join(LI)}</g>`;
+    write(board(
+      wrap(datum(centres(120,150,a),'scribe','Charles')) + chain(120,150,a) +
+      wrap(datum(centres(120,360,b),'scribe','Harper',0)) + chain(120,360,b), 500));
+  })();</script>
+</div>
+
+<div class="opt" style="background:#1E2226;border-color:#373E3D;color:#EEF1F0">
+  <h2 style="color:#EEF1F0">H — The same treatment, DARK theme</h2>
+  <p style="color:#93A5A3">Same construction, dark tokens: <code>--muted #93A5A3</code>
+  scribe, <code>--hair #373E3D</code> plate, at the ghost layer's dark opacity
+  (<code>0.17</code>). Wheels are lighter in dark mode, as the page's tone
+  derivation already makes them. <strong style="color:#EEF1F0">This is the case to
+  judge</strong> — a datum that works in light can vanish or shout in dark.</p>
+  <script>(function(){
+    const LI = '#93A5A3', PL = '#373E3D', OP = 0.34;
+    const a = [{teeth:17,fill:'#A9CBF6',line:'#5E86BE'},{teeth:14,fill:'#8FDCBB',line:'#4E9B78'},
+               {teeth:19,fill:'#74AEEC',line:'#4A7EB6'},{teeth:15,fill:'#E79AC9',line:'#A9628E'},
+               {teeth:18,fill:'#F2A876',line:'#B3743E'}];
+    const b = [{teeth:16,fill:'#7BD3CB',line:'#4A9992'}];
+    const wrap = (s) => `<g opacity="${OP}">${s.split('#B4BAB4').join(LI)
+      .split('#DDE0DB').join(PL).split('#6E7671').join(LI)}</g>`;
+    write(board(
+      wrap(datum(centres(120,150,a),'scribe','Charles')) + chain(120,150,a) +
+      wrap(datum(centres(120,360,b),'scribe','Harper',0)) + chain(120,360,b), 500));
+  })();</script>
+  <p style="color:#93A5A3;font-size:12.5px">Note the opacity is <code>0.34</code>
+  here, not the ghost layer's <code>0.17</code>. At 0.17 a one-pixel scribe on a
+  dark ground effectively disappears — a filled ghost wheel survives dimming that
+  a hairline does not. If this treatment ships, that difference is a real value to
+  derive rather than guess, and it should be measured against the rendered page
+  rather than this mock.</p>
+</div>
+
+<div class="opt">
+  <h2>I — Ticks aligned to the wheel centres <span class="cost">(a station index)</span></h2>
+  <p>Every major tick is a wheel, projected onto the datum and numbered; minor
+  ticks subdivide the gap between stations. The line now <em>means</em> something —
+  it is the index a fitter reads off to find part 03 — and it is derived from the
+  solve, so it cannot drift out of step with the wheels it references. Compare
+  against the arbitrary ruler in H above.</p>
+  <script>(function(){
+    const a = [{teeth:17,fill:'#8CB8F2',line:'#3E6CA8'},{teeth:14,fill:'#6ECFA6',line:'#2E7D5C'},
+               {teeth:19,fill:'#4A90E2',line:'#2A5E9E'},{teeth:15,fill:'#DB79B8',line:'#8E3F72'},
+               {teeth:18,fill:'#EC8C4E',line:'#96521E'}];
+    const b = [{teeth:16,fill:'#54BFB6',line:'#2A7972'}];
+    write(board(
+      datum(centres(120,150,a),'stations','Charles') + chain(120,150,a) +
+      datum(centres(120,360,b),'stations','Harper',0) + chain(120,360,b), 500));
+  })();</script>
+</div>
+
+<div class="opt">
+  <h2>J — As specified: full breadth, plate at the last leading ghost <span class="cost">(this is the one)</span></h2>
+  <p>The datum spans the whole assembly including the background machinery and runs
+  off the page on the trailing side. Stations mark only the <strong>clickable</strong>
+  gears — ghosts are spanned but not indexed, because they are not parts you can
+  reach. The plate sits alongside the last leading ghost, reading as the placard at
+  the head of the run. Harper's single-gear chain gets the same treatment, so a
+  short chain no longer looks stubby.</p>
+  <script>(function(){
+    const G = { ghost: true };
+    const a = [{...G,teeth:13},{...G,teeth:16},
+               {teeth:17,fill:'#8CB8F2',line:'#3E6CA8'},{teeth:14,fill:'#6ECFA6',line:'#2E7D5C'},
+               {teeth:19,fill:'#4A90E2',line:'#2A5E9E'},{teeth:15,fill:'#DB79B8',line:'#8E3F72'},
+               {teeth:18,fill:'#EC8C4E',line:'#96521E'},
+               {...G,teeth:19},{...G,teeth:21}];
+    const b = [{...G,teeth:13},{...G,teeth:15},{...G,teeth:18},
+               {teeth:16,fill:'#54BFB6',line:'#2A7972'},
+               {...G,teeth:18},{...G,teeth:20},{...G,teeth:21}];
+    const pa = centres(-40, 190, a), pb = centres(-40, 560, b);
+    /* BOTH datums first, then both chains: on the page the datum lives in the
+       background layer beneath every wheel, so painting one immediately before
+       its own chain would misrepresent the stacking. */
+    write(board(
+      datumRun(pa, a, 'Charles', 980) + datumRun(pb, b, 'Harper', 980) +
+      chain(-40, 190, a) + chain(-40, 560, b), 760));
+  })();</script>
+</div>
+
+<p class="lede" style="margin-top:34px">
+Not published — <code>docs/</code> is not in the deploy whitelist, so this page
+never reaches the web.</p>

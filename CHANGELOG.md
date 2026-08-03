@@ -5,6 +5,83 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ## Unreleased
 
+### Changed
+
+- **A hostname selects a scope, not a person — and `wozi.com` is now everybody.**
+  This is the change a visitor sees. `wozi.com`, `www.wozi.com` and the loopback
+  names moved off Charles's entry into a new top-level `STAGE_HOSTS`, and they
+  draw the combined stage: Charles's seven wheels along the spine, Harper's one
+  bridged off it through ghost idlers, each chain against its own scribed datum.
+  `charles.wozi.com` is Charles alone, `harper.wozi.com` is Harper alone,
+  `?who=<slug>` is that person solo and `?who=all` is the stage.
+
+  **The fallback changed with it**, from `PEOPLE[0]` to the combined stage. An
+  alternate domain name reaches the distribution long before anyone edits
+  `config.js`, and until they do it matches no list at all — it used to be served
+  one person, with nothing on the page to say that was a default. A hostname
+  nobody has claimed is far likelier to be another way of saying "this site".
+
+  **The picker is now hidden on a personal page.** It appeared whenever there was
+  more than one person; it now also requires `STAGE.mode === 'all'`. A link to
+  `charles.wozi.com` should not hand the visitor a menu of everyone else living
+  on the domain — the old rule was this rule with the scope left out. Nobody is
+  marked `aria-current` on the combined stage either: every entry there is a link
+  *away* from what is being looked at, and `WHO` is the spine, not the selection.
+
+  Two things had to be proved rather than assumed, because the default view
+  changing means the pixel gate's own baseline changes:
+
+  - `?who=charles` is **0 px** against `439c9ba` at 1440×900 and 390×844, in
+    **both themes**. Nothing in the whole idler-bridge branch touched the
+    single-chain path, which is the only way to say that with a number. The gate
+    grew a `--query` flag to ask it at all: it serves on `127.0.0.1`, which is
+    now a stage host, so its default shot is the combined stage.
+  - The default shot differs by **801,797 px** (608,767 at 1440×900, 193,030 at
+    390×844) against `439c9ba`. That is the feature, photographed.
+
+  `?who=harper` renders her chain alone: one wheel at a sane size, no datum — a
+  datum needs two chains to discriminate — and no bridge, since solo is not a
+  separate path but a tree with no branches.
+
+  One real defect fell out of making the picker visible. The rule between the
+  people and the gear families was drawn as its own menu entry: an `<a>` with an
+  empty `href` and no text, which the menu template cannot hide from the
+  accessibility tree — a **focusable element with no accessible name**.
+
+  **It was shipping, not latent.** The claim that it cost nothing until the apex
+  drew the picker was wrong: at `439c9ba` the picker's gate was already
+  `people.length > 1` alone, and `PEOPLE` had had two entries since Harper was
+  added. The panel's `display:none` hides nothing from the audit, which counts
+  `a[href]` straight out of the DOM. It was on the live page.
+
+  The rule is now its own `<div>` between two lists, guarded by `sc-if` — the
+  1px hairline it always was, inset 10px, floating in 6px of gap, and unable to
+  take focus. It is **not** a `border-top` on the first gear entry: that entry is
+  a 9px-rounded pill filled with `--accent` on any page without a `?kind=`, so a
+  border there draws on the top edge of a block of colour, at the entry's full
+  width rather than the rule's inset one. `a11y_audit` went from FAIL to PASS.
+
+  **The pageview beacon reports the scope now, not the spine.** It sent
+  `view/` + `WHO.slug`, and `WHO` is `CHAIN_ORDER[0]` — so every visit to the
+  combined stage reported `view/charles` and was indistinguishable in the
+  analytics from a visit to `charles.wozi.com`. The same spine-versus-selection
+  confusion as the `aria-current` above, in the one place where being wrong
+  produces a plausible-looking number instead of a visible fault. It sends
+  `view/all` on the combined stage.
+
+  `CLAUDE.md` gained the host model and four invariants this branch had been
+  relying on without naming: the bridge as structure versus escape runs as
+  decoration, the axis-relative bridge bearing (#67's class), longest-first
+  non-overlapping chain order, and the bridge's refusal to draw a crossing. That
+  omission is the #59 failure — the rulebook requiring what the rulebook does not
+  name.
+
+  Gates: 63/63 suite, motion PASS on the apex and on both solo views,
+  `mesh_dirs` PASS (8 meshing pairs, 1 idler on that viewport), devices 20/20 and
+  4/4, `a11y_audit` PASS in both themes. Apex looked at in light and dark at
+  1440×900, 390×844 and 2560×1440; portrait puts the bridge across the *long*
+  axis, as the axis-relative bearing requires.
+
 ### Added
 
 - **Harper's chain.** A second person in `config.js`: `harper`, one link,
@@ -20,6 +97,150 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
   against HEAD at 1440×900 and 390×844.
 
 ### Fixed
+
+- **#83 — the cast-shadow derivation was claimed but never executed, and two
+  same-named buttons slipped past the duplicate-name check.** The opacity test
+  re-asked `wheelOpacity()` instead of running the render's own
+  `filter(g => this.wheelOpacity(g) == null)`, so the claim that the shadows
+  *derive* from the opacity rule was untested; the filter callback is now sliced
+  out of `index.html` and run, and fails both on `g => true` and on
+  `g => g.role !== 'idler'` — right answer, wrong derivation. `a11y_audit` keyed
+  each focusable on `href || tagName`, so two `<button>`s with one name compared
+  equal; anything without a destination now keys on the element.
+
+- **#82 — a mirrored datum struck its ticks into its own wheels.** Ticks run
+  along the normal at `+MAJOR`, and the mirrored origin reverses which way that
+  points. A major tick is 1.2 modules against one module of clearance, so a
+  mirrored chain's ticks crossed the clearance and vanished under its own gears —
+  the mark reading inverted and short beside an unmirrored one. `plateSeat()`
+  returns the side with the origin, and every tick is struck at `out * MAJOR`.
+  Invisible to the seeded gate, because the mirror only fires on deals that seed
+  does not produce.
+
+- **#81 — the plate was seated flush, against a box that could move underneath
+  it.** Two faults, and only measurement separated them. The clamp bounded the
+  *geometric* rectangle while the body is stroked `HAIR` wide down its centre
+  line, so half that stroke hung outside — and the sweep measured the same
+  rectangle, so it could not see the overhang either. The seat now carries
+  `max(PLATE_H * 0.1, HAIR / 2)`: the plate's **own corner radius**, floored at
+  exactly the stroke's overhang. Both are read off marks already drawn.
+
+  The margin alone was not enough, and a probe that walks the viewport a pixel at
+  a time without navigating proved it: `_vpBox` is published from `fitEscapes`,
+  but a render only happens when something *quantised* moves, so the stage
+  re-centres underneath a seat that was computed against an older box. Measured,
+  that put the mark **1.32 px off the left edge at 390×844**. `fitEscapes` now
+  re-renders once the stage has drifted past the margin's real clearance —
+  a threshold asked of `plateMargin()`, not restated.
+
+  The first attempt compared consecutive `fitEscapes` calls, which compares one
+  step of a drag: forever under the threshold while the total runs away, and it
+  made 1440×900 strictly worse at **22.91 px past the fold**. `_vpSeated` is
+  stamped in `componentDidUpdate`, the one moment a render is known to have
+  finished, so the whole distance since the seat is what gets measured. Guarded to
+  the combined stage, so a solo page keeps the render schedule it had.
+
+  Re-measured on the **stroked** extent: 0 clipped of 2,720 measurements across a
+  40-load unseeded sweep and a 2,560-step one-pixel resize walk, worst margin
+  0.30 px inside the edge.
+
+- **#80 — `CLAUDE.md` described an attachment search that does not exist, in the
+  section added to close the #59 class.** It said the search "*prefers a clear
+  band of the cross axis and rejects every anchor that does not give one*".
+  `search()` has no cross-axis band test: it rejects on foul, pass-over and
+  bridge-crossing, and the cross axis is bounded elsewhere, by `idlerCount()`. The
+  neighbouring paragraph about the search's refusal-to-refuse was accurate
+  throughout, which is what made the wrong sentence read as checked. Rewritten to
+  what the code does.
+
+- **#79 — the datum plate's font stack named no face a Windows machine has.**
+  `ui-monospace, Menlo, 'DejaVu Sans Mono', monospace` covers Apple and Linux and
+  falls through to Courier New everywhere else — a lighter, narrower face at the
+  same size, on the one mark that carries the identity and already the smallest
+  lettering on the page. `Consolas` is now in the stack, ahead of the generic.
+  The plate's *size* is untouched and is Charles's call: it measures 4.8 px at
+  320×568, 7.5 at 390×844 and 12.5 at 1440×900, against tick numerals that were
+  dropped at 4.4/6.7/11.4 for being illegible.
+
+- **#78 — `idlerCount()` measured a different window from the `axisRot()` it
+  defers to.** It read `visualViewport`; the rotation reads
+  `innerWidth`/`innerHeight`. The two differ exactly when the iOS toolbar
+  collapses, which is the moment the fit re-runs — the same disagreement #67's
+  fix removed, arriving by a second route. Near-miss rather than a live fault at
+  390×844, and free to make consistent: one measurement now feeds both halves of
+  one decision.
+
+- **#77 — four "invariant" tests asserted source text, so the guard the ledger
+  cited as proof was not a guard.** The person-picker test was two regexes over a
+  slice of `index.html`: move the live condition into the comment beside it and
+  the suite stays 65/65 while the disclosure defect ships. The idler-count,
+  ghost-opacity and escape-run tests were the same shape. All four now **execute**
+  the page's own functions — `togPeople` against a synthetic `CONF` and `STAGE`,
+  `idlerCount()` with the rotation forced so the test can tell whether it is
+  listening at all, `wheelOpacity()` in both themes, and the real `fitEscapes` via
+  the `fitEscapesOn` harness that already existed. Each was checked by mutating
+  `index.html` and confirming it goes red; each carries its own non-vacuity
+  assertion.
+
+  The opacity rule got a name to be asked by: `wheelOpacity(g)`, which the cast
+  shadow layer now derives from instead of testing `role` a second time — "a
+  wheel drawn at reduced weight casts nothing" in one place.
+
+- **#76 — the last unguarded `SITES[g.person][g.slug]`.** Four other derefs
+  guard; `engraving()` did not, and it runs inside the render, so a person with no
+  table at all is a blank page rather than a missing engraving. That is #53's
+  exact failure mode. Unreachable with today's config; guarded anyway.
+
+- **#75 — the colour deal was sized before the idlers existed.** It was dealt over
+  `TRAIN.length`, which counts the bridge idlers — whose colours are then thrown
+  away and overpainted from `GHOST_COLORS`. So the deal spent pool entries on
+  wheels that never wear them (the *links* run out first when the train grows),
+  and a chain head arriving over a bridge was hue-scored against a colour nobody
+  draws. It is now sized and scored over the linked wheels only, and a head past a
+  bridge is scored against nothing at all — honest, because a whole idler of
+  background palette stands between it and the nearest coloured wheel.
+
+  `dealColours` also repeats its shuffled pool when there are more wheels than
+  colours, so those slots are inside the scored array. The call site used to close
+  that gap itself with `WHEEL_DEAL[i % len]`, which handed out colours the 40°
+  rule of #12 had never looked at. `WHEEL_POOL` is 10 and the train is exactly 10
+  today: one more link and it would have wrapped.
+
+- **#74 — two focusable links shared the accessible name "Mail".** New with the
+  combined stage: two people, two mailboxes, one string. The only differentiator
+  was the datum plate, which lives inside the `aria-hidden` gear art. `a11y_audit`
+  passing was not evidence — it counted *unlabelled* focusables, not ambiguous
+  ones. On the combined stage a badge is now named `"<service>, <person>"`, using
+  the same name the plate is stamped with so the audible differentiator and the
+  visible one are one string. The solo page is unchanged, and the visible pill
+  still reads the service alone — a prefix of the name, which is what WCAG 2.5.3
+  asks. `a11y_audit` grew a duplicate-accessible-name check (same name, different
+  destination) and was confirmed to go red on the unqualified label.
+
+- **#73 — the datum plate fell off the viewport on a random fraction of loads.**
+  `datumLayer` runs *after* `fitStage`, so the plate sat outside all three limbs
+  of the fit: `WHEEL_CROSS_MAX` bounds a wheel, `CROSS_BLEED` bounds the band, and
+  both deliberately let the machine bleed past the cross axis — which is the edge
+  the mark then went over. Measured unseeded over 20 loads per viewport: **2/20**
+  put Harper's plate at y 913–930 against a 900 px viewport at 1440×900, and
+  **1/20** put it at x −18…−9 at 390×844. The seeded pixel gate structurally
+  cannot see it; it photographs one deal.
+
+  `datumRuns()` already said "off the page is invisible, and invisible is the one
+  thing this mark may not be", and nothing enforced it. It now hands over **both**
+  origins — a scribed datum may be laid either side of the parts it references,
+  and both clear every tooth by the same module of air — and `plateSeat()` spends
+  the two freedoms a datum actually has, in order: which side, then which station
+  along it. The natural side and the natural station win every tie, so a load that
+  was already right is untouched, and the smaller slide wins otherwise. Neither
+  side fitting is a `console.warn`, not a silent give-up.
+
+  The fit is deliberately *not* changed. Shrinking the machine so a placard fits
+  inverts the composition: the train is the subject and the mark references it, so
+  the mark is what moves.
+
+  Re-measured unseeded at 40 loads per viewport, 160 plate placements: **0
+  clipped**, worst margins −3.5 px at 1440×900 and −0.1 px at 390×844.
 
 - **#72 — `SERPENTINE_PACKING` was a measured constant standing in for a
   derivation.** #67 shipped it at 0.85, measured over 15 loads at 5 viewports,

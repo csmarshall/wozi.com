@@ -32,6 +32,41 @@ and every document in the repo root — `CLAUDE.md`, `README.md`, `CHANGELOG.md`
 If you add something that should be live, add it to the include list in
 `.github/workflows/deploy.yml`. Adding a file alone does not publish it.
 
+## What a hostname selects
+
+One object is served to every domain, and the browser decides what to draw from
+it. **A hostname selects a scope, not a person.**
+
+| what arrives | what draws |
+| --- | --- |
+| `wozi.com`, `www.wozi.com`, `localhost`, `127.0.0.1` | the combined stage — every chain |
+| `charles.wozi.com` | Charles alone |
+| `harper.wozi.com` | Harper alone |
+| `?who=<slug>` | that person, solo, whatever the hostname said |
+| `?who=all` | the combined stage |
+| anything else | the combined stage |
+
+The combined-stage names live in `STAGE_HOSTS` in `config.js`; a person's own
+names live in their `hosts`, which are **solo hosts only**. The two lists must
+stay disjoint and `npm test` asserts it — `STAGE_HOSTS` is checked first, so a
+name in both would quietly mean "everyone" while `config.js` read as though it
+named one person.
+
+**The fallback is the combined stage, not `PEOPLE[0]`.** An alternate domain
+name reaches the distribution before anyone edits `config.js`, so an
+unrecognised hostname has to work on its own; it used to serve whoever was
+written first, with nothing to say that was a default. Adding a domain is an ACM
+SAN in us-east-1, an alternate domain name on the distribution and a Route53
+alias — no deploy change, and no edit to `config.js` unless the new name is
+meant to be somebody's personal address.
+
+**The picker is drawn only on the combined stage.** A personal link must not
+advertise everyone else living on the domain, so the old rule — hidden while
+there is one person — now also hides it while the view is deliberately one
+person. It is stated here because this rulebook has got the host and file model
+wrong once already (#59, `config.js` published but unnamed), and a rule nobody
+writes down is the one that drifts.
+
 ## Do not
 
 - **Do not hand-edit `support.js`.** It is generated runtime, not project code.
@@ -82,6 +117,52 @@ on an explicit `isIntersecting === false` *after* the stage has non-zero size,
 and the flag must be one expression evaluated in `step()`. Latching it true
 froze the entire page (#7).
 
+**A bridge is structure; an escape run is decoration.** On a combined stage
+every chain but the spine is driven off it through ghost idlers, and those
+idlers are **solved with the train** — they are `TRAIN` entries, they mesh, and
+the gap between two chains is exactly what they take up, so the spacing is a
+consequence of the drive rather than a number beside it. Escape runs are the
+other ghosts: computed *after* the fit, off wheels that are already placed,
+purely to carry the eye off the edge. **Never merge the two.** They look alike
+on the page and are opposites in the solve — one may move a chain, the other may
+not move anything. What they do share is the crossing rule: `fitEscapes` is
+seeded with the bridges so an escape run refuses to cross one.
+
+**A bridge bearing is relative to the axis, never to the screen.** The stage
+rotates the whole train by `_axisRot` in portrait. `BRIDGE_BEARING` is 90°
+*from the spine*, and is only ever used added to `_axisRot` — write it in
+absolute screen degrees and the bridge stays horizontal while the train turns
+upright, sending it across the **short** axis. That is the #67 class of failure,
+and it has now been made twice by two different pieces of geometry.
+
+**Chains are laid out longest first, and overlap is a reported failure — not an
+impossible one.** `CHAIN_ORDER` sorts by link count, ties breaking to `PEOPLE`
+order, and that is the *layout* order, not merely the emission order: `solve()`
+places wheels in `TRAIN` order and a bridge may only hang off a wheel already
+placed, so a chain can only ever be driven from one earlier in the list. The
+spine is `CHAIN_ORDER[0]` and growth goes one way.
+
+The attachment search ranks every anchor and takes the first that clears three
+tests: the bridge and the whole chain behind it must foul no wheel, the bridge
+run must pass over none, and it must cross no other bridge. There is no
+cross-axis band test — the cross axis is bounded elsewhere, by `idlerCount()`.
+What the search does **not** do is refuse: when nothing
+clears, the last-ditch path takes the best-ranked anchor and plants the chain
+anyway — `console.warn`, "which may clash" — because a chain that is simply
+absent is worse than one standing too close. A separate pass then measures every
+cross-chain pair and warns `wozi: chains overlap — …` with the wheels and the
+overlap in pixels. So overlap is *detected and announced*, never silently
+prevented: if that warning is in the console, the composition has failed and the
+console is the only place it says so. **A crossing bridge is the thing that is
+actually impossible** — see below — and that is a stronger guarantee than this
+one on purpose.
+
+**A bridge that cannot be placed cleanly refuses.** When no anchor clears the
+non-crossing rule, the bridge is abandoned and the chain is placed *unbridged* —
+the same shape `bridge: false` produces, at the same distance, warning to the
+console. An undriven chain now and then is a cost; a bridge drawn across another
+run is the rule itself failing. **A crossing bridge is never drawn.**
+
 ## Dormant capability: chain and belt
 
 The shipped train is fully direct-mesh — every wheel drives its neighbour, so
@@ -125,6 +206,14 @@ This matters most for one class of edit: `MODULE`, any `TOOTH_*`, `BAND_*`,
 bigger bore makes gear sets reachable that nothing has ever measured. Change one
 and re-run the suite before pushing.
 
+
+**The pixel gate photographs the combined stage.** `tools/pixel_regress.py`
+serves on `127.0.0.1`, which is a `STAGE_HOSTS` name, so its default shot is
+every chain at once. Use `--query '?who=charles'` to ask the narrower and often
+more useful question — whether **one** chain still draws exactly as it did —
+because a change to the bridge, the datum or the chain ordering moves the
+combined shot enormously while leaving the single-chain path untouched, and only
+the second run can tell you so.
 
 Never trust the screenshot alone — a static train looks fine in a still. Serve
 the page and check, ~700ms apart:

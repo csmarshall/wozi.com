@@ -48,39 +48,89 @@ window.WOZI_CONFIG = {
   },
 
   /* ---------------------------------------------------------------------------
-     PEOPLE — one entry per chain. THE ORDER MATTERS: PEOPLE[0] is the default
-     when the hostname matches nobody.
+     STAGE_HOSTS — the hostnames that show EVERY chain at once.
+
+     A HOSTNAME SELECTS A SCOPE, NOT A PERSON. The apex and its aliases are the
+     whole household, so they carry the combined stage; a person's own subdomain
+     is that person alone and lives in their `hosts` below. The two lists must
+     stay disjoint — the resolver checks this one first, so a name in both would
+     quietly mean "everyone" while config.js read as though it named one person.
+     The suite asserts the disjointness rather than trusting it.
+
+     This is also the FALLBACK: a hostname in neither list gets the combined
+     stage. An alternate domain name reaches the distribution the moment it is
+     added, which is usually well before anyone edits this file, and until then
+     it should serve everybody rather than silently serve whoever happens to be
+     written first. Adding a domain is an ACM SAN in us-east-1, an alternate
+     domain name on the distribution and a Route53 alias — no deploy change, and
+     no edit here unless it is meant to be somebody's personal name.
+
+     The loopback names are here on purpose: a local server is the developer
+     looking at the whole composition, and it is what tools/pixel_regress.py
+     photographs.
+     --------------------------------------------------------------------------- */
+  STAGE_HOSTS: ['wozi.com', 'www.wozi.com', 'localhost', '127.0.0.1'],
+
+  /* ---------------------------------------------------------------------------
+     PEOPLE — one entry per chain. THE ORDER MATTERS: it breaks ties when the
+     chains are ordered by length, and the longest chain is the spine the rest of
+     the composition is built around.
 
        slug    stable id, used by the ?who= override
        name    shown in the person picker
-       hosts   hostnames that land on this person. One CloudFront distribution
-               can carry many alternate domain names, all serving this same
-               object out of s3://wozi.com — selection happens here, in the
-               browser, so the HTML is byte-identical for every domain and one
-               cached object serves them all. Adding a domain is an ACM SAN in
-               us-east-1, an alternate domain name on the distribution, and a
+       hosts   hostnames that land on this person ALONE. One CloudFront
+               distribution can carry many alternate domain names, all serving
+               this same object out of s3://wozi.com — selection happens here, in
+               the browser, so the HTML is byte-identical for every domain and
+               one cached object serves them all. Adding a domain is an ACM SAN
+               in us-east-1, an alternate domain name on the distribution, and a
                Route53 alias. No deploy change.
+
+               These are SOLO hosts only, and must not repeat anything in
+               STAGE_HOSTS: the person's own subdomain, and nothing that means
+               the whole household.
        links   this person's wheels, IN TRAIN ORDER. Each needs a `slug` naming
                a SERVICES key, plus the handle to engrave and where to point.
                  slug   which service
                  path   engraved on the wheel's band — the handle, not the URL
                  href   where the badge links to
+       datum   optional. What this chain's datum plate is stamped with on a
+               combined stage — the scribed reference line each chain is drawn
+               against, which is how one chain is told from another. Defaults to
+               `name`, verbatim, casing and all. Set it only when the plate
+               should read as something other than the picker's label; it is
+               never uppercased, abbreviated or given a serial, and no datum is
+               drawn at all while one chain is on stage, because there is then
+               nothing to tell apart. Identity deliberately does NOT live in
+               colour: a person's hue preference must not reserve that hue, so
+               two chains may legitimately come out looking alike.
+       bridge  optional, default true. On a combined stage every chain but the
+               longest is driven off it through a short run of plain idler
+               wheels, which is also what sets the gap between the two. Set
+               `bridge: false` and this chain is placed in the same spot with no
+               drive reaching it — it becomes a machine of its own standing
+               beside the others rather than one the spine turns. It has no
+               effect on a page showing a single chain, because there is nothing
+               to bridge to.
 
-     THE PICKER IS HIDDEN WHILE THERE IS ONE PERSON, so today's page looks
-     exactly as it did. Add a second entry and the picker appears by itself.
+     THE PICKER IS HIDDEN WHILE THERE IS ONE PERSON, and hidden again whenever
+     the view is deliberately one person — a personal subdomain or an explicit
+     ?who=. It is a way to move around the combined stage, not a directory: a
+     link to charles.wozi.com should not hand the visitor a menu of everyone else
+     living on the domain.
 
      A word of warning before adding people: the constraint is WHEEL COUNT, not
      code. Every wheel has to fit the long axis at LINK_SHARE (0.78), so more
      wheels means smaller ones, and the centres — the hex core, the epicyclics —
      stop being legible well before the layout breaks. Two chains are
-     comfortable, three is a squeeze, and beyond that the picker is doing the
-     real work, since only one chain is ever on stage at a time.
+     comfortable, three is a squeeze, and beyond that a combined stage is asking
+     more of the long axis than it has.
      --------------------------------------------------------------------------- */
   PEOPLE: [
     {
       slug: 'charles',
       name: 'Charles',
-      hosts: ['wozi.com', 'www.wozi.com', 'charles.wozi.com', 'localhost', '127.0.0.1'],
+      hosts: ['charles.wozi.com'],
       links: [
         { slug: 'linkedin',  path: '/in/csmarshall',    href: 'http://www.linkedin.com/in/csmarshall' },
         { slug: 'github',    path: '/csmarshall',       href: 'https://github.com/csmarshall/' },
@@ -102,9 +152,10 @@ window.WOZI_CONFIG = {
       name: 'Harper',
       /* harper.wozi.com is listed before it resolves, which costs nothing: a
          host that matches nothing simply never selects this chain, and ?who=
-         reaches her either way. Making it live is an ACM SAN in us-east-1, an
-         alternate domain name on the distribution and a Route53 alias -- no
-         deploy change, per the note above. */
+         reaches her either way -- and the combined stage she shares is on the
+         apex regardless. Making it live is an ACM SAN in us-east-1, an alternate
+         domain name on the distribution and a Route53 alias -- no deploy change,
+         per the note above. */
       hosts: ['harper.wozi.com'],
       links: [
         { slug: 'mail', path: 'harper@wozi.com', href: 'mailto:harper@wozi.com' }
