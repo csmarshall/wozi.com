@@ -754,6 +754,11 @@ git commit -F /tmp/m.txt
 - **All bridges on the same side.**
 - Attachment: prefer the spine; **cascade off a child when placement fails.** Rejected when there is no clear bearing, when it crosses another bridge/chain/escape run, when the bearing is too far off perpendicular, or when the legibility floor would be breached.
 - **Quantise** the attachment and idler count, or a chain hops between wheels while a window edge is dragged (#55).
+- **BRIDGING IS A PER-PERSON SETTING** (Charles, 2026-08-02). `config.js` is
+  explicitly "everything in this file is a SETTING", so a `bridge: true|false` on a
+  `PEOPLE` entry is config, not a tuned constant. It is nearly free: an unbridged
+  chain is simply a root with `parent: null`, which is what Task 5 already
+  produces, so bridging stays purely additive. Default `true`.
 - **Hysteresis on the idler count.** `IDLERS_FOR` changes with orientation, so a
   viewport dragged across the threshold re-solves — and without hysteresis it will
   thrash between one and two idlers, adding and removing a whole wheel on every
@@ -944,7 +949,112 @@ git commit -F /tmp/m.txt
 
 ---
 
-### Task 8: Host scoping, and make the combined stage the default
+### Task 8: The chain datum mark
+
+Identity on the combined stage: a scribed datum line with a stamped plate behind
+each chain. Settled with Charles and mocked in `docs/chain-labels.html` (option
+J) — read that file before starting; it is the visual spec.
+
+**Files:**
+- Modify: `index.html` (background layer, near the shared shadow/ghost layer)
+- Modify: `config.js` (optional per-person `datum` key)
+- Modify: `tools/test.js`
+
+**Interfaces:**
+- Consumes: the chain-axis computation from Task 7, `person`, `role`, and the
+  solved wheel centres.
+- Produces: one datum per chain in the background layer.
+
+**THE RULES, all settled — do not reinterpret them:**
+
+1. **The line spans the entire breadth of the assembly it references**, ghosts
+   included, and runs off the page on the trailing side.
+2. **A station tick sits at the centre of each CLICKABLE gear only.** Ghosts are
+   spanned but never indexed — they are machinery, not parts you can reach. Minor
+   ticks subdivide between stations.
+3. **The plate sits alongside the LAST LEADING GHOST** — immediately before the
+   first real gear, reading as the placard at the head of the run. With no leading
+   ghost, fall back to the head of the run rather than vanishing.
+4. **The plate string is `PEOPLE[].name`, verbatim** — the casing config already
+   carries, no transformation. A per-person `datum` key overrides it. Never
+   uppercase it, abbreviate it, or append a serial.
+5. **Colours come from tokens, never invented greys:** `--muted` for the scribe
+   and plate text, `--hair` for the plate body.
+6. **Every datum is in the background layer beneath ALL wheels** — not painted
+   before its own chain. The mock got this wrong and one chain's ghosts buried
+   another's plate.
+7. **It MUST share Task 7's chain-axis computation.** A one-wheel chain has no
+   axis of its own — first and last are the same wheel, so a first-to-last vector
+   is zero-length and the mark collapses to a point. That is #67 again. A second
+   copy of that computation is forbidden.
+
+**TWO VALUES TO MEASURE, NOT GUESS:**
+
+- **Dark-theme opacity.** The ghost layer runs at `0.46` light and `0.17` dark. A
+  hairline does not survive dimming the way a filled ghost wheel does — at `0.17`
+  the scribe effectively vanishes on the dark ground, and the mock needed `0.34`.
+  Derive this against the rendered page in both themes; do not copy `0.34` from
+  the mock.
+- **Station number legibility.** The digits are legible at mock scale, but a real
+  wheel renders 130–240px so they land far smaller, and the #61–#63 floors are in
+  rendered pixels. Either they drop out below a threshold leaving bare ticks, or
+  they are omitted. Decide from a rendered page.
+
+- [ ] **Step 1: Write the failing tests**
+
+```js
+test('the datum takes its axis from the chain, never its own copy', () => {
+  /* #67, twice over. A one-wheel chain has no first-to-last vector, so a datum
+     that derives its own direction collapses to a point. */
+  const i = SRC.indexOf('datum');
+  ok(i > 0, 'no datum is drawn at all');
+  ok(!/atan2\(\s*last\.cy - first\.cy/.test(SRC.slice(i, i + 4000))
+     || /_axisRot|chainAxis/.test(SRC.slice(i, i + 4000)),
+    'the datum derives its own axis instead of sharing the chain axis');
+});
+
+test('a datum station is a clickable gear, never a ghost', () => {
+  const i = SRC.indexOf('datum');
+  const frag = SRC.slice(i, i + 4000);
+  ok(/role === 'link'|!== 'idler'|\.slug/.test(frag),
+    'the datum indexes every wheel rather than only the clickable ones');
+});
+
+test('the datum plate defaults to the person name, untransformed', () => {
+  ok(!/toUpperCase\(\)/.test(SRC.slice(SRC.indexOf('datum'), SRC.indexOf('datum') + 4000)),
+    'the datum plate transforms the configured name');
+});
+```
+
+- [ ] **Step 2: Run them to verify they fail**
+
+Run: `npm test` — three FAILs.
+
+- [ ] **Step 3: Implement, following the seven rules above**
+
+- [ ] **Step 4: Verify in both themes and both orientations**
+
+```bash
+python3 -m http.server 8765 &
+python3 tools/verify_motion.py "http://127.0.0.1:8765/?who=all"
+python3 tools/mesh_dirs.py "http://127.0.0.1:8765/?who=all"
+npm test
+```
+
+Then screenshot `?who=all` at 1440x900 and 390x844, in **light and dark**, and
+**look at all four**. The datum is the one feature whose whole requirement is
+"subtle in both themes" — no automated gate can judge that.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add index.html config.js tools/test.js
+git commit -F /tmp/m.txt
+```
+
+---
+
+### Task 9: Host scoping, and make the combined stage the default
 
 **This is the task that changes what `wozi.com` shows.** Everything before it is invisible to a visitor.
 
@@ -1023,7 +1133,7 @@ gh pr create --fill
 
 ---
 
-### Task 9: The legibility gate
+### Task 10: The legibility gate
 
 The gate that makes "wheels are allowed to shrink" safe rather than open-ended.
 
