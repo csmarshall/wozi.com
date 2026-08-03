@@ -123,10 +123,20 @@ function chain(x0, y0, spec) {
      kind 'scribe' — a thin scribed line with tick marks
      kind 'track'  — a ground/milled band the chain sits on
      plate         — a stamped designation plate at the leading end   */
-function datum(pts, kind, plate) {
+function datum(pts, kind, plate, axisDeg) {
   const a = pts[0], z = pts[pts.length - 1];
-  const dx = z.x - a.x, dy = z.y - a.y, L = Math.hypot(dx, dy) || 1;
-  const ux = dx / L, uy = dy / L, nx = -uy, ny = ux;
+  const dx = z.x - a.x, dy = z.y - a.y, L = Math.hypot(dx, dy);
+  /* A ONE-WHEEL CHAIN HAS NO AXIS OF ITS OWN — first and last are the same wheel,
+     so this vector is zero-length and everything downstream collapses to a point.
+     That is the #67 failure again in another guise (there it was atan2(0,0)
+     returning 0, i.e. horizontal in every orientation). The datum must therefore
+     take the STAGE axis, exactly as the escape runs now do — which means the
+     shipped version has to SHARE the chain-axis computation rather than derive
+     its own second copy of it. */
+  const fallback = (axisDeg == null ? 0 : axisDeg) * Math.PI / 180;
+  const ux = L < 1e-6 ? Math.cos(fallback) : dx / L;
+  const uy = L < 1e-6 ? Math.sin(fallback) : dy / L;
+  const nx = -uy, ny = ux;
   const off = a.r * 1.32;                       /* below the chain's axis */
   const x1 = a.x - ux * 120 + nx * off, y1 = a.y - uy * 120 + ny * off;
   const x2 = z.x + ux * 150 + nx * off, y2 = z.y + uy * 150 + ny * off;
@@ -300,7 +310,7 @@ function write(html) { document.write(html); }
     const hb = [{teeth:16,fill:'#F2C14E',line:'#9A7415'}];
     write(board(
       datum(centres(120, 150, ha), 'track', 'DRIVE A') + chain(120, 150, ha) +
-      datum(centres(120, 360, hb), 'track', 'DRIVE B') + chain(120, 360, hb), 500));
+      datum(centres(120, 360, hb), 'track', 'DRIVE B', 0) + chain(120, 360, hb), 500));
 })();</script>
 </div>
 
@@ -319,8 +329,55 @@ function write(html) { document.write(html); }
     const ib = [{teeth:16,fill:'#54BFB6',line:'#2A7972'}];
     write(board(
       datum(centres(120, 150, ia), 'scribe', 'CM-01') + chain(120, 150, ia) +
-      datum(centres(120, 360, ib), 'scribe', 'HM-01') + chain(120, 360, ib), 500));
+      datum(centres(120, 360, ib), 'scribe', 'HM-01', 0) + chain(120, 360, ib), 500));
 })();</script>
+</div>
+
+<div class="opt" style="background:#E8EAE5;border-color:#D5DAD6">
+  <h2>H — The chosen treatment, LIGHT theme</h2>
+  <p>Datum drawn from the page's own tokens rather than an invented grey:
+  <code>--muted #6B7E7C</code> for the scribe and plate text, <code>--hair #D5DAD6</code>
+  for the plate body, at the opacity the ghost layer already uses in light
+  (<code>0.46</code>). The plate string comes from config, not from code.</p>
+  <script>(function(){
+    const LI = '#6B7E7C', PL = '#D5DAD6', OP = 0.46;
+    const a = [{teeth:17,fill:'#8CB8F2',line:'#3E6CA8'},{teeth:14,fill:'#6ECFA6',line:'#2E7D5C'},
+               {teeth:19,fill:'#4A90E2',line:'#2A5E9E'},{teeth:15,fill:'#DB79B8',line:'#8E3F72'},
+               {teeth:18,fill:'#EC8C4E',line:'#96521E'}];
+    const b = [{teeth:16,fill:'#54BFB6',line:'#2A7972'}];
+    const wrap = (s) => `<g opacity="${OP}">${s.split('#B4BAB4').join(LI)
+      .split('#DDE0DB').join(PL).split('#6E7671').join(LI)}</g>`;
+    write(board(
+      wrap(datum(centres(120,150,a),'scribe','CM-01')) + chain(120,150,a) +
+      wrap(datum(centres(120,360,b),'scribe','HM-01',0)) + chain(120,360,b), 500));
+  })();</script>
+</div>
+
+<div class="opt" style="background:#1E2226;border-color:#373E3D;color:#EEF1F0">
+  <h2 style="color:#EEF1F0">H — The same treatment, DARK theme</h2>
+  <p style="color:#93A5A3">Same construction, dark tokens: <code>--muted #93A5A3</code>
+  scribe, <code>--hair #373E3D</code> plate, at the ghost layer's dark opacity
+  (<code>0.17</code>). Wheels are lighter in dark mode, as the page's tone
+  derivation already makes them. <strong style="color:#EEF1F0">This is the case to
+  judge</strong> — a datum that works in light can vanish or shout in dark.</p>
+  <script>(function(){
+    const LI = '#93A5A3', PL = '#373E3D', OP = 0.34;
+    const a = [{teeth:17,fill:'#A9CBF6',line:'#5E86BE'},{teeth:14,fill:'#8FDCBB',line:'#4E9B78'},
+               {teeth:19,fill:'#74AEEC',line:'#4A7EB6'},{teeth:15,fill:'#E79AC9',line:'#A9628E'},
+               {teeth:18,fill:'#F2A876',line:'#B3743E'}];
+    const b = [{teeth:16,fill:'#7BD3CB',line:'#4A9992'}];
+    const wrap = (s) => `<g opacity="${OP}">${s.split('#B4BAB4').join(LI)
+      .split('#DDE0DB').join(PL).split('#6E7671').join(LI)}</g>`;
+    write(board(
+      wrap(datum(centres(120,150,a),'scribe','CM-01')) + chain(120,150,a) +
+      wrap(datum(centres(120,360,b),'scribe','HM-01',0)) + chain(120,360,b), 500));
+  })();</script>
+  <p style="color:#93A5A3;font-size:12.5px">Note the opacity is <code>0.34</code>
+  here, not the ghost layer's <code>0.17</code>. At 0.17 a one-pixel scribe on a
+  dark ground effectively disappears — a filled ghost wheel survives dimming that
+  a hairline does not. If this treatment ships, that difference is a real value to
+  derive rather than guess, and it should be measured against the rendered page
+  rather than this mock.</p>
 </div>
 
 <p class="lede" style="margin-top:34px">
