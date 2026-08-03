@@ -309,7 +309,7 @@ function segDist(p, a, b) {
   t = Math.max(0, Math.min(1, t));
   return Math.hypot(p.x - (a.x + t * vx), p.y - (a.y + t * vy));
 }
-const ENDS_APART = 90; /* extra push between the first and last wheel of the visible run */
+const ENDS_APART = 90; /* extra push between the two extremities of the spine */
 const CLEARANCE = 13; /* px kept between the tip circles of wheels that are not meshed */
 
 /* The gear train. Each entry meshes with the one before it:
@@ -361,8 +361,42 @@ const STAGE = (function () {
 const WHO = STAGE.people.slice().sort((a, b) =>
   (b.links || []).length - (a.links || []).length)[0] || { slug: '', name: '', links: [] };
 
-/* One entry per wheel across every chain on stage. Each person's first wheel is
-   a root for now; Task 6 gives it a bridge to hang from.
+/* The SPINE is the longest chain -- it sets the scale, and it is the axis every
+   other chain runs parallel to. Ties break by PEOPLE order, which is exactly how
+   WHO picks it above. */
+const SPINE_LEN = Math.max(1, ...STAGE.people.map(p => (p.links || []).length));
+
+/* HOW MANY IDLERS BRIDGE A CHAIN TO THE ONE THAT DRIVES IT. Never zero -- two
+   chains meshing directly would read as one machine, and the bridge is what
+   makes the drive visible.
+
+   MAX_IDLERS is not a number that looked right. Every wheel in a bridge sits at
+   the sum of two pitch radii from its neighbour, so an idler contributes exactly
+   its own diameter to the gap between the two chains: the target gap of about
+   two wheel diameters IS two idlers at the nominal tooth count. Change the
+   target gap and this follows it.
+
+   BOTH IDLERS ARE ALWAYS BUILT INTO TRAIN. How many are actually in mesh is
+   decided at solve time from the room the cross axis has (idlerCount()), and the
+   surplus is PARKED rather than spliced out -- teeth, colours and centre designs
+   are dealt once at load against these indices, and removing an entry on a
+   resize would renumber every parent after it and re-deal the machine under the
+   pointer, which is the whole of #55. */
+const MIN_IDLERS = 1;
+const MAX_IDLERS = 2;
+/* `roomy` is measured, not assumed: see idlerCount(). Portrait is the case it
+   was written for -- there the cross axis is the scarce one and the gap is what
+   gives, because the wheels do not. */
+const IDLERS_FOR = (roomy) => roomy ? MAX_IDLERS : MIN_IDLERS;
+
+/* One bridge per chain that is not the spine: which person it feeds, which
+   TRAIN entries are its idlers (empty when that person set `bridge: false`), and
+   the index of the chain's first wheel. Filled by the TRAIN builder below and
+   read by solve(), which decides where each one hangs from. */
+const BRIDGES = [];
+
+/* One entry per wheel across every chain on stage, plus the idlers that bridge
+   each chain onto the spine.
 
    IT CARRIES NO TOOTH COUNTS AND NO ANGLES, deliberately. Both are dealt fresh
    every load -- dealTeeth() draws each wheel uniformly from [TEETH_MIN,
@@ -383,19 +417,53 @@ const WHO = STAGE.people.slice().sort((a, b) =>
    this is a default rather than a per-wheel choice. */
 const TRAIN = (function () {
   const out = [];
-  STAGE.people.forEach(p => {
+  /* THE SPINE IS EMITTED FIRST, whatever its position in PEOPLE, and every
+     bridge hangs off a wheel already on the array. solve() derives a wheel's
+     position from g[t.parent] out of the wheels it has ALREADY placed, so a
+     parent that appears later than its child reads as undefined and the whole
+     branch lands wherever the last iteration happened to leave it. Sorting the
+     same way WHO does keeps the two in agreement by construction. */
+  const order = STAGE.people.slice().sort((a, b) =>
+    (b.links || []).length - (a.links || []).length);
+  order.forEach(p => {
+    const links = p.links || [];
+    if (!links.length) return;
+    /* A chain bridges unless its own config entry says otherwise. `bridge:
+       false` says "no drive", not "no position" -- an unbridged chain is still
+       placed clear of the others, it simply arrives there without idlers. */
+    const bridged = out.length > 0 && p.bridge !== false;
+    const idlers = [];
+    if (bridged) {
+      for (let k = 0; k < MAX_IDLERS; k++) {
+        /* The first idler's parent is where the bridge HANGS FROM, and that is
+           solved rather than placed -- see solve(). The middle of the spine is
+           the default so the static tree is well formed before anything runs;
+           solve() overrides it with whatever it finds room for. */
+        idlers.push(out.length);
+        out.push({ slug: null, prof: { rim: 1.7 },
+          parent: k === 0 ? Math.floor((SPINE_LEN - 1) / 2) : out.length - 1,
+          person: null, role: 'idler', bridge: p.slug });
+      }
+    }
     const base = out.length;
-    (p.links || []).forEach((l, i) => {
+    links.forEach((l, i) => {
       out.push({ slug: l.slug, prof: { rim: 1.7 },
-        parent: i === 0 ? null : base + i - 1,
+        parent: i === 0 ? (bridged ? idlers[idlers.length - 1] : null) : base + i - 1,
         person: p.slug, role: 'link' });
     });
+    if (base > 0) BRIDGES.push({ person: p.slug, idlers: idlers, head: base });
   });
   return out;
 })();
-/* The SPINE is the longest chain -- it sets the scale and, from Task 6, the axis
-   every other chain runs parallel to. Ties break by PEOPLE order. */
-const SPINE_LEN = Math.max(1, ...STAGE.people.map(p => (p.links || []).length));
+/* Two lookups into BRIDGES, keyed by TRAIN index: which bridge STARTS at this
+   wheel -- the first idler, or the chain head itself when there are none -- and
+   which bridge this wheel is the chain head of. Built once because solve() asks
+   both questions per wheel per pass. */
+const BRIDGE_FROM = {}, BRIDGE_HEAD = {};
+BRIDGES.forEach(b => {
+  BRIDGE_FROM[b.idlers.length ? b.idlers[0] : b.head] = b;
+  BRIDGE_HEAD[b.head] = b;
+});
 
 /* The tooth counts above are the seed, not the answer: they are dealt per load,
    so the machine has a different silhouette every visit rather than the same
@@ -404,26 +472,23 @@ const SPINE_LEN = Math.max(1, ...STAGE.people.map(p => (p.links || []).length));
    meshes, and the engraving band is module-based, so it stays exactly as wide on
    a 13-tooth blank as on a 19.
 
-   The deal is constrained, not free. The total sets the train's overall length,
+   The deal is constrained, not free. The total sets a chain's overall length,
    so it is held near the original 114 and the layout keeps its proportions. No
    two neighbours share a count, because two identical wheels side by side read
    as a mistake rather than a choice. And one wheel is kept genuinely large, since
    the planetary goes to the biggest blank available and a cramped one has
    nothing worth seeing inside it. */
-/* TEETH_SUM scales with the number of wheels -- it is the train's overall length,
-   and it was 114 when there were seven. Eight links means a longer train at the
-   same wheel size, which the stage then scales to fit, so each wheel lands about
-   an eighth smaller on the glass. That is the cost of the extra link, not a bug. */
+/* The target total scales with the number of wheels -- it is a chain's overall
+   length, and it was 114 when there were seven. Eight links means a longer train
+   at the same wheel size, which the stage then scales to fit, so each wheel lands
+   about an eighth smaller on the glass. That is the cost of the extra link, not a
+   bug. */
 const TEETH_MIN = 13, TEETH_MAX = 19, TEETH_SLACK = 4, TEETH_HOST = 18;
 /* The tooth count the deal aims at per wheel. Named once because two separate
-   things derive from it -- the train's target total below, and the nominal span
-   the standard gear size comes from -- and a literal repeated in both would be a
+   things derive from it -- each chain's target total, and the nominal span the
+   standard gear size comes from -- and a literal repeated in both would be a
    copy that could drift. */
 const TEETH_MEAN = 16.3;
-/* The train's overall LENGTH, which is the spine -- a branch adds cross-axis
-   height, not length, so counting every wheel on stage would overstate it and
-   the layout would lose its proportions. */
-const TEETH_SUM = Math.round(TEETH_MEAN * SPINE_LEN);
 /* THE SPAN A NOMINAL CHAIN OCCUPIES, computed rather than measured, and it is
    what gives every page the same gear size. A chain shorter than the longest is
    scaled as though the longest were on stage, so harper.wozi.com draws her wheel
@@ -958,10 +1023,34 @@ function smallestBlankHolding(wantTwo) {
      parses, and the failure it exists for is an edge serving a truncated body,
      a content blocker, or a stale cache. */
   if (!TRAIN.length) return;
+  /* THE TOTAL IS PER CHAIN, because the total IS a chain's overall length and a
+     combined stage has several. Summed across the whole array it became a
+     constraint no combined stage could satisfy: ten wheels cannot total a
+     seven-wheel target -- their minimum already exceeds it -- so every draw was
+     rejected, every load fell through to the fallback below, and ?who=all dealt
+     a flat train of floor-sized wheels with one giant at the head. Silent, and a
+     screenshot passes it.
+     The bridge idlers belong to no chain's length: they set the GAP between two
+     chains rather than the length of either, so they take the range and the
+     no-twins rule and no total at all. */
+  const chains = {};
+  const links = [];
+  TRAIN.forEach((t, i) => {
+    if (t.role !== 'link') return;
+    links.push(i);
+    (chains[t.person] = chains[t.person] || []).push(i);
+  });
+  const names = Object.keys(chains);
   for (let tries = 0; tries < 600; tries++) {
     const cut = TRAIN.map(() => floor + Math.floor(Math.random() * span));
-    if (Math.abs(cut.reduce((a, b) => a + b, 0) - TEETH_SUM) > TEETH_SLACK && floor === TEETH_MIN) continue;
-    if (Math.max.apply(null, cut) < host) continue;
+    if (floor === TEETH_MIN && names.some(k => Math.abs(
+      chains[k].reduce((a, i) => a + cut[i], 0)
+      - Math.round(TEETH_MEAN * chains[k].length)) > TEETH_SLACK)) continue;
+    /* THE BIG BLANK HAS TO BE ONE YOU CAN SEE INTO. An idler is drawn in the
+       background palette with no centre design at all, so a planetary seated on
+       one would simply not be there -- the host wheel is looked for among the
+       LINKED wheels only. */
+    if (Math.max.apply(null, links.map(i => cut[i])) < host) continue;
     /* Two identical wheels side by side read as a mistake rather than a choice --
        and "side by side" means MESHING, which on a tree is the parent, not the
        previous array slot. */
@@ -974,9 +1063,15 @@ function smallestBlankHolding(wantTwo) {
     TRAIN.forEach((t, i) => { t.teeth = cut[i]; });
     return;
   }
-  /* Range too tight to satisfy every preference -- take the floor plus a host. */
+  /* Range too tight to satisfy every preference -- take the floor plus a host.
+     The host lands on a LINKED wheel drawn at random rather than always on
+     TRAIN[0]: the intent is "keep one blank large enough to host a planetary
+     worth looking at", and with several chains on stage the first chain's first
+     wheel has no claim on it. */
   TRAIN.forEach((t, i) => { t.teeth = (i % 2 && span > 1) ? floor + 1 : floor; });
-  TRAIN[0].teeth = Math.max(host, TEETH_MAX);
+  if (links.length) {
+    TRAIN[links[Math.floor(Math.random() * links.length)]].teeth = Math.max(host, TEETH_MAX);
+  }
 })();
 
 /* The bearings are dealt too, which is what actually varies the SHAPE. Tooth
@@ -997,6 +1092,26 @@ function smallestBlankHolding(wantTwo) {
    wheel clears everything it is not meshed with, so this only has to propose a
    shape worth looking at. */
 const ANG_MIN = 14, ANG_MAX = 30, BAND_MAX = 62, ENDS_MAX = 26;
+/* THE END-DRIFT CAP A CHAIN OF n WHEELS CAN ACTUALLY BE HELD TO, because a cap
+   that asks for less than the geometry allows is not a cap, it is a filter that
+   never passes.
+
+   A serpentine alternates its bearings, so consecutive steps cancel: a chain
+   with an EVEN number of steps can return to its own baseline, and one with an
+   ODD number cannot -- whatever the draw, it is left holding a single
+   uncancelled step. The shallowest step the deal can draw is already 27.6 units
+   at the nominal wheel, against an ENDS_MAX of 26, so a TWO-wheel chain (one
+   step) could never satisfy the cap: with the caps applied per chain, the deal
+   would have exhausted every try and assigned no bearings at all, and every
+   wheel's `angle` would have read undefined.
+
+   Derived from the deal's own bounds and the nominal wheel, so it follows them
+   rather than needing to be re-measured. Even-step chains are untouched, which
+   is every chain shipped today. */
+function endsCapFor(n) {
+  const step = MODULE * TEETH_MEAN * Math.sin(ANG_MIN * Math.PI / 180);
+  return ((n - 1) % 2) ? Math.max(ENDS_MAX, step) : ENDS_MAX;
+}
 /* Declared here rather than beside NOMINAL_CHAIN because it needs the bearing
    range, and reading ANG_MIN/ANG_MAX before this line is a temporal dead zone.
    See the note at NOMINAL_CHAIN for why every term is derived. */
@@ -1005,9 +1120,50 @@ const NOMINAL_SPAN = (function () {
   const foreshorten = Math.cos((ANG_MIN + ANG_MAX) / 2 * Math.PI / 180);
   return 2 * r * (1 + (NOMINAL_CHAIN - 1) * foreshorten);
 })();
+/* THE LINKED TRAIN TAKES A SHARE, NOT THE WHOLE. `solved` is the linked wheels
+   only -- the outriggers are added afterwards, in fitEscapes -- so scaling
+   `solved` to the full long axis leaves the icons spanning edge to edge with
+   nowhere for a ghost to sit, and anything that does not fit simply runs off.
+   That is what Charles saw in Firefox portrait.
+
+   Sizing the LINKS to a share of the axis is what he actually asked for and
+   what makes the picture read: the icons shrink as more of them are added,
+   they stay wholly on screen, and the space left at both ends is where the
+   leading and trailing ghosts live. The ghost runs then fill that space and
+   keep going off the edge, so the machine still covers 100% of the long axis
+   -- the coverage comes from the chain being longer, never from the wheels
+   being bigger.
+
+   Declared here rather than inside fitStage(), where it used to live, because
+   the bridge reads it too: idlerCount() has to know the scale the long axis is
+   asking for before there is a solve to measure. */
+const LINK_SHARE = 0.78;
+/* HOW MUCH CROSS AXIS A BRIDGED COMPOSITION WANTS, in solve units, for a bridge
+   of n idlers. One wheel for the spine's own diameter, plus one centre distance
+   for every step of the bridge -- n idlers is n+1 steps, spine to chain head.
+   Every term is the nominal wheel, so nothing here needs re-measuring when the
+   module or the deal moves.
+
+   HONEST ABOUT ITS RANGE: it assumes each bridge hangs off the spine, which is
+   the attachment solve()'s search prefers, and understates the case where one
+   cascades onto a chain that is itself bridged. It does not have to be exact --
+   it only chooses between one idler and two, and the real cross extent is
+   measured off the finished solve by fitStage(), which binds either way. */
+const STAGE_CROSS = (n) => MODULE * TEETH_MEAN
+  * (1 + (STAGE.people.length > 1 ? n + 1 : 0));
 (function dealAngles() {
   const rOf = (t) => MODULE * t.teeth / 2;
   const first = Math.random() < 0.5 ? 1 : -1;
+  /* THE FILTER HAS A FLOOR AS WELL AS A TEST. Every draw here is either legal or
+     discarded, and nothing said what happens when 500 draws in a row are
+     discarded: the loop simply ended, no `angle` was ever assigned, and every
+     bearing downstream read undefined -- which propagates to NaN coordinates, a
+     NaN fit, and `gsr !== this._gsr` true forever because NaN never equals
+     itself. The page did not degrade, it rendered nothing at all and spun.
+     Keeping the closest draw makes the worst case a train that leans a little
+     further than it should, which is the same trade dealTeeth's fallback makes.
+     (Same one-sided-bound class as #46 and #59.) */
+  let best = null, bestCost = Infinity;
   for (let tries = 0; tries < 500; tries++) {
     const ang = [0];
     for (let i = 1; i < TRAIN.length; i++) {
@@ -1017,22 +1173,46 @@ const NOMINAL_SPAN = (function () {
        offset plus this step, and the array order is not the chain order.
        A COMBINED STAGE has more than one root -- every person's first wheel
        carries parent === null, not just TRAIN[0] -- and a root has no bearing
-       of its own to walk, so it starts its own chain back at the baseline. */
+       of its own to walk, so it starts its own chain back at the baseline.
+
+       THE CAPS ARE PER CHAIN. Both of them describe ONE chain -- the band its
+       centres occupy, and how far its far end has drifted from its near one --
+       and the walk now spans several. Measured across the whole array they
+       described the union of every chain plus the bridges between them, which is
+       a shape no chain has: it rejected honest draws and would have accepted a
+       chain that wandered as long as another wandered back.
+
+       A BRIDGE IS NOT DRIFT. An idler takes the bridge bearing, not a dealt one,
+       so the cross-axis offset it contributes is deliberate and belongs to no
+       chain's band -- the walk skips it, and a chain hanging off one starts back
+       at its own baseline. */
     const yOf = new Array(TRAIN.length).fill(0);
-    let lo = 0, hi = 0, last = 0;
-    for (let i = 1; i < TRAIN.length; i++) {
-      const p = TRAIN[i].parent;
-      if (p == null) continue;
-      yOf[i] = yOf[p] + (rOf(TRAIN[p]) + rOf(TRAIN[i])) * Math.sin(ang[i] * Math.PI / 180);
-      if (yOf[i] < lo) lo = yOf[i];
-      if (yOf[i] > hi) hi = yOf[i];
-      last = yOf[i];
+    const band = {};
+    for (let i = 0; i < TRAIN.length; i++) {
+      const t = TRAIN[i];
+      if (t.role !== 'link') continue;
+      const p = t.parent;
+      const along = p != null && TRAIN[p].role === 'link' && TRAIN[p].person === t.person;
+      yOf[i] = along
+        ? yOf[p] + (rOf(TRAIN[p]) + rOf(t)) * Math.sin(ang[i] * Math.PI / 180)
+        : 0;
+      const b = band[t.person] = band[t.person] || { lo: 0, hi: 0, last: 0, n: 0 };
+      if (yOf[i] < b.lo) b.lo = yOf[i];
+      if (yOf[i] > b.hi) b.hi = yOf[i];
+      b.last = yOf[i];
+      b.n++;
     }
-    if (hi - lo > BAND_MAX) continue;
-    if (Math.abs(last) > ENDS_MAX) continue;
+    /* How far past its own caps the worst chain of this draw is, so a draw that
+       misses by a hair beats one that misses by a mile. Zero means legal. */
+    const cost = Object.keys(band).reduce((m, k) => Math.max(m,
+      band[k].hi - band[k].lo - BAND_MAX,
+      Math.abs(band[k].last) - endsCapFor(band[k].n)), -Infinity);
+    if (cost < bestCost) { bestCost = cost; best = ang; }
+    if (cost > 0) continue;
     TRAIN.forEach((t, i) => { t.angle = +ang[i].toFixed(2); });
     return;
   }
+  if (best) TRAIN.forEach((t, i) => { t.angle = +best[i].toFixed(2); });
 })();
 
 const CENTRE_DEAL = dealCentres(TRAIN.length);
@@ -1048,13 +1228,19 @@ const CENTRE_DEAL = dealCentres(TRAIN.length);
     const m = planetaryMenuFor(teeth);
     return two ? m.two.length > 0 : !m.fallback;
   };
-  const order = TRAIN.map((t, i) => i).sort((a, b) => TRAIN[b].teeth - TRAIN[a].teeth);
+  /* LINKED WHEELS ONLY, both as candidates and as a place the deal may leave
+     one. An idler is drawn in the background palette by ghostSvg, which reads
+     neither `kind` nor `arms` -- an epicyclic left sitting on one is not a
+     cramped planetary, it is an invisible one. */
+  const order = TRAIN.map((t, i) => i).filter(i => TRAIN[i].role === 'link')
+    .sort((a, b) => TRAIN[b].teeth - TRAIN[a].teeth);
   const claimed = {};
   [['ravigneaux', true], ['planetary', false]].forEach(function (pair) {
     const type = pair[0], two = pair[1];
     const pi = CENTRE_DEAL.findIndex(c => c.type === type);
     if (pi < 0) return;
-    if (!claimed[pi] && TRAIN[pi] && holds(TRAIN[pi].teeth, two)) { claimed[pi] = 1; return; }
+    if (!claimed[pi] && TRAIN[pi] && TRAIN[pi].role === 'link'
+      && holds(TRAIN[pi].teeth, two)) { claimed[pi] = 1; return; }
     const big = order.find(i => !claimed[i] && holds(TRAIN[i].teeth, two));
     if (big === undefined) { claimed[pi] = 1; return; }
     const tmp = CENTRE_DEAL[pi]; CENTRE_DEAL[pi] = CENTRE_DEAL[big]; CENTRE_DEAL[big] = tmp;
@@ -1187,7 +1373,14 @@ function dealColours(n, parentOf) {
 }
 const WHEEL_DEAL = dealColours(TRAIN.length, (i) => TRAIN[i].parent);
 TRAIN.forEach((t, i) => {
-  t.color = WHEEL_DEAL[i % WHEEL_DEAL.length];
+  /* AN IDLER IS ANONYMOUS BY DESIGN LANGUAGE, and that is the whole reason a
+     bridge is made of them rather than of an unowned coloured wheel: a coloured
+     wheel with no badge and no engraving looks exactly like the blank-gear
+     defect in #65. The background palette says "structure, not content" without
+     anyone having to be told. */
+  t.color = t.role === 'idler'
+    ? GHOST_COLORS[i % GHOST_COLORS.length]
+    : WHEEL_DEAL[i % WHEEL_DEAL.length];
 });
 
 /* Sibling services sit on neighbouring wheels of the train. */
@@ -1596,8 +1789,13 @@ class Component extends DCLogic {
     this._lastM = this._M;
     const gears = this.solve().gears;
     if (this._spinEls) {
+      /* ADDRESSED BY TRAIN INDEX, which is what the render's ref writes them
+         under -- not by position in `gears`. The two were the same array until
+         a parked idler made the solved list shorter than TRAIN, and reading by
+         position would then have driven the tail of the train with the wrong
+         wheel's phase, or with nothing at all. */
       for (let i = 0; i < gears.length; i++) {
-        const el = this._spinEls[i];
+        const el = this._spinEls[gears[i].i];
         if (el) el.style.transform = 'rotate(' + (gears[i].phase + gears[i].dir * this._M / gears[i].teeth).toFixed(3) + 'deg)';
       }
     }
@@ -1750,6 +1948,36 @@ class Component extends DCLogic {
      doubling back on itself. Only the layout bearings rotate — badges stay upright. */
   axisRot() { return window.innerHeight > window.innerWidth * 1.05 ? 90 : 0; }
 
+  /* HOW MANY IDLERS THE BRIDGE CAN AFFORD. Two is the target -- about two wheel
+     diameters of gap -- and the cross axis is what takes it away, which is why
+     portrait is the case that drops to one: there the cross axis is the scarce
+     one and the gap is what gives, because the wheels do not.
+
+     MEASURED, NOT ASSUMED, and derived rather than tuned. The long axis is what
+     asks for a scale (LINK_SHARE of it, over the span a nominal chain occupies);
+     STAGE_CROSS says how much cross axis the composition then wants at that
+     scale; the second idler is taken only while that still FITS the cross axis.
+     It deliberately does not spend CROSS_BLEED: the bleed exists so a serpentine
+     may run off the top and bottom of a wide screen, not so a bridge may hang off
+     the side. This is also the legibility floor doing its job -- everything that
+     would otherwise push the fit down far enough to smear the engraving arrives
+     through the cross term, so bounding the bridge here bounds it there.
+
+     HYSTERESIS, or a drag across the threshold adds and removes a whole wheel on
+     every pixel: one nominal wheel of cross axis must be spare to TAKE the second
+     idler, and none to keep it. The gap between the two thresholds is a wheel,
+     which is the thing being added -- not a percentage someone picked. */
+  idlerCount() {
+    const vv = window.visualViewport;
+    const w = (vv && vv.width) || window.innerWidth;
+    const h = (vv && vv.height) || window.innerHeight;
+    const longAvail = Math.max(w, h), crossAvail = Math.min(w, h);
+    const scale = LINK_SHARE * longAvail / NOMINAL_SPAN;
+    const want = STAGE_CROSS(MAX_IDLERS) * scale;
+    const spare = this._idlerN === MAX_IDLERS ? 0 : MODULE * TEETH_MEAN * scale;
+    return IDLERS_FOR(want + spare <= crossAvail);
+  }
+
   /* The one number every rendered coordinate in the stage is multiplied by.
      Before fitStage() has measured the viewport there is nothing to multiply by
      yet, so the boot value is read back out of the `--gsfit` declaration rather
@@ -1769,10 +1997,17 @@ class Component extends DCLogic {
     const small = Math.min(window.innerWidth, window.innerHeight);
     const boost = Math.round(Math.max(0.86, Math.min(1.15, small / 700)) * 20) / 20;
     const tight = Math.round(Math.max(0.6, Math.min(1, small / 760)) * 20) / 20;
-    if (rot !== this._axisRot || boost !== this._spreadBoost || tight !== this._tight) {
+    /* The idler count belongs with the other quantised layout inputs: it changes
+       how many wheels the solve places, so a change has to invalidate the cache
+       exactly as an orientation flip does. Its own hysteresis lives in
+       idlerCount(), which reads the count it is replacing. */
+    const idle = this.idlerCount();
+    if (rot !== this._axisRot || boost !== this._spreadBoost || tight !== this._tight
+      || idle !== this._idlerN) {
       this._axisRot = rot;
       this._spreadBoost = boost;
       this._tight = tight;
+      this._idlerN = idle;
       this._solved = null;
       this._escKey = null;
       this.forceUpdate();
@@ -1865,20 +2100,8 @@ class Component extends DCLogic {
        missed is that the SHORT axis does not have that property. The cap below is
        a fraction of the short axis, which is the sentence's own words two
        paragraphs up: "a wheel cannot exceed the short axis". */
-    /* THE LINKED TRAIN TAKES A SHARE, NOT THE WHOLE. `solved` is the eight linked
-       wheels only -- the outriggers are added afterwards, in fitEscapes -- so
-       scaling `solved` to the full long axis leaves the icons spanning edge to
-       edge with nowhere for a ghost to sit, and anything that does not fit simply
-       runs off. That is what Charles saw in Firefox portrait.
-
-       Sizing the LINKS to a share of the axis is what he actually asked for and
-       what makes the picture read: the icons shrink as more of them are added,
-       they stay wholly on screen, and the space left at both ends is where the
-       leading and trailing ghosts live. The ghost runs then fill that space and
-       keep going off the edge, so the machine still covers 100% of the long axis
-       -- the coverage comes from the chain being longer, never from the wheels
-       being bigger. */
-    const LINK_SHARE = 0.78;
+    /* LINK_SHARE is declared at module scope, beside NOMINAL_SPAN, because the
+       bridge reads it too -- see the note there for what it is and why. */
     /* A SINGLE WHEEL MAY NOT EXCEED THE SHORT AXIS. Both terms above are ratios
        against the SOLVE, so they say nothing about how big one wheel ends up.
        That is fine while the solve is a chain -- solved.w is seven wheels, so
@@ -2051,6 +2274,7 @@ class Component extends DCLogic {
      angular speed inversely proportional to tooth count, tooth phase meshed. */
   solve() {
     if (this._axisRot === undefined) this._axisRot = this.axisRot();
+    if (this._idlerN === undefined) this._idlerN = this.idlerCount();
     if (this._solved) return this._solved;
     /* Sites are dealt onto the wheels fresh each load, but sibling services stay
        belted to each other: the two belt-linked slots always get a pair. */
@@ -2122,14 +2346,108 @@ class Component extends DCLogic {
     }
     const slugFor = this._slugFor;
     const g = [], strands = [];
+    /* g IS DENSE OVER THE WHEELS ACTUALLY PLACED; TRAIN IS NOT. A parked idler
+       is skipped entirely, so a wheel's slot in g stops being its index in
+       TRAIN -- gi maps one to the other, and every lookup that used to index g
+       with a TRAIN index goes through it. Nothing else changes: each entry still
+       carries its own TRAIN index as `i`, which is what the render keys and the
+       rotation loop address it by. */
+    const gi = new Array(TRAIN.length).fill(-1);
+    /* HOW MANY IDLERS ARE IN MESH, and therefore which are parked. The surplus is
+       skipped rather than spliced out of TRAIN (see MIN_IDLERS), and the chain a
+       bridge feeds re-parents onto the last idler still in mesh. */
+    const nIdle = Math.max(MIN_IDLERS, Math.min(MAX_IDLERS, this._idlerN || MIN_IDLERS));
+    const parked = new Array(TRAIN.length).fill(false);
+    const parentOf = TRAIN.map(t => t.parent);
+    BRIDGES.forEach(b => {
+      b.idlers.forEach((ix, k) => { if (k >= nIdle) parked[ix] = true; });
+      if (b.idlers.length) parentOf[b.head] = b.idlers[Math.min(nIdle, b.idlers.length) - 1];
+    });
+    /* PERPENDICULAR TO THE SPINE, RELATIVE TO IT. The stage rotates the whole
+       train by this._axisRot in portrait, so a bearing in absolute screen degrees
+       would keep the bridge horizontal and send it across the SHORT axis --
+       exactly the #67 failure. It is only ever used added to this._axisRot, never
+       on its own. All bridges take the same side, which is the ordering Charles
+       chose over balancing the cross axis: growth goes one way and the spine sits
+       at the top. */
+    const BRIDGE_BEARING = 90;
+    const bridgeBase = (this._axisRot || 0) + BRIDGE_BEARING;
+    /* HOW FAR OFF PERPENDICULAR A BRIDGE MAY BE NUDGED before it stops reading as
+       a bridge and starts reading as a wandering chain. Not a new tuned number:
+       it is the width of the bearing range the serpentine itself is dealt from,
+       so the two move together. */
+    const BRIDGE_SWING = ANG_MAX - ANG_MIN;
+    const bridgeRuns = [];
     /* A TREE HAS MORE THAN TWO ENDS. The rule is that the machine's extremities
        push apart so the run reads as a line rather than a closed ring; with one
        chain that is the first and last wheel, but a branch adds an end. Leaves
-       and the root are the extremities. */
+       and the root are the extremities.
+
+       AND THE EXTREMITIES ARE THE SPINE'S. Read as "any two leaves" the rule
+       over-applies the moment the tree is bushy: two chains hanging off one spine
+       are both leaves, and they are MEANT to sit one bridge apart rather than be
+       shoved a further ENDS_APART from each other -- which surfaces as the nudge
+       loop growing d by 12% over and over until something lands. The spine is the
+       line that has to read as a line; a branch hangs off it. On a single chain
+       every wheel is spine, so this is the old rule exactly -- the root and the
+       one leaf, and no other pair. */
     const hasChild = new Array(TRAIN.length).fill(false);
     TRAIN.forEach(t => { if (t.parent != null) hasChild[t.parent] = true; });
     const isLeaf = (i) => !hasChild[i];
+    const isEnd = (i) => TRAIN[i].person === WHO.slug
+      && (isLeaf(i) || TRAIN[i].parent == null);
+    /* WHERE A BRIDGE HANGS FROM IS SOLVED, NOT PLACED. Candidates are tried from
+       the middle of the spine outward, so a branch balances the run rather than
+       hanging off one end, and then -- cascading -- onto the wheels of chains
+       already on stage, which is how a third chain arrives once the spine has no
+       clear bearing left. A candidate is rejected when any wheel of the bridge
+       would foul a wheel already placed, when the run would pass over one, or
+       when it would cross a bridge already run.
+
+       DECIDED ONCE AND CACHED ON THE INSTANCE, exactly as the slug seating above
+       is and for the same reason (#55): solve() re-runs at every quantised resize
+       step, and a bridge free to re-choose would walk along the spine while a
+       window edge was being dragged. */
+    const bridgeAnchor = (b) => {
+      if (!this._bridgeAt) this._bridgeAt = {};
+      if (this._bridgeAt[b.person] !== undefined) return this._bridgeAt[b.person];
+      const mid = (SPINE_LEN - 1) / 2;
+      const rank = (k) => (TRAIN[k].person === WHO.slug ? 0 : 1000)
+        + (TRAIN[k].role === 'link' ? 0 : 500) + Math.abs(k - mid);
+      const cands = g.map(o => o.i).sort((p, q) => rank(p) - rank(q));
+      const a = bridgeBase * Math.PI / 180;
+      const tight = this._tight || 1;
+      /* No idlers means an unbridged chain: its one step carries the gap the
+         idlers would have made, so `bridge: false` changes the drive and not the
+         position. */
+      const wheels = b.idlers.slice(0, nIdle).concat([b.head]);
+      const gap = b.idlers.length ? 0 : nIdle * MODULE * TEETH_MEAN;
+      let choice = cands.length ? cands[0] : null;
+      for (let c = 0; c < cands.length; c++) {
+        const from = g[gi[cands[c]]];
+        let px = from.x, py = from.y, pr = from.r, clear = true;
+        const pts = [];
+        wheels.forEach(k => {
+          const rr = MODULE * TRAIN[k].teeth / 2, d = pr + rr + gap;
+          px += d * Math.cos(a); py += d * Math.sin(a);
+          pts.push({ x: px, y: py, ro: rr + MODULE * TOOTH_ADD });
+          pr = rr;
+        });
+        pts.forEach((p, k) => g.forEach(o => {
+          if (k === 0 && o.i === cands[c] && !gap) return;   /* the wheel it meshes */
+          if (Math.hypot(p.x - o.x, p.y - o.y) < o.ro + p.ro + CLEARANCE * tight) clear = false;
+        }));
+        const s1 = { x: from.x, y: from.y }, s2 = pts[pts.length - 1];
+        if (clear) clear = !g.some(o => o.i !== cands[c]
+          && segDist({ x: o.x, y: o.y }, s1, s2) < o.ro);
+        if (clear) clear = !bridgeRuns.some(st => segCross(s1, s2, st[0], st[1]));
+        if (clear) { choice = cands[c]; break; }
+      }
+      this._bridgeAt[b.person] = choice;
+      return choice;
+    };
     TRAIN.forEach((t, i) => {
+      if (parked[i]) return;
       const prof = t.prof || {};
       const r = MODULE * t.teeth / 2;
       const ro = r + MODULE * TOOTH_ADD;
@@ -2140,27 +2458,49 @@ class Component extends DCLogic {
          from its own parent is what makes a branch possible. The initial values
          are the ones the old declaration held, so the root is unchanged. */
       let x = 0, y = 0, dir = 1, phase = 0;
-      if (t.parent != null) {
-        const prev = g[t.parent];
+      /* A BRIDGE STARTS HERE: take the anchor from the attachment solve rather
+         than the default the TRAIN builder wrote. An unbridged chain's first
+         wheel stays a ROOT -- no parent, no drive -- but is still placed off the
+         same anchor, so `bridge: false` costs it its idlers and nothing else.
+         EVERY non-first root needs real coordinates: without this they all
+         resolve to (0,0) and the second chain draws on top of the first. */
+      const starts = BRIDGE_FROM[i];
+      let rootFrom = null;
+      if (starts) {
+        const at = bridgeAnchor(starts);
+        if (at != null) { if (starts.idlers.length) parentOf[i] = at; else rootFrom = at; }
+      }
+      const free = rootFrom != null && parentOf[i] == null;
+      const host = free ? rootFrom : parentOf[i];
+      if (host != null && gi[host] >= 0) {
+        const prev = g[gi[host]];
         const linked = !!t.link;
+        /* A WHEEL IS COMPLETING A BRIDGE when it is an idler, when its host is
+           one, or when it is an unbridged chain's root: the run that sets the gap
+           between two chains is perpendicular to them, and only then does the
+           chain it feeds go back to running parallel to the spine. */
+        const bridging = free || t.role === 'idler' || TRAIN[host].role === 'idler';
         /* Distance is fixed by the drive type; the bearing is nudged until this wheel
            clears every wheel it is not meshed with by at least CLEARANCE. */
-        let d = linked ? (prev.r + r) * (t.spread || 2) * (this._spreadBoost || 1) : prev.r + r;
-        const base = t.angle + (this._axisRot || 0);
+        let d = linked ? (prev.r + r) * (t.spread || 2) * (this._spreadBoost || 1)
+          : free ? prev.r + r + nIdle * MODULE * TEETH_MEAN
+          : prev.r + r;
+        const base = bridging ? bridgeBase : t.angle + (this._axisRot || 0);
+        const maxStep = linked ? 150 : bridging ? BRIDGE_SWING : 60;
         let ang = base, placed = false;
         for (let pass = 0; pass < (linked ? 3 : 1) && !placed; pass++) {
-          for (let step = 0; step <= (linked ? 150 : 60) && !placed; step += 4) {
+          for (let step = 0; step <= maxStep && !placed; step += 4) {
             for (let sgn = 1; sgn >= -1 && !placed; sgn -= 2) {
               const cand = base + sgn * step;
               const a = cand * Math.PI / 180;
               const px = prev.x + d * Math.cos(a), py = prev.y + d * Math.sin(a);
-              let clash = g.some((o, oi) => {
-                if (oi === t.parent) return false;
+              let clash = g.some((o) => {
+                if (o.i === host && !free) return false;
                 /* The two ends of the train repel each other, so the run reads as a
                    line of machinery rather than a closed ring. */
                 const tight = this._tight || 1;
                 const need = o.ro + ro + CLEARANCE * tight
-                  + ((isLeaf(oi) || oi === 0) && isLeaf(i) && oi !== t.parent ? ENDS_APART * tight : 0);
+                  + (isEnd(o.i) && isEnd(i) && o.i !== host ? ENDS_APART * tight : 0);
                 return Math.hypot(px - o.x, py - o.y) < need;
               });
               if (!clash && linked && g.length > 1) {
@@ -2175,7 +2515,7 @@ class Component extends DCLogic {
                 /* A chain or belt run may not cross another run, nor pass over a wheel. */
                 const s1 = { x: prev.x, y: prev.y }, s2 = { x: px, y: py };
                 clash = strands.some(st => segCross(s1, s2, st[0], st[1])) ||
-                  g.some((o, oi) => oi !== t.parent && segDist({ x: o.x, y: o.y }, s1, s2) < o.ro + 10);
+                  g.some((o) => o.i !== host && segDist({ x: o.x, y: o.y }, s1, s2) < o.ro + 10);
               }
               if (!clash) { ang = cand; x = px; y = py; placed = true; }
               if (step === 0) break;
@@ -2187,8 +2527,15 @@ class Component extends DCLogic {
         if (linked) {
           dir = prev.dir;
           phase = 0;
-          chainFrom = t.parent;
+          chainFrom = host;
           strands.push([{ x: prev.x, y: prev.y }, { x: x, y: y }]);
+        } else if (free) {
+          /* AN UNBRIDGED CHAIN IS ITS OWN MACHINE. Nothing drives it, so there is
+             no sense to inherit and no tooth phase to mesh: it takes the same
+             values the spine's own root takes, and no consumer has to special-case
+             a wheel with no parent. */
+          dir = 1;
+          phase = 0;
         } else {
           dir = -prev.dir;
           /* Exact conjugate mesh: measure where the line of centres falls inside the
@@ -2199,6 +2546,17 @@ class Component extends DCLogic {
           phase = ang + 180 - (0.5 - u) * pThis;
         }
       }
+      /* Record the finished run, so the next bridge can be rejected for crossing
+         it. Kept separate from `strands`, which is the dormant chain-and-belt
+         capability's list and is drawn -- a bridge is meshed metal, not a strand. */
+      const arrived = BRIDGE_HEAD[i];
+      if (arrived && this._bridgeAt) {
+        const at = this._bridgeAt[arrived.person];
+        if (at != null && gi[at] >= 0) {
+          bridgeRuns.push([{ x: g[gi[at]].x, y: g[gi[at]].y }, { x: x, y: y }]);
+        }
+      }
+      gi[i] = g.length;
       g.push({ i: i, teeth: t.teeth, color: t.color, cv: t.cv || null, crot: t.crot || 0, slug: slugFor[i] || null, person: t.person, role: t.role, belt: t.link || null, kind: t.kind || 'holes', arms: t.arms || 5, prof: prof, chainFrom: chainFrom,
         r: r, ro: ro, x: x, y: y, dir: dir, phase: phase });
     });
@@ -2225,7 +2583,7 @@ class Component extends DCLogic {
     minX = hubMidX - halfX; maxX = hubMidX + halfX;
     minY = hubMidY - halfY; maxY = hubMidY + halfY;
     g.forEach(k => { k.cx = k.x - minX; k.cy = k.y - minY; });
-    const chains = g.filter(k => k.chainFrom !== null && k.chainFrom !== undefined).map(k => ({ a: g[k.chainFrom], b: k }));
+    const chains = g.filter(k => k.chainFrom !== null && k.chainFrom !== undefined).map(k => ({ a: g[gi[k.chainFrom]], b: k }));
     /* The wordmark hangs from the lowest wheel on two cords, clear of every gear. */
     this._solved = { gears: g, chains: chains, w: maxX - minX, h: maxY - minY };
     return this._solved;
@@ -3642,7 +4000,13 @@ class Component extends DCLogic {
           style: {
             transform: 'rotate(' + g.phase.toFixed(2) + 'deg)', willChange: 'transform'
           } },
-          this.gearSvg(g, S)))))
+          /* A BRIDGE IDLER IS DRAWN AS A GHOST. It is structural -- solved with
+             the train, because it is what decides where a chain sits -- but it
+             carries nobody's service, so it gets the background palette and none
+             of gearSvg's marks: no engraving, no badge, no centre design. That is
+             what makes it read as the drive between two machines rather than as a
+             wheel someone forgot to label (#65). */
+          g.role === 'idler' ? this.ghostSvg(g, S) : this.gearSvg(g, S)))))
 
     /* Filter on a slug that RESOLVES, not merely on one being present. solve()
        now only seats services the active person has (#53), so this is belt and

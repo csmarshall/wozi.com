@@ -82,37 +82,61 @@ def _grab_number(name):
 MODULE = _grab_number("MODULE")
 TOOTH_ADD = _grab_number("TOOTH_ADD")
 
-# gearSvg(g, S) is the only renderer that draws a LINKED wheel's outer <svg>
-# (ghostSvg draws the dim background wheels, already excluded below by
-# requiring <defs> as the svg's first child -- ghosts don't carry one). It
-# sizes that svg `(g.ro + 6) * 2`, where g.ro is already the OUTER radius
-# (pitch radius + addendum) in solve units -- so the svg's own width is
-# addendum-plus-padding beyond the pitch circle on every side, not the pitch
-# radius meshing distance is actually measured against.
+# TWO RENDERERS DRAW A SOLVED WHEEL, and they pad their <svg> by different
+# amounts. gearSvg(g, S) draws the linked wheels and sizes its svg
+# `(g.ro + 6) * 2`; ghostSvg(g, S) draws the bridge idlers -- and the escape
+# runs -- and sizes its own `(g.ro + 4) * 2`. In both, g.ro is already the OUTER
+# radius (pitch radius + addendum) in solve units, so the svg's width overstates
+# the pitch radius that meshing distance is measured against by addendum plus
+# that renderer's padding.
 #
-# The "6" is a literal in index.html, not a named constant, so it cannot be
-# grabbed with _grab_number(). It is pulled out of the exact source line that
-# defines it instead of retyped -- the same rule #59 exists for a whole file,
-# applied to one padding literal. If that line ever moves or changes shape,
-# this harness fails loudly rather than silently drifting back to the bug it
-# was written to catch.
-_PAD_RE = re.compile(
-    r"size\s*=\s*\(g\.ro\s*\+\s*(-?[0-9]+(?:\.[0-9]+)?)\)\s*\*\s*2,\s*r\s*=\s*g\.r\s*,\s*m\s*=\s*MODULE")
-_pad_m = _PAD_RE.search(_HTML_SRC)
-if not _pad_m:
-    print("FATAL: gearSvg()'s svg-sizing line not found in index.html -- "
-          "the padding this harness corrects for may have moved or been renamed")
-    sys.exit(2)
-PAD_LITERAL = float(_pad_m.group(1))
+# Correcting both matters, not just gearSvg's: a bridge idler is a real,
+# structural, MESHING wheel -- it is what carries the drive from one chain into
+# the next -- so a harness that could not measure one would report PASS on a
+# stage whose second chain was not driven at all, which is precisely the failure
+# this file exists to catch.
+#
+# The "6" and the "4" are literals in index.html, not named constants, so they
+# cannot be grabbed with _grab_number(). Each is pulled out of the exact source
+# line that defines it instead of retyped -- the same rule #59 exists for a whole
+# file, applied to two padding literals. If either line moves or changes shape,
+# this harness fails loudly rather than silently drifting back to the bug it was
+# written to catch.
+def _pad_literal(rx, who):
+    m = re.search(rx, _HTML_SRC)
+    if not m:
+        print(f"FATAL: {who}'s svg-sizing line not found in index.html -- "
+              "the padding this harness corrects for may have moved or been renamed")
+        sys.exit(2)
+    return float(m.group(1))
+
+
+PAD_LITERAL = _pad_literal(
+    r"size\s*=\s*\(g\.ro\s*\+\s*(-?[0-9]+(?:\.[0-9]+)?)\)\s*\*\s*2,\s*r\s*=\s*g\.r\s*,\s*m\s*=\s*MODULE",
+    "gearSvg()")
+GHOST_PAD_LITERAL = _pad_literal(
+    r"size\s*=\s*\(g\.ro\s*\+\s*(-?[0-9]+(?:\.[0-9]+)?)\)\s*\*\s*2,\s*r\s*=\s*g\.r\s*;",
+    "ghostSvg()")
 
 # The full outer-radius overstatement, in SOLVE units (unscaled by the page's
-# fit factor): addendum beyond the pitch circle, plus the drawn padding.
+# fit factor): addendum beyond the pitch circle, plus the drawn padding. One per
+# renderer; the sample below says which drew each wheel.
 RADIUS_PAD_SOLVE = MODULE * TOOTH_ADD + PAD_LITERAL
+GHOST_RADIUS_PAD_SOLVE = MODULE * TOOTH_ADD + GHOST_PAD_LITERAL
 
 
-# A linked wheel is an <svg> whose first child is <defs>. Ghost wheels (svg
-# without a defs-first child) are excluded: they are re-dealt per load, not
-# part of the tree.
+# WHICH WHEELS ARE ON THE STAGE, structurally rather than by appearance. Every
+# wheel solve() places -- linked or idler -- is rendered as an anchor <div>
+# directly inside the one `aria-hidden="true"` container renderVals() builds for
+# the artwork. The escape runs are NOT: they live one level deeper, inside the
+# ghost layer that container holds, so their anchor's parent is that layer and
+# not the container. Testing the anchor's parent therefore separates "solved with
+# the train" from "dealt afterwards by fitEscapes", which is the distinction that
+# matters here -- and it does not confuse a bridge idler with an escape wheel
+# merely because both are drawn in the background palette.
+#
+# `defs` then says which RENDERER drew it: gearSvg opens with a <defs>, ghostSvg
+# does not. That picks the padding to subtract, nothing more.
 #
 # POSITION and ROTATION live on two different ancestors, not one combined
 # wrapper: solve()'s render (index.html ~3600) emits an outer anchor <div>
@@ -139,10 +163,11 @@ SAMPLE_JS = r"""
 (() => {
   const out = [];
   document.querySelectorAll('svg').forEach((s) => {
-    const k = s.firstElementChild;
-    if (!k || k.tagName.toLowerCase() !== 'defs') return;
     const spin = s.parentElement;       // carries transform: rotate(...)
-    const anchor = spin.parentElement;  // carries left/top == wheel centre
+    const anchor = spin && spin.parentElement;  // carries left/top == wheel centre
+    const stage = anchor && anchor.parentElement;
+    if (!stage || stage.getAttribute('aria-hidden') !== 'true') return;
+    const k = s.firstElementChild;
     const st = anchor.getAttribute('style') || '';
     const m = st.match(/left:\s*([-0-9.]+)px;\s*top:\s*([-0-9.]+)px/);
     const w = parseFloat(s.getAttribute('width'));
@@ -150,8 +175,9 @@ SAMPLE_JS = r"""
     const mm = tr.match(/matrix\(([-0-9.e]+),\s*([-0-9.e]+)/);
     if (!m || !mm) return;
     out.push({
-      cx: parseFloat(m[1]), cy: parseFloat(m[2]),
-      rOuter: w / 2, rot: Math.atan2(+mm[2], +mm[1]) * 180 / Math.PI
+      cx: parseFloat(m[1]), cy: parseFloat(m[2]), rOuter: w / 2,
+      ghost: !(k && k.tagName.toLowerCase() === 'defs'),
+      rot: Math.atan2(+mm[2], +mm[1]) * 180 / Math.PI
     });
   });
   const raw = parseFloat(getComputedStyle(document.documentElement)
@@ -160,6 +186,11 @@ SAMPLE_JS = r"""
   return JSON.stringify({ wheels: out, S: S });
 })()
 """
+
+
+def _pad_of(wheel):
+    """The outer-radius overstatement for whichever renderer drew this wheel."""
+    return GHOST_RADIUS_PAD_SOLVE if wheel["ghost"] else RADIUS_PAD_SOLVE
 
 
 def delta(a, b):
@@ -249,11 +280,14 @@ async def cdp():
     s1, s2 = r1["wheels"], r2["wheels"]
     S = r1["S"]
 
-    print(f"wheels sampled     : {len(s1)}")
+    print(f"wheels sampled     : {len(s1)}  "
+          f"({sum(1 for w in s1 if not w['ghost'])} linked, "
+          f"{sum(1 for w in s1 if w['ghost'])} idler)")
     print(f"fit scale (S)      : {S:.2f}  (from --gsfit, floored to gsRender()'s own quantisation)")
-    print(f"radius pad (solve) : {RADIUS_PAD_SOLVE:.4f}  "
-          f"(MODULE*TOOTH_ADD={MODULE * TOOTH_ADD:.4f} + literal {PAD_LITERAL:.4f}, "
-          f"from gearSvg()'s own sizing line)")
+    print(f"radius pad (solve) : {RADIUS_PAD_SOLVE:.4f} linked / "
+          f"{GHOST_RADIUS_PAD_SOLVE:.4f} idler  "
+          f"(MODULE*TOOTH_ADD={MODULE * TOOTH_ADD:.4f} + literal {PAD_LITERAL:.4f} / "
+          f"{GHOST_PAD_LITERAL:.4f}, from each renderer's own sizing line)")
 
     if S <= 0:
         print("\nRESULT: FAIL (--gsfit unreadable -- cannot recover pitch radius)")
@@ -295,8 +329,8 @@ async def cdp():
     for i in range(len(s1)):
         for j in range(i + 1, len(s1)):
             a, b = s1[i], s1[j]
-            ra = a["rOuter"] - RADIUS_PAD_SOLVE * S
-            rb = b["rOuter"] - RADIUS_PAD_SOLVE * S
+            ra = a["rOuter"] - _pad_of(a) * S
+            rb = b["rOuter"] - _pad_of(b) * S
             d = math.hypot(a["cx"] - b["cx"], a["cy"] - b["cy"])
             rs = ra + rb
             diff = d - rs
@@ -317,8 +351,8 @@ async def cdp():
             if any(i == pi and j == pj for pi, pj, *_ in pairs):
                 continue
             a, b = s1[i], s1[j]
-            ra = a["rOuter"] - RADIUS_PAD_SOLVE * S
-            rb = b["rOuter"] - RADIUS_PAD_SOLVE * S
+            ra = a["rOuter"] - _pad_of(a) * S
+            rb = b["rOuter"] - _pad_of(b) * S
             d = math.hypot(a["cx"] - b["cx"], a["cy"] - b["cy"])
             rs = ra + rb
             non_pairs.append((i, j, d - rs))

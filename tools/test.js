@@ -35,8 +35,9 @@ const meshRav = require('./mesh_rav.js');
 const SRC = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 /* The settings moved to config.js (#40), so the suite reads BOTH files. It has
    to: TRAIN is derived from the active person's links now, and its length feeds
-   TEETH_SUM and therefore the geometry -- a suite that only read index.html
-   would be measuring a train whose size it could no longer see. */
+   the tooth total each chain is dealt against, and therefore the geometry -- a
+   suite that only read index.html would be measuring a train whose size it could
+   no longer see. */
 const CFG_SRC = fs.readFileSync(path.join(__dirname, '..', 'config.js'), 'utf8');
 
 /* ---- extraction: pull the real thing out of the real page ---------------- */
@@ -72,17 +73,18 @@ const page = (function build() {
        sets fouled (#51). */
     'RING_STUB'];
   const decls = consts.map(n => 'const ' + n + ' = ' + grabNumber(n) + ';').join('\n');
-  /* TEETH_SUM is derived from the train's length now, so it is read the same way
-     the page computes it rather than scraped as a literal -- a suite that hard-codes
-     a number the page derives is exactly the drift this file exists to prevent. */
+  /* The tooth total is derived from a chain's length now, so it is read the same
+     way the page computes it rather than scraped as a literal -- a suite that
+     hard-codes a number the page derives is exactly the drift this file exists to
+     prevent. */
   /* Comments are stripped first: a retired wheel is commented out rather than
      deleted, and counting its slug would inflate the train's length -- which
-     feeds TEETH_SUM, so the error would land in the geometry. */
+     feeds the tooth total, so the error would land in the geometry. */
   /* TRAIN is no longer a literal -- it is built from the active person's links
      in config.js. Count them there, still stripping comments first, because a
      retired wheel is commented out rather than deleted and counting its slug
-     would inflate the train's length. That length feeds TEETH_SUM, so the error
-     would land in the geometry rather than anywhere obvious.
+     would inflate the train's length. That length feeds the tooth total, so the
+     error would land in the geometry rather than anywhere obvious.
 
      COUNTED PER PERSON, NOT OVER THE WHOLE BLOCK. It used to be one count across
      every chain, guarded by an assertion that there was exactly one -- which was
@@ -108,7 +110,7 @@ const page = (function build() {
   if (!personBlocks.length) throw new Error('no people found in config.js PEOPLE');
   /* Count `href:`, NOT `slug:` -- a person carries a slug of their own as well
      as one per link, so counting slugs would report one wheel too many per
-     person and inflate TEETH_SUM. Only links have an href. */
+     person and inflate its tooth total. Only links have an href. */
   const trainLens = personBlocks.map(b => (b.match(/href:/g) || []).length);
   trainLens.forEach((n, i) => {
     if (!n) throw new Error('person ' + i + ' in config.js PEOPLE has no links');
@@ -118,13 +120,21 @@ const page = (function build() {
     + grabBlock('const RAVIGNEAUX_MENU =', '[', ']') + ';\n'
     + grabBlock('function planetaryBore(', '{', '}') + '\n'
     + grabBlock('function planetaryMenuFor(', '{', '}') + '\n'
+    /* The end-drift cap is a FUNCTION of chain length now, not a constant, and
+       it is the page's own -- executed here rather than re-derived, so the
+       bearing test below measures the rule that ships. */
+    + 'const TEETH_MEAN = ' + grabNumber('TEETH_MEAN') + ';\n'
+    + grabBlock('function endsCapFor(', '{', '}') + '\n'
     + 'return { planetaryBore, planetaryMenuFor, RAVIGNEAUX_MENU, PLANETARY_FLAVOURS, '
+    + 'endsCapFor, TEETH_MEAN, '
     + consts.join(', ') + ' };';
   const built = new Function('enumeratePlanetaries', src)(enumeratePlanetaries);
-  /* One entry per chain, in PEOPLE order. TEETH_SUM is the page's own derivation
-     -- read the same way it computes it, never scraped as a literal. */
+  /* One entry per chain, in PEOPLE order. The page has no TEETH_SUM constant any
+     more -- the total is a CHAIN's overall length and a combined stage has several,
+     so dealTeeth() computes round(TEETH_MEAN * n) per chain. Same derivation here,
+     with TEETH_MEAN read out of the page rather than retyped. */
   built.TRAIN_LENS = trainLens;
-  built.TEETH_SUMS = trainLens.map(n => Math.round(16.3 * n));
+  built.TEETH_SUMS = trainLens.map(n => Math.round(grabNumber('TEETH_MEAN') * n));
   return built;
 })();
 
@@ -194,7 +204,7 @@ test('every chain is counted on its own, never summed across people', () => {
   /* This replaces the old "exactly one person" tripwire, which fired the day
      Harper was added and demanded exactly this: only one chain is ever on stage,
      so a single count across the whole list would measure a train the page never
-     builds, and TEETH_SUM is derived from that length -- the error would land in
+     builds, and the tooth total is derived from that length -- the error lands in
      the geometry rather than anywhere visible.
      The check is that the per-person split agrees with the independent
      slug-minus-href headcount. If the brace walker ever mis-splits, these two
@@ -220,7 +230,7 @@ test('an empty train does not throw — a missing config degrades, it does not b
     const TRAIN = [];
     const TEETH_MIN = ${page.TEETH_MIN}, TEETH_MAX = ${page.TEETH_MAX};
     const TEETH_SLACK = ${page.TEETH_SLACK}, TEETH_HOST = ${page.TEETH_HOST};
-    const TEETH_SUM = 0, FORCE_FAMILY = null;
+    const TEETH_MEAN = ${grabNumber('TEETH_MEAN')}, FORCE_FAMILY = null;
     const smallestBlankHolding = () => ${page.TEETH_MIN};
     ${fn})();
     return 'ok';`);
@@ -311,8 +321,9 @@ test('every wheel of every chain gets a service seated on it', () => {
    a copy of that formula here is exactly the drift this file exists to stop. */
 function fitRule() {
   /* Anchored on WHEEL_CROSS_MAX, which exists once and only inside fitStage.
-     NOMINAL_WHEELS would match the module-level declaration beside TEETH_SUM
-     instead, and slice in a thousand lines of unrelated code. */
+     Anything anchored on the deal constants beside TEETH_MEAN would match their
+     module-level declarations instead, and slice in a thousand lines of unrelated
+     code. */
   const i = SRC.indexOf('const WHEEL_CROSS_MAX =');
   const j = SRC.indexOf('const root = document.documentElement.style;', i);
   ok(i > 0 && j > i, 'could not find the fit computation in index.html');
@@ -339,15 +350,24 @@ function fitRule() {
   };
 }
 
-/* Executes the real TRAIN builder out of index.html rather than modelling it. */
+/* Executes the real TRAIN builder out of index.html rather than modelling it.
+   Returns the bridges it filled in as well as the wheels: the two are built
+   together, and a test that only saw the array could not tell an idler apart
+   from the chain it feeds. Every value the builder closes over is handed in
+   from the page rather than re-typed -- MAX_IDLERS is read out of index.html,
+   and SPINE_LEN is derived from the fixture exactly as the page derives it. */
 function buildTrain(people) {
   const expr = grabBlock('const TRAIN = (function', '(', ')');
-  return new Function('STAGE', 'return ' + expr.replace(/^const TRAIN = /, '') + '()')(
-    { people: people });
+  const bridges = [];
+  const spineLen = Math.max(1, ...people.map(p => (p.links || []).length));
+  const train = new Function('STAGE', 'SPINE_LEN', 'MAX_IDLERS', 'BRIDGES',
+    'return ' + expr.replace(/^const TRAIN = /, '') + '()')(
+    { people: people }, spineLen, grabNumber('MAX_IDLERS'), bridges);
+  return { train, bridges };
 }
 
 test('every TRAIN entry names its parent, and the parents form one tree', () => {
-  const train = buildTrain([{ slug: 'p', links: [{ slug: 'a' }, { slug: 'b' }, { slug: 'c' }] }]);
+  const { train } = buildTrain([{ slug: 'p', links: [{ slug: 'a' }, { slug: 'b' }, { slug: 'c' }] }]);
   const roots = train.filter(t => t.parent === null || t.parent === undefined);
   eq(roots.length, 1, 'a train must have exactly one root');
   const bad = [];
@@ -366,7 +386,7 @@ test('every TRAIN entry names its parent, and the parents form one tree', () => 
 });
 
 test('every TRAIN entry names its person and its role', () => {
-  const train = buildTrain([{ slug: 'harper', links: [{ slug: 'a' }, { slug: 'b' }] }]);
+  const { train } = buildTrain([{ slug: 'harper', links: [{ slug: 'a' }, { slug: 'b' }] }]);
   const bad = [];
   train.forEach((t, i) => {
     if (t.person !== 'harper') bad.push(`wheel ${i} person is ${t.person}, want harper`);
@@ -397,6 +417,113 @@ test('the ends-apart rule is expressed in leaves, not array positions', () => {
   ok(!/oi === 0 && i === TRAIN\.length - 1/.test(SRC),
     'ENDS_APART still tests the first and last array positions');
   ok(/isLeaf/.test(SRC), 'solve() does not compute leaves for the ends-apart rule');
+});
+
+test('the ends-apart rule means the spine\'s extremities, not any two leaves', () => {
+  /* Read as "any two leaves" the rule over-applies the moment the tree is bushy:
+     two chains hanging off one spine are both leaves, and they are MEANT to sit
+     one bridge apart rather than be shoved a further ENDS_APART from each other.
+     What that looks like from outside is the nudge loop growing the centre
+     distance by 12% over and over until something lands. */
+  const i = SRC.indexOf('const isEnd =');
+  ok(i > 0, 'solve() no longer names the machine\'s extremities');
+  ok(/WHO\.slug/.test(SRC.slice(i, i + 200)),
+    'the extremities are not restricted to the spine, so every pair of leaves on '
+    + 'a branched stage is pushed ENDS_APART');
+});
+
+test('every non-spine chain is reached through at least one idler', () => {
+  /* Chains never mesh directly -- the bridge is what makes the drive legible. */
+  ok(/role:\s*'idler'/.test(SRC), 'no idler role is ever assigned');
+  ok(/MIN_IDLERS/.test(SRC), 'there is no floor on the number of idlers in a bridge');
+  const { train, bridges } = buildTrain([
+    { slug: 'a', links: [{ slug: 'p' }, { slug: 'q' }, { slug: 'r' }] },
+    { slug: 'b', links: [{ slug: 's' }] }
+  ]);
+  eq(bridges.length, 1, 'the second chain got no bridge');
+  const MIN = grabNumber('MIN_IDLERS');
+  ok(bridges[0].idlers.length >= MIN,
+    `bridge carries ${bridges[0].idlers.length} idlers, floor is ${MIN}`);
+  /* Walk from the driven chain's first wheel back to the root: it must pass
+     through idlers and never mesh a link of another chain directly. */
+  let at = train[bridges[0].head].parent, hops = 0, seen = 0;
+  while (at !== null && hops++ <= train.length) {
+    if (train[at].role === 'idler') seen++;
+    else break;
+    at = train[at].parent;
+  }
+  ok(seen >= MIN, `the driven chain meshes a linked wheel after ${seen} idlers`);
+  ok(at !== null && train[at].role === 'link' && train[at].person === 'a',
+    'the bridge does not land on the spine');
+});
+
+test('a parent always appears earlier in TRAIN than its children', () => {
+  /* solve() derives a wheel from g[t.parent] out of the wheels it has ALREADY
+     placed. A forward reference reads undefined and the branch lands wherever
+     the last iteration happened to leave it -- silently, with no error. The
+     spine is emitted first for exactly this reason, so the check has to run on
+     a stage where the spine is NOT the first person in config order. */
+  const { train } = buildTrain([
+    { slug: 'short', links: [{ slug: 's' }] },
+    { slug: 'long', links: [{ slug: 'a' }, { slug: 'b' }, { slug: 'c' }] }
+  ]);
+  const bad = [];
+  train.forEach((t, i) => {
+    if (t.parent === null) return;
+    if (t.parent >= i) bad.push(`wheel ${i} (${t.role}) names parent ${t.parent}, which is not placed yet`);
+  });
+  eq(train.filter(t => t.parent === null).length, 1, 'a bridged stage must have exactly one root');
+  eq(train[0].person, 'long', 'the spine is not emitted first');
+  ok(bad.length === 0, bad.join('\n      '));
+});
+
+test('an idler never carries a service, a badge or an engraving', () => {
+  /* A ghost is anonymous by design language; that is the whole reason the bridge
+     is made of them rather than of an unowned coloured wheel, which would look
+     exactly like the blank-gear defect in #65. */
+  const i = SRC.indexOf('if (!this._slugFor) {');
+  const j = SRC.indexOf('const g = [], strands = []', i);
+  ok(/t\.role !== 'link'/.test(SRC.slice(i, j)),
+    'the seating block does not exclude idlers, so one could acquire a slug');
+  const { train } = buildTrain([
+    { slug: 'a', links: [{ slug: 'p' }, { slug: 'q' }] },
+    { slug: 'b', links: [{ slug: 's' }] }
+  ]);
+  const bad = [];
+  train.filter(t => t.role === 'idler').forEach((t, k) => {
+    if (t.slug) bad.push(`idler ${k} carries slug ${t.slug}`);
+    if (t.person) bad.push(`idler ${k} claims to belong to ${t.person}`);
+  });
+  ok(bad.length === 0, bad.join('\n      '));
+});
+
+test('the bridge bearing is relative to the stage axis, never absolute', () => {
+  /* The page rotates the whole train by _axisRot in portrait. A bridge expressed
+     in screen degrees would stay horizontal and cross the SHORT axis -- the same
+     failure as #67. */
+  const i = SRC.indexOf('BRIDGE_BEARING');
+  ok(i > 0, 'no BRIDGE_BEARING is defined');
+  const near = SRC.slice(i, i + 600);
+  ok(/_axisRot/.test(near), 'BRIDGE_BEARING is not expressed relative to _axisRot');
+});
+
+test('a chain that opts out of bridging is a root, and keeps no idlers', () => {
+  /* `bridge: false` is a per-person setting in config.js and says "no drive",
+     not "no position": the chain stays a root, and solve() still has to place it
+     clear of the others -- every root but the first resolved to (0,0) before
+     this task, which drew the second chain on top of the first. */
+  const { train, bridges } = buildTrain([
+    { slug: 'a', links: [{ slug: 'p' }, { slug: 'q' }, { slug: 'r' }] },
+    { slug: 'b', bridge: false, links: [{ slug: 's' }] }
+  ]);
+  eq(train.filter(t => t.role === 'idler').length, 0,
+    'an unbridged chain still built idlers');
+  eq(bridges.length, 1, 'an unbridged chain is not registered, so nothing places it');
+  eq(bridges[0].idlers.length, 0, 'an unbridged chain claims idlers');
+  eq(train[bridges[0].head].parent, null, 'an unbridged chain is not a root');
+  ok(/const free = /.test(SRC),
+    'solve() has no branch for a root that is not the first wheel, so it would '
+    + 'resolve to (0,0) on top of the spine');
 });
 
 test('a combined stage seats every person, each within its own slot range', () => {
@@ -710,7 +837,7 @@ test('no planet anywhere is under eight teeth', () => {
 
 test('the tooth deal always produces a legal train, for every chain', () => {
   /* Run per chain, not once: each person's train has its own length and
-     therefore its own TEETH_SUM, and a chain short enough to strain the bounds
+     therefore its own tooth total, and a chain short enough to strain the bounds
      would be invisible in a single averaged run. */
   const { TEETH_MIN, TEETH_MAX, TEETH_SLACK, TEETH_HOST } = page;
   const bad = [];
@@ -735,6 +862,49 @@ test('the tooth deal always produces a legal train, for every chain', () => {
   ok(bad.length === 0, bad.join('\n      '));
 });
 
+test('the tooth deal succeeds on a combined stage, not only on one chain', () => {
+  /* The target total is a CHAIN's overall length, and a combined stage has
+     several. Summed across the whole array it was a constraint no combined stage
+     could ever satisfy -- ten wheels cannot total a seven-wheel target, their
+     minimum already exceeds it -- so every draw was rejected, every load fell
+     through to the fallback, and ?who=all dealt a flat train of floor-sized
+     wheels with one giant at the head. Silent, and a screenshot passes it.
+
+     Runs the REAL dealTeeth against the REAL people, plus the idlers a bridge
+     adds, and asserts the result is a legal draw rather than the fallback. */
+  const conf = (function () { const w = {}; new Function('window', CFG_SRC)(w); return w.WOZI_CONFIG; })();
+  const { train } = buildTrain(conf.PEOPLE || []);
+  const fn = grabBlock('(function dealTeeth()', '{', '}');
+  const TEETH_MEAN = grabNumber('TEETH_MEAN');
+  const deal = new Function('TRAIN', 'TEETH_MIN', 'TEETH_MAX', 'TEETH_SLACK',
+    'TEETH_HOST', 'TEETH_MEAN', 'FORCE_FAMILY', 'smallestBlankHolding',
+    `${fn})();`);
+  const chains = {};
+  train.forEach((t, i) => { if (t.role === 'link') (chains[t.person] = chains[t.person] || []).push(i); });
+  const bad = [];
+  let fell = 0;
+  for (let trial = 0; trial < 300; trial++) {
+    deal(train, page.TEETH_MIN, page.TEETH_MAX, page.TEETH_SLACK, page.TEETH_HOST,
+      TEETH_MEAN, null, () => page.TEETH_MIN);
+    const legal = Object.keys(chains).every(k => Math.abs(
+      chains[k].reduce((a, i) => a + train[i].teeth, 0)
+      - Math.round(TEETH_MEAN * chains[k].length)) <= page.TEETH_SLACK);
+    if (!legal) fell++;
+    train.forEach((t, i) => {
+      if (t.teeth < page.TEETH_MIN || t.teeth > page.TEETH_MAX) {
+        bad.push(`wheel ${i} was dealt ${t.teeth}, outside [${page.TEETH_MIN},${page.TEETH_MAX}]`);
+      }
+    });
+    /* The big blank has to be one you can see into: an idler is drawn in the
+       background palette with no centre design at all. */
+    const big = Math.max(...train.filter(t => t.role === 'link').map(t => t.teeth));
+    if (big < page.TEETH_HOST) bad.push(`no LINKED wheel reached TEETH_HOST (largest was ${big})`);
+  }
+  ok(fell === 0, `${fell}/300 deals fell through to the fallback on the combined `
+    + `stage (${train.length} wheels across ${Object.keys(chains).length} chains)`);
+  ok(bad.length === 0, [...new Set(bad)].slice(0, 4).join('\n      '));
+});
+
 test('the largest blank a deal guarantees can host a planetary', () => {
   const m = page.planetaryMenuFor(page.TEETH_HOST);
   ok(!m.fallback && m.one.length > 0,
@@ -743,11 +913,17 @@ test('the largest blank a deal guarantees can host a planetary', () => {
 });
 
 test('the bearing deal keeps the train a horizontal line', () => {
-  const { ANG_MIN, ANG_MAX, BAND_MAX, ENDS_MAX, MODULE } = page;
+  /* Swept over every chain length a page could carry, not just the ones shipped:
+     the caps are applied PER CHAIN now, so a length that cannot satisfy them
+     leaves that chain's wheels on the deal's fallback draw rather than on a
+     legal one -- and until endsCapFor existed, a two-wheel chain was exactly
+     such a length and the deal assigned no bearings at all. */
+  const { ANG_MIN, ANG_MAX, BAND_MAX, MODULE } = page;
   ok(ANG_MIN > 0 && ANG_MAX > ANG_MIN, 'bearing range is degenerate');
   ok(ANG_MAX <= 45, 'bearings past 45 degrees stack the wheels diagonally');
   const bad = [];
-  page.TRAIN_LENS.forEach((len, pi) => {
+  const lens = [...new Set([...page.TRAIN_LENS, 1, 2, 3, 4, 5, 6, 7, 8, 9])];
+  lens.forEach((len) => {
     let legal = 0;
     for (let trial = 0; trial < 2000; trial++) {
       const first = Math.random() < 0.5 ? 1 : -1;
@@ -758,12 +934,32 @@ test('the bearing deal keeps the train a horizontal line', () => {
         y += (MODULE * 16) * Math.sin(ang[i] * Math.PI / 180);   /* two mid-size wheels */
         lo = Math.min(lo, y); hi = Math.max(hi, y);
       }
-      if (hi - lo <= BAND_MAX && Math.abs(y) <= ENDS_MAX) legal++;
+      if (hi - lo <= BAND_MAX && Math.abs(y) <= page.endsCapFor(len)) legal++;
     }
-    if (!legal) bad.push('chain ' + pi + ' (' + len + ' wheels): no bearing draw '
+    if (!legal) bad.push('a chain of ' + len + ' wheels: no bearing draw '
       + 'satisfies the drift caps; every load would fall back');
   });
   ok(bad.length === 0, bad.join('\n      '));
+});
+
+test('the bearing deal always assigns a bearing, even with no legal draw', () => {
+  /* A filter with no floor. Every draw was either legal or discarded, and 500
+     discards in a row left `angle` undefined on every wheel -- which becomes NaN
+     coordinates, a NaN fit scale, and `gsr !== this._gsr` true forever because
+     NaN never equals itself. The page rendered nothing and spun until React gave
+     up on the update depth. Runs the REAL dealAngles against caps it cannot
+     possibly satisfy, and asserts it still assigns. */
+  const fn = grabBlock('(function dealAngles()', '{', '}');
+  const train = [
+    { teeth: 16, parent: null, person: 'a', role: 'link' },
+    { teeth: 17, parent: 0, person: 'a', role: 'link' },
+    { teeth: 15, parent: 1, person: 'a', role: 'link' }
+  ];
+  new Function('TRAIN', 'MODULE', 'ANG_MIN', 'ANG_MAX', 'BAND_MAX', 'endsCapFor',
+    `${fn})();`)(train, page.MODULE, page.ANG_MIN, page.ANG_MAX, 0, () => 0);
+  const bad = train.filter((t, i) => typeof t.angle !== 'number' || !isFinite(t.angle));
+  ok(bad.length === 0, bad.length + ' of ' + train.length
+    + ' wheels were left with no bearing when no draw could satisfy the caps');
 });
 
 /* ---- report -------------------------------------------------------------- */

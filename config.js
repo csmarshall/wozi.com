@@ -65,6 +65,14 @@ window.WOZI_CONFIG = {
                  slug   which service
                  path   engraved on the wheel's band — the handle, not the URL
                  href   where the badge links to
+       bridge  optional, default true. On a combined stage every chain but the
+               longest is driven off it through a short run of plain idler
+               wheels, which is also what sets the gap between the two. Set
+               `bridge: false` and this chain is placed in the same spot with no
+               drive reaching it — it becomes a machine of its own standing
+               beside the others rather than one the spine turns. It has no
+               effect on a page showing a single chain, because there is nothing
+               to bridge to.
 
      THE PICKER IS HIDDEN WHILE THERE IS ONE PERSON, so today's page looks
      exactly as it did. Add a second entry and the picker appears by itself.
