@@ -5,6 +5,7 @@ git ref pixel for pixel.
     tools/pixel_regress.py                  # working tree vs HEAD
     tools/pixel_regress.py --ref origin/main
     tools/pixel_regress.py --shot /tmp/x.png # just capture, no comparison
+    tools/pixel_regress.py --query '?who=charles'   # one chain, not the stage
 
 WHY THIS EXISTS. A screenshot of this page proves very little on its own, for
 two separate reasons, and both had to be dealt with before a pixel diff could
@@ -211,6 +212,12 @@ def main():
     ap.add_argument("--viewport", action="append", default=[],
                     help="WxH, repeatable (default 1440x900 and 390x844)")
     ap.add_argument("--outdir", default=tempfile.gettempdir())
+    # The page is scoped by hostname AND by ?who=, and the harness only ever
+    # serves 127.0.0.1 -- which is a combined-stage host. Without this there is
+    # no way to ask whether ONE chain still draws exactly as it did, which is
+    # the only question left once the default view has deliberately changed.
+    ap.add_argument("--query", default="",
+                    help="query string appended to the page, e.g. '?who=charles'")
     a = ap.parse_args()
 
     vps = [tuple(int(n) for n in v.lower().split("x")) for v in a.viewport] \
@@ -218,7 +225,7 @@ def main():
 
     srv, base = serve(ROOT)
     try:
-        now = asyncio.run(shoot(base, vps, a.seed, a.frames, a.theme))
+        now = asyncio.run(shoot(base + a.query, vps, a.seed, a.frames, a.theme))
     finally:
         srv.kill()
 
@@ -240,7 +247,7 @@ def main():
     try:
         srv2, base2 = serve(tree)
         try:
-            ref = asyncio.run(shoot(base2, vps, a.seed, a.frames, a.theme))
+            ref = asyncio.run(shoot(base2 + a.query, vps, a.seed, a.frames, a.theme))
         finally:
             srv2.kill()
     finally:
@@ -248,7 +255,8 @@ def main():
                        capture_output=True)
         shutil.rmtree(work, ignore_errors=True)
 
-    print(f"\nworking tree vs {a.ref}   seed {a.seed}, {a.frames} frames, {a.theme} theme")
+    print(f"\nworking tree vs {a.ref}   seed {a.seed}, {a.frames} frames, "
+          f"{a.theme} theme{', ' + a.query if a.query else ''}")
     total = 0
     for label in now:
         n = compare(ref[label], now[label], label, a.outdir)

@@ -5,6 +5,65 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ## Unreleased
 
+### Changed
+
+- **A hostname selects a scope, not a person — and `wozi.com` is now everybody.**
+  This is the change a visitor sees. `wozi.com`, `www.wozi.com` and the loopback
+  names moved off Charles's entry into a new top-level `STAGE_HOSTS`, and they
+  draw the combined stage: Charles's seven wheels along the spine, Harper's one
+  bridged off it through ghost idlers, each chain against its own scribed datum.
+  `charles.wozi.com` is Charles alone, `harper.wozi.com` is Harper alone,
+  `?who=<slug>` is that person solo and `?who=all` is the stage.
+
+  **The fallback changed with it**, from `PEOPLE[0]` to the combined stage. An
+  alternate domain name reaches the distribution long before anyone edits
+  `config.js`, and until they do it matches no list at all — it used to be served
+  one person, with nothing on the page to say that was a default. A hostname
+  nobody has claimed is far likelier to be another way of saying "this site".
+
+  **The picker is now hidden on a personal page.** It appeared whenever there was
+  more than one person; it now also requires `STAGE.mode === 'all'`. A link to
+  `charles.wozi.com` should not hand the visitor a menu of everyone else living
+  on the domain — the old rule was this rule with the scope left out. Nobody is
+  marked `aria-current` on the combined stage either: every entry there is a link
+  *away* from what is being looked at, and `WHO` is the spine, not the selection.
+
+  Two things had to be proved rather than assumed, because the default view
+  changing means the pixel gate's own baseline changes:
+
+  - `?who=charles` is **0 px** against `439c9ba` at 1440×900 and 390×844, in
+    **both themes**. Nothing in the whole idler-bridge branch touched the
+    single-chain path, which is the only way to say that with a number. The gate
+    grew a `--query` flag to ask it at all: it serves on `127.0.0.1`, which is
+    now a stage host, so its default shot is the combined stage.
+  - The default shot differs by **801,797 px** (608,767 at 1440×900, 193,030 at
+    390×844) against `439c9ba`. That is the feature, photographed.
+
+  `?who=harper` renders her chain alone: one wheel at a sane size, no datum — a
+  datum needs two chains to discriminate — and no bridge, since solo is not a
+  separate path but a tree with no branches.
+
+  One real defect fell out of making the picker visible. The rule between the
+  people and the gear families was drawn as its own menu entry: an `<a>` with an
+  empty `href` and no text, which the menu template cannot hide from the
+  accessibility tree. Free while the picker never rendered, a **focusable element
+  with no accessible name** the moment the apex drew it. The rule now hangs off
+  the first gear entry as a `border-top` — same hairline, no extra node, no stop
+  in the tab order. `a11y_audit` went from FAIL to PASS on that count.
+
+  `CLAUDE.md` gained the host model and four invariants this branch had been
+  relying on without naming: the bridge as structure versus escape runs as
+  decoration, the axis-relative bridge bearing (#67's class), longest-first
+  non-overlapping chain order, and the bridge's refusal to draw a crossing. That
+  omission is the #59 failure — the rulebook requiring what the rulebook does not
+  name.
+
+  Gates: 63/63 suite, motion PASS on the apex and on both solo views,
+  `mesh_dirs` PASS (8 meshing pairs, 1 idler on that viewport), devices 20/20 and
+  4/4, `a11y_audit` PASS in both themes. Apex looked at in light and dark at
+  1440×900, 390×844 and 2560×1440; portrait puts the bridge across the *long*
+  axis, as the axis-relative bearing requires.
+
 ### Added
 
 - **Harper's chain.** A second person in `config.js`: `harper`, one link,

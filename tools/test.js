@@ -200,6 +200,67 @@ test('config.js is named in the deploy whitelist', () => {
   ok(/\bconfig\.js\b/.test(wf), 'config.js is not published by .github/workflows/deploy.yml');
 });
 
+test('stage hosts and solo hosts are disjoint, and every person has a solo host', () => {
+  /* A HOSTNAME SELECTS A SCOPE, NOT A PERSON. The apex, www and the loopback
+     names carry the combined stage; a person's own subdomain carries that person
+     alone. The two lists must not overlap, because the resolver checks
+     STAGE_HOSTS first -- a name in both would silently mean "everyone" while
+     config.js reads as though it meant one person, and only a screenshot would
+     ever say so.
+     Every person also needs at least one solo host, or their chain is reachable
+     only by ?who= and the subdomain they were given does nothing. */
+  const conf = (function () { const w = {}; new Function('window', CFG_SRC)(w); return w.WOZI_CONFIG; })();
+  ok(Array.isArray(conf.STAGE_HOSTS) && conf.STAGE_HOSTS.length,
+    'config.js defines no STAGE_HOSTS, so nothing selects the combined stage');
+  const bad = [];
+  (conf.PEOPLE || []).forEach(p => {
+    if (!(p.hosts || []).length) bad.push(`${p.slug} has no solo host`);
+    (p.hosts || []).forEach(h => {
+      if (conf.STAGE_HOSTS.indexOf(h) >= 0) bad.push(`${h} is both a stage host and ${p.slug}'s solo host`);
+    });
+  });
+  ok(bad.length === 0, bad.join('\n      '));
+});
+
+test('a hostname matching nothing falls back to the combined stage', () => {
+  /* THE FALLBACK IS THE SCOPE, NOT PEOPLE[0]. An alternate domain name can be
+     added to the distribution long before anyone edits config.js, and until they
+     do it matches no list at all. Falling back to the first person would serve
+     that new domain one chain and give no sign it was a default; falling back to
+     the combined stage serves everyone, which is what an apex is for.
+     Executes the real resolver out of index.html against a hostname in neither
+     list, rather than restating its order of precedence here. */
+  /* The block walker stops on the IIFE's closing brace, so the call that runs it
+     is put back here -- the body itself is the page's, unedited. */
+  const src = grabBlock('const STAGE = (function () {', '{', '}') + ')();';
+  const conf = (function () { const w = {}; new Function('window', CFG_SRC)(w); return w.WOZI_CONFIG; })();
+  const run = (host, search) => new Function('CONF', 'location', 'URLSearchParams',
+    src + '\n return STAGE;')(conf, { hostname: host, search: search || '' }, URLSearchParams);
+  eq(run('nothing-here.example').mode, 'all',
+    'an unrecognised hostname does not fall back to the combined stage');
+  eq(run(conf.STAGE_HOSTS[0]).mode, 'all', conf.STAGE_HOSTS[0] + ' does not select the combined stage');
+  const solo = run((conf.PEOPLE[0].hosts || [])[0]);
+  eq(solo.mode, 'solo', "a person's own host does not select them alone");
+  eq(solo.people.length, 1, "a person's own host puts more than one chain on stage");
+  eq(solo.people[0].slug, conf.PEOPLE[0].slug, "a person's own host selects the wrong person");
+  eq(run(conf.STAGE_HOSTS[0], '?who=' + conf.PEOPLE[1].slug).people[0].slug, conf.PEOPLE[1].slug,
+    '?who= does not override a stage host');
+});
+
+test('the person picker is drawn only on the combined stage', () => {
+  /* A PERSONAL LINK MUST NOT ADVERTISE EVERYONE ELSE. charles.wozi.com is
+     Charles's page, and a menu listing every other person on the domain is a
+     disclosure the visitor did not ask for. The existing rule -- hidden while
+     there is one person -- extends to "or while the view is deliberately one
+     person", and both halves have to be in the same condition. */
+  const i = SRC.indexOf('THE PERSON PICKER LIVES HERE');
+  ok(i > 0, 'could not find the person picker block in index.html');
+  const frag = SRC.slice(i, SRC.indexOf("out.push(item(null,", i));
+  ok(/people\.length > 1/.test(frag), 'the picker no longer hides itself at one person');
+  ok(/STAGE\.mode === 'all'/.test(frag),
+    'the picker does not check STAGE.mode — a solo page would list every person on the domain');
+});
+
 test('every chain is counted on its own, never summed across people', () => {
   /* This replaces the old "exactly one person" tripwire, which fired the day
      Harper was added and demanded exactly this: only one chain is ever on stage,
