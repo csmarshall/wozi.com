@@ -82,12 +82,16 @@ MANUAL = r"""
      a tab order with no way to tell them apart; the datum plate that
      distinguishes them on screen is inside the aria-hidden gear art.
      Same name AND same href is not a finding: that is one destination reachable
-     twice, which is a navigation choice, not an ambiguity. */
+     twice, which is a navigation choice, not an ambiguity. Anything WITHOUT a
+     destination gets a key unique to the element instead of its tag name -- two
+     same-named buttons are two different actions announced identically, and
+     keying them both on "BUTTON" made them compare equal and slip through. */
   const byName = {};
-  foc.forEach(e => {
+  foc.forEach((e, i) => {
     const n = accName(e);
     if (!n) return;
-    (byName[n] = byName[n] || []).push(e.getAttribute('href') || e.tagName);
+    const dest = e.tagName === 'A' && e.getAttribute('href') !== null ? 'href:' + e.href : 'el:' + i;
+    (byName[n] = byName[n] || []).push(dest);
   });
   out.dupNames = Object.keys(byName).filter(n =>
       new Set(byName[n]).size > 1).map(n => [n, byName[n].length]);

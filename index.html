@@ -2039,6 +2039,44 @@ class Component extends DCLogic {
        past the cross axis (CROSS_BLEED), because a machine that continues past
        the frame is the composition. This is for the marks that may not. */
     this._vpBox = { x0: -rect.left, y0: -rect.top, x1: vw - rect.left, y1: vh - rect.top };
+    /* AND A SEAT THAT HAS GONE STALE IS RE-SEATED. Publishing the box is not
+       enough on its own: the datum plate is placed during render, and a render
+       only happens when something QUANTISED moves -- the 1% render scale, the
+       spread and tightness ratios, the idler count, or the escape-ghost key. A
+       resize under all of those re-centres the stage without re-seating the
+       plate, and a plate seated against a box that has since moved is a plate
+       creeping toward the edge with nothing to stop it. Walked a pixel at a time
+       it put the mark 1.32 px off the left edge at 390x844.
+
+       MEASURED FROM THE BOX THE PLATE WAS LAST SEATED AGAINST, not from the last
+       box this function measured. Comparing consecutive calls compares one step
+       of a drag, which is a pixel at a time and under the threshold forever while
+       the total runs away: walked down from 900px that let the mark slide 23px
+       past the fold without ever tripping. `_vpSeated` is stamped in
+       componentDidUpdate, at the one moment a render is known to have just
+       happened, so what is measured here is the whole distance since the seat
+       was computed.
+
+       THE THRESHOLD IS THE MARGIN THE SEAT ALREADY CARRIES, asked of
+       plateMargin() rather than restated -- drift within it is drift the plate
+       was seated to absorb, and only drift past it can clip. So this costs a
+       render exactly when one is needed, and the resize quantisation everything
+       else depends on is left alone.
+
+       ONLY ON A STAGE THAT HAS A MARK. One chain draws no datum at all, so a
+       solo page keeps precisely the render schedule it had.
+
+       It terminates: the render this asks for stamps a new `_vpSeated` from the
+       box it drew against, and a render at the same fit does not move the stage,
+       so the next pass measures a drift of zero. */
+    const seated = this._vpSeated;
+    if (seated && STAGE.people.length > 1) {
+      const slack = this.plateMargin(gs).slack;
+      const moved = Math.max(
+        Math.abs(seated.x0 - this._vpBox.x0), Math.abs(seated.y0 - this._vpBox.y0),
+        Math.abs(seated.x1 - this._vpBox.x1), Math.abs(seated.y1 - this._vpBox.y1));
+      if (moved > slack) this.forceUpdate();
+    }
     const ghosts = [];
     this._seed = 20260729;
     /* SEEDED WITH THE BRIDGES, so the crossing search that already refuses to lay
@@ -2641,7 +2679,13 @@ class Component extends DCLogic {
     this.syncVars();
   }
 
-  componentDidUpdate() { this.syncVars(); this.fitStage(); }
+  /* `_vpSeated` is stamped HERE, and only here, because this is the one moment
+     the page knows a render has just finished: whatever `_vpBox` held is the box
+     the datum plate was just seated against. fitEscapes then measures its drift
+     from that rather than from its own previous call -- see the note there. It
+     is stamped BEFORE fitStage, so a pass that changes the fit measures against
+     what was actually drawn and settles on the next one. */
+  componentDidUpdate() { this.syncVars(); this._vpSeated = this._vpBox; this.fitStage(); }
 
   componentWillUnmount() {
     if (this.mq && this.mq.removeEventListener) this.mq.removeEventListener('change', this.onSys);
@@ -4648,7 +4692,50 @@ class Component extends DCLogic {
      NEITHER SIDE FITTING IS REPORTED, NOT HIDDEN. It cannot happen while the
      plate is smaller than the viewport and the chain is on stage, but "cannot
      happen" is what the crossing bridge was said to be too: the console is the
-     only place a composition failure can announce itself. */
+     only place a composition failure can announce itself.
+
+     IT SEATS WITH A MARGIN, NOT FLUSH, and the margin is the plate's own corner
+     radius. A flush seat was wrong rather than merely tight, because the
+     rectangle this solves for is the GEOMETRIC one: the plate is stroked `HAIR`
+     wide down its centre line, so half that stroke hangs outside the box the
+     clamp bounds, and a sweep measuring the same rectangle could not see the
+     overhang either.
+
+     PLATE_H * 0.1 is the radius the plate's own corners are drawn at, so the
+     margin is the one distance the shape already declares about itself rather
+     than a number chosen to look safe. HAIR / 2 -- exactly the stroke overhang --
+     is the floor, and takes over at very small render scales where the hairline
+     is held at its one-rendered-pixel minimum and the radius has shrunk below
+     it. Neither is picked; both are read off things already drawn.
+
+     THE MARGIN IS NOT A SUBSTITUTE FOR RE-SEATING, and measurement said so. The
+     stage re-centres on every pixel of a resize while a render only happens when
+     something quantised moves, so a seat can go stale underneath its own margin.
+     Walked one pixel at a time over 576 measurements at 390x844, that put the
+     plate 1.32 px off the left edge with nothing to correct it. fitEscapes now
+     re-renders when the stage has drifted further than this margin's real
+     clearance -- see plateMargin(). The margin absorbs the stroke; the re-seat
+     absorbs the movement. */
+  /* THE TWO SIZES OF THE MARK THAT ANYTHING OUTSIDE datumLayer NEEDS, at a given
+     render scale. Both are module multiples like everything else here. They are
+     named here rather than left inline because fitEscapes has to know how far the
+     stage may move before a seat it published stops being true, and a second copy
+     of either derivation is the drift this repo has already paid for in #12, #15
+     and #51. */
+  plateMetrics(s) {
+    return { h: MODULE * 2 * s, hair: Math.max(1, MODULE * 0.13 * s) };
+  }
+
+  /* THE MARGIN THE PLATE IS SEATED WITH, and how much of it is real clearance.
+     `pad` is the plate's own corner radius, floored at half a hairline; `slack`
+     is what is left after the stroke's own overhang is paid for, which is the
+     distance the stage may drift underneath a seat before it clips. */
+  plateMargin(s) {
+    const m = this.plateMetrics(s);
+    const pad = Math.max(m.h * 0.1, m.hair / 2);
+    return { pad: pad, slack: pad - m.hair / 2 };
+  }
+
   plateSeat(r, S, pw, ph) {
     const want = r.plateAt * S;
     const nat = { ox: r.o.x * S, oy: r.o.y * S };
@@ -4657,12 +4744,14 @@ class Component extends DCLogic {
        one would be a second opinion about where the stage is. The natural side
        stands for that one frame; the fit runs out of componentDidUpdate, so the
        next one is measured. */
-    if (!vp) return { ox: nat.ox, oy: nat.oy, at: want };
+    if (!vp) return { ox: nat.ox, oy: nat.oy, at: want, side: 1 };
     /* The plate turns with its chain, so what has to fit inside the viewport is
        the axis-aligned box of a ROTATED rectangle -- half its width along the
-       run plus half its height across it, resolved onto each screen axis. */
-    const hx = Math.abs(r.ux) * pw / 2 + Math.abs(r.nx) * ph / 2;
-    const hy = Math.abs(r.uy) * pw / 2 + Math.abs(r.ny) * ph / 2;
+       run plus half its height across it, resolved onto each screen axis. Both
+       half-extents carry the margin, so it applies on every edge. */
+    const pad = this.plateMargin(S).pad;
+    const hx = Math.abs(r.ux) * pw / 2 + Math.abs(r.nx) * ph / 2 + pad;
+    const hy = Math.abs(r.uy) * pw / 2 + Math.abs(r.ny) * ph / 2 + pad;
     /* The stations at which the WHOLE plate is on the page, by the same slab
        clip the line itself uses: an axis the run is parallel to does not bound
        it, and taking that axis' crossing anyway is what made a datum a fraction
@@ -4684,8 +4773,15 @@ class Component extends DCLogic {
         });
       return lo <= hi ? [lo, hi] : null;
     };
-    const alt = { ox: r.alt.x * S, oy: r.alt.y * S };
+    const alt = { ox: r.alt.x * S, oy: r.alt.y * S, side: -1 };
     let best = null;
+    /* `side` travels with the origin because the ticks are struck along the
+       normal, and on the mirrored origin the normal points AT the wheels: a
+       major tick is 1.2 modules and the line stands one module clear, so
+       unflipped ticks cross the clearance and vanish under the chain's own
+       teeth. A mirrored datum then reads inverted and short beside an
+       unmirrored one -- and the seeded gate cannot see it, because the mirror
+       only fires on the deals that seed does not produce. */
     [nat, alt].forEach(O => {
       const iv = window_(O);
       if (!iv) return;
@@ -4693,7 +4789,9 @@ class Component extends DCLogic {
       const slide = Math.abs(at - want);
       /* Strictly smaller, so the natural side keeps every tie -- including the
          zero-slide tie, which is the case that must not move. */
-      if (!best || slide < best.slide) best = { ox: O.ox, oy: O.oy, at: at, slide: slide };
+      if (!best || slide < best.slide) {
+        best = { ox: O.ox, oy: O.oy, at: at, slide: slide, side: O.side || 1 };
+      }
     });
     if (!best) {
       if (!this._plateWarned) this._plateWarned = {};
@@ -4702,7 +4800,7 @@ class Component extends DCLogic {
         console.warn('wozi: neither side of chain "' + r.person + '" has room for its '
           + 'datum plate — the mark is drawn where it falls');
       }
-      return { ox: nat.ox, oy: nat.oy, at: want };
+      return { ox: nat.ox, oy: nat.oy, at: want, side: 1 };
     }
     return best;
   }
@@ -4730,9 +4828,13 @@ class Component extends DCLogic {
     const h = React.createElement;
     const runs = this.datumRuns(solved, this.state.ghosts);
     if (!runs.length) return null;
-    const HAIR = Math.max(1, MODULE * 0.13 * S);
+    /* Read off plateMetrics() rather than repeated here: fitEscapes needs the
+       same two numbers to know when a seat has gone stale, and one derivation
+       cannot be in two places. */
+    const MARK = this.plateMetrics(S);
+    const HAIR = MARK.hair;
     const MAJOR = MODULE * 1.2 * S, MINOR = MODULE * 0.5 * S, PAST = MODULE * 2 * S;
-    const PLATE_H = MODULE * 2 * S, PLATE_F = MODULE * 1.3 * S;
+    const PLATE_H = MARK.h, PLATE_F = MODULE * 1.3 * S;
     /* A WINDOWS FACE IN THE STACK. ui-monospace covers Apple, Menlo is the older
        macOS name and DejaVu Sans Mono is what Linux ships -- and nothing here
        named anything a Windows machine has, so the generic `monospace` resolved
@@ -4781,6 +4883,10 @@ class Component extends DCLogic {
       const pw = this.textWidth(label, font) + track * Math.max(0, label.length - 1) + PLATE_H * 0.8;
       const seat = this.plateSeat(r, S, pw, PLATE_H);
       const ox = seat.ox, oy = seat.oy;
+      /* OUTBOARD IS WHICHEVER WAY THE MARK WAS LAID. Every tick is struck along
+         the normal, away from the assembly the line references -- and the
+         mirrored origin reverses which way that is. */
+      const out = seat.side;
       const at = (d, t) => ({ x: ox + r.ux * d + r.nx * t, y: oy + r.uy * d + r.ny * t });
       const edge = span(ox, oy, r.ux, r.uy);
       const d0 = Math.min(r.d0 * S, edge[0]) - PAST;
@@ -4802,7 +4908,7 @@ class Component extends DCLogic {
          requirement is to stay quiet in both themes. */
       r.stations.forEach((sd, k) => {
         const d = sd * S;
-        const p = at(d, 0), q = at(d, MAJOR);
+        const p = at(d, 0), q = at(d, out * MAJOR);
         seg('t' + ri + '_' + k, p.x, p.y, q.x, q.y);
         /* Minor ticks subdivide the gap between stations, which is what gives
            the line its scale without inventing a spacing to give it one. */
@@ -4810,7 +4916,7 @@ class Component extends DCLogic {
         const nd = r.stations[k + 1] * S;
         for (let m = 1; m < 4; m++) {
           const dm = d + (nd - d) * (m / 4);
-          const mp = at(dm, 0), mq = at(dm, MINOR);
+          const mp = at(dm, 0), mq = at(dm, out * MINOR);
           seg('m' + ri + '_' + k + '_' + m, mp.x, mp.y, mq.x, mq.y);
         }
       });

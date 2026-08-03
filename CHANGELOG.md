@@ -98,6 +98,52 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **#83 — the cast-shadow derivation was claimed but never executed, and two
+  same-named buttons slipped past the duplicate-name check.** The opacity test
+  re-asked `wheelOpacity()` instead of running the render's own
+  `filter(g => this.wheelOpacity(g) == null)`, so the claim that the shadows
+  *derive* from the opacity rule was untested; the filter callback is now sliced
+  out of `index.html` and run, and fails both on `g => true` and on
+  `g => g.role !== 'idler'` — right answer, wrong derivation. `a11y_audit` keyed
+  each focusable on `href || tagName`, so two `<button>`s with one name compared
+  equal; anything without a destination now keys on the element.
+
+- **#82 — a mirrored datum struck its ticks into its own wheels.** Ticks run
+  along the normal at `+MAJOR`, and the mirrored origin reverses which way that
+  points. A major tick is 1.2 modules against one module of clearance, so a
+  mirrored chain's ticks crossed the clearance and vanished under its own gears —
+  the mark reading inverted and short beside an unmirrored one. `plateSeat()`
+  returns the side with the origin, and every tick is struck at `out * MAJOR`.
+  Invisible to the seeded gate, because the mirror only fires on deals that seed
+  does not produce.
+
+- **#81 — the plate was seated flush, against a box that could move underneath
+  it.** Two faults, and only measurement separated them. The clamp bounded the
+  *geometric* rectangle while the body is stroked `HAIR` wide down its centre
+  line, so half that stroke hung outside — and the sweep measured the same
+  rectangle, so it could not see the overhang either. The seat now carries
+  `max(PLATE_H * 0.1, HAIR / 2)`: the plate's **own corner radius**, floored at
+  exactly the stroke's overhang. Both are read off marks already drawn.
+
+  The margin alone was not enough, and a probe that walks the viewport a pixel at
+  a time without navigating proved it: `_vpBox` is published from `fitEscapes`,
+  but a render only happens when something *quantised* moves, so the stage
+  re-centres underneath a seat that was computed against an older box. Measured,
+  that put the mark **1.32 px off the left edge at 390×844**. `fitEscapes` now
+  re-renders once the stage has drifted past the margin's real clearance —
+  a threshold asked of `plateMargin()`, not restated.
+
+  The first attempt compared consecutive `fitEscapes` calls, which compares one
+  step of a drag: forever under the threshold while the total runs away, and it
+  made 1440×900 strictly worse at **22.91 px past the fold**. `_vpSeated` is
+  stamped in `componentDidUpdate`, the one moment a render is known to have
+  finished, so the whole distance since the seat is what gets measured. Guarded to
+  the combined stage, so a solo page keeps the render schedule it had.
+
+  Re-measured on the **stroked** extent: 0 clipped of 2,720 measurements across a
+  40-load unseeded sweep and a 2,560-step one-pixel resize walk, worst margin
+  0.30 px inside the edge.
+
 - **#80 — `CLAUDE.md` described an attachment search that does not exist, in the
   section added to close the #59 class.** It said the search "*prefers a clear
   band of the cross axis and rejects every anchor that does not give one*".

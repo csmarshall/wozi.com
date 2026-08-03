@@ -966,14 +966,26 @@ test('a bridge idler is drawn at the same opacity as every other ghost', () => {
         bad.push(`${theme}: a wheel with role ${role} is dimmed like background machinery`);
       }
     });
-    /* And the shadow layer's own question, asked the way the render asks it:
-       reduced weight casts nothing, full weight casts. */
-    if (c.wheelOpacity.call(c, { role: 'idler' }) == null) {
-      bad.push(theme + ': an idler passes the cast-shadow filter, so background '
-        + 'machinery throws a full-strength shadow — heavier than the wheel casting it');
+    /* AND THE SHADOW LAYER'S OWN PREDICATE, EXECUTED. Re-asking wheelOpacity()
+       here would only restate the two answers above and would leave the
+       derivation claim -- "the shadows come from this rule rather than testing
+       the role a second time" -- untested. The render's filter callback is
+       sliced out of index.html and RUN, the way fitRule() runs the real fit
+       expression. It is an arrow, so it takes its `this` from the scope it is
+       built in: calling the builder on the stub is what binds it. */
+    const shad = SRC.slice(SRC.indexOf("h('div', { key: 'shadows'"));
+    const m = shad.match(/solved\.gears\.filter\((.*?)\)\.map\(/);
+    ok(m, 'could not find the cast-shadow layer\'s gear filter in index.html');
+    const filterFn = new Function('return ' + m[1] + ';').call(c);
+    const wheels = [{ i: 'idler', role: 'idler' }, { i: 'link', role: 'link' }, { i: 'plain' }];
+    const kept = wheels.filter(filterFn).map(g => g.i).join(',');
+    if (kept !== 'link,plain') {
+      bad.push(`${theme}: the cast-shadow layer keeps [${kept}] — it must draw under `
+        + 'every full-weight wheel and under no background machinery');
     }
-    if (c.wheelOpacity.call(c, { role: 'link' }) != null) {
-      bad.push(theme + ': a linked wheel is excluded from the cast-shadow layer');
+    if (!/wheelOpacity/.test(m[1])) {
+      bad.push('the cast-shadow filter tests something other than wheelOpacity(), so '
+        + 'the two rules can drift apart again');
     }
   });
   /* The two themes must not resolve to the same alpha, or the whole per-theme
@@ -1287,6 +1299,26 @@ function datumRunsOn(solved, axisRot, spineSlug, ghosts, sites, plates) {
   };
   return fn.call(ctx, solved, ghosts || []);
 }
+/* plateSeat() lifted out of the page. It reads exactly two things off the
+   component -- the measured viewport box and its own margin rule -- so both are
+   handed in and the seat it returns is the seat the page would compute. Warnings
+   are captured rather than printed: "neither side fits" is a reported state, and
+   a test that could not see it could not tell it from a silent give-up. */
+function plateSeatOn(vpBox, r, S, pw, ph) {
+  const metrics = new Function('MODULE',
+    'return function ' + grabBlock('  plateMetrics(s) {', '{', '}') + ';')(page.MODULE);
+  const margin = new Function('return function ' + grabBlock('  plateMargin(s) {', '{', '}') + ';')();
+  const seat = new Function('return function ' + grabBlock('  plateSeat(r, S, pw, ph) {', '{', '}') + ';')();
+  const warns = [];
+  const ctx = { _vpBox: vpBox, plateMetrics: metrics, plateMargin: margin };
+  const real = console.warn;
+  console.warn = (m) => warns.push(m);
+  try {
+    const out = seat.call(ctx, r, S, pw, ph);
+    return { seat: out, warns: warns, pad: margin.call(ctx, S) };
+  } finally { console.warn = real; }
+}
+
 /* runSolve seats no service slugs -- PAIR_SLOTS, PAIRS and SINGLES are handed in
    empty, so slugFor is empty and every wheel comes back with slug null. The
    harness supplies what the page's own seating supplies: one slug per linked
@@ -1448,6 +1480,69 @@ test('a datum station is a clickable gear, never a ghost or an idler', () => {
       bad.push(`rot ${rot}: a wheel with no service seated on it is still indexed`);
   });
   ok(bad.length === 0, bad.join('\n      '));
+});
+
+test('the plate seats on the side the page has room for, and the ticks follow it', () => {
+  /* THE MARK MAY NOT LEAVE THE PAGE, which datumRuns() has always said and
+     nothing enforced: the plate is placed after fitStage, outside all three limbs
+     of the fit, and the fit deliberately lets the machine bleed past the cross
+     axis. Measured unseeded, that put Harper's plate wholly below the fold on
+     2 of 20 loads at 1440x900.
+
+     A horizontal run, so the two axes separate cleanly: sliding along it moves x
+     only, and the choice of side moves y only. That is the shape of the real
+     failure -- both observed cases were cross-axis, which sliding cannot fix. */
+  const r = { person: 'p', plate: 'P', ux: 1, uy: 0, nx: 0, ny: 1,
+    o: { x: 0, y: 0 }, alt: { x: 0, y: -20 }, plateAt: 0, stations: [], d0: 0, d1: 0 };
+  const pw = 40, ph = 10, S = 1;
+  const wide = { x0: -100, y0: -100, x1: 100, y1: 100 };
+  const A = plateSeatOn(wide, r, S, pw, ph);
+  eq(A.seat.side, 1, 'a plate with room on its own side is moved anyway');
+  eq(A.seat.oy, 0, 'a plate with room on its own side does not stay on it');
+  eq(A.seat.at, 0, 'a plate with room at its own station is slid off it');
+  eq(A.warns.length, 0, 'a plate that seats cleanly warns about it');
+  /* THE MARGIN IS REAL, not nominal. The seat must hold the plate `pad` inside
+     every edge, so a box exactly the plate's own size does NOT fit. */
+  const half = ph / 2;
+  const snug = { x0: -100, y0: -half, x1: 100, y1: half };
+  ok(plateSeatOn(snug, r, S, pw, ph).warns.length === 1,
+    'a box exactly the size of the plate is treated as room for it — the seat is '
+    + 'flush, so the stroke that straddles its edge hangs off the page');
+  /* ONLY THE MIRROR FITS: the natural side is below the fold, the mirrored one is
+     not, and no station along a horizontal run can change a y. */
+  const low = { x0: -100, y0: -100, x1: 100, y1: half + 1 };
+  const B = plateSeatOn(low, r, S, pw, ph);
+  eq(B.seat.side, -1, 'the plate stays on a side the page cannot show, with the '
+    + 'mirrored origin standing unused');
+  eq(B.seat.oy, -20, 'the seat reports the mirrored side but not the mirrored origin');
+  eq(B.warns.length, 0, 'a plate that seats on the mirror is reported as unplaceable');
+  /* SLIDING IS THE OTHER FREEDOM, and is preferred over mirroring: a station out
+     of reach along the run is pulled back to the nearest one that fits, on the
+     side the plate was already on. */
+  const narrow = { x0: -100, y0: -100, x1: 100, y1: 100 };
+  const far = Object.assign({}, r, { plateAt: 500 });
+  const C = plateSeatOn(narrow, far, S, pw, ph);
+  eq(C.seat.side, 1, 'a plate that only needed sliding was mirrored instead');
+  ok(C.seat.at < 500 && C.seat.at + pw / 2 + C.pad.pad <= 100 + 1e-9,
+    'a plate past the end of the page is not pulled back to a station that fits');
+  /* NEITHER SIDE FITTING IS REPORTED, NOT HIDDEN. */
+  const none = { x0: -100, y0: -1, x1: 100, y1: 1 };
+  const D = plateSeatOn(none, r, S, pw, ph);
+  eq(D.seat.side, 1, 'an unplaceable plate does not fall back to its natural side');
+  eq(D.warns.length, 1, 'a plate that fits nowhere is drawn silently');
+  ok(/neither side/.test(D.warns[0]), 'the warning does not say what went wrong');
+  /* THE TICKS FOLLOW THE SIDE. They are struck along the normal, and on the
+     mirrored origin the normal points AT the wheels: a major tick is 1.2 modules
+     against one module of clearance, so unflipped ticks vanish under the chain's
+     own teeth and the mark reads inverted and short. The seeded gate cannot see
+     it — the mirror only fires on deals that seed does not produce. */
+  ok(/const out = seat\.side/.test(DATUM_DRAW),
+    'datumLayer no longer takes its outboard direction from the seat');
+  const ticks = DATUM_DRAW.match(/at\(d[m]?, [^)]*(MAJOR|MINOR)\)/g) || [];
+  eq(ticks.length, 2, 'expected exactly two tick strikes in datumLayer, found ' + ticks.length);
+  ticks.forEach(t => ok(/out \* (MAJOR|MINOR)/.test(t),
+    'a tick is struck at a fixed sign (' + t + '), so a mirrored datum draws its '
+    + 'ticks into the wheels it is meant to clear'));
 });
 
 test('the datum plate defaults to the person name, untransformed', () => {
