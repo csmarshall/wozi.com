@@ -247,12 +247,12 @@ test('a service the active person does not have is never seated on a wheel', () 
     const PAIR_SLOTS = [[0,1],[3,4]];
     const PAIRS = [['linkedin','github'], ['instagram','threads']];
     const SINGLES = ['bluesky','mail','reddit'];
-    const SITES = { linkedin:{}, github:{}, bluesky:{}, mail:{} };   /* 5-link person */
-    const TRAIN = [1,2,3,4,5];
+    const SITES = { p: { linkedin:{}, github:{}, bluesky:{}, mail:{} } };   /* 5-link person */
+    const TRAIN = [1,2,3,4,5].map(() => ({ person: 'p', role: 'link' }));
     const shuffle = (arr) => arr;
     /* the block caches onto \`this\`, so it is called with one (#55) */
     ${frag}
-    return Object.values(slugFor).filter(s => s && !SITES[s]);`).call({});
+    return Object.values(slugFor).filter(s => s && !SITES.p[s]);`).call({});
   eq(seated.length, 0,
     'seated services the active person does not have: ' + [...new Set(seated)].join(', '));
 });
@@ -288,7 +288,7 @@ test('every wheel of every chain gets a service seated on it', () => {
       ${frag}
       return slugFor;`);
     const slugFor = seat.call({}, conf.PAIR_SLOTS, conf.PAIRS, conf.SINGLES,
-      sites, links.map(l => ({ slug: l.slug })), (arr) => arr);
+      { [p.slug]: sites }, links.map(l => ({ slug: l.slug, person: p.slug, role: 'link' })), (arr) => arr);
     for (let k = 0; k < links.length; k++) {
       if (!slugFor[k]) bad.push(p.slug + ': wheel ' + k + ' of ' + links.length
         + ' has no service seated on it — it draws as a blank gear');
@@ -340,16 +340,14 @@ function fitRule() {
 }
 
 /* Executes the real TRAIN builder out of index.html rather than modelling it. */
-function buildTrain(links, personSlug) {
-  const i = SRC.indexOf('const TRAIN = ');
-  const j = SRC.indexOf(';', i);
-  ok(i > 0 && j > i, 'could not find the TRAIN builder in index.html');
-  const expr = SRC.slice(i + 'const TRAIN = '.length, j);
-  return new Function('WHO', 'return ' + expr)({ links: links, slug: personSlug });
+function buildTrain(people) {
+  const expr = grabBlock('const TRAIN = (function', '(', ')');
+  return new Function('STAGE', 'return ' + expr.replace(/^const TRAIN = /, '') + '()')(
+    { people: people });
 }
 
 test('every TRAIN entry names its parent, and the parents form one tree', () => {
-  const train = buildTrain([{ slug: 'a' }, { slug: 'b' }, { slug: 'c' }], 'p');
+  const train = buildTrain([{ slug: 'p', links: [{ slug: 'a' }, { slug: 'b' }, { slug: 'c' }] }]);
   const roots = train.filter(t => t.parent === null || t.parent === undefined);
   eq(roots.length, 1, 'a train must have exactly one root');
   const bad = [];
@@ -368,7 +366,7 @@ test('every TRAIN entry names its parent, and the parents form one tree', () => 
 });
 
 test('every TRAIN entry names its person and its role', () => {
-  const train = buildTrain([{ slug: 'a' }, { slug: 'b' }], 'harper');
+  const train = buildTrain([{ slug: 'harper', links: [{ slug: 'a' }, { slug: 'b' }] }]);
   const bad = [];
   train.forEach((t, i) => {
     if (t.person !== 'harper') bad.push(`wheel ${i} person is ${t.person}, want harper`);
@@ -399,6 +397,33 @@ test('the ends-apart rule is expressed in leaves, not array positions', () => {
   ok(!/oi === 0 && i === TRAIN\.length - 1/.test(SRC),
     'ENDS_APART still tests the first and last array positions');
   ok(/isLeaf/.test(SRC), 'solve() does not compute leaves for the ends-apart rule');
+});
+
+test('a combined stage seats every person, each within its own slot range', () => {
+  /* PAIR_SLOTS indexes wheels. On a combined stage those indices must be read
+     per person -- siblings sit on neighbouring wheels WITHIN a chain, not across
+     a boundary into someone else's. */
+  const conf = (function () { const w = {}; new Function('window', CFG_SRC)(w); return w.WOZI_CONFIG; })();
+  const i = SRC.indexOf('if (!this._slugFor) {');
+  const j = SRC.indexOf('const g = [], strands = []', i);
+  const frag = SRC.slice(i, j);
+  const people = conf.PEOPLE || [];
+  const train = [], sites = {};
+  people.forEach(p => (p.links || []).forEach(l => {
+    train.push({ slug: l.slug, person: p.slug, role: 'link' });
+    (sites[p.slug] = sites[p.slug] || {})[l.slug] = {};
+  }));
+  const seat = new Function('PAIR_SLOTS', 'PAIRS', 'SINGLES', 'SITES', 'TRAIN', 'shuffle',
+    `${frag}\n return slugFor;`);
+  const slugFor = seat.call({}, conf.PAIR_SLOTS, conf.PAIRS, conf.SINGLES, sites, train, (a) => a);
+  const bad = [];
+  train.forEach((t, k) => {
+    if (!slugFor[k]) bad.push(`${t.person}: wheel ${k} has no service seated on it`);
+    else if (!sites[t.person][slugFor[k]]) {
+      bad.push(`${t.person}: wheel ${k} seated "${slugFor[k]}", which belongs to someone else`);
+    }
+  });
+  ok(bad.length === 0, bad.join('\n      '));
 });
 
 test('the fit rule does not branch on how many gears are in the chain', () => {

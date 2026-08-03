@@ -341,51 +341,43 @@ const CONF = CFG || { SERVICES: {}, PEOPLE: [], PAIR_SLOTS: [], PAIRS: [],
   SINGLES: [], BRAND: {}, PILL_STACK: {}, ACCENTS: {},
   WHEEL_POOL: ['#4A90E2', '#17A05C', '#8CB8F2'] };
 
-/* Which person's chain is on stage. The hostname decides it, so one CloudFront
-   distribution carrying several alternate domain names serves this same
-   byte-identical object to all of them and each lands on its own chain --
-   selection happens here rather than at the edge, so nothing has to vary by
-   Host and one cached object covers every domain. `?who=` overrides, for
-   testing a chain from any host. */
-const WHO = (function () {
+/* WHICH CHAINS ARE ON STAGE, and whether they share it. `?who=all` shows every
+   chain; `?who=<slug>` or a person's own hostname shows one. Selection stays in
+   the browser so one cached object serves every alternate domain name. */
+const STAGE = (function () {
   const people = CONF.PEOPLE || [];
-  if (!people.length) return { slug: '', name: '', links: [] };
+  if (!people.length) return { mode: 'solo', people: [] };
   let q = '';
   try { q = new URLSearchParams(location.search).get('who') || ''; } catch (e) {}
+  if (q === 'all') return { mode: 'all', people: people.slice() };
   const host = (typeof location !== 'undefined' && location.hostname) || '';
-  return people.find(p => p.slug === q)
-      || people.find(p => (p.hosts || []).indexOf(host) >= 0)
-      || people[0];
+  const one = people.find(p => p.slug === q)
+           || people.find(p => (p.hosts || []).indexOf(host) >= 0)
+           || people[0];
+  return { mode: 'solo', people: [one] };
 })();
+/* Kept so everything reading a single active person still works: on a combined
+   stage it is the spine, which is the chain the composition is built around. */
+const WHO = STAGE.people.slice().sort((a, b) =>
+  (b.links || []).length - (a.links || []).length)[0] || { slug: '', name: '', links: [] };
 
-/* TRAIN is DERIVED from the active person's links now, rather than authored.
-
-   IT CARRIES NO TOOTH COUNTS AND NO ANGLES, deliberately. Both are dealt fresh
-   every load -- dealTeeth() draws each wheel uniformly from [TEETH_MIN,
-   TEETH_MAX] and then filters the draw, and the bearing deal below it does the
-   same for angles -- so every wheel's values are overwritten before anything
-   reads them. The old hand-written numbers here were seeds inherited from the
-   original fixed list and were dead the day dealing was introduced: nothing
-   between this line and dealTeeth() reads .teeth or .angle at all. Writing them
-   out again would only invite someone to tune a number that has no effect.
-
-   Nor is there a placeholder: dealTeeth() and the bearing deal ASSIGN these
-   properties, they never read them, so seeding with TEETH_MIN would not even
-   parse here -- that constant is declared further down and would be in its
-   temporal dead zone.
-
-   `prof.rim` sets the face radius on UNMARKED wheels only. Every wheel here is
-   marked, and a marked wheel takes its face from the engraving band instead, so
-   this is a default rather than a per-wheel choice. */
-const TRAIN = (WHO.links || []).map((l, i) => ({ slug: l.slug, prof: { rim: 1.7 },
-  /* THE PARENT IS EXPLICIT. It used to be implicit -- wheel i meshed wheel i-1,
-     and nothing said so -- which is why solve() carried x/y/dir/phase as running
-     state down the array. A chain is still a path, so every parent here is i-1
-     and nothing renders differently -- what changes is that a branch becomes
-     expressible at all. */
-  parent: i === 0 ? null : i - 1,
-  person: WHO.slug,
-  role: 'link' }));
+/* One entry per wheel across every chain on stage. Each person's first wheel is
+   a root for now; Task 6 gives it a bridge to hang from. */
+const TRAIN = (function () {
+  const out = [];
+  STAGE.people.forEach(p => {
+    const base = out.length;
+    (p.links || []).forEach((l, i) => {
+      out.push({ slug: l.slug, prof: { rim: 1.7 },
+        parent: i === 0 ? null : base + i - 1,
+        person: p.slug, role: 'link' });
+    });
+  });
+  return out;
+})();
+/* The SPINE is the longest chain -- it sets the scale and, from Task 6, the axis
+   every other chain runs parallel to. Ties break by PEOPLE order. */
+const SPINE_LEN = Math.max(1, ...STAGE.people.map(p => (p.links || []).length));
 
 /* The tooth counts above are the seed, not the answer: they are dealt per load,
    so the machine has a different silhouette every visit rather than the same
@@ -410,7 +402,10 @@ const TEETH_MIN = 13, TEETH_MAX = 19, TEETH_SLACK = 4, TEETH_HOST = 18;
    the standard gear size comes from -- and a literal repeated in both would be a
    copy that could drift. */
 const TEETH_MEAN = 16.3;
-const TEETH_SUM = Math.round(TEETH_MEAN * TRAIN.length);
+/* The train's overall LENGTH, which is the spine -- a branch adds cross-axis
+   height, not length, so counting every wheel on stage would overstate it and
+   the layout would lose its proportions. */
+const TEETH_SUM = Math.round(TEETH_MEAN * SPINE_LEN);
 /* THE SPAN A NOMINAL CHAIN OCCUPIES, computed rather than measured, and it is
    what gives every page the same gear size. A chain shorter than the longest is
    scaled as though the longest were on stage, so harper.wozi.com draws her wheel
@@ -446,6 +441,9 @@ const TEETH_SUM = Math.round(TEETH_MEAN * TRAIN.length);
    matters: the standard size is one term in a min() alongside the chain's own
    span, so underestimating means a real chain is bound by itself and never by
    this. Overestimating is what clamped the page before. */
+/* ALL CONFIGURED PEOPLE, not just the ones on stage -- deliberately different
+   from SPINE_LEN. A solo page has to draw its wheels at the size they have on
+   the fullest chain, and that chain is not on stage to be measured. */
 const NOMINAL_CHAIN = Math.max(1,
   ...((CONF.PEOPLE || []).map(p => (p.links || []).length)));
 /* dealt further down, once the planetary's sizing rules exist to consult */
@@ -998,11 +996,15 @@ const NOMINAL_SPAN = (function () {
       ang.push(first * (i % 2 ? 1 : -1) * (ANG_MIN + Math.random() * (ANG_MAX - ANG_MIN)));
     }
     /* Walk parents, not indices: on a tree the offset of a wheel is its parent's
-       offset plus this step, and the array order is not the chain order. */
+       offset plus this step, and the array order is not the chain order.
+       A COMBINED STAGE has more than one root -- every person's first wheel
+       carries parent === null, not just TRAIN[0] -- and a root has no bearing
+       of its own to walk, so it starts its own chain back at the baseline. */
     const yOf = new Array(TRAIN.length).fill(0);
     let lo = 0, hi = 0, last = 0;
     for (let i = 1; i < TRAIN.length; i++) {
       const p = TRAIN[i].parent;
+      if (p == null) continue;
       yOf[i] = yOf[p] + (rOf(TRAIN[p]) + rOf(TRAIN[i])) * Math.sin(ang[i] * Math.PI / 180);
       if (yOf[i] < lo) lo = yOf[i];
       if (yOf[i] > hi) hi = yOf[i];
@@ -1295,15 +1297,19 @@ function shades(hex, soft) {
     : [mix(0.55, 255), mix(0.14, 255), mix(0.2, 0), mix(0.42, 0)];
 }
 
-/* SITES is per-PERSON now: config.js keeps SERVICES (what a service is, shared
-   by everyone) separate from each person's own handle and URL, because
-   `/in/csmarshall` is Charles's, not LinkedIn's. This rebuilds the flat shape
-   the rest of the file already expects, for whichever chain is on stage. */
-const SITES = (WHO.links || []).reduce(function (acc, l) {
-  const svc = (CONF.SERVICES || {})[l.slug] || {};
-  acc[l.slug] = { label: svc.label || l.slug, path: l.path, href: l.href };
-  return acc;
-}, {});
+/* Per person now: a combined stage carries several chains and a service belongs
+   to whoever's chain it sits on. Keyed person -> slug -> { label, path, href }. */
+const SITES = (function () {
+  const out = {};
+  STAGE.people.forEach(p => {
+    const m = out[p.slug] = {};
+    (p.links || []).forEach(l => {
+      const svc = (CONF.SERVICES || {})[l.slug] || {};
+      m[l.slug] = { label: svc.label || l.slug, path: l.path, href: l.href };
+    });
+  });
+  return out;
+})();
 
 class Component extends DCLogic {
   state = { theme: 'light', hover: null, icons: {}, ghosts: [], motion: null, tog: false };
@@ -2053,34 +2059,34 @@ class Component extends DCLogic {
        shuffle reads this.props.shuffle, and PAIR_SLOTS/SITES are declared
        further down the file than the colour deal is. */
     if (!this._slugFor) {
-    /* A PAIR SLOT THE TRAIN CANNOT REACH IS NOT A PAIR SLOT. PAIR_SLOTS names
-       wheel indices, and a shorter chain simply does not have all of them --
-       [3,4] needs five wheels, [0,1] needs two. An unreachable slot used to go
-       on claiming its in-range index anyway, so that wheel was excluded from
-       singleSlots while no pair could ever be seated in it: the wheel drew with
-       no slug at all, meaning no badge, no engraved handle and no link. A
-       one-link chain lost its only wheel that way. Dropping the slot releases
-       its index to the singles, which is what an unpairable wheel is. */
-    const pairSlots = PAIR_SLOTS.filter(pr => pr.every(i => i < TRAIN.length)), singleSlots = [];
-      TRAIN.forEach((t, i) => { if (!pairSlots.some(pr => pr.indexOf(i) >= 0)) singleSlots.push(i); });
-      /* ONLY SEAT SERVICES THE ACTIVE PERSON ACTUALLY HAS (#53). config.js says
-         "a service named here but absent from the active person's links is simply
-         skipped" -- it was not, and a second person crashed the page 2000 times
-         out of 2000, because renderVals() reads SITES[g.slug].label unguarded.
-         That matters now rather than later: #39 is shipped, the picker is built,
-         and adding a person is documented as a config edit. Filtering here is the
-         right place -- it keeps the promise where the seating happens, instead of
-         leaving every consumer to guard a slug that should never have existed. */
-      const has = (slug) => Object.prototype.hasOwnProperty.call(SITES, slug);
-      const pairs = shuffle(PAIRS.filter(pr => pr.every(has)).map(pr => shuffle(pr.slice())));
-      const singles = shuffle(SINGLES.filter(has));
       const slugFor = {};
-      /* Both guards are needed and for different reasons: PAIRS empty gave
-         pairs[NaN] -> a TypeError, while SINGLES empty merely left the slug null
-         and the badge filtered out later. Same shape, two outcomes, three lines
-         apart -- so treat them the same. */
-      if (pairs.length) pairSlots.forEach((pr, k) => { const pair = pairs[k % pairs.length]; slugFor[pr[0]] = pair[0]; slugFor[pr[1]] = pair[1]; });
-      if (singles.length) singleSlots.forEach((s, k) => { slugFor[s] = singles[k % singles.length]; });
+      /* SEATED PER PERSON. PAIR_SLOTS names wheel indices WITHIN a chain, so on a
+         combined stage they have to be read relative to where that person's
+         wheels start -- otherwise a pair straddles a boundary and one of someone
+         else's services lands on this person's wheel (#65 is the same family:
+         a wheel that ends up with the wrong slug, or none). */
+      const byPerson = {};
+      TRAIN.forEach((t, i) => {
+        if (t.role !== 'link') return;
+        (byPerson[t.person] = byPerson[t.person] || []).push(i);
+      });
+      Object.keys(byPerson).forEach(person => {
+        const idx = byPerson[person];
+        /* A pair slot the chain cannot reach is not a pair slot -- it would claim
+           its in-range index while never being fillable, and that wheel would draw
+           blank (#65). */
+        const pairSlots = PAIR_SLOTS.filter(pr => pr.every(k => k < idx.length));
+        const singleSlots = [];
+        idx.forEach((_, k) => { if (!pairSlots.some(pr => pr.indexOf(k) >= 0)) singleSlots.push(k); });
+        const has = (slug) => Object.prototype.hasOwnProperty.call(SITES[person] || {}, slug);
+        const pairs = shuffle(PAIRS.filter(pr => pr.every(has)).map(pr => shuffle(pr.slice())));
+        const singles = shuffle(SINGLES.filter(has));
+        if (pairs.length) pairSlots.forEach((pr, k) => {
+          const pair = pairs[k % pairs.length];
+          slugFor[idx[pr[0]]] = pair[0]; slugFor[idx[pr[1]]] = pair[1];
+        });
+        if (singles.length) singleSlots.forEach((s, k) => { slugFor[idx[s]] = singles[k % singles.length]; });
+      });
       this._slugFor = slugFor;
     }
     const slugFor = this._slugFor;
@@ -2162,7 +2168,7 @@ class Component extends DCLogic {
           phase = ang + 180 - (0.5 - u) * pThis;
         }
       }
-      g.push({ i: i, teeth: t.teeth, color: t.color, cv: t.cv || null, crot: t.crot || 0, slug: slugFor[i] || null, belt: t.link || null, kind: t.kind || 'holes', arms: t.arms || 5, prof: prof, chainFrom: chainFrom,
+      g.push({ i: i, teeth: t.teeth, color: t.color, cv: t.cv || null, crot: t.crot || 0, slug: slugFor[i] || null, person: t.person, role: t.role, belt: t.link || null, kind: t.kind || 'holes', arms: t.arms || 5, prof: prof, chainFrom: chainFrom,
         r: r, ro: ro, x: x, y: y, dir: dir, phase: phase });
     });
     let minX = Math.min.apply(null, g.map(k => k.x - k.ro)) - 6;
@@ -2198,7 +2204,7 @@ class Component extends DCLogic {
      is identical on every wheel; the arc sweep is then derived from the actual text length
      and the band's circumference, shrinking the type only if a long handle would not fit. */
   engraving(g, r, m, bandOut) {
-    const site = g.slug ? SITES[g.slug] : null;
+    const site = g.slug ? SITES[g.person][g.slug] : null;
     const raw = site ? site.path : '';
     /* Just the handle: everything after the last slash. */
     const handle = raw.indexOf('/') >= 0 ? raw.slice(raw.lastIndexOf('/') + 1) : raw;
@@ -3613,8 +3619,8 @@ class Component extends DCLogic {
        actually threw, and two of its neighbours already used the guarded form,
        which is the tell that this was half-known. One filter beats three
        scattered ternaries. */
-    const links = solved.gears.filter(g => g.slug && SITES[g.slug]).map(g => {
-      const site = SITES[g.slug];
+    const links = solved.gears.filter(g => g.slug && SITES[g.person] && SITES[g.person][g.slug]).map(g => {
+      const site = SITES[g.person][g.slug];
       /* The planetary wheel gets a smaller axle cap: the badge is the grounded
          carrier's end plate, and shrinking it uncovers the sun -- the
          counter-rotating member that is the whole show. */
@@ -3636,7 +3642,7 @@ class Component extends DCLogic {
          opens, because `max-content` cannot be transitioned -- so the label is
          MEASURED rather than estimated. A per-character guess clipped "Mastodon"
          on the first try, which is what estimating glyph widths gets you. */
-      const label = SITES[g.slug] ? SITES[g.slug].label : '';
+      const label = SITES[g.person] && SITES[g.person][g.slug] ? SITES[g.person][g.slug].label : '';
       const pillType = pillFont(g.slug);
       const labelW = this.textWidth(label, pillType) + 4;
       /* Open while hovered OR while being dragged. Without the second half the
@@ -3709,7 +3715,7 @@ class Component extends DCLogic {
                name arrives in it rather than with it */
             transition: 'max-width .26s cubic-bezier(.22,1,.36,1), opacity .16s ease .06s, margin-left .26s cubic-bezier(.22,1,.36,1)'
           }
-        }, SITES[g.slug] ? SITES[g.slug].label : ''),
+        }, SITES[g.person] && SITES[g.person][g.slug] ? SITES[g.person][g.slug].label : ''),
         discStyle: {
           position: 'absolute',
           /* Grows RIGHTWARD. The element is centred on the hub by
