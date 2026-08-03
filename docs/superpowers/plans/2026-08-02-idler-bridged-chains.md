@@ -621,12 +621,25 @@ Replace `index.html:404`'s `TEETH_SUM`:
 const TEETH_SUM = Math.round(TEETH_MEAN * SPINE_LEN);
 ```
 
-And at `index.html:441`, `NOMINAL_CHAIN` becomes `SPINE_LEN` — delete the separate scan, since `SPINE_LEN` is the same quantity computed once:
+**`NOMINAL_CHAIN` and `SPINE_LEN` are two different quantities. Keep both.**
+
+- `SPINE_LEN` = the longest chain among the people **on stage**. It sets
+  `TEETH_SUM`, because that is the train actually being drawn.
+- `NOMINAL_CHAIN` at `index.html:441` = the longest chain among **all configured**
+  people, staged or not. It sets `NOMINAL_SPAN`, which is what makes a gear the
+  same size on every page — a solo page must render at the fullest chain's scale
+  even though that chain is not on stage.
+
+They coincide on the combined stage and differ on a solo one, which is the whole
+point. Leave `NOMINAL_CHAIN` scanning `CONF.PEOPLE` and add a comment saying
+exactly why, so nobody "simplifies" it to `SPINE_LEN`:
 
 ```js
+/* ALL CONFIGURED PEOPLE, not just the ones on stage -- deliberately different
+   from SPINE_LEN. A solo page has to draw its wheels at the size they have on
+   the fullest chain, and that chain is not on stage to be measured. */
 const NOMINAL_CHAIN = Math.max(1, ...((CONF.PEOPLE || []).map(p => (p.links || []).length)));
 ```
-stays as-is: it scans **all configured** people, not just staged ones, so a solo page still renders at the fullest chain's scale. Add a comment saying exactly that, so nobody "simplifies" it to `SPINE_LEN`.
 
 - [ ] **Step 6: Make SITES and seating per person**
 
