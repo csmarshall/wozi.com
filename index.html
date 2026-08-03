@@ -1709,6 +1709,72 @@ class Component extends DCLogic {
     return this._seed / 0x7fffffff;
   }
 
+  /* THE AXIS OF EACH CHAIN ON STAGE, measured from that chain's own wheels, in
+     the same solve units the gears carry.
+
+     A BRANCH HAS TWO DIRECTIONS, NOT ONE. The bridge runs perpendicular to the
+     spine, because that is what sets the spacing between one chain and the next;
+     the chain itself then runs parallel to the spine. Anything that continues a
+     branch -- an escape run, a datum mark -- continues the CHAIN axis. Follow the
+     bridge instead and it leaves by the short axis, which is the failure #10 was
+     fixed for and #67 hit again from the other side.
+
+     IDLERS ARE NOT CHAIN WHEELS. They belong to the bridge, not to the chain they
+     feed, and including one drags the measured axis toward the bridge -- which is
+     exactly the tilt this is here to avoid. Linked wheels only.
+
+     Derived ONCE, here, and read by everything that needs it. Two consumers
+     measuring the same axis two ways is how the escape runs and the bridge came
+     to disagree in the first place. */
+  chainAxes(solved) {
+    solved = solved || this.solve();
+    const order = [], byPerson = {};
+    solved.gears.forEach(g => {
+      if (g.role !== 'link' || g.person == null) return;
+      let c = byPerson[g.person];
+      if (!c) { c = byPerson[g.person] = { person: g.person, wheels: [] }; order.push(c); }
+      c.wheels.push(g);
+    });
+    if (!order.length) return order;
+    const spine = byPerson[WHO.slug] || order[0];
+    order.forEach(c => {
+      c.spine = c === spine;
+      const a = c.wheels[0], b = c.wheels[c.wheels.length - 1];
+      /* A ONE-WHEEL CHAIN HAS NO AXIS OF ITS OWN, and measuring one anyway is how
+         the escape runs ended up crossing the SHORT axis in portrait (#67). With a
+         single wheel `a` and `b` are the same object, so this is atan2(0, 0) --
+         which returns 0 rather than failing, and 0 degrees is horizontal in every
+         orientation. On a 390x844 phone that sent both runs off the 390px sides
+         after one wheel each and left the whole 844px of height empty, which is
+         the exact failure #10 fixed for multi-wheel trains: a run must continue
+         the machine's axis, not leave by whichever edge is nearest.
+
+         The stage's own axis is the honest fallback -- axisRot() is 90 in portrait
+         and 0 in landscape, which IS the "chain follows the longest dimension"
+         rule, stated once and reused here instead of re-derived. A chain with two
+         or more wheels still measures its own axis, so nothing changes for it. */
+      const dx = b.cx - a.cx, dy = b.cy - a.cy;
+      c.deg = Math.hypot(dx, dy) < 1e-6
+        ? (this._axisRot || 0)
+        : Math.atan2(dy, dx) * 180 / Math.PI;
+      c.head = a;
+      c.tail = b;
+    });
+    /* POINTED THE SAME WAY AS THE SPINE. Which end of a chain the deal calls
+       first is arbitrary -- and for a one-wheel chain the fallback above is the
+       stage axis, which knows nothing about which way the spine happens to run.
+       Flipping the axis to agree with the spine is what lets a driven chain's one
+       escape run leave on the same side as the spine's trailing run, rather than
+       on whichever side its own wheel order fell out on. */
+    order.forEach(c => {
+      if (c.spine) return;
+      if (Math.cos((c.deg - spine.deg) * Math.PI / 180) >= 0) return;
+      c.deg += 180;
+      const t = c.head; c.head = c.tail; c.tail = t;
+    });
+    return order;
+  }
+
   /* Background machinery: extra wheels seeded off each edge, meshed onto the visible
      train, dimmed and set behind it so they read as context rather than content. */
   fitEscapes() {
@@ -1728,38 +1794,38 @@ class Component extends DCLogic {
     const vw = window.innerWidth, vh = window.innerHeight;
     const ghosts = [];
     this._seed = 20260729;
-    const hosts = [solved.gears[0], solved.gears[solved.gears.length - 1]];
     const taken = [];
     /* Uses the module-level segCross (#57). This was a second copy, identical
        character-for-character including its inner helper, shadowing a perfectly
        good function three lines above where it is used -- exactly the drift
        hazard that has already bitten this repo twice. */
-    /* The escape runs continue the train's OWN AXIS rather than leaving by whichever
+    /* The escape runs continue each chain's OWN AXIS rather than leaving by whichever
        screen edge happens to be nearest. Nearest-edge was measuring the wrong thing:
        on a wide, short viewport the closest edges are the top and bottom, so one run
        climbed off the top and the other dropped off the bottom — a horizontal train
        with a vertical tail at each end, which reads as an S rather than as a machine
        continuing past the frame (#10). Continuing the axis is what SESSION-LOG says
        these are for, and it fills a wide display instead of stranding the train in
-       the middle of one. */
-    const first = solved.gears[0], last = solved.gears[solved.gears.length - 1];
-    /* A ONE-WHEEL TRAIN HAS NO AXIS OF ITS OWN, and measuring one anyway is how
-       the escape runs ended up crossing the SHORT axis in portrait (#67). With a
-       single gear `first` and `last` are the same object, so this is
-       atan2(0, 0) -- which returns 0 rather than failing, and 0 degrees is
-       horizontal in every orientation. On a 390x844 phone that sent both runs off
-       the 390px sides after one wheel each and left the whole 844px of height
-       empty, which is the exact failure #10 fixed for multi-wheel trains: a run
-       must continue the machine's axis, not leave by whichever edge is nearest.
+       the middle of one.
 
-       The stage's own axis is the honest fallback -- axisRot() is 90 in portrait
-       and 0 in landscape, which IS the "chain follows the longest dimension"
-       rule, stated once and reused here instead of re-derived. A train with two
-       or more wheels still measures its own axis, so nothing changes for it. */
-    const axDx = last.cx - first.cx, axDy = last.cy - first.cy;
-    const axisDeg = Math.hypot(axDx, axDy) < 1e-6
-      ? (this._axisRot || 0)
-      : Math.atan2(axDy, axDx) * 180 / Math.PI;
+       PER CHAIN, from chainAxes() -- not one axis across the whole array. First-to-
+       last of solved.gears once spans the spine, the idlers and a branch, so its
+       heading is the spine-to-branch DIAGONAL: the runs then leave along the
+       bridge rather than along either chain, which is #10 all over again.
+
+       THE SPINE GETS TWO RUNS, EVERY OTHER CHAIN GETS ONE, on the same side as the
+       spine's trailing run. Asymmetric on purpose: the end a driven chain is
+       missing its leading run at is the end its bridge arrives at, so the chain
+       visibly receives its power there instead of trailing a second tail into the
+       machinery that drives it. */
+    const axes = this.chainAxes(solved);
+    const hosts = [];
+    axes.forEach(c => {
+      if (!c.spine) return;
+      hosts.push({ g: c.head, deg: c.deg + 180 });
+      hosts.push({ g: c.tail, deg: c.deg });
+    });
+    axes.forEach(c => { if (!c.spine) hosts.push({ g: c.tail, deg: c.deg }); });
     /* How far a heading travels before it leaves the viewport. */
     const reachAlong = (px, py, deg) => {
       const a = deg * Math.PI / 180, dx = Math.cos(a), dy = Math.sin(a);
@@ -1771,11 +1837,13 @@ class Component extends DCLogic {
       return Math.max(0, t === Infinity ? 0 : t);
     };
     hosts.forEach((host, ei) => {
-      const sx = rect.left + host.cx * gs, sy = rect.top + host.cy * gs;
-      /* The first wheel continues backwards along the axis, the last one onwards.
-         A small arc either side is searched only to dodge a run already placed —
-         the axis itself is always tried first. */
-      const want = ei === 0 ? axisDeg + 180 : axisDeg;
+      const g0 = host.g;
+      const sx = rect.left + g0.cx * gs, sy = rect.top + g0.cy * gs;
+      /* Each host already carries the way out: backwards along its chain's axis at
+         the leading end, onwards at the trailing one. A small arc either side is
+         searched only to dodge a run already placed — the axis itself is always
+         tried first. */
+      const want = host.deg;
       let e = null;
       const offsets = [0, 16, -16, 32, -32, 50, -50];
       for (let q = 0; q < offsets.length; q++) {
@@ -1790,7 +1858,7 @@ class Component extends DCLogic {
       taken.push([{ x: sx, y: sy }, { x: sx + (e.reach + 80) * Math.cos(ea), y: sy + (e.reach + 80) * Math.sin(ea) }]);
       if (e.reach < 60) return;
       const span = e.reach / gs;
-      let prev = { cx: host.cx, cy: host.cy, r: host.r, teeth: host.teeth, dir: host.dir, phase: host.phase };
+      let prev = { cx: g0.cx, cy: g0.cy, r: g0.r, teeth: g0.teeth, dir: g0.dir, phase: g0.phase };
       let reached = 0, k = 0;
       /* Keep adding wheels until the run is genuinely off the edge; they grow as they
          go, so a tall screen does not need a long string of identical pinions. */

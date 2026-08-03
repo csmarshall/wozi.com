@@ -817,6 +817,83 @@ test('a bridge idler is drawn at the same opacity as every other ghost', () => {
     + 'that casts a full-strength shadow reads heavier than the wheel casting it');
 });
 
+/* chainAxes() lifted out of the page and run against a solve of the test's
+   choosing. `this` is the only thing it reads from the component -- _axisRot,
+   which is what fitStage() hands solve() too -- so no DOM is needed. */
+function chainAxesOf(solved, axisRot, spineSlug) {
+  const fn = new Function('WHO',
+    'return function ' + grabBlock('  chainAxes(solved) {', '{', '}') + ';')(
+    { slug: spineSlug });
+  return fn.call({ _axisRot: axisRot }, solved);
+}
+/* Unsigned angle between two headings, folded to 0..90: an axis and its reverse
+   are the same axis. */
+const axisOff = (a, b) => {
+  const d = Math.abs(((a - b) % 360 + 540) % 360 - 180);
+  return d > 90 ? 180 - d : d;
+};
+
+test('escape runs follow each chain axis, never its bridge axis', () => {
+  /* A branch has TWO directions: the bridge runs perpendicular to set spacing,
+     then the chain runs parallel to the spine. A run that followed the bridge
+     would leave by the short axis -- the #10 and #67 failure. */
+  const i = SRC.indexOf('fitEscapes()');
+  const j = SRC.indexOf('applyRotation()', i);
+  const frag = SRC.slice(i, j);
+  ok(!/solved\.gears\[solved\.gears\.length - 1\]/.test(frag)
+     || /chainAxis|perChain/.test(frag),
+    'fitEscapes still takes the first and last gear of the whole train as its ends');
+  ok(/this\.chainAxes\(/.test(frag),
+    'fitEscapes derives its own axis instead of reading the one chainAxes() states');
+  /* The spine keeps both runs; every other chain gets ONE, on the same side. The
+     missing leading run is where the bridge attaches, so a driven chain visibly
+     receives its power there. */
+  ok(/if \(!c\.spine\) return;[\s\S]{0,220}?hosts\.push\([\s\S]{0,120}?hosts\.push\(/.test(frag),
+    'the spine no longer gets both a leading and a trailing run');
+  ok(/if \(!c\.spine\) hosts\.push\(/.test(frag),
+    'a driven chain gets no escape run of its own, or gets more than one');
+});
+
+test('a chain axis is measured from its own linked wheels, never its idlers', () => {
+  /* Including an idler drags the axis toward the BRIDGE, which is perpendicular
+     to the chain -- for a one-wheel chain it becomes the bridge exactly. That is
+     the whole defect: escape runs leaving along the spine-to-branch diagonal. */
+  const bad = [];
+  [0, 90].forEach(rot => {
+    const { solved, train, order } = runSolve(THREE, { axisRot: rot });
+    const axes = chainAxesOf(solved, rot, order[0].slug);
+    eq(axes.length, THREE.length, 'rot ' + rot + ': not every chain has an axis');
+    const spine = axes.find(c => c.spine);
+    ok(spine && spine.person === order[0].slug, 'rot ' + rot + ': the spine is not the longest chain');
+    axes.forEach(c => {
+      if (c.wheels.some(w => w.role !== 'link'))
+        bad.push(`rot ${rot}: ${c.person}'s axis counts a wheel that is not a link`);
+      /* Parallel to the spine, not to the bridge, which runs at rot + 90. */
+      if (axisOff(c.deg, rot) >= axisOff(c.deg, rot + 90))
+        bad.push(`rot ${rot}: ${c.person} runs closer to the bridge axis `
+          + `(${axisOff(c.deg, rot + 90).toFixed(1)}°) than to the stage axis `
+          + `(${axisOff(c.deg, rot).toFixed(1)}°)`);
+      /* Every chain points the way the spine points, so one run per driven chain
+         leaves the same side as the spine's trailing run. */
+      if (Math.cos((c.deg - spine.deg) * Math.PI / 180) < 0)
+        bad.push(`rot ${rot}: ${c.person} points back against the spine`);
+      if (c.wheels.length === 1 && axisOff(c.deg, rot) > 1e-9)
+        bad.push(`rot ${rot}: a one-wheel chain measured an axis of its own (${c.deg}) `
+          + `instead of falling back to the stage axis (#67)`);
+      if (c.spine) return;
+      /* What the old code did: first-to-last across everything the chain is
+         reached through. It must be measurably more bridge-ward than the answer. */
+      const with_ = solved.gears.filter(w => (w.person != null ? w.person : train[w.i].bridge) === c.person);
+      const a = with_[0], b = with_[with_.length - 1];
+      const naive = Math.atan2(b.cy - a.cy, b.cx - a.cx) * 180 / Math.PI;
+      if (axisOff(naive, rot + 90) >= axisOff(c.deg, rot + 90))
+        bad.push(`rot ${rot}: ${c.person}'s axis is no further from the bridge with `
+          + `its idlers dropped — the idlers are still being counted`);
+    });
+  });
+  ok(bad.length === 0, bad.join('\n      '));
+});
+
 test('the end-drift floor clears the widest step the deal can actually produce', () => {
   /* endsCapFor's floor was the NOMINAL wheel: 27.6 units. The wheels are dealt,
      not nominal, and two 19-tooth blanks stand 133 apart -- their shallowest
