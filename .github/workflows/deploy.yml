@@ -89,10 +89,25 @@ jobs:
           # overflow:hidden to animate open, so a line box shorter than the ink
           # does not overflow, it CLIPS. That shipped once and was caught by eye.
           python3 tools/pill_clip.py http://127.0.0.1:8765/ ; PILL=$?
+          # Structure, which sits in the gap between the two gates above it.
+          # node tools/test.js proves the gear MATHS meshes, in Node, with no
+          # browser; the pixel gate proves the page draws the same picture as a
+          # ref. Nothing asserted that what solve() computed is what the DOM
+          # actually contains -- a wheel rendered with the wrong tooth count, an
+          # empty <svg>, a missing engraving or a fill gone black would leave the
+          # maths untouched. No images and no baselines here, so it behaves the
+          # same on this runner as it does on a laptop.
+          #
+          # BOTH SCOPES, because they are different code paths: 127.0.0.1 is a
+          # STAGE_HOSTS name so the bare URL is the combined stage -- bridges,
+          # idlers, a datum -- and ?who=charles is one chain with none of them.
+          python3 tools/dom_invariants.py http://127.0.0.1:8765/ ; DOM=$?
+          python3 tools/dom_invariants.py http://127.0.0.1:8765/ --query '?who=charles' ; DOM1=$?
           set -e
           kill $SERVER 2>/dev/null || true
-          if [ $LAYOUT -ne 0 ] || [ $MOTION -ne 0 ] || [ $PILL -ne 0 ]; then
-            echo "::error::layout, motion or pill gate failed — not deploying"
+          if [ $LAYOUT -ne 0 ] || [ $MOTION -ne 0 ] || [ $PILL -ne 0 ] \
+             || [ $DOM -ne 0 ] || [ $DOM1 -ne 0 ]; then
+            echo "::error::layout, motion, pill or DOM-invariant gate failed — not deploying"
             exit 1
           fi
 
