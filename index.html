@@ -3687,6 +3687,13 @@ class Component extends DCLogic {
 
   /* HOW HARD THE DATUM MARK IS DRAWN, solved rather than carried per theme.
 
+     THIS IS NO LONGER AN `opacity` DECLARATION. Since #81 the mark is drawn
+     inside the ghost layer's group -- the only place a wheel at ghost alpha can
+     hide it -- so it can only be painted at THAT alpha, and the number this
+     solves for is spent on the ink instead. datumInk() does that conversion and
+     the answer is unchanged: this is still what decides how hard the scribe
+     reads, and everything below still holds.
+
      The ghost layer's pair does not transfer, and measuring it says why. It is
      not a contrast-matched pair to begin with: sampled on the rendered page over
      the eight tones ghostSvg deals, a ghost body composites to roughly 1.9:1
@@ -3755,6 +3762,75 @@ class Component extends DCLogic {
     const a = Math.round((lo + hi) * 50) / 100;
     this._datumOp[theme] = a;
     return a;
+  }
+
+  /* THE SCRIBE'S INK RATHER THAN ITS ALPHA (#81), because the mark is now drawn
+     INSIDE the ghost layer's compositing group instead of one sibling in front
+     of it.
+
+     WHAT WAS ACTUALLY WRONG. The datum was already emitted BELOW every ghost --
+     first child, `zIndex: 0`, hit-tested and confirmed below all 24 of them --
+     and it still showed straight through every wheel it crossed. Paint order was
+     never the fault. The ghost layer carries ONE opacity for the whole assembly,
+     and an occluder composited at 0.17 does not occlude: the line survived at
+     83% of its weight over a wheel body and read as an overlay laid on the
+     drawing. It is also exactly why ghost wheels have always hidden EACH OTHER
+     cleanly -- inside that group they paint at full alpha, and the group's alpha
+     is charged once at the end. The datum was the only part of the background
+     assembly standing outside the group, so it was the only part nothing could
+     cover. Moving it in buys occlusion by the wheels' real silhouettes, teeth
+     and gaps included, at no geometric cost.
+
+     WHAT MOVING IN COSTS. Inside, the mark can only be drawn at the group's
+     alpha, and datumOpacity() solved for a different one -- 0.28 against the
+     ghosts' 0.17 on dark, because a hairline does not survive dimming the way a
+     filled body does. So the alpha the solve asked for is spent on the INK
+     instead. Compositing is linear in sRGB values, so
+
+         ink = bg + (datumOpacity / ghostOpacity) * (token - bg)
+
+     drawn at ghostOpacity lands on the same tone `token` reaches at
+     datumOpacity, and the shot says so: the two agree to within 2/255 on every
+     channel off a wheel, which is sRGB rounding rather than a difference in
+     weight. In light the two alphas are the same number by construction, the
+     ratio is exactly 1, and this hands the token straight back.
+
+     A CLIPPED CHANNEL MEANS TOO STRONG, WHICH IS THE REFUSAL THIS FILE ALREADY
+     KEEPS. A ratio above 1 lifts the token away from the page, and a palette
+     whose muted already sits near the top of a channel cannot be lifted that
+     far; clamping leaves the mark stronger than asked for and a shade off hue.
+     That is the same trade datumOpacity() takes at every one of its own dead
+     ends -- visibly too strong beats quietly absent, because only one of those
+     leaves anything on the page to diagnose from.
+
+     AND IF THE TOKENS WILL NOT READ AS COLOURS there is nothing to lift, so the
+     line falls back to --ink: the page's own foreground, which contrasts with
+     its own background by construction in any palette. Drawn at the ghost alpha
+     it is the wrong weight for the job and obviously so, which is the point. The
+     plate is a filled body and falls back to its own token, since a body still
+     reads at 0.17 where a hairline does not.
+
+     CACHED PER THEME, and only once it has read. An empty token means the page's
+     own <style> has not landed yet -- the markup is compiled and re-inserted --
+     so caching the fallback would hold the wrong ink for the life of the page,
+     which is the trap datumOpacity() documents next door. */
+  datumInk() {
+    if (!this._datumInk) this._datumInk = {};
+    const theme = this.state.theme;
+    if (this._datumInk[theme]) return this._datumInk[theme];
+    const css = getComputedStyle(document.documentElement);
+    const bg = rgbOf((css.getPropertyValue('--bg') || '').trim());
+    const k = this.datumOpacity() / this.ghostOpacity();
+    const lift = (token) => {
+      const c = rgbOf((css.getPropertyValue(token) || '').trim());
+      if (!bg || !c) return null;
+      return 'rgb(' + c.map((v, i) => Math.max(0, Math.min(255,
+        Math.round(bg[i] + k * (v - bg[i]))))).join(',') + ')';
+    };
+    const line = lift('--muted'), plate = lift('--hair');
+    const ink = { line: line || 'var(--ink)', plate: plate || 'var(--hair)' };
+    if (line && plate) this._datumInk[theme] = ink;
+    return ink;
   }
 
   /* Cheap stand-in for the background wheels: body, web and hub, no masks or turning
@@ -5107,7 +5183,9 @@ class Component extends DCLogic {
      rendered-pixel intent (#61): under a device-independent pixel the rasteriser
      turns a scribe into a grey wash instead of a line.
 
-     `box` is the ghost layer's own union, in rendered pixels. The line is run to
+     `box` is the union of the ghost WHEELS, in rendered pixels -- not of the
+     layer they live in, which is widened afterwards to hold this mark as well
+     (#81). The line is run to
      the edge of it and a little past, which is what makes it leave the drawing
      the way a scribed datum runs past the parts it references -- derived from
      what is actually on stage rather than from a guessed length. */
@@ -5120,6 +5198,10 @@ class Component extends DCLogic {
        cannot be in two places. */
     const MARK = this.plateMetrics(S);
     const HAIR = MARK.hair;
+    /* Two concrete colours, not the tokens: the mark is drawn inside the ghost
+       layer's opacity now, and datumInk() is where the alpha it lost is paid
+       back as ink (#81). */
+    const INK = this.datumInk();
     const MAJOR = MODULE * 1.2 * S, MINOR = MODULE * 0.5 * S, PAST = MODULE * 2 * S;
     const PLATE_H = MARK.h, PLATE_F = MODULE * 1.3 * S;
     /* A WINDOWS FACE IN THE STACK. ui-monospace covers Apple, Menlo is the older
@@ -5142,7 +5224,7 @@ class Component extends DCLogic {
       mk(ax, ay); mk(zx, zy);
       els.push(h('line', { key: key, x1: ax.toFixed(2), y1: ay.toFixed(2),
         x2: zx.toFixed(2), y2: zy.toFixed(2),
-        style: { stroke: 'var(--muted)', strokeWidth: HAIR.toFixed(2) + 'px' } }));
+        style: { stroke: INK.line, strokeWidth: HAIR.toFixed(2) + 'px' } }));
     };
     /* WHERE THE LINE ENTERS AND LEAVES THE DRAWN AREA, by slab clipping. An axis
        the line runs very nearly parallel to does not bound it at all, and taking
@@ -5219,27 +5301,38 @@ class Component extends DCLogic {
         transform: 'translate(' + c.x.toFixed(2) + ',' + c.y.toFixed(2) + ') rotate(' + r.deg.toFixed(2) + ')' },
         h('rect', { x: (-pw / 2).toFixed(2), y: (-PLATE_H / 2).toFixed(2),
           width: pw.toFixed(2), height: PLATE_H.toFixed(2), rx: (PLATE_H * 0.1).toFixed(2),
-          style: { fill: 'var(--hair)', stroke: 'var(--muted)', strokeWidth: HAIR.toFixed(2) + 'px' } }),
+          style: { fill: INK.plate, stroke: INK.line, strokeWidth: HAIR.toFixed(2) + 'px' } }),
         /* Offset by a share of the font size, not by `dominant-baseline`:
            WebKit puts `central` somewhere Blink and Gecko do not, which is what
            left the rim engraving off centre in Safari (#26). */
         h('text', { x: 0, y: (PLATE_F * 0.35).toFixed(2), textAnchor: 'middle',
-          style: { fill: 'var(--muted)', font: font, letterSpacing: track.toFixed(2) + 'px' } },
+          style: { fill: INK.line, font: font, letterSpacing: track.toFixed(2) + 'px' } },
           label)));
     });
-    /* THE LAYER MUST CONTAIN WHAT IT PAINTS (#21). It carries an opacity, and an
-       opacity below 1 makes the subtree one composited group: WebKit rasterises
-       that group at the element's BOX while Blink uses the union of its
-       children, so a box smaller than its contents is clipped in Safari and not
-       in Chrome. The viewBox is the box, so the coordinates above stay absolute
-       and nothing has to be shifted to match. */
+    /* THE SVG MUST CONTAIN WHAT IT PAINTS (#21). The viewBox is the box, so the
+       coordinates above stay absolute in stage space and nothing has to be
+       shifted to match -- which is also what lets this element be dropped into
+       the ghost layer at a single offset (#81) rather than re-solved there.
+
+       IT NO LONGER CARRIES AN OPACITY OF ITS OWN. The mark takes the ghost
+       layer's, which is the only way a wheel drawn at that alpha can hide it;
+       what the solve wanted is carried by datumInk() instead. Two nested
+       opacities would have charged the dimming twice.
+
+       THE BOUNDS GO BACK TO THE CALLER because the layer this now lives in has
+       the same rule, one level up: it is the element carrying the opacity, so
+       WebKit rasterises the group at ITS box while Blink takes the union of its
+       children, and a datum that runs past the wheels -- which is the whole
+       point of a datum -- would be clipped in Safari and not in Chrome. The
+       caller widens the layer to hold both. */
     const pad = PLATE_H;
     bx0 -= pad; by0 -= pad; bx1 += pad; by1 += pad;
-    return h('svg', { key: 'datum', width: (bx1 - bx0).toFixed(2), height: (by1 - by0).toFixed(2),
-      viewBox: [bx0, by0, bx1 - bx0, by1 - by0].map(v => v.toFixed(2)).join(' '),
-      style: { position: 'absolute', left: bx0.toFixed(2) + 'px', top: by0.toFixed(2) + 'px',
-        opacity: this.datumOpacity(), zIndex: 0, pointerEvents: 'none', overflow: 'visible' } },
-      els);
+    return { x0: bx0, y0: by0, x1: bx1, y1: by1,
+      el: h('svg', { key: 'datum', width: (bx1 - bx0).toFixed(2), height: (by1 - by0).toFixed(2),
+        viewBox: [bx0, by0, bx1 - bx0, by1 - by0].map(v => v.toFixed(2)).join(' '),
+        style: { position: 'absolute', left: bx0.toFixed(2) + 'px', top: by0.toFixed(2) + 'px',
+          zIndex: 0, pointerEvents: 'none', overflow: 'visible' } },
+        els) };
   }
 
   renderVals() {
@@ -5285,7 +5378,12 @@ class Component extends DCLogic {
 
        `ro` is generous on purpose: a ghost's outer radius is its pitch radius
        plus an addendum, and over-reserving costs nothing but a slightly larger
-       surface, whereas under-reserving clips a tooth. */
+       surface, whereas under-reserving clips a tooth.
+
+       THE LAYER NOW HOLDS THE DATUM AS WELL (#81), which splits it in two: the
+       opacity, the z-index and the box stay on the outer div, and the wheels
+       move into an inner one that carries the parallax transform. Both parts
+       matter and for different reasons -- see the two comments below. */
     const _gl = this.state.ghosts || [];
     let _gx0 = 0, _gy0 = 0, _gx1 = solved.w * S, _gy1 = solved.h * S;
     _gl.forEach(g => {
@@ -5297,16 +5395,44 @@ class Component extends DCLogic {
       _gx0 = Math.min(_gx0, g.cx * S - ro); _gy0 = Math.min(_gy0, g.cy * S - ro);
       _gx1 = Math.max(_gx1, g.cx * S + ro); _gy1 = Math.max(_gy1, g.cy * S + ro);
     });
-    const ghosts = h('div', { key: 'ghosts', ref: (el) => { this._ghostLayer = el; },
-      style: { position: 'absolute', left: _gx0 + 'px', top: _gy0 + 'px', width: (_gx1 - _gx0) + 'px', height: (_gy1 - _gy0) + 'px',
-      /* Light mode carries the outriggers harder: pale grey at 0.22 over a near-white
-         page was close to invisible, and since #10 these runs carry the composition
-         out to both edges rather than trailing off a corner. Still well behind the
-         train — they imply the machine continues, they do not compete with it. Dark
-         mode is unchanged; the same greys read correctly against #1E2226. */
-      transform: this.props.parallax ? 'scale(0.94)' : null, transformOrigin: 'center', opacity: this.ghostOpacity(), zIndex: 0, pointerEvents: 'none' } },
-      /* offset by the layer's own origin, so widening the box moves nothing */
-      _gl.map(g => h('div', { key: g.i, style: { position: 'absolute', left: (g.cx * S - _gx0) + 'px', top: (g.cy * S - _gy0) + 'px', width: 0, height: 0 } },
+    /* THE WHEELS' UNION IS SETTLED BEFORE THE DATUM READS IT, and never widened
+       afterwards. The scribed line is run to the edge of this box and a little
+       past -- that is what makes it leave the drawing the way a datum runs past
+       the parts it references -- so a box that had already grown to contain the
+       line would push the line further out again, and the mark would grow every
+       time it was measured. One direction only: wheels bound the line, the line
+       does not bound the wheels. */
+    const _wheels = { x0: _gx0, y0: _gy0, x1: _gx1, y1: _gy1 };
+    const datum = this.datumLayer(solved, S, _wheels);
+    /* Widen the LAYER, not the wheels' box, so the group's surface holds the
+       whole mark in WebKit too -- the same rule as #21, applied to the thing
+       that just moved inside it. */
+    if (datum) {
+      _gx0 = Math.min(_gx0, datum.x0); _gy0 = Math.min(_gy0, datum.y0);
+      _gx1 = Math.max(_gx1, datum.x1); _gy1 = Math.max(_gy1, datum.y1);
+    }
+    /* THE PARALLAX TRANSFORM BELONGS TO THE WHEELS ALONE, and this inner div is
+       the whole reason it can. The datum's stations mark the CENTRES OF LINKED
+       WHEELS, which are drawn at the train's own scale; scale the mark by 0.94
+       with the far plane and every station slides off the wheel it points at. So
+       the far plane's motion -- the 0.94 here and the pointer drift applied to
+       this same ref in _onPointer -- stays on the wheels, and the mark stays in
+       stage space where the train is.
+
+       A TRANSFORM DOES NOT BREAK THE OCCLUSION the move was made for: only an
+       opacity below 1 forces a subtree to composite as a group of its own, and
+       this div has none. The wheels still paint at full alpha onto the outer
+       div's surface, straight over the datum, and the assembly is dimmed once.
+
+       Its box is the WHEELS' union rather than the widened layer, so
+       `transform-origin: center` is the same point it has always been and
+       widening the layer for the datum moves nothing. */
+    const wheels = h('div', { key: 'wheels', ref: (el) => { this._ghostLayer = el; },
+      style: { position: 'absolute', left: (_wheels.x0 - _gx0) + 'px', top: (_wheels.y0 - _gy0) + 'px',
+        width: (_wheels.x1 - _wheels.x0) + 'px', height: (_wheels.y1 - _wheels.y0) + 'px',
+        transform: this.props.parallax ? 'scale(0.94)' : null, transformOrigin: 'center' } },
+      /* offset by the wheels' own origin, so widening the box moves nothing */
+      _gl.map(g => h('div', { key: g.i, style: { position: 'absolute', left: (g.cx * S - _wheels.x0) + 'px', top: (g.cy * S - _wheels.y0) + 'px', width: 0, height: 0 } },
         /* Guard on `el`, not just on the array: React calls a detached ref with
              null, so without it this collected roughly 2N entries per render, half
              of them {el: null} (#59). applyRotation skipped them, so nothing broke
@@ -5315,6 +5441,21 @@ class Component extends DCLogic {
           h('div', { ref: (el) => { if (el && this._ghostEls) this._ghostEls.push({ el: el, g: g }); },
           style: { transform: 'rotate(' + g.phase.toFixed(2) + 'deg)' } },
           this.ghostSvg(g, S)))));
+    const ghosts = h('div', { key: 'ghosts',
+      style: { position: 'absolute', left: _gx0 + 'px', top: _gy0 + 'px', width: (_gx1 - _gx0) + 'px', height: (_gy1 - _gy0) + 'px',
+      /* Light mode carries the outriggers harder: pale grey at 0.22 over a near-white
+         page was close to invisible, and since #10 these runs carry the composition
+         out to both edges rather than trailing off a corner. Still well behind the
+         train — they imply the machine continues, they do not compete with it. Dark
+         mode is unchanged; the same greys read correctly against #1E2226. */
+      opacity: this.ghostOpacity(), zIndex: 0, pointerEvents: 'none' } },
+      /* THE DATUM, FIRST AND INSIDE (#81), so every chain's mark is beneath EVERY
+         background wheel rather than only in front of them all. It is one
+         zero-size offset back to stage coordinates, exactly like a ghost's, so
+         the svg above keeps absolute coordinates and nothing had to be re-solved
+         to move it in here. */
+      datum ? h('div', { key: 'datum', style: { position: 'absolute', left: (-_gx0) + 'px', top: (-_gy0) + 'px', width: 0, height: 0 } }, datum.el) : null,
+      wheels);
     /* The artwork is decoration: the meaning is carried by the labelled <a>
        badges, which are siblings of this container, not children. One
        aria-hidden here removes all of it from the accessibility tree -- most
@@ -5324,12 +5465,13 @@ class Component extends DCLogic {
        that one declaration is what made Safari soft: everything below it was laid
        out small and then stretched as a bitmap by the compositor. */
     const gearArt = h('div', { 'aria-hidden': 'true', style: { position: 'absolute', left: 0, top: 0, width: (solved.w * S) + 'px', height: (solved.h * S) + 'px' } },
-      /* FIRST, so every chain's datum is beneath EVERY wheel rather than only
-         beneath its own. Painted per chain, the next chain's ghost run buries
-         the previous chain's plate. It reads the same union box the ghost layer
-         sizes itself to, so the line leaves the drawing rather than stopping at
-         the edge of the linked wheels. */
-      this.datumLayer(solved, S, { x0: _gx0, y0: _gy0, x1: _gx1, y1: _gy1 }),
+      /* FIRST, and it carries the datum inside it. One mark for the whole stage
+         rather than one per chain -- painted per chain, the next chain's ghost
+         run buries the previous chain's plate -- and it is drawn inside this
+         layer rather than in front of it, which is the only arrangement in which
+         a background wheel can actually cover it (#81). Everything after this
+         line is the machine the mark is a reference for, so the mark is beneath
+         all of it. */
       ghosts,
       /* One cast-shadow layer behind every wheel, so a wheel's shadow can never fall
          on top of the neighbour it meshes with (#18). Static — never touched by the

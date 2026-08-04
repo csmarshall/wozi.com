@@ -1425,7 +1425,14 @@ const DATUM_SRC = SRC.slice(SRC.indexOf('  datumRuns(solved, ghosts, S) {'),
   SRC.indexOf('  fitEscapes() {'));
 const DATUM_DRAW = SRC.slice(SRC.indexOf('  datumLayer(solved, S, box) {'),
   SRC.indexOf('  renderVals() {'));
+/* Bounded at datumInk() rather than at ghostSvg(), because the two methods sit
+   next to each other and the rule below is about ONE of them. datumOpacity() may
+   never end at the current theme's ghost alpha; datumInk() divides by that same
+   alpha on every path, by design (#81). Slicing to the far side of both would
+   read the second one's arithmetic as the first one's fallback. */
 const DATUM_OP = SRC.slice(SRC.indexOf('  datumOpacity() {'),
+  SRC.indexOf('  datumInk() {'));
+const DATUM_INK = SRC.slice(SRC.indexOf('  datumInk() {'),
   SRC.indexOf('  ghostSvg(g, S) {'));
 
 /* THE REAL COLOUR MATHS, lifted out of the page. datumOpacity() is the one part
@@ -1471,10 +1478,29 @@ function cssVar(block, name) {
 }
 const TOKENS = {
   light: { '--ref-bg': cssVar(CSS_ROOT, '--ref-bg'), '--ref-muted': cssVar(CSS_ROOT, '--ref-muted'),
-    '--bg': cssVar(CSS_ROOT, '--ref-bg'), '--muted': cssVar(CSS_ROOT, '--ref-muted') },
+    '--bg': cssVar(CSS_ROOT, '--ref-bg'), '--muted': cssVar(CSS_ROOT, '--ref-muted'),
+    '--hair': cssVar(CSS_ROOT, '--hair') },
   dark: { '--ref-bg': cssVar(CSS_ROOT, '--ref-bg'), '--ref-muted': cssVar(CSS_ROOT, '--ref-muted'),
-    '--bg': cssVar(CSS_DARK, '--bg'), '--muted': cssVar(CSS_DARK, '--muted') }
+    '--bg': cssVar(CSS_DARK, '--bg'), '--muted': cssVar(CSS_DARK, '--muted'),
+    '--hair': cssVar(CSS_DARK, '--hair') }
 };
+
+/* Runs the page's own datumInk() over a palette of the test's choosing, the same
+   way datumOpacityOn does -- and for the same reason. The mark is drawn inside
+   the ghost layer's opacity now (#81), so what it is drawn IN is a colour rather
+   than an alpha, and whether that colour lands on the tone the solve asked for
+   is arithmetic no still and no solve can answer. */
+function datumInkOn(tokens, theme) {
+  const obj = new Function('rgbOf', 'contrastAt', 'getComputedStyle', 'document', 'console',
+    'return {\n' + grabBlock('  datumInk() {', '{', '}') + ',\n'
+    + grabBlock('  datumOpacity() {', '{', '}') + ',\n'
+    + grabBlock('  ghostOpacity(theme) {', '{', '}') + '\n};')(
+    colour.rgbOf, colour.contrastAt,
+    () => ({ getPropertyValue: (k) => (tokens[k] === undefined ? '' : tokens[k]) }),
+    { documentElement: {} }, { warn: () => {} });
+  obj.state = { theme: theme };
+  return { ink: obj.datumInk(), alpha: obj.datumOpacity(), ghost: obj.ghostOpacity(theme) };
+}
 
 test('the datum takes its axis from the chain, never its own copy', () => {
   /* #67, twice over. A one-wheel chain has no first-to-last vector: head and
@@ -1803,19 +1829,78 @@ test('no datum is drawn while one chain is on stage, and none is painted per cha
   const { solved, order } = runSolve(solo, { axisRot: 0 });
   eq(datumRunsOn(solved, 0, order[0].slug, [], seatSlugs(solved)).length, 0,
     'a solo page draws a datum, which identifies nothing and moves shipped pixels');
-  /* RULE 6: one layer, beneath EVERY wheel. Painted per chain, the following
-     chain's ghost run buries the previous chain's plate — which is what the mock
-     did first. */
+  /* RULE 6: one mark, beneath EVERY wheel — and BENEATH now has to mean covered,
+     not merely earlier. Painted per chain, the following chain's ghost run
+     buries the previous chain's plate, which is what the mock did first; painted
+     as a SIBLING of the ghost layer, it is below all 24 of them in paint order
+     and still shows straight through every one, because an occluder composited
+     at 0.17 occludes nothing (#81). The arrangement that holds is: the mark
+     inside the layer that carries the ghost opacity, first child, so the wheels
+     paint over it at full alpha and the assembly is dimmed once. */
   const art = SRC.slice(SRC.indexOf('const gearArt = h(\'div\''));
-  const iDatum = art.indexOf('this.datumLayer(');
-  ok(iDatum > 0 && iDatum < art.indexOf('ghosts,') && iDatum < art.indexOf("key: 'shadows'"),
-    'the datum layer is not the first thing the stage paints, so a chain\'s '
-    + 'machinery can cover another chain\'s plate');
-  /* RULE 5: tokens, never invented greys. */
-  ok(!/#[0-9A-Fa-f]{3,6}/.test(DATUM_DRAW),
-    'the datum draws itself in a literal colour instead of --muted and --hair');
-  ok(/var\(--muted\)/.test(DATUM_DRAW) && /var\(--hair\)/.test(DATUM_DRAW),
-    'the datum does not take its scribe and plate colours from the theme tokens');
+  ok(!/this\.datumLayer\(/.test(art),
+    'the datum is emitted beside the ghost layer rather than inside it, where a '
+    + 'wheel drawn at the ghost alpha cannot cover it');
+  ok(art.indexOf('ghosts,') > 0 && art.indexOf('ghosts,') < art.indexOf("key: 'shadows'"),
+    'the ghost layer is not the first thing the stage paints, so the mark it '
+    + 'carries is no longer beneath the machine');
+  const layer = SRC.slice(SRC.indexOf('const ghosts = h(\'div\', { key: \'ghosts\''),
+    SRC.indexOf('const gearArt = h(\'div\''));
+  ok(/opacity: this\.ghostOpacity\(\)/.test(layer),
+    'the ghost layer no longer carries the ghost opacity, so nothing says what '
+    + 'alpha the datum inside it is being drawn at');
+  ok(layer.indexOf('datum.el') > 0 && layer.indexOf('datum.el') < layer.indexOf('wheels)'),
+    'the datum is not the first child of the ghost layer, so a background wheel '
+    + 'is painted under the mark that is supposed to be a reference for it');
+  /* The double-dim trap: inside the layer, an opacity of its own would charge
+     the dimming twice and the scribe would be gone. */
+  ok(!/opacity:/.test(DATUM_DRAW),
+    'the datum svg still carries an opacity of its own on top of the ghost '
+    + 'layer\'s, which dims the scribe twice');
+  /* RULE 5: tokens, never invented greys. Still true, one step removed — the
+     colours are LIFTED from the tokens by datumInk() so that drawing them at the
+     ghost alpha lands on the tone datumOpacity() solved for. */
+  ok(!/#[0-9A-Fa-f]{3,6}|rgb\(/.test(DATUM_DRAW),
+    'the datum draws itself in a literal colour instead of one derived from '
+    + '--muted and --hair');
+  ok(/this\.datumInk\(\)/.test(DATUM_DRAW),
+    'the datum does not take its scribe and plate colours from datumInk()');
+  ok(/--muted/.test(DATUM_INK) && /--hair/.test(DATUM_INK) && /--bg/.test(DATUM_INK),
+    'the datum ink is not derived from the theme tokens it is supposed to match');
+  ok(/this\.datumOpacity\(\) \/ this\.ghostOpacity\(\)/.test(DATUM_INK),
+    'the lift is a number of its own rather than the ratio of the two alphas it '
+    + 'exists to convert between — which is a constant nobody will re-measure');
+  /* THE CONVERSION IS EXACT, in both palettes, and this is the whole claim of
+     the fix: the ink drawn at the ghost alpha must composite to the same tone
+     the token reaches at the alpha datumOpacity() solved for. Off by more than
+     sRGB rounding and the mark has quietly changed weight. */
+  ['light', 'dark'].forEach(theme => {
+    const r = datumInkOn(TOKENS[theme], theme);
+    const bg = colour.rgbOf(TOKENS[theme]['--bg']);
+    [['line', '--muted'], ['plate', '--hair']].forEach(pair => {
+      const got = colour.rgbOf(r.ink[pair[0]]);
+      ok(got, theme + ': datumInk did not return a colour for ' + pair[1]
+        + ' from a palette that declares it');
+      const token = colour.rgbOf(TOKENS[theme][pair[1]]);
+      got.forEach((v, i) => {
+        const drawn = bg[i] + (v - bg[i]) * r.ghost;
+        const want = bg[i] + (token[i] - bg[i]) * r.alpha;
+        ok(Math.abs(drawn - want) <= 1,
+          theme + ': ' + pair[1] + ' channel ' + i + ' composites to '
+          + drawn.toFixed(1) + ' at the ghost alpha, not the ' + want.toFixed(1)
+          + ' the solved alpha asks for — the mark changed weight when it moved '
+          + 'inside the layer');
+      });
+    });
+  });
+  /* AND THE WAY OUT IS STILL VISIBLE. With no palette to read there is nothing
+     to lift, so the line must fall back to a token that contrasts with the page
+     by construction rather than to one that vanishes at the ghost alpha. */
+  const blind = datumInkOn({}, 'dark').ink;
+  ok(blind.line === 'var(--ink)',
+    'a datum that cannot read its palette falls back to ' + blind.line
+    + ' — at the ghost alpha the scribe has to be drawn in the page\'s own '
+    + 'foreground or it is indistinguishable from not being there');
   /* The dark alpha is SOLVED against the light treatment's contrast, not carried
      as a second number beside the ghost layer's pair. */
   ok(/contrastAt\(/.test(DATUM_OP) && !/0\.3[0-9]/.test(DATUM_OP),
