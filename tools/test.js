@@ -67,6 +67,10 @@ const page = (function build() {
     'BAND_DEPTH', 'RIM_UNDER_BAND', 'BASELINE_MID', 'ROOT_MARGIN', 'MIN_MODULE',
     'TEETH_MIN', 'TEETH_MAX', 'TEETH_SLACK', 'TEETH_HOST',
     'ANG_MIN', 'ANG_MAX', 'BAND_MAX', 'ENDS_MAX',
+    /* The one figure on this page stated in RENDERED pixels rather than in
+       modules (#76). Read from the page like everything else, so the suite
+       measures the bound that ships rather than a copy of it. */
+    'PLATE_TOP_CLEAR',
     /* RING_STUB governs the mesh this suite's headline test is named after, and
        was the one constant kept as a copy here instead of read from the page.
        Mutating index.html alone used to leave every test green while 10 of 19
@@ -1287,17 +1291,29 @@ test('the bridges come out of solve(), and stay distinct from the drawn strands'
    separate method -- so only the chain axis it consumes has to be handed in, and
    that is the page's own chainAxes() built the same way the escape-run harness
    builds it. `ghosts` is the escape-run list the page would have in state. */
-function datumRunsOn(solved, axisRot, spineSlug, ghosts, sites, plates) {
+function datumRunsOn(solved, axisRot, spineSlug, ghosts, sites, plates, S) {
   const fn = new Function('MODULE', 'SITES', 'DATUM_PLATE',
-    'return function ' + grabBlock('  datumRuns(solved, ghosts) {', '{', '}') + ';')(
+    'return function ' + grabBlock('  datumRuns(solved, ghosts, S) {', '{', '}') + ';')(
     page.MODULE, sites || {}, plates || {});
+  /* The stand-off is bounded in RENDERED pixels (#76), so the page's own
+     datumClear() comes along with the rest -- lifted, never restated, because a
+     second copy of the owner's figure is exactly the drift the comment on
+     PLATE_TOP_CLEAR warns about. It needs the plate's own height, so
+     plateMetrics comes with it. A render scale of 1 is the harness default:
+     there the module of air fits inside the figure, which is the case every
+     assertion written before #76 was written against. */
   const ctx = {
     _axisRot: axisRot,
+    plateMetrics: new Function('MODULE',
+      'return function ' + grabBlock('  plateMetrics(s) {', '{', '}') + ';')(page.MODULE),
+    datumClear: new Function('MODULE', 'PLATE_TOP_CLEAR',
+      'return function ' + grabBlock('  datumClear(S) {', '{', '}') + ';')(
+      page.MODULE, page.PLATE_TOP_CLEAR),
     chainAxes: new Function('WHO',
       'return function ' + grabBlock('  chainAxes(solved) {', '{', '}') + ';')(
       { slug: spineSlug })
   };
-  return fn.call(ctx, solved, ghosts || []);
+  return fn.call(ctx, solved, ghosts || [], S === undefined ? 1 : S);
 }
 /* plateSeat() lifted out of the page. It reads exactly two things off the
    component -- the measured viewport box and its own margin rule -- so both are
@@ -1334,7 +1350,7 @@ function seatSlugs(solved) {
 }
 /* Where the datum source lives, so an assertion about it cannot drift onto some
    other mention of the word. `datum` appears in chainAxes' rationale first. */
-const DATUM_SRC = SRC.slice(SRC.indexOf('  datumRuns(solved, ghosts) {'),
+const DATUM_SRC = SRC.slice(SRC.indexOf('  datumRuns(solved, ghosts, S) {'),
   SRC.indexOf('  fitEscapes() {'));
 const DATUM_DRAW = SRC.slice(SRC.indexOf('  datumLayer(solved, S, box) {'),
   SRC.indexOf('  renderVals() {'));
@@ -1395,7 +1411,10 @@ test('the datum takes its axis from the chain, never its own copy', () => {
      in every orientation -- so a mark that derives its own direction lies across
      the SHORT axis in portrait. chainAxes() already answers this for the escape
      runs, and a second copy of the answer is how the escape runs and the bridge
-     came to disagree in the first place. */
+     came to disagree in the first place.
+
+     WHICH of the two axes chainAxes() publishes is the mark's is asserted
+     separately, below (#76): this one is about where the answer comes from. */
   ok(DATUM_SRC.length > 0, 'no datum is drawn at all');
   ok(/this\.chainAxes\(/.test(DATUM_SRC),
     'the datum derives its own axis instead of sharing the chain axis');
@@ -1409,9 +1428,9 @@ test('the datum takes its axis from the chain, never its own copy', () => {
     const runs = datumRunsOn(solved, rot, spineSlug, [], seatSlugs(solved));
     eq(runs.length, axes.length, 'rot ' + rot + ': not every chain gets a datum');
     runs.forEach((r, k) => {
-      if (Math.abs(r.deg - axes[k].deg) > 1e-9)
+      if (Math.abs(r.deg - axes[k].travel) > 1e-9)
         bad.push(`rot ${rot}: ${r.person}'s datum runs at ${r.deg.toFixed(2)}, `
-          + `its chain at ${axes[k].deg.toFixed(2)}`);
+          + `its chain's path of travel at ${axes[k].travel.toFixed(2)}`);
       /* The one-wheel chain is the case that collapses. Its mark must still have
          length, and must lie on the stage axis rather than on the horizontal. */
       if (axes[k].wheels.length === 1) {
@@ -1424,6 +1443,97 @@ test('the datum takes its axis from the chain, never its own copy', () => {
     });
   });
   ok(bad.length === 0, bad.join('\n      '));
+});
+
+test('the datum is scribed straight along the travel, and stands off by the stated figure', () => {
+  /* #76, both halves, over many dealt trains rather than one.
+
+     THE ANGLE. `chainAxes()` measures each chain head-to-tail, and a dealt
+     serpentine's ends rarely land level: the bearings come out of
+     [ANG_MIN, ANG_MAX] with alternating signs and only the band and the
+     end-to-end drift are capped, never the end-to-end angle. So the MEASURED
+     axis carries whatever tilt this load dealt -- up to a couple of degrees --
+     and a datum laid at it runs visibly askew to a chain the eye reads as
+     travelling straight. The mark is laid along the PATH OF TRAVEL, which is the
+     stage's own axis, and is therefore exactly parallel on every deal. This is
+     the test that would have caught it: a single deal can look level by luck,
+     so it takes many, and it asserts the tilt is not merely small but ZERO.
+
+     THE OFFSET. "the top of the label box is no more than 20px outside the
+     extreme border of the side" -- so the plate's outer edge, in RENDERED
+     pixels, against the deepest tip radius of the chain's own link gears
+     projected on the travel normal. Checked at three render scales, chosen for
+     which side of the figure they fall on: at S=1 a module of air still fits
+     inside it and nothing is taken away; at the ~1.47 a 1440-wide window deals
+     the bound is what holds the mark in; at the ~3.4 an ultrawide deals the
+     plate's own half-height has already spent the whole figure, so the air goes
+     to zero and the mark stands as close as it geometrically can. The last is
+     the case a bound stated in rendered pixels cannot satisfy, and the assertion
+     says so in the same terms the page does rather than exempting it. Both sides
+     of the line are checked, because plateSeat() may mirror the mark onto the
+     other one. */
+  const bad = [];
+  const PLATE_HALF = (S) => page.MODULE * 2 * S / 2;   /* plateMetrics().h / 2 */
+  [0, 90].forEach(rot => {
+    [1, 1.47, 3.4].forEach(S => {
+      /* Every runSolve is a fresh deal -- dealAngles() draws from Math.random --
+         so the loop IS the sweep of trains, and a tilt that only shows up on
+         some loads cannot hide behind one lucky arrangement. */
+      for (let deal = 0; deal < 24; deal++) {
+        const { solved, order } = runSolve(THREE, { axisRot: rot });
+        const spineSlug = order[0].slug;
+        const runs = datumRunsOn(solved, rot, spineSlug, [], seatSlugs(solved), null, S);
+        runs.forEach(r => {
+          /* PARALLEL TO THE TRAVEL, to the last bit of floating point. */
+          if (axisOff(r.deg, rot) > 1e-9)
+            bad.push(`rot ${rot} S ${S} deal ${deal}: ${r.person}'s datum is laid at `
+              + `${r.deg.toFixed(3)}, ${axisOff(r.deg, rot).toFixed(3)}° off the path of travel`);
+          /* And the direction vector it hands the drawing agrees with that
+             angle -- a `deg` used only for the plate's rotation, with ux/uy
+             still off the measured axis, would draw a tilted line under a
+             square plate and pass an angle-only check. */
+          const ux = Math.cos(r.deg * Math.PI / 180), uy = Math.sin(r.deg * Math.PI / 180);
+          if (Math.hypot(r.ux - ux, r.uy - uy) > 1e-9)
+            bad.push(`rot ${rot} S ${S} deal ${deal}: ${r.person}'s datum reports `
+              + `${r.deg}° but runs along (${r.ux.toFixed(4)}, ${r.uy.toFixed(4)})`);
+          /* THE STAND-OFF, on each side, in rendered pixels. */
+          const own = solved.gears.filter(g => g.person === r.person && g.role === 'link');
+          const hi = Math.max.apply(null, own.map(g => g.cx * r.nx + g.cy * r.ny + g.ro));
+          const lo = Math.min.apply(null, own.map(g => g.cx * r.nx + g.cy * r.ny - g.ro));
+          /* What the figure leaves for air once the plate's own half-height is
+             paid out of it. Zero once the plate alone is 20px from the line,
+             which is where the bound stops being satisfiable at all. */
+          const allowed = Math.max(0, page.PLATE_TOP_CLEAR - PLATE_HALF(S));
+          [[r.o, hi, 1], [r.alt, lo, -1]].forEach(pair => {
+            const line = pair[0].x * r.nx + pair[0].y * r.ny;
+            /* how far outside that side's extreme border the line sits */
+            const air = (line - pair[1]) * pair[2];
+            const top = (air * S) + PLATE_HALF(S);
+            if (air < -1e-9)
+              bad.push(`rot ${rot} S ${S} deal ${deal}: ${r.person}'s datum is scribed `
+                + `${(-air).toFixed(2)} inside the teeth it references`);
+            if (air * S > allowed + 1e-6)
+              bad.push(`rot ${rot} S ${S} deal ${deal}: ${r.person}'s datum stands `
+                + `${(air * S).toFixed(2)} rendered px off the extreme border, where the `
+                + `stated ${page.PLATE_TOP_CLEAR} leaves room for ${allowed.toFixed(2)} `
+                + `once its ${PLATE_HALF(S).toFixed(2)} of plate is paid for`);
+            if (allowed > 0 && top > page.PLATE_TOP_CLEAR + 1e-6)
+              bad.push(`rot ${rot} S ${S} deal ${deal}: the top of ${r.person}'s label box `
+                + `stands ${top.toFixed(2)} rendered px outside the extreme border, past the `
+                + `stated ${page.PLATE_TOP_CLEAR}`);
+            /* And where the air still fits inside the figure, it is the module
+               of air the rest of this page states its clearances in -- the bound
+               is a ceiling, not a target, so it may not quietly become one. */
+            if (allowed >= page.MODULE * S - 1e-9 && Math.abs(air - page.MODULE) > 1e-9)
+              bad.push(`rot ${rot} S ${S} deal ${deal}: ${r.person}'s datum gave up its `
+                + `module of air (${air.toFixed(3)}) where the figure had room for it`);
+          });
+        });
+      }
+    });
+  });
+  ok(bad.length === 0, bad.slice(0, 6).join('\n      ')
+    + (bad.length > 6 ? `\n      … and ${bad.length - 6} more` : ''));
 });
 
 test('a datum station is a clickable gear, never a ghost or an idler', () => {

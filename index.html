@@ -430,6 +430,21 @@ CHAIN_ORDER.forEach((p, k) => { CHAIN_RANK[p.slug] = k; });
 const DATUM_PLATE = {};
 (CONF.PEOPLE || []).forEach(p => { DATUM_PLATE[p.slug] = p.datum || p.name || p.slug; });
 
+/* HOW FAR OUTSIDE THE CHAIN THE MARK MAY STAND, in RENDERED PIXELS.
+   "put the datum straight along the side such that the top of the label box is
+   no more than 20px outside the extreme border of the side" -- Charles, #76.
+   TWENTY IS THE OWNER'S FIGURE AND NOT A DERIVED ONE. It is stated in the
+   pixels a viewer actually sees, so it is the one number here that does NOT
+   scale with MODULE, and it must not later be "derived" into a module multiple:
+   a mark standing a fixed number of modules off its chain stands twice as far
+   off on a viewport that renders the machine twice as big, which is the
+   half of #76 that made the line look detached from what it references.
+   It bounds the plate's OUTER edge, not the line: the line is scribed at
+   whatever air is left once the plate's own half-height is paid for
+   (datumClear), so what the eye measures -- the gap between the teeth and the
+   top of the placard -- is what the figure names. */
+const PLATE_TOP_CLEAR = 20;
+
 /* The SPINE is the longest chain -- it sets the scale, and it is the axis every
    other chain runs parallel to. */
 const SPINE_LEN = Math.max(1, ...STAGE.people.map(p => (p.links || []).length));
@@ -1838,8 +1853,34 @@ class Component extends DCLogic {
     return this._seed / 0x7fffffff;
   }
 
-  /* THE AXIS OF EACH CHAIN ON STAGE, measured from that chain's own wheels, in
-     the same solve units the gears carry.
+  /* THE AXES OF EACH CHAIN ON STAGE, in the same solve units the gears carry.
+     There are TWO of them, and they answer two different questions:
+
+       `deg`    THE CHAIN'S OWN AXIS, measured from that chain's own wheels --
+                head to tail. This is where the machine actually goes, so it is
+                what anything CONTINUING the machine follows: an escape run
+                leaves along it, because a run that leaves along anything else
+                reads as a second machine rather than as this one carrying on.
+       `travel` THE PATH OF TRAVEL, which is the stage's own axis -- axisRot(),
+                0 in landscape and 90 in portrait. This is the direction the eye
+                reads the chain as running, and it is what anything MEASURING
+                the machine is laid along: a scribed reference line is straight
+                by definition, and straight means along the travel.
+
+     THEY ARE NOT THE SAME NUMBER AND THAT IS THE POINT (#76). A dealt
+     serpentine's first and last wheels rarely land level -- the bearings are
+     drawn with alternating signs and only the band and the end-to-end drift are
+     capped, never the end-to-end angle -- so `deg` carries whatever tilt this
+     load happened to deal, up to a couple of degrees. An escape run wants
+     exactly that: it continues the wheels it grew out of. A datum laid at it
+     runs visibly askew to a chain the eye reads as travelling straight, and the
+     mismatch is the whole of #76.
+
+     BOTH ARE DERIVED HERE, TOGETHER, and neither consumer measures its own. Two
+     consumers measuring the same axis two ways is how the escape runs and the
+     bridge came to disagree in the first place (#67, twice); the fix for that
+     was one place, and the fix for this is one place naming both directions
+     rather than a second function quietly measuring the other one.
 
      A BRANCH HAS TWO DIRECTIONS, NOT ONE. The bridge runs perpendicular to the
      spine, because that is what sets the spacing between one chain and the next;
@@ -1852,9 +1893,7 @@ class Component extends DCLogic {
      feed, and including one drags the measured axis toward the bridge -- which is
      exactly the tilt this is here to avoid. Linked wheels only.
 
-     Derived ONCE, here, and read by everything that needs it. Two consumers
-     measuring the same axis two ways is how the escape runs and the bridge came
-     to disagree in the first place. */
+     Derived ONCE, here, and read by everything that needs it. */
   chainAxes(solved) {
     solved = solved || this.solve();
     const order = [], byPerson = {};
@@ -1886,6 +1925,15 @@ class Component extends DCLogic {
       c.deg = Math.hypot(dx, dy) < 1e-6
         ? (this._axisRot || 0)
         : Math.atan2(dy, dx) * 180 / Math.PI;
+      /* THE SAME NUMBER THE ONE-WHEEL CHAIN ABOVE FALLS BACK TO, published for
+         every chain rather than only for the one that has no axis of its own.
+         It is stated once, here, so a consumer that wants the travel takes it
+         from the chain it belongs to instead of reaching for axisRot() a second
+         time -- and the 180-degree flip below deliberately does NOT touch it:
+         the stage's axis is a direction the whole stage shares, and a plate
+         rotated to agree with one chain's wheel order would be a placard set
+         upside down beside its neighbour's. */
+      c.travel = this._axisRot || 0;
       c.head = a;
       c.tail = b;
     });
@@ -1919,12 +1967,23 @@ class Component extends DCLogic {
      had to be caught; chainAxes() already answers it, for the escape runs and
      for this, in one place.
 
+     AND THE AXIS IT TAKES IS THE TRAVEL, NOT THE CHAIN (#76). A scribed datum is
+     straight -- that is what makes it a reference rather than a trace -- and
+     straight, to the eye, means along the path the chain is read as travelling.
+     The chain's MEASURED axis is a couple of degrees off that on most deals,
+     because a serpentine's first and last wheels rarely land level, and a line
+     laid at that measured angle reads as askew to the very thing it references.
+     chainAxes() publishes both directions under their own names for exactly this
+     reason; the escape runs continue `deg`, the mark is laid along `travel`. No
+     second measurement lives here -- swapping which named axis is read is not
+     forking the derivation, and there is still only one place either comes from.
+
      ONLY ON A SHARED STAGE. The datum exists to tell chains apart. A solo page
      has one chain, so a line with a name on it would be furniture identifying
      the only thing present -- and the mark is deliberately NOT colour, because a
      person's hue preference must not reserve that hue and two chains may
      legitimately come out looking alike. */
-  datumRuns(solved, ghosts) {
+  datumRuns(solved, ghosts, S) {
     const axes = this.chainAxes(solved);
     if (axes.length < 2) return [];
     const mine = {};
@@ -1932,16 +1991,30 @@ class Component extends DCLogic {
       if (g.person == null) return;
       (mine[g.person] = mine[g.person] || []).push(g);
     });
+    /* The air is asked for ONCE, outside the map: it is a property of the render
+       scale, not of the chain, so every mark on the stage stands the same
+       distance off the machine it references. */
+    const clear = this.datumClear(S);
     return axes.map(c => {
-      const a = c.deg * Math.PI / 180;
+      const a = c.travel * Math.PI / 180;
       const ux = Math.cos(a), uy = Math.sin(a), nx = -uy, ny = ux;
       /* CLEAR OF EVERY TOOTH THE CHAIN CARRIES, not merely of the first one. The
          far edge of each wheel is measured along the normal, off the TIP radius
          rather than the pitch radius -- the line has to miss the teeth, not the
-         circle they are cut on -- and the deepest of them sets the offset, plus
-         a module of air. A serpentine wanders perpendicular to its own axis by
-         most of a wheel, so an offset taken from the head alone puts the mark
-         straight through whichever wheel the deal happened to drop lowest.
+         circle they are cut on -- and the deepest of them is the EXTREME BORDER
+         OF THIS SIDE, which is what the mark is stood off from. A serpentine
+         wanders perpendicular to its own axis by most of a wheel, so an offset
+         taken from the head alone puts the mark straight through whichever wheel
+         the deal happened to drop lowest.
+
+         THE STAND-OFF IS BOUNDED, NOT CHOSEN (#76). It used to be a flat module
+         of air, which is a module of SOLVE units and therefore grows with the
+         render scale -- at the fit a 1440-wide window deals, the plate's outer
+         edge stood better than 20 rendered px off the extreme border, and the
+         line reads as belonging to the page rather than to the chain. datumClear
+         hands back whatever air is left once the plate's own half-height is paid
+         for out of the owner's figure, so it is the module of air wherever that
+         fits inside it and less where it does not.
 
          THE CHAIN'S GHOSTS ARE DELIBERATELY NOT IN THIS MAX, though they are in
          the extent below. A datum crossing a ghost is not a collision: the whole
@@ -1958,21 +2031,22 @@ class Component extends DCLogic {
          pixel or two of a portrait viewport's edge. Off the page is invisible,
          and invisible is the one thing this mark may not be. */
       const off = Math.max.apply(null, c.wheels.map(g =>
-        (g.cx - c.head.cx) * nx + (g.cy - c.head.cy) * ny + g.ro)) + MODULE;
+        (g.cx - c.head.cx) * nx + (g.cy - c.head.cy) * ny + g.ro)) + clear;
       const o = { x: c.head.cx + nx * off, y: c.head.cy + ny * off };
       /* THE SAME DATUM, SCRIBED ON THE OTHER SIDE. A reference line may be laid
-         either side of the parts it references -- both clear every tooth by the
-         same module of air, both project the same stations, and neither is more
-         correct than the other. Only ONE of them is on the page, though: the
-         stage is allowed to bleed CROSS_BLEED past the cross axis, so a chain
-         sitting near that edge puts its mark and its plate over the fold, and
-         "off the page is invisible" is the one thing the note above says this
-         mark may not be. datumLayer() picks between the two, because the choice
-         needs the plate's MEASURED width and the viewport, and neither of those
-         belongs in here. Mirroring is a translation along the normal only, so
-         every station, every extent and the plate's own anchor are unchanged. */
+         either side of the parts it references -- both stand off that side's own
+         extreme border by the same air, both project the same stations, and
+         neither is more correct than the other. Only ONE of them is on the page,
+         though: the stage is allowed to bleed CROSS_BLEED past the cross axis,
+         so a chain sitting near that edge puts its mark and its plate over the
+         fold, and "off the page is invisible" is the one thing the note above
+         says this mark may not be. datumLayer() picks between the two, because
+         the choice needs the plate's MEASURED width and the viewport, and
+         neither of those belongs in here. Mirroring is a translation along the
+         normal only, so every station, every extent and the plate's own anchor
+         are unchanged. */
       const offAlt = Math.min.apply(null, c.wheels.map(g =>
-        (g.cx - c.head.cx) * nx + (g.cy - c.head.cy) * ny - g.ro)) - MODULE;
+        (g.cx - c.head.cx) * nx + (g.cy - c.head.cy) * ny - g.ro)) - clear;
       const alt = { x: c.head.cx + nx * offAlt, y: c.head.cy + ny * offAlt };
       /* Every wheel is projected onto the line, which is what makes this a
          station index rather than a ruler: the marks cannot drift out of step
@@ -2003,8 +2077,11 @@ class Component extends DCLogic {
          at, and it falls back to the head wheel rather than vanishing. */
       const lead = own.filter(g => g.lead);
       const anchor = lead.length ? lead.reduce((m, g) => (g.k < m.k ? g : m)) : c.head;
+      /* `deg` IS THE MARK'S OWN ANGLE, which is the travel and not the chain's
+         measured axis -- the plate is stamped square to the line it rides, so
+         the two cannot be allowed to disagree by the tilt of the deal. */
       return { person: c.person, plate: DATUM_PLATE[c.person] || c.person,
-        deg: c.deg, ux: ux, uy: uy, nx: nx, ny: ny, o: o, alt: alt,
+        deg: c.travel, ux: ux, uy: uy, nx: nx, ny: ny, o: o, alt: alt,
         stations: stations, plateAt: at(anchor), d0: d0, d1: d1 };
     });
   }
@@ -4736,6 +4813,49 @@ class Component extends DCLogic {
     return { pad: pad, slack: pad - m.hair / 2 };
   }
 
+  /* THE AIR BETWEEN A CHAIN'S EXTREME BORDER AND ITS SCRIBED LINE, in solve
+     units, bounded by the owner's stated figure (#76):
+
+       "put the datum straight along the side such that the top of the label box
+        is no more than 20px outside the extreme border of the side"
+
+     WHAT IS BOUNDED IS THE PLATE'S OUTER EDGE, NOT THE LINE, because that edge
+     is the thing the eye measures the gap to -- the plate straddles the line, so
+     it reaches half its own height further out than the scribe does. Pay that
+     half-height out of PLATE_TOP_CLEAR first and what is left is the air the
+     line may stand off in.
+
+     THE CONVERSION IS DONE ONCE, HONESTLY, AND IN THE RIGHT DIRECTION. Both
+     candidates are compared in RENDERED PIXELS, which is the only space the
+     owner's figure means anything in, and the winner is divided back into solve
+     units because that is what datumRuns() places wheels and lines in. The
+     preferred air is still one module -- the spacing every other clearance on
+     this page is stated in -- so at a fit that leaves room for it nothing moves;
+     it is only where the render scale has grown the module past the figure that
+     the bound takes over.
+
+     FLOORED AT ZERO rather than at some minimum gap, and that is a statement:
+     zero puts the scribe tangent to the extreme tip circle, which is the closest
+     a line can be laid without crossing the teeth it references. "Never inside
+     the teeth" is the rule the max in datumRuns() already exists to keep, and
+     this is the same rule stated as a floor.
+
+     AND THE FLOOR IS REACHED IN PRACTICE, on a wide desktop. The plate is two
+     modules tall like everything else here, so past a render scale of about 2.86
+     its half-height alone has spent the whole figure: measured at 3440x1440 the
+     fit deals about 3.4, a 48px plate, and NO non-negative air satisfies 20px
+     there. The bound cannot be met, so what it does instead is get as close as
+     the geometry allows -- the plate's outer edge lands ~24px out rather than
+     the ~48px a full module of air would give -- and the scribe grazes the
+     deepest tooth tip. That is a real change of look on an ultrawide, taken
+     deliberately: the figure is a bound on the mark's distance from the machine,
+     and honouring it as closely as the plate's own height permits is nearer to
+     what it asks for than ignoring it at exactly the scales it binds hardest. */
+  datumClear(S) {
+    const air = Math.min(MODULE * S, PLATE_TOP_CLEAR - this.plateMetrics(S).h / 2);
+    return Math.max(0, air) / S;
+  }
+
   plateSeat(r, S, pw, ph) {
     const want = r.plateAt * S;
     const nat = { ox: r.o.x * S, oy: r.o.y * S };
@@ -4826,7 +4946,7 @@ class Component extends DCLogic {
      what is actually on stage rather than from a guessed length. */
   datumLayer(solved, S, box) {
     const h = React.createElement;
-    const runs = this.datumRuns(solved, this.state.ghosts);
+    const runs = this.datumRuns(solved, this.state.ghosts, S);
     if (!runs.length) return null;
     /* Read off plateMetrics() rather than repeated here: fitEscapes needs the
        same two numbers to know when a seat has gone stale, and one derivation

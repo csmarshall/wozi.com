@@ -98,6 +98,46 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **#84 — the datum was laid at the tilt the deal happened to hand it, and stood
+  off its chain by a distance nothing bounded.** (GitHub #76.) Two faults
+  stacking into one complaint: the line reads as askew to a chain the eye reads
+  as travelling straight.
+
+  `chainAxes()` measures each chain head-to-tail, and a dealt serpentine's ends
+  rarely land level — the bearings come out of `[ANG_MIN, ANG_MAX]` with
+  alternating signs, and only the *band* and the *end-to-end drift* are capped,
+  never the end-to-end *angle*. Measured unseeded, the datum came out up to
+  **1.84° off horizontal at 1440×900** and **2.3° off vertical at 390×844**,
+  differently on every load. It now publishes **two** named directions instead of
+  one: `deg`, the chain's own measured axis, which is what an escape run
+  *continues*; and `travel`, the stage's axis, which is what a scribed reference
+  is *laid along*. Both come from the one function — the #67 rule against a
+  second copy is kept, and what was forked was the question, not the derivation.
+  Across 80 unseeded loads the mark now reads **exactly 0.000° / 90.000°**.
+
+  The stand-off was a flat module of *solve* units, so it grew with the render
+  scale: at the fit a 1440-wide window deals, the plate's outer edge stood
+  **20.6 rendered px** off the chain's extreme border, and at 3440×1440 nearer
+  49. Charles's rule — *"put the datum straight along the side such that the top
+  of the label box is no more than 20px outside the extreme border of the side"* —
+  is now `PLATE_TOP_CLEAR`, the one figure on this page stated in **rendered
+  pixels** rather than in modules, and `datumClear()` pays the plate's own
+  half-height out of it before handing back the air that is left. It is a
+  ceiling, not a target: wherever a module of air fits inside the figure, a module
+  of air is what the mark gets.
+
+  Past a render scale of about 2.86 the plate's half-height alone has spent the
+  whole figure and no non-negative air satisfies it. The mark then stands as
+  close as the geometry allows — outer edge ~24 px rather than ~48 — and the
+  scribe grazes the deepest tooth tip. A real change of look on an ultrawide,
+  taken deliberately and stated in `datumClear()`, not discovered later.
+
+  Re-measured on the **stroked** extent, because the offset moved: 0 clipped
+  across 80 unseeded loads, worst margin **3.49 px** at 1440×900 and **2.20 px**
+  at 390×844. `?who=charles` is **0 px** against `439c9ba`. The new suite case
+  asserts parallelism and the bound over 144 dealt trains at three render scales,
+  and fails on both halves of the old behaviour.
+
 - **#83 — the cast-shadow derivation was claimed but never executed, and two
   same-named buttons slipped past the duplicate-name check.** The opacity test
   re-asked `wheelOpacity()` instead of running the render's own
