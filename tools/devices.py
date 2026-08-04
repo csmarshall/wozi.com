@@ -59,16 +59,21 @@ PROFILE = _os.environ.get("CHROME_PROFILE") or _tf.mkdtemp(prefix="wozi-chrome-"
 # THE STANDARD GEAR SIZE COMES OUT OF index.html, never a copy of it. A harness
 # holding its own number agrees with itself forever while the page moves, which
 # is the failure tools/test.js exists to avoid and states in its own header.
-def _target_gear_px():
+def _page_const(name):
     src = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "index.html")
     with open(src, encoding="utf-8") as fh:
-        m = re.search(r"const\s+TARGET_GEAR_PX\s*=\s*([0-9.]+)\s*;", fh.read())
+        m = re.search(r"\b" + re.escape(name) + r"\s*=\s*([0-9.]+)\s*[,;]", fh.read())
     if not m:
-        raise SystemExit("FATAL: TARGET_GEAR_PX not found in index.html")
+        raise SystemExit(f"FATAL: {name} not found in index.html")
     return float(m.group(1))
 
 
-TARGET_GEAR_PX = _target_gear_px()
+TARGET_GEAR_PX = _page_const("TARGET_GEAR_PX")
+# The top of the deal's range. Read here for the same reason as the line above:
+# the gear bound's tolerance is one tooth wide and a tooth is 1/(TEETH_MAX + 2)
+# of a wheel, so a harness holding its own copy would keep agreeing with itself
+# after the deal's range moved.
+TEETH_MAX = _page_const("TEETH_MAX")
 
 IOS_UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 "
           "(KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1")
@@ -342,8 +347,43 @@ async def main():
                 waited += poll
             return last  # never settled inside the budget -- report the last read anyway
 
+        # THE DEAL IS SEEDED, ONE FIXED SEED PER ROW.
+        #
+        # Every wheel on this page is dealt at random, so two loads of one profile
+        # are two different machines -- and this tool's verdict was a property of
+        # whichever machine it happened to get. It bit for real: CI failed two rows
+        # on a gear measuring 215.4px against the 222px standard, while the same
+        # rows passed ten times running here. Measured over 10 loads at 1080x2470,
+        # the gear comes out 215.4 or 221.0 depending only on the deal, and the
+        # bound below asks for 217.6 -- so those rows have been a coin toss since
+        # #85, and every green run of them was luck rather than evidence.
+        #
+        # A flaky gate is worse than a narrow one: it teaches everyone to re-run
+        # until it passes, which is how a real failure gets waved through. So the
+        # deal is pinned. Breadth is not lost, because the seed varies BY ROW --
+        # 24 profiles still exercise 24 different machines, the same 24 every time.
+        #
+        # Same LCG and the same reasoning as tools/pixel_regress.py, and the seed
+        # is read from the URL rather than baked in, so the injection happens once
+        # and each navigation names its own. Determinism lives in the harness and
+        # never in index.html -- there is no test hook in the shipped page.
+        # Page.enable FIRST. Without it the injection is accepted and silently
+        # never runs, which reads exactly like a seed that does not work: two runs
+        # of this tool came back with different deals and the same 24/24.
+        await send("Page.enable")
+        await send("Runtime.enable")
+        await send("Page.addScriptToEvaluateOnNewDocument", {"source": """
+          (() => {
+            const m = /[?&]seed=(\\d+)/.exec(location.search);
+            if (!m) return;
+            let s = +m[1] >>> 0;
+            Math.random = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+          })();
+        """})
+        seed = 20260804
         for label, pw, ph, dpr, ua, pchrome, lchrome in DEVICES:
             for orient in ("portrait", "landscape"):
+                seed += 1
                 w, h = (pw, ph) if orient == "portrait" else (ph, pw)
                 h -= pchrome if orient == "portrait" else lchrome   # browser chrome is real
                 await send("Emulation.setUserAgentOverride", {"userAgent": ua})
@@ -353,7 +393,8 @@ async def main():
                                           else "landscapePrimary",
                                           "angle": 0 if orient == "portrait" else 90}})
                 await send("Emulation.setTouchEmulationEnabled", {"enabled": True, "maxTouchPoints": 5})
-                await send("Page.navigate", {"url": URL + ("&" if "?" in URL else "?") + f"d={w}x{h}"})
+                await send("Page.navigate", {"url": URL + ("&" if "?" in URL else "?")
+                                             + f"d={w}x{h}&seed={seed}"})
                 await asyncio.sleep(2.3)
                 m = await measure_settled(MEASURE)
                 if "error" in m:
@@ -428,7 +469,29 @@ async def main():
                 # tools/test.js reads its constants there.
                 LINK_FLOOR, LINK_CEIL = 0.45, 0.80
                 gear = m.get("gear", 0)
-                at_standard = gear >= TARGET_GEAR_PX * 0.98
+                # THE TOLERANCE IS ONE TOOTH, AND IT IS DERIVED, because the two
+                # sides of this comparison are not the same quantity.
+                #
+                # `gear` is the LARGEST wheel the deal produced. TARGET_GEAR_PX is
+                # the size the fit aims that wheel at. The deal does not always
+                # reach TEETH_MAX: with the counts drawn per wheel and constrained
+                # only by each chain's total, the biggest wheel on stage is usually
+                # the full TEETH_MAX and sometimes one tooth under it. A wheel's
+                # outside diameter is m(z + 2), so one tooth short of the maximum
+                # is a wheel 1/(TEETH_MAX + 2) smaller -- about 4.8% here -- and
+                # the old flat 0.98 sat inside that. It failed rows where the page
+                # had done nothing wrong, and which of them failed depended on the
+                # deal. CI caught this the honest way: two rows at 215.4px against
+                # a 222px standard that pass ten times running locally.
+                #
+                # Deriving the slack from the tooth pitch says exactly what is
+                # being allowed -- one tooth of deal variance and not a pixel more
+                # -- instead of naming a percentage that has to be re-measured
+                # whenever the deal's range moves. It is still nowhere near a
+                # collapse: #44 read 0.30-0.33 of the long axis with wheels far
+                # smaller than one tooth off standard.
+                one_tooth = 1.0 / (TEETH_MAX + 2)
+                at_standard = gear >= TARGET_GEAR_PX * (1 - one_tooth)
                 links_in = ((l0 >= -1) and (l1 <= long_px + 1)
                             and (LINK_FLOOR <= link_share or at_standard)
                             and link_share <= LINK_CEIL)

@@ -98,6 +98,38 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **#88 — the device gate's verdict was a property of whichever machine it
+  happened to deal.** Found by CI failing #87 on two rows that pass ten times
+  running locally, at a gear of 215.4px against a 222px standard.
+
+  Every wheel on this page is dealt at random, and `tools/devices.py` navigated
+  once per profile and judged what it got. Two things followed from that, and the
+  second is the one that matters:
+
+  - **The deal is now seeded, one fixed seed per row.** Same LCG and the same
+    reasoning as `tools/pixel_regress.py`, injected over CDP so no test hook
+    reaches the shipped page, and read from the URL so each navigation names its
+    own. Breadth is not lost — 24 rows still exercise 24 different machines, but
+    the same 24 every time. A flaky gate is worse than a narrow one: it teaches
+    everyone to re-run until it passes, which is how a real failure gets waved
+    through.
+  - **The gear bound was comparing two different quantities.** It measures the
+    *largest wheel the deal produced* and bounded it against `TARGET_GEAR_PX`,
+    the size the fit aims that wheel at — but the deal does not always reach
+    `TEETH_MAX`, and one tooth short is a wheel `1/(TEETH_MAX + 2)` smaller,
+    about 4.8%. The flat 2% tolerance sat inside that, so the bound failed pages
+    that had done nothing wrong, and which rows failed depended on the deal. The
+    slack is now derived from the tooth pitch, which says exactly what is being
+    allowed — one tooth of deal variance and not a pixel more — rather than
+    naming a percentage somebody has to re-measure when the deal's range moves.
+    `TEETH_MAX` is read out of `index.html` beside `TARGET_GEAR_PX`, for the same
+    reason.
+
+  This is the third time in this file that a bound has been wrong because nobody
+  said *which* measure it was on: the linked span had three datums 15 points
+  apart, the ceiling of 0.88 could never be crossed, and now a bound on the mean
+  wheel was being applied to the largest one.
+
 - **#87 — the escape runs stopped short of the edges, and the gate that was
   supposed to say so had been pointed away from the widths where it happened.**
   (GitHub #80.)
