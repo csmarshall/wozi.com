@@ -98,6 +98,70 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **#91 — an escape run wandered off its own line, and the wander grew with the
+  run.** Charles, looking at a 5120px-wide screen: the ghost runs should follow
+  the chain's centre line more closely.
+
+  The wobble was already dealt around the run's own bearing rather than the
+  previous wheel's, so the ANGLE never accumulated. The POSITION did. Every step
+  displaces the run sideways by `d * sin(wobble)`, and those sum as a random walk,
+  so lateral drift grew with the square root of the run's length. Invisible while
+  a run was seven wheels; #87 made the length a function of the viewport, so on an
+  ultrawide a run is seventeen wheels and left its line by **207px** — on a stage
+  1440px tall. The fix made the symptom worse before anyone saw it.
+
+  **Each step now aims back at the axis before it wobbles.** Solving for the
+  bearing that lands the next centre back on the line and dealing the wobble
+  around THAT turns the walk into a contraction: the offset after a step is
+  `off * (1 - cos w) + d * cos(correct) * sin w`, and a coefficient under 1 on the
+  carried term is the whole difference between drift that accumulates and drift
+  that is bounded.
+
+  Four rules were photographed side by side, two seeded loads each, at two widths.
+  Peak excursion from the run's own axis:
+
+  | | 2560x1440 | 5120x1440 |
+  | --- | --- | --- |
+  | shipped — free wobble | 148px | **207px** |
+  | alternating signs | 62px | 119px |
+  | **steer home** | 55px | **59px** |
+  | steer home + alternating | 54px | 60px |
+
+  The column that decides it is the second against the first, not either alone.
+  The first two GROW with the run (8 wheels per run at 2560, 17 at 5120); the last
+  two are flat. Since the length now follows the viewport, an unbounded rule keeps
+  getting worse on wider screens.
+
+  Alternating the wobble's sign — the chain's own rule — halves the drift at 2560
+  and looks like the answer, then gives most of it back at 5120: decorrelating the
+  angle leaves the magnitudes free, so the position still walks. Steering plus
+  alternation is statistically identical to steering alone (60 vs 59), so the
+  simpler mechanism wins, and it keeps the uncorrelated wander that gives the runs
+  their character while removing only the accumulation.
+
+  Two corrections came with it, both of the same family as #87:
+
+  - **The progress sum was projecting the wrong angle.** It read `cos(wobble)`
+    while the step was taken at `wobble`, which agreed only while those were the
+    same angle. Steering added a term to the bearing without touching that line,
+    so the projection would have silently stopped matching the step — and it
+    over-credits, which is the direction that stops a run short. It projects
+    `ang - e.ang` now, the whole deflection by construction.
+  - **The iteration backstop assumed the widest off-axis step was the wobble
+    alone.** With steering it is the wobble plus the largest correction, and that
+    is derivable rather than measurable: the offset contracts to `d * tan(w)`, so
+    the largest correction is that over the shortest centre distance. The bound
+    stays an upper bound instead of quietly becoming an estimate.
+
+  Coverage is unchanged — reaches both edges on every load at every width tested,
+  0px shortfall, no new console warnings.
+
+  **Found while measuring, and it changes what the drift means:** `fitEscapes`
+  resets `this._seed` on entry (`index.html`), so the ghost wobble stream is
+  identical on every load. The drift figures came out bit-identical across two
+  genuinely different deals. The wandering was not an unlucky deal anyone could
+  reload away — it was the shape, every time, at a given viewport.
+
 - **#88 — the device gate's verdict was a property of whichever machine it
   happened to deal.** Found by CI failing #87 on two rows that pass ten times
   running locally, at a gear of 215.4px against a 222px standard.
