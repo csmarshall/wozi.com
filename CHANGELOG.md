@@ -98,6 +98,93 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **#90 — the scribed datum showed through every background wheel, and paint
+  order was never the reason.** (GitHub #81.) The line and its ticks ran
+  unbroken across the ghost runs at any wide viewport, which reads as an overlay
+  laid on the drawing rather than as the reference a fitter follows along a bed.
+
+  **The obvious diagnosis was wrong, and it was written down before it was
+  checked.** The issue said the ghosts were a separate layer painted after
+  `gearArt`, so the datum — first child of `gearArt` — necessarily sat in front
+  of them. Hit-testing the shipped page at six points where a datum line crosses
+  a ghost body says otherwise: `elementsFromPoint` returns the ghost first and
+  the datum line fourth or fifth, at every one. The mark was already **below all
+  24 of them**. Both are children of `gearArt`, both carry `z-index: 0`, and the
+  datum is written first.
+
+  **What it actually is: an occluder at 0.17 does not occlude.** The ghost layer
+  carries one `opacity` for the whole background assembly. Anything inside that
+  group paints at full alpha onto the group's surface and the alpha is charged
+  once, at the end — which is exactly why ghost wheels have always hidden *each
+  other* cleanly. The datum was the only part of the assembly standing outside
+  the group, so it was the only part nothing could cover: measured off the
+  shipped page, a hairline crossing a wheel body kept **83%** of its weight,
+  i.e. was attenuated only by the wheel's own transparency. Below in paint order
+  and visible through the thing above it are not a contradiction.
+
+  **The fix is to move the mark inside the group, first child**, where the
+  wheels' real silhouettes cover it — teeth, gaps and all, with no mask, no
+  circle approximation and no geometry duplicated out of `ghostSvg`. Three
+  things had to be paid for:
+
+  - **The alpha it lost is spent on ink instead.** Inside the group the mark can
+    only be drawn at `ghostOpacity()`, and `datumOpacity()` had solved for a
+    different number — 0.28 against the ghosts' 0.17 on dark, because a hairline
+    does not survive dimming the way a filled body does. Compositing is linear
+    in sRGB values, so `ink = bg + (datumOpacity / ghostOpacity) × (token − bg)`
+    drawn at the group's alpha lands on the tone the solve asked for; on dark
+    that lifts `--muted` to `rgb(223,250,244)`. Photographed, the two agree to
+    within **2/255** on every channel off a wheel, which is rounding rather than
+    a change in weight. In light the two alphas are the same number by
+    construction, the ratio is exactly 1, and `datumInk()` hands the token back
+    unchanged. **Nothing was re-dimmed to fake depth** — that would have traded a
+    paint bug for the legibility one #61 and the mock already settled.
+  - **The layer's box has to hold the mark too (#21).** It is the element
+    carrying the opacity, so WebKit rasterises the group at *its* box while Blink
+    takes the union of its children — and a datum runs past the wheels on
+    purpose. `datumLayer()` now returns its bounds and the layer is widened to
+    contain them. The *wheels'* union is settled first and never widened
+    afterwards: the line is run to the edge of that box and a little past, so a
+    box that had already grown to hold the line would push the line out again.
+  - **The parallax transform moved down to the wheels alone.** The datum's
+    stations mark the centres of linked wheels, which are drawn at the train's
+    scale; scaling the mark 0.94 with the far plane would slide every station off
+    the wheel it points at. An inner div now carries the `scale(0.94)` and the
+    pointer drift, and holds `_ghostLayer` — a transform does not force a
+    subtree to composite separately, so the wheels still paint over the datum at
+    full alpha. `parallax` is off by deliberate default, so this is latent either
+    way; it is fixed rather than introduced, since the mark and the wheels it
+    references had never travelled together.
+
+  **What this does not cover, and cannot.** A bridge idler is a ghost drawn in
+  the chain layer with the same alpha applied *per wheel* — it cannot live in the
+  ghost layer because it has to mesh, and that layer is parallax-scaled. Each one
+  is therefore its own translucent group, and no stacking arrangement makes a
+  translucent element occlude anything. The datum still shows through the bridge
+  idlers, and only through them: a handful of wheels in the column between two
+  chains, against 24 in the background runs. Fixing that means masking or
+  pre-blended fills, which is a different change.
+
+  Measured on the combined stage at 2560×1440, one seed, one load:
+  **2,881 px** differ on dark and **2,266 px** on light, max channel delta 29 and
+  30 — all of it the mark disappearing under wheels. The shipped fix is **0 px**
+  against a live mock of the same idea injected into the unmodified page, which
+  is what says the implementation does what the experiment did. Gates: suite
+  **69/69**, devices **24/24** plus safe-area **4/4**, motion **PASS**, and
+  `pixel_regress --query '?who=charles'` **0 px** against `main` at both
+  viewports — a solo page draws no datum, so the single-chain path had to be
+  untouched, and it is. The three fixed controls and all eight badges still
+  hit-test **on top** with the layer's box widened.
+
+  Two assertions in the suite moved with it, and both now assert the real rule:
+  the datum must be the **first child of the layer that carries the ghost
+  opacity** rather than merely the first thing `gearArt` paints, and the ink
+  conversion is checked numerically in both palettes — every channel must
+  composite at the ghost alpha to what the token reaches at the solved one. The
+  suite's slice of `datumOpacity()` was also bounded at `datumInk()`, since the
+  new method divides by `ghostOpacity()` on every path and the old bound would
+  have read that arithmetic as the previous method's fallback.
+
 - **#88 — the device gate's verdict was a property of whichever machine it
   happened to deal.** Found by CI failing #87 on two rows that pass ten times
   running locally, at a gear of 215.4px against a 222px standard.
