@@ -1,0 +1,14 @@
+# wozi.com — crawl policy
+#
+# Crawling is allowed everywhere, and this file disallows nothing. Where a page
+# should not be indexed, that is said on the page itself, in its own
+# <meta name="robots">: a Disallow here would stop a crawler fetching the page
+# at all, and so stop it ever reading that tag.
+#
+# There is no Sitemap line because there is no sitemap. The site is one page.
+#
+# This is a request to well-behaved crawlers. It is not access control, and it
+# does nothing about anything that ignores it.
+
+User-agent: *
+Allow: /
