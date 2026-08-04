@@ -102,26 +102,34 @@ DEVICES = [
     # LINK_SHARE rework (fitStage, index.html) actually killed it or just
     # moved the threshold out of reach of the old device list.
     #
-    # 5120 (Super ultrawide) is deliberately NOT in this list. It was tried
-    # here during the #2 investigation and reproducibly fails a DIFFERENT
-    # check -- "stops short" of the physical edges, a coverage gap, not a
-    # centring one -- on the very first navigation of a fresh session, so it
-    # is real and not test-harness noise. But it is not #2's fault (which is
-    # about centring, and is fixed -- see solve() in index.html), and closing
-    # it means deciding how many more outrigger wheels 5120px of empty edge
-    # is worth against the per-SVG frame cost #6 already fought to remove.
-    # That is a call for Charles, not a silent fix bundled into this commit --
-    # this tool gates CI (deploy.yml), so a device row with no agreed fix
-    # would block every future deploy over an open question. Re-add it once
-    # that call is made.
-    # 3440 is left out for the SAME reason as 5120, and it was measured before
-    # being dropped: four consecutive runs against this tree, all four failing
-    # portrait 3440x1350 by 20px, 28px and 35px -- and passing everything else,
-    # including every centring check. So it is not flaky and it is not #2; it is
-    # the coverage gap of #41 showing up at a second width, milder (99% covered)
-    # but just as real. Tracked there. Re-add both widths together once the
-    # outrigger-count question in #41 is settled.
-    #   ("Ultrawide 3440",     3440, 1440, 1, IOS_UA,      90,  90),
+    # 3440 AND 5120 ARE BACK (#80), and the reason they were out is the reason
+    # this list now goes this wide. Both were dropped during the #2 work because
+    # they reproducibly failed a DIFFERENT check -- "stops short" of the physical
+    # edges, a coverage gap rather than a centring one -- and closing that meant
+    # deciding how many more outrigger wheels 5120px of empty edge was worth
+    # against the per-SVG frame cost #6 fought to remove. That was Charles's call
+    # to make, not a silent fix, and since this tool gates CI a row with no agreed
+    # fix would have blocked every deploy over an open question.
+    #
+    # The call was made in #80: the run's wheel count is derived from the distance
+    # it has to cover, so it is no longer a number anyone chooses. Measured at
+    # 8 loads per width, ghost extent against the physical edges:
+    #
+    #                 before #80          after #80
+    #   3440x1440     8/8 reach           8/8 reach
+    #   5120x1440     0/8, 457-639px      8/8 reach
+    #
+    # and the frame cost that made it a question came in at nothing measurable:
+    # 31 -> 59 wheels at 5120, median frame time flat at the 16.7ms vsync interval
+    # and p95 17.3 -> 17.5ms. Hopefully that holds on hardware weaker than this
+    # machine; it is headroom being spent, and headless Chrome here has plenty.
+    #
+    # THESE TWO ROWS ARE WHY THE GATE READ 20/20 WHILE COVERAGE VISIBLY FAILED.
+    # Not a wrong measure and not a settling race -- the two widths where the page
+    # failed were the two widths the list did not contain. A gate is only ever
+    # green about what it was pointed at.
+    ("Ultrawide 3440",       3440, 1440, 1, IOS_UA,      90,  90),
+    ("Super ultrawide",      5120, 1440, 1, IOS_UA,      90,  90),
     ("QHD wide",             2560, 1440, 1, IOS_UA,      90,  90),
 ]
 
@@ -222,15 +230,33 @@ MEASURE = r"""
     if (!s.parentElement || getComputedStyle(s.parentElement).willChange !== 'transform') return;
     gear = Math.max(gear, parseFloat(w));
   });
-  /* every wheel that is actually drawn, ghosts included */
+  /* Every wheel that is actually DRAWN, ghosts included -- and only those.
+     This used to take any <svg> wider than 30px, which quietly let the page's
+     container elements answer the question. The largest of them is the full-stage
+     `key: 'chains'` svg: it is `solved.w * S` across, paints nothing while no drive
+     strand is enabled, and at 5120x1440 measured ~40px WIDER than the outermost
+     wheel. So "the assembly reaches both edges" could be satisfied by a declared
+     box rather than by any visible machinery. It never was the reason this gate
+     passed while coverage failed (#80 was the missing widths, above) -- but a
+     coverage measure that can be answered by an empty container is one screenful
+     of drift away from being exactly that, so it measures paint now.
+
+     A wheel's own wrapper is `transform: rotate(Ndeg)` inside the zero-size offset
+     div its layer positions it with. That signature belongs to the linked wheels
+     and the ghosts alike, and to nothing else on the page. */
   let ax0 = 1e9, ax1 = -1e9, ay0 = 1e9, ay1 = -1e9, n = 0;
   document.querySelectorAll('svg').forEach(s => {
     const r = s.getBoundingClientRect();
     if (r.width < 30) return;
+    const p = s.parentElement, gp = p && p.parentElement;
+    if (!p || !gp) return;
+    if (!/^transform:\s*rotate\(/.test(p.getAttribute('style') || '')) return;
+    if (!/width:\s*0px/.test(gp.getAttribute('style') || '')) return;
     n++;
     ax0 = Math.min(ax0, r.left); ax1 = Math.max(ax1, r.right);
     ay0 = Math.min(ay0, r.top);  ay1 = Math.max(ay1, r.bottom);
   });
+  if (!n) return JSON.stringify({ error: 'no wheels found — the wrapper signature the assembly measure keys on has changed' });
   return JSON.stringify({
     links: badges.length, wheels: n, gear: +gear.toFixed(1),
     vw: window.innerWidth, vh: window.innerHeight,

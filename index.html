@@ -571,6 +571,13 @@ const TEETH_MIN = 13, TEETH_MAX = 19, TEETH_SLACK = 4, TEETH_HOST = 18;
    standard gear size comes from -- and a literal repeated in both would be a
    copy that could drift. */
 const TEETH_MEAN = 16.3;
+/* How far either side of its own axis an escape run may wander, in degrees. Named
+   because fitEscapes needs it twice and the two uses must not drift apart: it deals
+   the wobble, and it bounds how many wheels a run can possibly need (#80). A run
+   that wanders foreshortens its own progress by cos of this, so a backstop derived
+   without it would be an underestimate -- which is the failure mode the derived
+   backstop exists to remove. */
+const ESCAPE_WOBBLE = 20;
 /* THE SPAN A NOMINAL CHAIN OCCUPIES, computed rather than measured, and it is
    what gives every page the same gear size. A chain shorter than the longest is
    scaled as though the longest were on stage, so harper.wozi.com draws her wheel
@@ -2327,12 +2334,34 @@ class Component extends DCLogic {
       const span = e.reach / gs;
       let prev = { cx: g0.cx, cy: g0.cy, r: g0.r, teeth: g0.teeth, dir: g0.dir, phase: g0.phase };
       let reached = 0, k = 0;
-      /* Keep adding wheels until the run is genuinely off the edge; they grow as they
-         go, so a tall screen does not need a long string of identical pinions. */
-      while (reached < span + 120 && k < 7) {
-        const teeth = Math.min(26, 11 + k * 2 + Math.floor(this.rnd() * 8));
+      /* Keep adding wheels until the run is genuinely off the edge.
+
+         THE BACKSTOP IS DERIVED, NOT CHOSEN (#80). It used to be `k < 7`, which was
+         safe while a wheel's size tracked the long axis -- a wider window dealt
+         bigger ghosts, so seven of them always got there. #85 gave a gear a standard
+         size instead, and from that day the same seven wheels covered the same
+         distance whatever the window was: at 5120x1440 the runs stopped 457-639px
+         short of the edges on 8 loads out of 8. A bound sized against one rule
+         silently became the thing deciding coverage under the next.
+
+         So bound the ITERATIONS by the arithmetic instead: the shortest step this
+         loop can take is two minimum wheels in mesh, foreshortened by the widest
+         wobble it may deal, and the run needs `span + 120`. That cannot stop short
+         -- it is an upper bound on how many wheels the distance can possibly need --
+         while still refusing to spawn without limit on a pathological viewport. */
+      const stepMin = MODULE * TEETH_MIN * Math.cos(ESCAPE_WOBBLE * Math.PI / 180);
+      const kMax = Math.ceil((span + 120) / stepMin) + 1;
+      while (reached < span + 120 && k < kMax) {
+        /* DEALT LIKE THE CHAIN'S OWN, uniform over the same range. The ramp here was
+           `Math.min(26, 11 + k * 2 + rnd() * 8)` -- wheels that grew as the run went
+           out, and past the chain's own TEETH_MAX at that. It was a second sizing
+           philosophy inside a machine whose premise is that sizes are random, and it
+           existed to keep the run short: bigger wheels cover ground faster, so seven
+           of them reached. With the count now derived from the distance, the run can
+           be as long as it needs to be and these can simply be wheels like any other. */
+        const teeth = TEETH_MIN + Math.floor(this.rnd() * (TEETH_MAX - TEETH_MIN + 1));
         const r = MODULE * teeth / 2;
-        const wobble = (this.rnd() * 2 - 1) * 20;
+        const wobble = (this.rnd() * 2 - 1) * ESCAPE_WOBBLE;
         const ang = e.ang + wobble;
         const a = ang * Math.PI / 180, d = prev.r + r;
         const cx = prev.cx + d * Math.cos(a), cy = prev.cy + d * Math.sin(a);
@@ -2352,7 +2381,15 @@ class Component extends DCLogic {
              along it -- k 0 is the wheel in mesh with the chain itself */
           person: host.person, lead: host.lead, k: k };
         ghosts.push(g);
-        reached += d;
+        /* PROGRESS ALONG THE RUN'S AXIS, not the length of the step that made it.
+           `span` is measured straight down the escape bearing to the viewport edge,
+           so a step taken `wobble` degrees off that bearing advances the run by only
+           its cosine. Summing the raw centre distance credited the run with ground it
+           had not covered, and it always over-credited -- cos is at most 1 -- so the
+           error only ever stopped a run short (#80). Per-step projections onto a
+           fixed direction sum to the projection of the whole displacement, so this is
+           exact, not an approximation. */
+        reached += d * Math.cos(wobble * Math.PI / 180);
         prev = g;
         k++;
       }

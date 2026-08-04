@@ -71,6 +71,10 @@ const page = (function build() {
        modules (#76). Read from the page like everything else, so the suite
        measures the bound that ships rather than a copy of it. */
     'PLATE_TOP_CLEAR',
+    /* How far an escape run may wander off its own axis. fitEscapes both deals the
+       wobble with it and derives its wheel-count backstop from it (#80), so the
+       suite has to hand it in or the extracted function throws. */
+    'ESCAPE_WOBBLE',
     /* RING_STUB governs the mesh this suite's headline test is named after, and
        was the one constant kept as a copy here instead of read from the page.
        Mutating index.html alone used to leave every test green while 10 of 19
@@ -1094,11 +1098,17 @@ const segCrossJs = new Function(
    identical; nothing here looks at a colour. */
 function fitEscapesOn(solved, axisRot, spineSlug, margin) {
   margin = margin || 300;
+  /* TEETH_MIN/TEETH_MAX and ESCAPE_WOBBLE are the run's own sizing rule since #80:
+     the wheels are dealt over the chain's range instead of a ramp of their own, and
+     the wheel-count backstop is derived from the smallest step the loop can take.
+     Handed in from the page's values, never restated here. */
   const fn = new Function('window', 'MODULE', 'GHOST_COLORS', 'segCross',
+    'TEETH_MIN', 'TEETH_MAX', 'ESCAPE_WOBBLE',
     'return function ' + grabBlock('  fitEscapes() {', '{', '}') + ';')(
     { innerWidth: solved.w + margin * 2, innerHeight: solved.h + margin * 2 },
     page.MODULE, ['#000'],
-    new Function('return ' + grabBlock('function segCross(', '{', '}'))());
+    new Function('return ' + grabBlock('function segCross(', '{', '}'))(),
+    page.TEETH_MIN, page.TEETH_MAX, page.ESCAPE_WOBBLE);
   const ctx = {
     _axisRot: axisRot,
     _stageRef: { current: { getBoundingClientRect: () => (

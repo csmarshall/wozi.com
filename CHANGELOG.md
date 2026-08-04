@@ -98,6 +98,70 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **#87 — the escape runs stopped short of the edges, and the gate that was
+  supposed to say so had been pointed away from the widths where it happened.**
+  (GitHub #80.)
+
+  `fitEscapes` grew each run until it was off the edge *or* it had placed seven
+  wheels, whichever came first. The seven was a backstop, and while a wheel's size
+  tracked the long axis it never bound: a wider window dealt bigger ghosts, so
+  seven of them always got there. #85 gave a gear a standard size instead, and
+  from that moment the same seven wheels covered the same ground whatever the
+  window was. At 5120×1440 the runs ended 532px and 637px inside the two edges,
+  leaving a band of bare page at each end of a machine that is meant to read as
+  continuing past the frame (#10).
+
+  Three things changed, and only the first is the bug:
+
+  - **The wheel count is derived from the distance.** The shortest step the loop
+    can take is two minimum wheels in mesh, foreshortened by the widest wobble it
+    may deal; the run needs `span + 120`. The ratio bounds the iterations, so the
+    backstop cannot be reached before the edge is. It is an upper bound on what
+    the arithmetic can need rather than a number anyone picked, which is the whole
+    difference between this and what it replaced.
+  - **The run's wheels are dealt like the chain's**, uniform over
+    `[TEETH_MIN, TEETH_MAX]`. They used to ramp — `11 + k * 2`, capped at 26 —
+    growing as the run went out and past the chain's own maximum at that. It was a
+    second sizing philosophy inside a machine whose premise is that sizes are
+    random, and it existed only to keep runs short enough for the cap. With the
+    count derived, a run can be as long as it needs and these can be wheels like
+    any other.
+  - **Progress is measured along the run's axis, not as the length of the step.**
+    `span` is measured straight down the escape bearing, so a step taken `wobble`
+    degrees off it advances the run by only its cosine. Summing raw centre
+    distances credited the run with ground it had not covered — and always in the
+    same direction, since cos is at most 1, so the error could only ever stop a
+    run short.
+
+  **The gate read 20/20 throughout, and the reason is worth more than the fix.**
+  Not a wrong measure and not a settling race: 3440 and 5120 had been commented
+  out of `tools/devices.py`'s device list during the #2 work, because they failed
+  a coverage check whose answer — how many more wheels an empty edge is worth
+  against the per-SVG frame cost of #6 — was Charles's to make and would have
+  blocked every deploy while it stayed open. The two widths where the page failed
+  were the two widths the list did not contain. A gate is only ever green about
+  what it was pointed at.
+
+  Both rows are back, and proven able to fail: against the pre-fix tree the suite
+  reports **22/24** with 5120 short by 532px and 637px in portrait and 516px and
+  623px in landscape; against this one, **24/24**. Measured over 8 loads a width,
+  5120 went from 0/8 reaching to 8/8, and every width from 1440 to 3440 reached
+  both before and after.
+
+  The frame cost that made this a question in the first place came in at nothing
+  measurable: 31 → 59 wheels at 5120, median frame time flat at the 16.7ms vsync
+  interval and p95 17.3 → 17.5ms. That is headroom being spent, on a fast machine
+  in headless Chrome — hopefully it holds up on weaker hardware, which this cannot
+  prove.
+
+  One thing found on the way and fixed with it: the assembly extent was the union
+  of every `<svg>` on the page wider than 30px, which let the page's *container*
+  elements answer a question about paint. The largest is the full-stage `chains`
+  svg — `solved.w * S` across, drawing nothing at all while no drive strand is
+  enabled, and at 5120 it measured about 40px wider than the outermost wheel. It
+  was not why this gate passed, but a coverage measure that an empty box can
+  satisfy is one edit away from being exactly that. It measures wheels now.
+
 - **#86 — a hub cap knew which service it was, but not which of two it was.**
   (GitHub #78.) Dragging Charles's `mail` cap threw Harper's out to arm's length,
   and hovering either one lit both and opened both pills.
