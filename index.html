@@ -2348,8 +2348,26 @@ class Component extends DCLogic {
          loop can take is two minimum wheels in mesh, foreshortened by the widest
          wobble it may deal, and the run needs `span + 120`. That cannot stop short
          -- it is an upper bound on how many wheels the distance can possibly need --
-         while still refusing to spawn without limit on a pathological viewport. */
-      const stepMin = MODULE * TEETH_MIN * Math.cos(ESCAPE_WOBBLE * Math.PI / 180);
+         while still refusing to spawn without limit on a pathological viewport.
+
+         THE WIDEST OFF-AXIS STEP IS NOT THE WOBBLE ALONE, because each step also
+         carries a steering correction back toward the axis (below). Both terms are
+         bounded, and the bound is arithmetic rather than measurement:
+
+         a step displaces the run laterally by `d * sin(correct + wobble)`, and
+         since `sin(correct) = -off / d` by construction, the offset after a step is
+
+             off' = off * (1 - cos w) + d * cos(correct) * sin w
+
+         The coefficient on `off` is `1 - cos(ESCAPE_WOBBLE)`, which is well under
+         1, so the offset contracts toward a fixed point of `d * tan(w)` rather
+         than accumulating -- that contraction IS the fix, and it is also what
+         makes this bound finite. The largest offset any step can be correcting is
+         therefore the widest centre distance times `tan(w)`, and the largest
+         correction is that offset over the SHORTEST centre distance. */
+      const w = ESCAPE_WOBBLE * Math.PI / 180;
+      const maxCorrect = Math.asin(Math.min(1, (TEETH_MAX / TEETH_MIN) * Math.tan(w)));
+      const stepMin = MODULE * TEETH_MIN * Math.cos(maxCorrect + w);
       const kMax = Math.ceil((span + 120) / stepMin) + 1;
       while (reached < span + 120 && k < kMax) {
         /* DEALT LIKE THE CHAIN'S OWN, uniform over the same range. The ramp here was
@@ -2361,9 +2379,33 @@ class Component extends DCLogic {
            be as long as it needs to be and these can simply be wheels like any other. */
         const teeth = TEETH_MIN + Math.floor(this.rnd() * (TEETH_MAX - TEETH_MIN + 1));
         const r = MODULE * teeth / 2;
+        const d = prev.r + r;
+        /* EACH STEP AIMS BACK AT THE RUN'S AXIS BEFORE IT WANDERS (#91).
+           The wobble is dealt around the run's bearing, not around the previous
+           wheel's, so the ANGLE never accumulated -- but the POSITION did: every
+           step displaces the run sideways by `d * sin(wobble)`, and those sum as a
+           random walk, so lateral drift grew with the square root of the run's
+           length. That was invisible while a run was seven wheels. #87 made the
+           length a function of the viewport, so on a 5120px-wide screen a run is
+           seventeen wheels and wandered 207px off its own line -- on a stage
+           1440px tall.
+           `off` is the run's current offset from its axis, positive to the left of
+           travel. Solving for the bearing that lands the next centre back ON the
+           axis and then dealing the wobble around THAT turns the walk into a
+           contraction: measured over two loads at two viewports, peak excursion
+           went 148/207px to 55/59px, and -- the part that matters -- stopped
+           growing with the run. The chain's own bearings are disciplined the same
+           way and for the same reason (see ANG_MIN/BAND_MAX above): a machine
+           stays a line of gears rather than wandering off a corner of the frame.
+           Alternating the wobble's SIGN each step was tried and is not enough --
+           it decorrelates the angle while leaving the magnitudes free, so the
+           position still walks: 133px at 5120, most of the way back to unsteered. */
+        const ox = prev.cx - g0.cx, oy = prev.cy - g0.cy;
+        const off = -ox * Math.sin(ea) + oy * Math.cos(ea);
+        const correct = Math.asin(Math.max(-1, Math.min(1, -off / d))) * 180 / Math.PI;
         const wobble = (this.rnd() * 2 - 1) * ESCAPE_WOBBLE;
-        const ang = e.ang + wobble;
-        const a = ang * Math.PI / 180, d = prev.r + r;
+        const ang = e.ang + correct + wobble;
+        const a = ang * Math.PI / 180;
         const cx = prev.cx + d * Math.cos(a), cy = prev.cy + d * Math.sin(a);
         const pPrev = 360 / prev.teeth, pThis = 360 / teeth;
         let u = ((ang - prev.phase) / pPrev) % 1;
@@ -2388,8 +2430,16 @@ class Component extends DCLogic {
            had not covered, and it always over-credited -- cos is at most 1 -- so the
            error only ever stopped a run short (#80). Per-step projections onto a
            fixed direction sum to the projection of the whole displacement, so this is
-           exact, not an approximation. */
-        reached += d * Math.cos(wobble * Math.PI / 180);
+           exact, not an approximation.
+
+           OFF THE RUN'S BEARING, NOT OFF THE WOBBLE. This read `cos(wobble)` while
+           the step was taken at `wobble`, which agreed only for as long as those
+           were the same angle. Steering (#91) added a correction term to the
+           bearing without touching this line, so the projection silently stopped
+           matching the step it was projecting -- and it over-credited, which is the
+           direction that stops a run short. `ang - e.ang` is the whole deflection
+           by construction, so it cannot fall out of step again. */
+        reached += d * Math.cos((ang - e.ang) * Math.PI / 180);
         prev = g;
         k++;
       }
