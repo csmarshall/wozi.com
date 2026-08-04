@@ -84,6 +84,57 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Added
 
+- **#94 — the checks only a phone can make, written down instead of remembered.**
+  (GitHub #49.) `docs/MANUAL-CHECKS.md`, and it is documentation of a gap rather
+  than a new gate: nothing runs it and nothing can.
+
+  Everything in `tools/` is headless Chrome over CDP plus `webkit_band.js`, which
+  builds a WKWebView that opens no window. So the directory has no browser chrome,
+  no window manager, no battery and no finger, and six questions fall straight
+  through it — a URL bar collapsing mid-scroll, rotation with the keyboard up,
+  home-indicator and Island overlap, Low Power Mode's rAF throttling, Safari's own
+  controls landing on the page's, and whether iOS hands the page the safe-area
+  insets `devices.py` has to inject for it. Each entry says what to do, what
+  correct looks like, what failure looks like, and — the part worth the file —
+  which line of which harness proves the question cannot be automated.
+
+  Two of those are worth naming here because the code already half-answers them
+  and the half is easy to mistake for the whole:
+
+  - **The safe-area pass tests the layout consequence, not the insets.**
+    `devices.py` sets `--safe-t/r/b/l` itself, from Apple's published figures, and
+    measures the fixed controls against the rectangle that produces — because
+    Chrome resolves every `env()` to 0 on every emulated device, the insets coming
+    from the real window manager rather than the metrics override. The file has
+    said so honestly all along; what it could not do is say who checks the other
+    half. Now something does, and it says which numbers are the assumption.
+  - **Nothing measures the frame *rate*.** `verify_motion.py` samples the DOM
+    twice ~700ms apart and reports how many transforms advanced, which is a
+    binary a train at 15fps passes exactly as well as one at 30; and
+    `pixel_regress.py` cannot ask at all, since it queues rAF rather than running
+    it and pins `performance.now` to a virtual clock. That matters under Low Power
+    Mode, where iOS is understood to throttle rAF to about 30Hz: the loop's budget
+    is `1000/30 - 1.5` = 31.83ms, so a 33.3ms stream clears it on every callback
+    and the train should still run at pace — with 1.5ms of margin, and any jitter
+    under the budget dropping the tick. Projected worst case is the rate falling
+    toward 15fps. Hopefully the margin holds on a real phone; this is arithmetic
+    off `index.html:2517`, not a measurement, and check 4 is how it gets one.
+
+  **A repro from a phone is only useful if it can be reproduced, and it cannot
+  be yet.** Eleven bare `Math.random()` sites deal the machine, so "it looked
+  wrong on my phone" describes a train that will never be drawn again. The
+  in-page `?seed=` hook is GitHub #48 part 1 and does not exist — `index.html`
+  parses no `seed` parameter, and the determinism both harnesses rely on is
+  injected over CDP before page script runs, deliberately out of reach of a
+  phone. The file says so rather than implying a hook is there.
+
+  Referenced from `CLAUDE.md` under *Verifying a change*, after the pixel gate.
+  Not published: `docs/` is absent from the deploy whitelist and stays absent.
+
+  This is the unblocked half of GitHub #49. **Whether to adopt Playwright is
+  Charles's call and nothing here takes it** — no dependency was added,
+  `package.json` still has none, and the issue stays open on that question.
+
 - **#89 — a crawl policy, because a 403 was standing in for one.**
   `https://wozi.com/robots.txt` returned the raw S3 `AccessDenied` XML: the file
   did not exist, was not in the deploy whitelist, and no `<meta name="robots">`

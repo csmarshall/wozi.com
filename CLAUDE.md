@@ -253,6 +253,18 @@ because a change to the bridge, the datum or the chain ordering moves the
 combined shot enormously while leaving the single-chain path untouched, and only
 the second run can tell you so.
 
+**Six things no harness here can answer, and `docs/MANUAL-CHECKS.md` names
+them.** Everything in `tools/` is headless Chrome over CDP plus one windowless
+WKWebView, so none of it has browser chrome, a window manager, a battery or a
+finger: a collapsing URL bar, rotation with the keyboard up, home-indicator
+overlap, Low Power Mode's rAF throttling, Safari's own controls, and the real
+`env(safe-area-inset-*)` values `tools/devices.py` currently has to inject
+because Chrome resolves every one of them to 0. That file lists each with what
+correct looks like and why it cannot be automated. It is not a gate and nothing
+runs it — the page's only mobile oracle is one human, which is the whole reason
+it is written down. Work through it after a change to the fit, the safe-area
+offsets, the frame budget or the fixed controls. `docs/` is not published.
+
 Never trust the screenshot alone — a static train looks fine in a still. Serve
 the page and check, ~700ms apart:
 
