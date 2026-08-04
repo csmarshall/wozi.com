@@ -20,9 +20,22 @@ that shape can fail: find a service TWO chains carry, work one of them, and
 assert the far one never twitched. Phase one alone cannot see it -- it only ever
 touched a single chain, which is exactly why the bug shipped.
 
+The third phase is the CLICK AFTER THE FLICK (#92). Letting go of a cap while
+the pointer is still moving lands the release on empty stage -- the cap tracks
+the pointer a frame behind, so it is no longer under it -- and the browser then
+fires `click` on the common ancestor of press and release rather than on the
+anchor. The drag-suppression flag was cleared only by the anchor's own click
+handler, so after that gesture it survived, and the next real click on that cap
+was spent clearing it instead of following the link. This phase flicks, then
+clicks for real, and asserts the second click was not swallowed. It also keeps
+the original guarantee honest in the same breath: a drag that DOES end on the
+anchor must still have its click suppressed, or a drag would count as an
+outbound visit.
+
 Usage: tools/cap_drag.py [url] [port]
-Exit 0 only if the cap moves under drag, returns after release, and the
-same-named cap on the other chain is untouched by either.
+Exit 0 only if the cap moves under drag, returns after release, the same-named
+cap on the other chain is untouched by either, and a flick does not eat the
+click that follows it.
 """
 
 import asyncio
@@ -91,6 +104,34 @@ FIND_PAIR = r"""
              x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width }; };
   return JSON.stringify({ svc: svc, a: box(a), b: box(b) });
 })()
+"""
+
+# WHAT A SWALLOWED CLICK LOOKS LIKE FROM OUTSIDE. There is no way to read the
+# component's private flag, and asking for one would be testing the fix rather
+# than the behaviour. What a person experiences is "the link did nothing", and
+# the browser's word for that is defaultPrevented -- so listen on `document` in
+# the bubble phase, which runs AFTER React's delegated handler at the root, and
+# record whether the anchor's guard had cancelled the click by then. The
+# listener cancels the click itself afterwards, because a link that really does
+# navigate would take the page out from under the rest of the run.
+CLICK_PROBE = r"""
+(() => {
+  window.__clicks = [];
+  document.addEventListener('click', (e) => {
+    window.__clicks.push({
+      onCap: !!(window.__cap && (window.__cap === e.target || window.__cap.contains(e.target))),
+      prevented: e.defaultPrevented });
+    e.preventDefault();
+  }, false);
+  return 'ok';
+})()
+"""
+
+# Where the cap is NOW -- after a release it springs home, and the genuine click
+# has to land on the axle it came back to, not the coordinate it was let go at.
+CAP_POS = r"""
+(() => { const r = window.__cap.getBoundingClientRect();
+         return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2 }); })()
 """
 
 # Both caps in one read, so the two are always sampled on the same frame.
@@ -265,6 +306,54 @@ async def main():
             pair["a_scale"] = scale_of(hot["a"]["t"])
             pair["b_scale"] = scale_of(hot["b"]["t"])
 
+        # ---- PHASE THREE: the click after the gesture (#92) ------------------
+        # Two gestures, each followed by a genuine click on the same cap. The
+        # only difference between them is whether a frame runs before the
+        # release, which is the whole of the bug: with one, the cap has caught
+        # up and the release lands on it; without, it has not and the release
+        # lands on the stage behind.
+        async def drag_then_click(fast):
+            await reload()
+            here = json.loads(await ev(FIND))
+            await ev(CLICK_PROBE)
+            x0, y0 = here["x"], here["y"]
+            await mouse("mouseMoved", x0, y0)
+            await asyncio.sleep(0.25)
+            await mouse("mousePressed", x0, y0, buttons=1, button="left")
+            await asyncio.sleep(0.20)          # frames between press and move
+            if fast:
+                for i in range(1, 7):
+                    await mouse("mouseMoved", x0 + i * 7, y0 + i * 3, buttons=1, button="left")
+                    await asyncio.sleep(0.02)
+                # THE FLICK: one long throw and the release in the SAME task, so
+                # no frame runs between them and the cap is still where it was.
+                # This is a hand letting go mid-movement, which is how a magnet
+                # you can pull all the way off is normally put down.
+                await mouse("mouseMoved", x0 + 420, y0 + 180, buttons=1, button="left")
+                await mouse("mouseReleased", x0 + 420, y0 + 180, buttons=0, button="left")
+            else:
+                for i in range(1, 13):
+                    await mouse("mouseMoved", x0 + i * 7, y0 + i * 3, buttons=1, button="left")
+                    await asyncio.sleep(0.02)
+                await asyncio.sleep(0.05)      # a frame, so the cap catches up
+                await mouse("mouseReleased", x0 + 84, y0 + 36, buttons=0, button="left")
+            await asyncio.sleep(0.3)
+            during = json.loads(await ev("JSON.stringify(window.__clicks)"))
+            await asyncio.sleep(1.2)           # let the spring carry it home
+            home = json.loads(await ev(CAP_POS))
+            await ev("window.__clicks = []")
+            await mouse("mouseMoved", home["x"], home["y"])
+            await asyncio.sleep(0.2)
+            await mouse("mousePressed", home["x"], home["y"], buttons=1, button="left")
+            await asyncio.sleep(0.12)
+            await mouse("mouseReleased", home["x"], home["y"], buttons=0, button="left")
+            await asyncio.sleep(0.3)
+            after = json.loads(await ev("JSON.stringify(window.__clicks)"))
+            return (during[0] if during else None), (after[0] if after else None)
+
+        away_release, after_away = await drag_then_click(True)
+        on_release, after_on = await drag_then_click(False)
+
     proc.kill()
 
     print(f"after press, before moving : {held:.1f}px   (should be ~0)")
@@ -313,6 +402,43 @@ async def main():
             ok = False
         else:
             print("PASS: the far cap stayed dark and shut while the near one was hovered.")
+
+    print()
+    say = lambda c: "no click at all" if c is None else (
+        ("on the cap" if c["onCap"] else "somewhere else") +
+        (", swallowed" if c["prevented"] else ", allowed through"))
+    print(f"flick, release mid-move    : {say(away_release)}")
+    print(f"  then a genuine click     : {say(after_away)}   (must be allowed through)")
+    print(f"drag, release on the cap   : {say(on_release)}   (must be swallowed)")
+    print(f"  then a genuine click     : {say(after_on)}   (must be allowed through)")
+    print()
+
+    # The flick only proves anything if it actually released off the anchor. If
+    # the cap caught up, this run reproduced the ordinary drag twice and has
+    # nothing to say about #92 -- which is a broken harness, not a pass.
+    if away_release is None or away_release["onCap"]:
+        print("FAIL: the flick still released on the cap, so this phase tested nothing.")
+        ok = False
+    elif after_away is None or not after_away["onCap"]:
+        print("FAIL: the genuine click missed the cap, so this phase tested nothing.")
+        ok = False
+    elif after_away["prevented"]:
+        print("FAIL: a flick swallowed the next genuine click on that cap.")
+        ok = False
+    else:
+        print("PASS: a click after a flick still reaches the link.")
+
+    if on_release is None or not on_release["onCap"]:
+        print("FAIL: the slow drag did not release on the cap, so suppression is untested.")
+        ok = False
+    elif not on_release["prevented"]:
+        print("FAIL: a drag that ended on the cap navigated -- it would count as an outbound visit.")
+        ok = False
+    elif after_on is None or after_on["prevented"]:
+        print("FAIL: a drag swallowed the next genuine click on that cap.")
+        ok = False
+    else:
+        print("PASS: a drag is still suppressed, and only its own click.")
 
     print()
     print("RESULT: PASS" if ok else "RESULT: FAIL")

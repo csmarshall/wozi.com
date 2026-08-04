@@ -166,6 +166,67 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **#92 — flicking a hub cap off its axle ate the next click on that cap.**
+  (GitHub #56.) Pull a cap off, let go while the hand is still moving, then come
+  back and click the link underneath: nothing happened. Once, silently, and only
+  for the cap that was thrown.
+
+  **The suppression flag outlived the gesture that set it.** A drag ends in a
+  `click`, and that click must not navigate or be counted as an outbound visit,
+  so `up()` records `_badgeMoved` and the anchor's `clickGuard` cancels the click
+  it finds waiting — clearing the flag as it goes. `clickGuard` was the only
+  thing that ever cleared it, and it only runs when the browser fires `click`
+  **on the anchor**. The cap follows the pointer a frame behind, so a release
+  taken mid-movement lands on empty stage rather than on the cap; Chrome then
+  sends the click to the common ancestor of press and release, the guard never
+  runs, and the flag survives. The next real click on that badge was spent
+  clearing it instead of following the link.
+
+  That is not an edge case — the cap is deliberately a magnet you can pull all
+  the way off, ever since the asymptote that used to stop it at about three of
+  its own widths was taken out, so letting go out in space is the ordinary way
+  to put one down. The
+  slow, careful release is the one that happens to work, because the cap has
+  caught up and is still under the pointer.
+
+  **The flag is now cleared where it is armed**, on the press, first thing in
+  `badgeGrab`. The issue offered a second option — stamp the flag with a
+  timestamp and ignore it after about 300ms — and that is a tuned constant nobody
+  could re-derive later, wrong for any hand that pauses before clicking and
+  wrong again on a slow frame. Clearing on the press needs no window at all,
+  because every genuine click begins with a primary pointerdown on the same
+  anchor: by the time a click could be swallowed, the line has already run. It
+  clears unconditionally rather than only for its own key, since only the gesture
+  in progress may suppress anything. `preventDefault` in `badgeGrab` is untouched
+  — it is what stops the browser's native link-drag from hijacking the pointer
+  stream — and the flag is still the composite `badgeKey` of #86, not a bare slug.
+
+  **The gate can fail, and was made to.** `tools/cap_drag.py` grew a third phase
+  that performs both gestures and then clicks for real, reading
+  `event.defaultPrevented` from a `document`-level listener that runs after
+  React's delegated handler — what a person calls "the link did nothing", asked
+  of the browser rather than of the component's private state. Against a
+  throwaway worktree at `ff3cb07` it exits **1**: *flick, release mid-move →
+  somewhere else, allowed through; then a genuine click → on the cap,
+  swallowed.* With the fix it exits **0**, and the same run still asserts the
+  original guarantee — a drag that does end on the cap is suppressed, so a drag
+  is not counted as an outbound visit. A flick that fails to release off the
+  anchor is itself reported as a failure, because a phase that cannot reproduce
+  its own gesture has proved nothing.
+
+  Also gated: 69/69 suite, `verify_motion` PASS (35/35 advancing, badge offsets
+  ≤0.01px), `a11y_audit` PASS in both themes, pixel gate **0px** at 1440×900 and
+  390×844 on `?who=charles` — this change draws nothing.
+
+  **What none of that proves.** Synthetic CDP input has now hidden three pointer
+  bugs in this file, and the reason is in `cap_drag.py`'s own header: press and
+  move arrive in the same task with no frame between them, which a hand can never
+  do. The new phase leans on exactly that asymmetry in reverse — it needs the cap
+  to be *behind* the pointer at release, and it gets there by dispatching the
+  last move and the release with no frame in between. A real hand achieves the
+  same thing by moving fast, which is a different mechanism producing the same
+  geometry. Final confirmation is a person, a real mouse, and a cap thrown across
+  the stage.
 - **#91 — an escape run wandered off its own line, and the wander grew with the
   run.** Charles, looking at a 5120px-wide screen: the ghost runs should follow
   the chain's centre line more closely.
