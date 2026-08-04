@@ -515,15 +515,29 @@ function fitRule() {
   const NOMINAL_SPAN = spanFn(page.MODULE, grabNumber('TEETH_MEAN'),
     page.ANG_MIN, page.ANG_MAX, Math.max(...page.TRAIN_LENS));
   const fn = new Function('MODULE', 'TOOTH_ADD', 'TRAIN', 'NOMINAL_SPAN',
+    'TARGET_GEAR_PX', 'WHEEL_SPAN',
     'longAvail', 'crossAvail', 'longSolved', 'crossSolved', `
     const LINK_SHARE = ${LINK_SHARE}, CROSS_BLEED = ${CROSS_BLEED};
     ${frag}
-    return { fit, wheelSpan, NOMINAL_SPAN, WHEEL_CROSS_MAX };`);
+    return { fit, wheelSpan: WHEEL_SPAN, NOMINAL_SPAN, WHEEL_CROSS_MAX, TARGET_GEAR_PX };`);
   return (n, longAvail, crossAvail, longSolved, crossSolved) => {
     const train = Array.from({ length: n }, () => ({ teeth: page.TEETH_MAX }));
     return fn(page.MODULE, page.TOOTH_ADD, train, NOMINAL_SPAN,
+      grabNumber('TARGET_GEAR_PX'), wheelSpanOf(train),
       longAvail, crossAvail, longSolved, crossSolved);
   };
+}
+
+/* The largest wheel a train puts on stage, as index.html's own WHEEL_SPAN line
+   computes it, executed against a fixture rather than re-typed here (#47). It
+   moved to module scope when the fit stopped sizing a gear as a share of the
+   long axis and started drawing it at TARGET_GEAR_PX: two callers divide by it
+   now, fitStage() and idlerCount(), and both must be handed the same number this
+   file measures. */
+function wheelSpanOf(train) {
+  return new Function('TRAIN', 'MODULE', 'TOOTH_ADD',
+    grabDecl('const WHEEL_SPAN =') + ' return WHEEL_SPAN;')(
+    train, page.MODULE, page.TOOTH_ADD);
 }
 
 /* One `const NAME = ...;` declaration, verbatim from index.html. For the
@@ -1992,11 +2006,15 @@ test('the idler count and the stage rotation agree on which axis is long', () =>
     'return ' + grabBlock('const NOMINAL_SPAN =', '(', ')')
       .replace(/^const NOMINAL_SPAN =\s*/, '') + '()')(
     page.MODULE, page.TEETH_MEAN, page.ANG_MIN, page.ANG_MAX, Math.max(...page.TRAIN_LENS));
+  const fixture = Array.from({ length: Math.max(...page.TRAIN_LENS) },
+    () => ({ teeth: page.TEETH_MAX }));
   const countOn = (win) => new Function('window', 'LINK_SHARE', 'NOMINAL_SPAN',
     'STAGE_CROSS', 'MODULE', 'TEETH_MEAN', 'IDLERS_FOR', 'MAX_IDLERS',
+    'TARGET_GEAR_PX', 'WHEEL_SPAN',
     'return function ' + grabBlock('  idlerCount() {', '{', '}') + ';')(
     win, grabNumber('LINK_SHARE'), NOMINAL_SPAN, STAGE_CROSS,
-    page.MODULE, page.TEETH_MEAN, IDLERS_FOR, grabNumber('MAX_IDLERS'));
+    page.MODULE, page.TEETH_MEAN, IDLERS_FOR, grabNumber('MAX_IDLERS'),
+    grabNumber('TARGET_GEAR_PX'), wheelSpanOf(fixture));
   const rotOn = (win) => new Function('window',
     'return function ' + grabBlock('  axisRot() {', '{', '}') + ';')(win);
   const bad = [];
@@ -2143,25 +2161,99 @@ test('no chain renders a wheel past the cross-axis guard', () => {
   ok(bad.length === 0, bad.slice(0, 6).join('\n      '));
 });
 
-test('the linked share of the long axis stays width-invariant', () => {
-  /* #44's property, which the NOMINAL_SPAN floor must not break. A full chain
-     takes LINK_SHARE of the long axis; a short one takes a smaller CONSTANT
-     share, with the escape runs covering the difference. What must never happen
-     is a share that FALLS as the viewport widens -- that is the 1/W failure that
-     shipped three times behind three different ratio ceilings. */
+test('a wheel only ever stops growing at the standard size', () => {
+  /* WHAT REPLACED #44's PROPERTY, and why it had to be replaced rather than
+     re-stated. #44 said the linked run takes a CONSTANT share of the long axis
+     at every width, and this test asserted exactly that. It is no longer true:
+     past TARGET_GEAR_PX a gear is a fixed number of pixels, so its share of a
+     growing axis falls as 1/W. Charles asked for that (GitHub #75) -- the share
+     rule read the long axis and nothing else, so the same screen area reshaped
+     from 3.3:1 to 1:1 moved the wheels 1.8x.
+
+     What is still forbidden is the failure #19, #44 and #66 actually were: a
+     share that falls while the wheels are still BELOW the standard size, which
+     is what a ratio ceiling produces and what nobody chose. So the property is
+     now a disjunction, asserted at every width: either the share is the share
+     the narrowest viewport got, or the wheels have reached their standard size
+     and the escape runs are covering the difference. A ratio ceiling fails it
+     immediately -- it caps the share somewhere the wheels are still small.
+
+     AND THE SIZE IS MONOTONE. A wider viewport may never give a SMALLER wheel,
+     and no viewport may give one larger than the standard. Between them those
+     two bound the whole rule from both sides, which is what the old single-sided
+     share assertion never did. */
   const fit = fitRule();
+  const TARGET = grabNumber('TARGET_GEAR_PX');
   const bad = [];
   for (const n of [1, 2, 4, 7, 9]) {
     const span = n === 1 ? 150 : page.MODULE * 16.3 * n;
-    const shares = [1440, 2560, 3440].map(w => {
+    const widths = [1440, 2560, 3440, 5120];
+    const rows = widths.map(w => {
       const r = fit(n, w, w * 0.5625, span, n === 1 ? 150 : 210);
-      return (r.fit * span) / w;
+      return { w, share: (r.fit * span) / w, px: r.fit * r.wheelSpan };
     });
-    const spread = Math.max(...shares) - Math.min(...shares);
-    if (spread > 0.001) {
-      bad.push(`${n} wheels: share of the long axis varies with width `
-        + `(${shares.map(s => (s * 100).toFixed(1) + '%').join(', ')})`);
+    const base = rows[0].share;
+    rows.forEach(r => {
+      if (Math.abs(r.share - base) > 0.001 && r.px < TARGET - 0.5) {
+        bad.push(`${n} wheels at ${r.w}px: share moved to ${(r.share * 100).toFixed(1)}% `
+          + `from ${(base * 100).toFixed(1)}% while the wheel is only ${r.px.toFixed(1)}px, `
+          + `under the ${TARGET}px standard — that is a ratio ceiling, not a size`);
+      }
+      if (r.px > TARGET + 0.5) {
+        bad.push(`${n} wheels at ${r.w}px: wheel renders ${r.px.toFixed(1)}px, `
+          + `past the ${TARGET}px standard size`);
+      }
+    });
+    for (let i = 1; i < rows.length; i++) {
+      if (rows[i].px < rows[i - 1].px - 0.5) {
+        bad.push(`${n} wheels: ${rows[i].w}px gives a ${rows[i].px.toFixed(1)}px wheel, `
+          + `SMALLER than the ${rows[i - 1].px.toFixed(1)}px at ${rows[i - 1].w}px`);
+      }
     }
+  }
+  ok(bad.length === 0, bad.join('\n      '));
+});
+
+test('gear size does not track the shape of the viewport at constant area', () => {
+  /* GitHub #75, as measured: swept wide to square at a constant screen AREA, the
+     wheels moved 1.8x -- 325.9px at 3.3:1 against 178.1px at 1:1 -- because both
+     binding limbs of the fit read the long axis and the two cross-axis limbs are
+     ceilings, which shrink a gear and never grow one. Rotating a window changed
+     nothing, which is what says it was shape and not orientation.
+
+     The bound is not zero spread. LINK_SHARE still binds where the chain
+     genuinely cannot fit the axis, which is correct and is most of what is left.
+     Both endpoints are measured through this same harness, at the issue's own
+     shapes and its own constant area: the outgoing rule gives 1.82x
+     (321/262/224/198/177px, which is the issue's measured table), and the
+     standard size gives 1.26x (222/222/222/198/177px). The bound is the
+     geometric midpoint of the two, 1.51 -- far enough from the survivor to
+     tolerate a change in LINK_SHARE or the module, and nowhere near far enough
+     to let the long-axis rule back in.
+
+     ORIENTATION IS NOT SWEPT HERE, and that is not an omission: the fit is handed
+     longAvail and crossAvail, so a rotated window is the same call with the same
+     arguments. The issue measured it -- 1.6:1 landscape and 1:1.6 portrait give
+     the same wheel -- which is what says the fault was shape, not rotation.
+     tools/devices.py is where both orientations are actually drawn. */
+  const fit = fitRule();
+  const AREA = 2074 * 625;
+  const px = (long, short) => {
+    /* Solved extents scale with the chain, not the viewport: hold them fixed so
+       the only thing moving between shapes is the viewport itself. */
+    const r = fit(7, long, short, page.MODULE * 16.3 * 7, 210);
+    return r.fit * r.wheelSpan;
+  };
+  const bad = [];
+  const sizes = [3.3, 2.2, 1.6, 1.25, 1.0].map(ratio => {
+    const long = Math.round(Math.sqrt(AREA * ratio));
+    return { ratio, px: px(long, Math.round(AREA / long)) };
+  });
+  const spread = Math.max(...sizes.map(s => s.px)) / Math.min(...sizes.map(s => s.px));
+  if (spread > 1.51) {
+    bad.push(`at one constant area the wheel moves ${spread.toFixed(2)}x across shapes `
+      + `(${sizes.map(s => s.ratio + ':1 ' + s.px.toFixed(0) + 'px').join(', ')}) — `
+      + `gear size is tracking the long axis again (GitHub #75)`);
   }
   ok(bad.length === 0, bad.join('\n      '));
 });
@@ -2269,6 +2361,7 @@ test('the configured chains still clear the legibility floors', () => {
      axis — the generous direction, consistent with the rest of this test. */
   const idlersAt = new Function('window', 'MODULE', 'TEETH_MEAN', 'LINK_SHARE',
     'NOMINAL_SPAN', 'STAGE_CROSS', 'MAX_IDLERS', 'MIN_IDLERS', 'IDLERS_FOR',
+    'TARGET_GEAR_PX', 'WHEEL_SPAN',
     'const o = { ' + grabBlock('axisRot() {', '{', '}') + ', '
     + grabBlock('idlerCount() {', '{', '}') + ' }; return o.idlerCount();');
   /* Quantised DOWN to 1% before anything is drawn at it, so the scale the marks
@@ -2322,7 +2415,8 @@ test('the configured chains still clear the legibility floors', () => {
     const NOMINAL_SPAN = fit(spine, longAvail, crossAvail, 1, 1).NOMINAL_SPAN;
     const idlers = idlersAt(win, page.MODULE, page.TEETH_MEAN, grabNumber('LINK_SHARE'),
       NOMINAL_SPAN, STAGE_CROSS, grabNumber('MAX_IDLERS'), grabNumber('MIN_IDLERS'),
-      IDLERS_FOR);
+      IDLERS_FOR, grabNumber('TARGET_GEAR_PX'),
+      wheelSpanOf(Array.from({ length: spine }, () => ({ teeth: page.TEETH_MAX }))));
     const crossSolved = STAGE_CROSS(idlers);
     const S = quantise.call({ props: {} },
       fit(spine, longAvail, crossAvail, NOMINAL_SPAN, crossSolved).fit);
