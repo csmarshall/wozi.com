@@ -1706,10 +1706,32 @@ const SITES = (function () {
   return out;
 })();
 
+/* WHICH BADGE, as opposed to which service (#78). A slug names a SERVICE, and
+   that is all it can name: on a combined stage two people both own a `mail`
+   wheel, so two caps answer to `mail` and every map keyed on the bare slug held
+   one entry where it needed two. Dragging Charles's cap sent Harper's out to
+   arm's length on release, and hovering either lit both, because both badges
+   read the same spring entry and the same hover flag while the element map kept
+   only whichever cap was pressed last.
+
+   So identity is person AND slug, everywhere the question is "which of these
+   two caps is this": the spring entries, the element references, the drag claim,
+   the hover, the click guard. It is deliberately NOT used where the question is
+   "which service is this" -- SITES[person][slug], the icon, BRAND, PILL_STACK,
+   the pill's own label, the outbound counter -- because those are per service by
+   design and were already right. Getting that backwards trades a drag bug for
+   missing icons.
+
+   The separator is one a slug cannot contain: config slugs are the identifiers
+   that key SERVICES, BRAND and the icon table, so a '/' in one would already
+   have broken far more than this. */
+const badgeKey = (person, slug) => person + '/' + slug;
+
 class Component extends DCLogic {
+  /* `hover` holds a badgeKey(), not a slug -- see the note above badgeKey. */
   state = { theme: 'light', hover: null, icons: {}, ghosts: [], motion: null, tog: false };
-  _badgeOff = {};   /* per-slug {x,y,vx,vy} spring state for the magnetic hub caps */
-  _badgeEl = {};
+  _badgeOff = {};   /* badgeKey -> {x,y,vx,vy} spring state for the magnetic hub caps */
+  _badgeEl = {};    /* badgeKey -> the cap element that key's spring writes to */
   _spinEls = [];
   _chainEls = [];
   _ghostEls = [];
@@ -1780,7 +1802,7 @@ class Component extends DCLogic {
      stopPropagation keeps a cap drag from also grabbing the train, and a >6px
      move suppresses the link click on release -- a plain click still navigates,
      and keyboard activation never touches any of this. */
-  badgeGrab(e, slug) {
+  badgeGrab(e, key) {
     if (e.button > 0) return;
     e.stopPropagation();
     /* preventDefault here kills the browser's native link-drag, which otherwise
@@ -1792,8 +1814,8 @@ class Component extends DCLogic {
     const el = e.currentTarget;
     /* No pointer capture: window listeners, exactly like the train's own drag —
        capture on the anchor swallowed the move stream under some pointers. */
-    const off = this._badgeOff[slug] = this._badgeOff[slug] || { x: 0, y: 0, vx: 0, vy: 0 };
-    this._badgeEl[slug] = el;
+    const off = this._badgeOff[key] = this._badgeOff[key] || { x: 0, y: 0, vx: 0, vy: 0 };
+    this._badgeEl[key] = el;
     /* Claim the drag HERE, on the press, not on the first move.
        The spring loop deletes any entry that is settled and not being dragged.
        A brand new entry is exactly that -- zero offset, zero velocity -- so the
@@ -1806,7 +1828,7 @@ class Component extends DCLogic {
        frame runs, so the entry survived and the harness passed a dead feature
        -- the third time that gap has hidden a pointer bug. tools/cap_drag.py
        now waits frames between the two, the way a person does. */
-    this._badgeDragging = slug;
+    this._badgeDragging = key;
     const sx = e.clientX, sy = e.clientY, ox0 = off.x, oy0 = off.y;
     let moved = false;
     const move = (ev) => {
@@ -1821,13 +1843,13 @@ class Component extends DCLogic {
       off.y = ev.clientY - sy + oy0;
       off.vx = 0; off.vy = 0;
       if (Math.hypot(ev.clientX - sx, ev.clientY - sy) > 6) moved = true;
-      this._badgeDragging = slug;
+      this._badgeDragging = key;
     };
     const up = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
       this._badgeDragging = null;
-      if (moved) this._badgeMoved = slug;
+      if (moved) this._badgeMoved = key;
       /* Nothing else re-renders on release, so the pill would stay open until
          the next unrelated render. */
       this.forceUpdate();
@@ -2361,21 +2383,21 @@ class Component extends DCLogic {
          overshoots a touch and lands back on the axle. Same clock as the train;
          entries delete themselves once settled, so the loop is normally empty. */
       const dts = Math.min(dt, 60) / 1000;
-      for (const slug in this._badgeOff) {
-        const o = this._badgeOff[slug], el = this._badgeEl[slug];
-        if (!el) { delete this._badgeOff[slug]; continue; }
-        if (this._badgeDragging !== slug) {
+      for (const key in this._badgeOff) {
+        const o = this._badgeOff[key], el = this._badgeEl[key];
+        if (!el) { delete this._badgeOff[key]; continue; }
+        if (this._badgeDragging !== key) {
           const K = 180, C = 13;
           o.vx += (-K * o.x - C * o.vx) * dts;
           o.vy += (-K * o.y - C * o.vy) * dts;
           o.x += o.vx * dts; o.y += o.vy * dts;
           if (Math.abs(o.x) < 0.4 && Math.abs(o.y) < 0.4 && Math.abs(o.vx) < 8 && Math.abs(o.vy) < 8) {
-            el.style.transform = 'translate(-50%,-50%) scale(' + ((this.state.hover === slug || this._badgeDragging === slug) ? 1.06 : 1) + ')';
-            delete this._badgeOff[slug];
+            el.style.transform = 'translate(-50%,-50%) scale(' + ((this.state.hover === key || this._badgeDragging === key) ? 1.06 : 1) + ')';
+            delete this._badgeOff[key];
             continue;
           }
         }
-        el.style.transform = 'translate(-50%,-50%) translate(' + o.x.toFixed(1) + 'px,' + o.y.toFixed(1) + 'px) scale(' + ((this.state.hover === slug || this._badgeDragging === slug) ? 1.06 : 1) + ')';
+        el.style.transform = 'translate(-50%,-50%) translate(' + o.x.toFixed(1) + 'px,' + o.y.toFixed(1) + 'px) scale(' + ((this.state.hover === key || this._badgeDragging === key) ? 1.06 : 1) + ')';
       }
       this._raf = requestAnimationFrame(step);
     };
@@ -5260,8 +5282,14 @@ class Component extends DCLogic {
          pill collapses the instant the pointer leaves the plate, which on a
          drag is immediately -- you would be dragging a circle you had just
          watched turn back from a pill. */
-      const on = hov === g.slug || this._badgeDragging === g.slug;
-      const bo = this._badgeOff[g.slug];
+      /* WHICH CAP, not which service (#78). Everything below that asks about
+         this badge as an object -- is it lit, where has it been dragged to,
+         whose press am I claiming, whose click do I swallow -- goes through the
+         composite key. Everything that asks about the SERVICE keeps the bare
+         slug a line or two later: the icon, BRAND, the pill's own label. */
+      const bk = badgeKey(g.person, g.slug);
+      const on = hov === bk || this._badgeDragging === bk;
+      const bo = this._badgeOff[bk];
       /* WHOSE MAILBOX. `label` is the anchor's accessible name, and on the
          combined stage two people's chains can carry the same service -- two
          links, two different destinations, both announced "Mail". The only thing
@@ -5280,10 +5308,10 @@ class Component extends DCLogic {
         : site.label;
       return {
         label: named, path: site.path, href: site.href,
-        badgeDown: (e) => this.badgeGrab(e, g.slug),
+        badgeDown: (e) => this.badgeGrab(e, bk),
         noDrag: (e) => e.preventDefault(),
         clickGuard: (e) => {
-          if (this._badgeMoved === g.slug) { e.preventDefault(); this._badgeMoved = null; return; }
+          if (this._badgeMoved === bk) { e.preventDefault(); this._badgeMoved = null; return; }
           /* Only a real click counts. A drag ends in the branch above, so
              pulling a cap off its axle and letting go is not an outbound
              visit -- which it would be if this were counted on pointerdown. */
@@ -5293,7 +5321,7 @@ class Component extends DCLogic {
           style: { width: (size * 0.56) + 'px', height: (size * 0.56) + 'px', display: 'block', lineHeight: 0, color: BRAND[g.slug] || 'var(--ink)', transition: 'color .2s ease' },
           dangerouslySetInnerHTML: { __html: this.state.icons[g.slug] || '' }
         }),
-        enter: () => this.setState({ hover: g.slug }),
+        enter: () => this.setState({ hover: bk }),
         leave: () => this.setState({ hover: null }),
         /* The label used to be a native `title`, whose appearance delay belongs to
            the OS — about a second, and not reachable from CSS or JS. Rendering it

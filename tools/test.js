@@ -445,6 +445,53 @@ test('every wheel of every chain gets a service seated on it', () => {
   ok(bad.length === 0, bad.join('\n      '));
 });
 
+test('no two badges on a combined stage answer to the same identity', () => {
+  /* #78. Every map behind the magnetic hub caps -- the spring entries, the
+     element references, the drag claim, the hover -- was keyed by service slug,
+     which is unique only while one chain is on stage. Charles and Harper both
+     own a `mail` wheel, so both caps read one spring entry and one hover flag:
+     dragging his sent hers out to arm's length on release, and hovering either
+     lit both.
+
+     WHAT THIS CAN AND CANNOT SEE, said plainly. It runs the real badgeKey out of
+     index.html against the real config and proves the identity is injective over
+     every (person, service) the page can seat. It CANNOT prove the render path
+     asks it that question rather than passing a bare slug -- that is behaviour in
+     a browser, and tools/cap_drag.py is what checks it, by dragging one chain's
+     mail cap and measuring the other's. A test here that grepped index.html for
+     the call sites would assert on the shape of the source rather than on what it
+     does, which is worth less than the harness that already exists.
+
+     The second assertion is what keeps the first from going quietly vacuous: if
+     no service is ever on two chains, injectivity is free and this test stops
+     meaning anything without failing. */
+  const conf = (function () {
+    const win = {};
+    new Function('window', CFG_SRC)(win);
+    return win.WOZI_CONFIG;
+  })();
+  const line = SRC.slice(SRC.indexOf('const badgeKey ='));
+  const badgeKey = new Function(line.slice(0, line.indexOf('\n')) + '\n return badgeKey;')();
+
+  const seen = {}, bySlug = {}, bad = [];
+  (conf.PEOPLE || []).forEach(p => {
+    (p.links || []).forEach(l => {
+      const k = badgeKey(p.slug, l.slug);
+      if (seen[k]) bad.push('two badges share the identity "' + k + '": '
+        + seen[k] + ' and ' + p.slug + '/' + l.slug);
+      seen[k] = p.slug + '/' + l.slug;
+      (bySlug[l.slug] = bySlug[l.slug] || []).push(p.slug);
+    });
+  });
+  ok(bad.length === 0, bad.join('\n      '));
+
+  const shared = Object.keys(bySlug).filter(s => bySlug[s].length > 1);
+  ok(shared.length > 0,
+    'no service is configured on more than one chain, so keying badges by slug '
+    + 'alone would collide with nothing and the check above proves nothing — '
+    + 'either restore a shared service or retire this test deliberately');
+});
+
 /* The three tests below all execute the REAL fit expression, sliced out of
    index.html and run with inputs of our choosing. They are not a model of it --
    a copy of that formula here is exactly the drift this file exists to stop. */
