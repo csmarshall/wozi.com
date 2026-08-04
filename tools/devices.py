@@ -19,6 +19,7 @@ Exit 0 only if every device passes in both orientations.
 
 import asyncio
 import json
+import re
 import subprocess
 import sys
 import time
@@ -54,6 +55,20 @@ PORT = int(_os.environ.get("CDP_PORT") or 0) or _free_port()
 import tempfile as _tf
 # The scratchpad path only exists on Charles's machine; CI gets a temp dir.
 PROFILE = _os.environ.get("CHROME_PROFILE") or _tf.mkdtemp(prefix="wozi-chrome-")
+
+# THE STANDARD GEAR SIZE COMES OUT OF index.html, never a copy of it. A harness
+# holding its own number agrees with itself forever while the page moves, which
+# is the failure tools/test.js exists to avoid and states in its own header.
+def _target_gear_px():
+    src = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "index.html")
+    with open(src, encoding="utf-8") as fh:
+        m = re.search(r"const\s+TARGET_GEAR_PX\s*=\s*([0-9.]+)\s*;", fh.read())
+    if not m:
+        raise SystemExit("FATAL: TARGET_GEAR_PX not found in index.html")
+    return float(m.group(1))
+
+
+TARGET_GEAR_PX = _target_gear_px()
 
 IOS_UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 "
           "(KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1")
@@ -194,6 +209,19 @@ MEASURE = r"""
     lx0 = Math.min(lx0, cx); lx1 = Math.max(lx1, cx);
     ly0 = Math.min(ly0, cy); ly1 = Math.max(ly1, cy);
   });
+  /* HOW BIG A GEAR ACTUALLY CAME OUT, which is the thing index.html now promises
+     (TARGET_GEAR_PX) and the thing GitHub #75 was about. Read off the wheel's
+     own `width` attribute rather than its bounding box: the wrappers rotate, and
+     a rotated box over-reports by up to sqrt(2). The filter is the promoted
+     wrapper, which is what distinguishes a wheel from the full-stage chains
+     <svg> -- that one is solved.w * S across and would swamp the maximum. */
+  let gear = 0;
+  document.querySelectorAll('svg').forEach(s => {
+    const w = s.getAttribute('width');
+    if (!w || /%$/.test(w) || !(parseFloat(w) > 30)) return;
+    if (!s.parentElement || getComputedStyle(s.parentElement).willChange !== 'transform') return;
+    gear = Math.max(gear, parseFloat(w));
+  });
   /* every wheel that is actually drawn, ghosts included */
   let ax0 = 1e9, ax1 = -1e9, ay0 = 1e9, ay1 = -1e9, n = 0;
   document.querySelectorAll('svg').forEach(s => {
@@ -204,7 +232,7 @@ MEASURE = r"""
     ay0 = Math.min(ay0, r.top);  ay1 = Math.max(ay1, r.bottom);
   });
   return JSON.stringify({
-    links: badges.length, wheels: n,
+    links: badges.length, wheels: n, gear: +gear.toFixed(1),
     vw: window.innerWidth, vh: window.innerHeight,
     linkX0: +lx0.toFixed(1), linkX1: +lx1.toFixed(1),
     linkY0: +ly0.toFixed(1), linkY1: +ly1.toFixed(1),
@@ -243,7 +271,8 @@ async def main():
         return 2
 
     print(f"Chrome device emulation (not an iOS simulator — none installed)\n")
-    print(f"{'device':22} {'orient':10} {'viewport':11} {'covered':7} {'links':8} verdict")
+    print(f"{'device':22} {'orient':10} {'viewport':11} {'covered':7} {'links':6} "
+          f"{'gear':>7}  verdict")
     bad = 0
     sbad = 0
     mid = 0
@@ -345,11 +374,41 @@ async def main():
                 # ultrawides while #44 was live), a ceiling at 0.80 catches it
                 # running off the edges, and both sit inside what the page can
                 # actually reach.
+                #
+                # THE FLOOR IS NOW A DISJUNCTION, because the page stopped making
+                # the promise the bare floor was measuring (GitHub #75, CHANGELOG
+                # #85). A gear is drawn at TARGET_GEAR_PX and shrinks below that
+                # only when an axis cannot afford it, so past that size the linked
+                # run IS a fixed number of pixels and its share of a growing long
+                # axis falls as 1/W by design -- 62% here on every profile up to a
+                # laptop, and about 35% on the 2560px ones. A bare 0.45 fails four
+                # rows of this list against a page doing exactly what Charles
+                # asked for.
+                #
+                # This is NOT the floor being loosened to go green, which is what
+                # the note in webkit_fit.js warns against. The bound is moved onto
+                # the property that replaced it: EITHER the linked run still takes
+                # its share, OR the wheels have reached their standard size and
+                # the escape runs are covering the rest. A train that collapses
+                # for any other reason -- a fit that goes wrong, a solve that
+                # shrinks, the 0.28 floor engaging -- still gives small wheels AND
+                # a small share, and still fails here.
+                #
+                # And it gained the half it never had: a CEILING on gear size.
+                # That is the bound GitHub #75 needed and no harness carried --
+                # run against the outgoing rule it fails these same four rows at
+                # 390-418px against a 222px standard. TARGET_GEAR_PX is read out
+                # of index.html rather than copied, for the same reason
+                # tools/test.js reads its constants there.
                 LINK_FLOOR, LINK_CEIL = 0.45, 0.80
+                gear = m.get("gear", 0)
+                at_standard = gear >= TARGET_GEAR_PX * 0.98
                 links_in = ((l0 >= -1) and (l1 <= long_px + 1)
-                            and LINK_FLOOR <= link_share <= LINK_CEIL)
+                            and (LINK_FLOOR <= link_share or at_standard)
+                            and link_share <= LINK_CEIL)
+                gear_ok = 0 < gear <= TARGET_GEAR_PX * 1.02
                 ok = ((train_long == want) and reaches and centre_off <= 0.06
-                      and links_in and not m["overflowX"])
+                      and links_in and gear_ok and not m["overflowX"])
                 if not ok:
                     bad += 1
                 why = []
@@ -359,10 +418,16 @@ async def main():
                     why.append(f"stops {max(0, a0):.0f}px short / {max(0, long_px - a1):.0f}px short")
                 if centre_off > 0.06:
                     why.append(f"links off-centre by {centre_off:.0%}")
+                if not gear_ok:
+                    why.append(f"gear renders {gear:.0f}px against the "
+                               f"{TARGET_GEAR_PX}px standard size — sizing is tracking "
+                               f"the viewport again (GitHub #75)")
                 if not links_in:
-                    if link_share < LINK_FLOOR:
+                    if link_share < LINK_FLOOR and not at_standard:
                         why.append(f"links span only {link_share:.0%}, under the "
-                                   f"{LINK_FLOOR:.0%} floor — the train has collapsed (#44)")
+                                   f"{LINK_FLOOR:.0%} floor, with the gear at only "
+                                   f"{gear:.0f}px of its {TARGET_GEAR_PX}px standard — "
+                                   f"the train has collapsed (#44)")
                     elif link_share > LINK_CEIL:
                         why.append(f"links span {link_share:.0%}, over the "
                                    f"{LINK_CEIL:.0%} ceiling — they will run off the edge")
@@ -371,8 +436,8 @@ async def main():
                 if m["overflowX"]:
                     why.append("scrolls sideways")
                 print(f"{label:22} {orient:10} {str(w) + 'x' + str(h):11} "
-                      f"{covered * 100:5.0f}%   {link_share * 100:4.0f}%    "
-                      f"{'ok' if ok else 'FAIL: ' + ', '.join(why)}")
+                      f"{covered * 100:5.0f}%   {link_share * 100:4.0f}%  "
+                      f"{gear:5.0f}px  {'ok' if ok else 'FAIL: ' + ', '.join(why)}")
 
         print(f"\nsafe areas (insets injected — Chrome resolves every env() to 0)\n")
         print(f"{'device':22} {'orient':10} {'insets':16} {'clearance':11} verdict")

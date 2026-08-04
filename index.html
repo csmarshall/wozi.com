@@ -1235,6 +1235,69 @@ const NOMINAL_SPAN = (function () {
    the bridge reads it too: idlerCount() has to know the scale the long axis is
    asking for before there is a solve to measure. */
 const LINK_SHARE = 0.78;
+/* THE LARGEST WHEEL THIS DEAL PUT ON STAGE, in solve units. Matches what is
+   drawn: gearSvg sizes each wheel (ro + 6) * 2. It was recomputed inside
+   fitStage() on every resize, and it cannot live there any more -- idlerCount()
+   has to divide by it before there is a solve to measure, and a wheel's size
+   must be answered in one place or the two answers drift. Nothing here reads
+   the viewport, so it is dealt once with the train. */
+const WHEEL_SPAN = TRAIN.reduce((m, t) => Math.max(m,
+  (MODULE * (t.teeth / 2 + TOOTH_ADD) + 6) * 2), 0);
+/* HOW BIG A GEAR IS, in rendered pixels, once nothing physical is stopping it.
+   Charles's call, 2026-08-04, and it overturns his own earlier one: LINK_SHARE
+   existed because he asked for the linked wheels to take a fixed share of the
+   long axis, and he has now asked for a fixed SIZE instead, knowing what it
+   costs (see #85 and the note below).
+
+   WHY THE SHARE RULE HAD TO GO. Both binding limbs of the old fit measured the
+   LONG axis and the two cross-axis limbs were ceilings, which can shrink a gear
+   and never grow one -- so at constant screen AREA, reshaping the window changed
+   the wheels by 1.8x: 325.9px at 3.3:1 against 178.1px at 1:1 (GitHub #75).
+   Rotating a window changed nothing, because the long axis is the same either
+   way; only reshaping did. That is the share rule working exactly as written,
+   and what it never decided was what should happen when the SHORT axis is the
+   scarce one.
+
+   THIS IS THE SENTENCE index.html ALREADY MADE, said in px. "The coverage comes
+   from the chain being longer, never from the wheels being bigger" is the note
+   at LINK_SHARE, and a standard size is what makes it true on the long axis too:
+   past this size the escape runs absorb every further pixel of viewport, in
+   whichever direction it grew.
+
+   222 IS MEASURED, NOT PICKED, and here is the criterion, because no physical
+   constant sets it. A gear has no natural size in pixels: the legibility floors
+   in gearSvg bound it from below and WHEEL_CROSS_MAX bounds it from above, and
+   between those two the number is a judgement. So it is taken from the page's
+   own behaviour on real hardware rather than invented -- the LARGEST wheel the
+   outgoing rule draws on any profile in tools/devices.py whose size nobody
+   disputed. Swept over that list, three deals per shape, with the browser chrome
+   that harness subtracts:
+
+     phones            92-145px
+     iPad mini         167-177px
+     iPad Pro 12.9     211-213px
+     MacBook 1440x810  222.6px   <- the largest undisputed shape
+     Ultrawide 2560    390-401px  \ the disputed ones: this is #75's complaint,
+     QHD wide 2560     396-418px  / and #44's and #66's history as well
+
+   So every shape at or below a laptop renders exactly as it did -- the long-axis
+   limb is still the smaller term there and still binds -- and only the shapes
+   the complaint is about are capped. Charles's own prototype said 232, taken
+   from 1440x900 with no browser chrome on it; this is the same laptop measured
+   with the toolbar the device list insists on, which is why the two agree to 4%.
+
+   IT IS NOT A HARDCODED WHEEL SIZE in the sense CLAUDE.md forbids. Tooth counts,
+   centre distances and every radius are still derived from MODULE; this is the
+   scale the finished geometry is DRAWN at, which is a property of the screen and
+   has never been derivable from the module.
+
+   WHAT IT COSTS, stated rather than discovered later: the linked run's share of
+   a very wide screen now falls as 1/W, which is the failure #19, #44 and #66 all
+   shipped. It is a failure when it happens by accident behind a ratio ceiling
+   nobody chose, and a decision when the size is named in pixels and the ghost
+   runs are what fill the rest. tools/devices.py carries the bound that used to
+   catch it and now has to be asked a different question -- see the floor there. */
+const TARGET_GEAR_PX = 222;
 /* HOW MUCH CROSS AXIS A BRIDGED COMPOSITION WANTS, in solve units, for bridges
    of n idlers. One wheel for the spine's own diameter, plus one centre distance
    for every step of every bridge -- n idlers is n+1 steps, and there is one
@@ -1706,10 +1769,32 @@ const SITES = (function () {
   return out;
 })();
 
+/* WHICH BADGE, as opposed to which service (#78). A slug names a SERVICE, and
+   that is all it can name: on a combined stage two people both own a `mail`
+   wheel, so two caps answer to `mail` and every map keyed on the bare slug held
+   one entry where it needed two. Dragging Charles's cap sent Harper's out to
+   arm's length on release, and hovering either lit both, because both badges
+   read the same spring entry and the same hover flag while the element map kept
+   only whichever cap was pressed last.
+
+   So identity is person AND slug, everywhere the question is "which of these
+   two caps is this": the spring entries, the element references, the drag claim,
+   the hover, the click guard. It is deliberately NOT used where the question is
+   "which service is this" -- SITES[person][slug], the icon, BRAND, PILL_STACK,
+   the pill's own label, the outbound counter -- because those are per service by
+   design and were already right. Getting that backwards trades a drag bug for
+   missing icons.
+
+   The separator is one a slug cannot contain: config slugs are the identifiers
+   that key SERVICES, BRAND and the icon table, so a '/' in one would already
+   have broken far more than this. */
+const badgeKey = (person, slug) => person + '/' + slug;
+
 class Component extends DCLogic {
+  /* `hover` holds a badgeKey(), not a slug -- see the note above badgeKey. */
   state = { theme: 'light', hover: null, icons: {}, ghosts: [], motion: null, tog: false };
-  _badgeOff = {};   /* per-slug {x,y,vx,vy} spring state for the magnetic hub caps */
-  _badgeEl = {};
+  _badgeOff = {};   /* badgeKey -> {x,y,vx,vy} spring state for the magnetic hub caps */
+  _badgeEl = {};    /* badgeKey -> the cap element that key's spring writes to */
   _spinEls = [];
   _chainEls = [];
   _ghostEls = [];
@@ -1780,7 +1865,7 @@ class Component extends DCLogic {
      stopPropagation keeps a cap drag from also grabbing the train, and a >6px
      move suppresses the link click on release -- a plain click still navigates,
      and keyboard activation never touches any of this. */
-  badgeGrab(e, slug) {
+  badgeGrab(e, key) {
     if (e.button > 0) return;
     e.stopPropagation();
     /* preventDefault here kills the browser's native link-drag, which otherwise
@@ -1792,8 +1877,8 @@ class Component extends DCLogic {
     const el = e.currentTarget;
     /* No pointer capture: window listeners, exactly like the train's own drag —
        capture on the anchor swallowed the move stream under some pointers. */
-    const off = this._badgeOff[slug] = this._badgeOff[slug] || { x: 0, y: 0, vx: 0, vy: 0 };
-    this._badgeEl[slug] = el;
+    const off = this._badgeOff[key] = this._badgeOff[key] || { x: 0, y: 0, vx: 0, vy: 0 };
+    this._badgeEl[key] = el;
     /* Claim the drag HERE, on the press, not on the first move.
        The spring loop deletes any entry that is settled and not being dragged.
        A brand new entry is exactly that -- zero offset, zero velocity -- so the
@@ -1806,7 +1891,7 @@ class Component extends DCLogic {
        frame runs, so the entry survived and the harness passed a dead feature
        -- the third time that gap has hidden a pointer bug. tools/cap_drag.py
        now waits frames between the two, the way a person does. */
-    this._badgeDragging = slug;
+    this._badgeDragging = key;
     const sx = e.clientX, sy = e.clientY, ox0 = off.x, oy0 = off.y;
     let moved = false;
     const move = (ev) => {
@@ -1821,13 +1906,13 @@ class Component extends DCLogic {
       off.y = ev.clientY - sy + oy0;
       off.vx = 0; off.vy = 0;
       if (Math.hypot(ev.clientX - sx, ev.clientY - sy) > 6) moved = true;
-      this._badgeDragging = slug;
+      this._badgeDragging = key;
     };
     const up = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
       this._badgeDragging = null;
-      if (moved) this._badgeMoved = slug;
+      if (moved) this._badgeMoved = key;
       /* Nothing else re-renders on release, so the pill would stay open until
          the next unrelated render. */
       this.forceUpdate();
@@ -2361,21 +2446,21 @@ class Component extends DCLogic {
          overshoots a touch and lands back on the axle. Same clock as the train;
          entries delete themselves once settled, so the loop is normally empty. */
       const dts = Math.min(dt, 60) / 1000;
-      for (const slug in this._badgeOff) {
-        const o = this._badgeOff[slug], el = this._badgeEl[slug];
-        if (!el) { delete this._badgeOff[slug]; continue; }
-        if (this._badgeDragging !== slug) {
+      for (const key in this._badgeOff) {
+        const o = this._badgeOff[key], el = this._badgeEl[key];
+        if (!el) { delete this._badgeOff[key]; continue; }
+        if (this._badgeDragging !== key) {
           const K = 180, C = 13;
           o.vx += (-K * o.x - C * o.vx) * dts;
           o.vy += (-K * o.y - C * o.vy) * dts;
           o.x += o.vx * dts; o.y += o.vy * dts;
           if (Math.abs(o.x) < 0.4 && Math.abs(o.y) < 0.4 && Math.abs(o.vx) < 8 && Math.abs(o.vy) < 8) {
-            el.style.transform = 'translate(-50%,-50%) scale(' + ((this.state.hover === slug || this._badgeDragging === slug) ? 1.06 : 1) + ')';
-            delete this._badgeOff[slug];
+            el.style.transform = 'translate(-50%,-50%) scale(' + ((this.state.hover === key || this._badgeDragging === key) ? 1.06 : 1) + ')';
+            delete this._badgeOff[key];
             continue;
           }
         }
-        el.style.transform = 'translate(-50%,-50%) translate(' + o.x.toFixed(1) + 'px,' + o.y.toFixed(1) + 'px) scale(' + ((this.state.hover === slug || this._badgeDragging === slug) ? 1.06 : 1) + ')';
+        el.style.transform = 'translate(-50%,-50%) translate(' + o.x.toFixed(1) + 'px,' + o.y.toFixed(1) + 'px) scale(' + ((this.state.hover === key || this._badgeDragging === key) ? 1.06 : 1) + ')';
       }
       this._raf = requestAnimationFrame(step);
     };
@@ -2450,6 +2535,14 @@ class Component extends DCLogic {
      asks for a scale (LINK_SHARE of it, over the span a nominal chain occupies);
      STAGE_CROSS says how much cross axis the composition then wants at that
      scale; the second idler is taken only while that still FITS the cross axis.
+
+     IT ASKS THE FIT'S OWN QUESTION, not half of it (#85). fitStage() draws a
+     gear at a standard SIZE and shrinks it only when the axis cannot afford
+     that, so the scale this has to reason about is the smaller of those two --
+     asking the long axis alone would have handed the bridge a scale 1.8x larger
+     than anything renders at on a wide screen, and bought a second idler with
+     cross axis the composition does not have. Neither term needs a solve, which
+     is why this can still run before there is one.
      It deliberately does not spend CROSS_BLEED: the bleed exists so a serpentine
      may run off the top and bottom of a wide screen, not so a bridge may hang off
      the side. This is also the legibility floor doing its job -- everything that
@@ -2478,7 +2571,8 @@ class Component extends DCLogic {
     const w = window.innerWidth, h = window.innerHeight;
     const turned = this.axisRot() !== 0;
     const longAvail = turned ? h : w, crossAvail = turned ? w : h;
-    const scale = LINK_SHARE * longAvail / NOMINAL_SPAN;
+    const scale = Math.min(LINK_SHARE * longAvail / NOMINAL_SPAN,
+                           WHEEL_SPAN ? TARGET_GEAR_PX / WHEEL_SPAN : Infinity);
     const want = STAGE_CROSS(MAX_IDLERS) * scale;
     const spare = this._idlerN === MAX_IDLERS ? 0 : MODULE * TEETH_MEAN * scale;
     return IDLERS_FOR(want + spare <= crossAvail);
@@ -2605,7 +2699,18 @@ class Component extends DCLogic {
        ratio driven by the LONG axis is crossed at some width every time. What it
        missed is that the SHORT axis does not have that property. The cap below is
        a fraction of the short axis, which is the sentence's own words two
-       paragraphs up: "a wheel cannot exceed the short axis". */
+       paragraphs up: "a wheel cannot exceed the short axis".
+
+       AND AN ABSOLUTE PX SIZE IS NOW IN THE MIN AFTER ALL (#85), which is worth
+       reconciling rather than leaving as a contradiction. #66's measurement
+       stands: no single pixel value can both spare a real chain and CATCH a
+       degenerate one, because a 7-wheel chain on a 5120x1440 display renders
+       larger wheels than a lone wheel does on a phone. TARGET_GEAR_PX is not
+       being asked to catch anything. It is the standard size every wheel is
+       drawn at, applied to a one-wheel chain and a nine-wheel chain alike, and
+       the discrimination #66 needed is still done by the fraction of the short
+       axis below -- which is why both terms are in the min and neither replaces
+       the other. */
     /* LINK_SHARE is declared at module scope, beside NOMINAL_SPAN, because the
        bridge reads it too -- see the note there for what it is and why. */
     /* A SINGLE WHEEL MAY NOT EXCEED THE SHORT AXIS. Both terms above are ratios
@@ -2646,8 +2751,8 @@ class Component extends DCLogic {
        count test, and a one-wheel chain and a nine-wheel chain run exactly the
        same arithmetic. The rule is:
 
-         a gear is drawn as though a NOMINAL_SPAN chain were on stage, and it
-         shrinks below that only when something physical says it must.
+         a gear is drawn at a STANDARD SIZE, and it shrinks below that only when
+         something physical says it must.
 
        The three things that can say so:
          1. the chain itself is too long to fit the axis at that size
@@ -2657,8 +2762,19 @@ class Component extends DCLogic {
        Bounds 1 and 2 are what shipped before; the standard size and bound 3 are
        new. A long chain is bound by its own span, a short one by the standard
        size, and neither knows which it is -- they are terms in one min(), not
-       branches. NOMINAL_SPAN is computed from the module, the tooth count the
-       deal aims at and the bearing range, so no term here is a tuned number.
+       branches.
+
+       THE STANDARD SIZE IS NOW A SIZE, in pixels, and it used to be a share of
+       the long axis: `LINK_SHARE * longAvail / NOMINAL_SPAN`, a gear drawn as
+       though a nominal chain were on stage. That is the whole of GitHub #75. The
+       share form has no reference length in it, so it tracks the LONG axis and
+       nothing else -- and since both cross-axis limbs are ceilings, which shrink
+       a gear and never grow one, the same screen area reshaped from 3.3:1 to 1:1
+       moved the wheels 1.8x (325.9px to 178.1px). Rotating the window moved
+       nothing, which is what says it is shape and not orientation. See
+       TARGET_GEAR_PX for the size and how it was measured; NOMINAL_SPAN is still
+       what idlerCount() asks the long axis for, since the two terms bound each
+       other there as well.
 
        #44's property is intact and unchanged in every state: the linked run still
        takes a CONSTANT fraction of the long axis at every width. A full chain
@@ -2666,6 +2782,19 @@ class Component extends DCLogic {
        5120px, and the escape runs cover the difference. A different constant, not
        a broken invariant -- "the coverage comes from the chain being longer,
        never from the wheels being bigger".
+
+       THAT PARAGRAPH NO LONGER DESCRIBES THE PAGE, and it is kept because the
+       trade it names is the one being made rather than one being forgotten. Past
+       the standard size the linked run IS a fixed number of pixels, so its share
+       of a growing long axis falls as 1/W -- the exact shape of the failure #19,
+       #44 and #66 each shipped. What made those failures was that the size was
+       set by whichever ratio ceiling happened to be crossed first, so nobody
+       chose it and nobody could say what it was; here the size is named in
+       pixels, measured against real hardware, and the escape runs are what fill
+       everything past it. Charles asked for this knowing the cost. The half that
+       must NOT fall is coverage: the assembly still reaches both edges of the
+       long axis at every width, and tools/devices.py still fails the moment it
+       does not.
 
        Bound 3 exists because a constant share of a very WIDE screen is not a
        constant share of a SHORT one: 27% of 5120px is 1391px, which on a 1440px
@@ -2680,14 +2809,15 @@ class Component extends DCLogic {
        With the standard size in the min it rarely binds at all -- it is the
        backstop for an aspect ratio nothing else covers. */
     const WHEEL_CROSS_MAX = 1.0;
-    /* Matches what is drawn: gearSvg sizes each wheel (ro + 6) * 2. */
-    const wheelSpan = TRAIN.reduce((m, t) => Math.max(m,
-      (MODULE * (t.teeth / 2 + TOOTH_ADD) + 6) * 2), 0);
+    /* WHEEL_SPAN is the largest wheel this deal put on stage, declared at module
+       scope beside TARGET_GEAR_PX because idlerCount() divides by it too -- see
+       the note there. Matches what is drawn: gearSvg sizes each wheel
+       (ro + 6) * 2. */
     const fit = Math.max(0.28, Math.min(
-      LINK_SHARE * longAvail / NOMINAL_SPAN,
+      WHEEL_SPAN ? TARGET_GEAR_PX / WHEEL_SPAN : Infinity,
       LINK_SHARE * longAvail / longSolved,
       crossAvail * CROSS_BLEED / crossSolved,
-      wheelSpan ? WHEEL_CROSS_MAX * crossAvail / wheelSpan : Infinity));
+      WHEEL_SPAN ? WHEEL_CROSS_MAX * crossAvail / WHEEL_SPAN : Infinity));
     const root = document.documentElement.style;
     root.setProperty('--gsfit', fit.toFixed(3));
     /* THE WHEELS ARE DRAWN AT FINAL SIZE (#37). Everything inside the stage used
@@ -5260,8 +5390,14 @@ class Component extends DCLogic {
          pill collapses the instant the pointer leaves the plate, which on a
          drag is immediately -- you would be dragging a circle you had just
          watched turn back from a pill. */
-      const on = hov === g.slug || this._badgeDragging === g.slug;
-      const bo = this._badgeOff[g.slug];
+      /* WHICH CAP, not which service (#78). Everything below that asks about
+         this badge as an object -- is it lit, where has it been dragged to,
+         whose press am I claiming, whose click do I swallow -- goes through the
+         composite key. Everything that asks about the SERVICE keeps the bare
+         slug a line or two later: the icon, BRAND, the pill's own label. */
+      const bk = badgeKey(g.person, g.slug);
+      const on = hov === bk || this._badgeDragging === bk;
+      const bo = this._badgeOff[bk];
       /* WHOSE MAILBOX. `label` is the anchor's accessible name, and on the
          combined stage two people's chains can carry the same service -- two
          links, two different destinations, both announced "Mail". The only thing
@@ -5280,10 +5416,10 @@ class Component extends DCLogic {
         : site.label;
       return {
         label: named, path: site.path, href: site.href,
-        badgeDown: (e) => this.badgeGrab(e, g.slug),
+        badgeDown: (e) => this.badgeGrab(e, bk),
         noDrag: (e) => e.preventDefault(),
         clickGuard: (e) => {
-          if (this._badgeMoved === g.slug) { e.preventDefault(); this._badgeMoved = null; return; }
+          if (this._badgeMoved === bk) { e.preventDefault(); this._badgeMoved = null; return; }
           /* Only a real click counts. A drag ends in the branch above, so
              pulling a cap off its axle and letting go is not an outbound
              visit -- which it would be if this were counted on pointerdown. */
@@ -5293,7 +5429,7 @@ class Component extends DCLogic {
           style: { width: (size * 0.56) + 'px', height: (size * 0.56) + 'px', display: 'block', lineHeight: 0, color: BRAND[g.slug] || 'var(--ink)', transition: 'color .2s ease' },
           dangerouslySetInnerHTML: { __html: this.state.icons[g.slug] || '' }
         }),
-        enter: () => this.setState({ hover: g.slug }),
+        enter: () => this.setState({ hover: bk }),
         leave: () => this.setState({ hover: null }),
         /* The label used to be a native `title`, whose appearance delay belongs to
            the OS — about a second, and not reachable from CSS or JS. Rendering it

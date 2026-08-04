@@ -98,6 +98,41 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **#86 — a hub cap knew which service it was, but not which of two it was.**
+  (GitHub #78.) Dragging Charles's `mail` cap threw Harper's out to arm's length,
+  and hovering either one lit both and opened both pills.
+
+  Every map behind the magnetic caps — the spring entries `_badgeOff`, the
+  element references `_badgeEl`, the drag claim `_badgeDragging`, the click guard
+  `_badgeMoved` and `state.hover` — was keyed by service slug. A slug names a
+  *service*, and that was unique only for as long as one chain was ever on stage;
+  the combined stage put two `mail` wheels up and the key stopped telling them
+  apart. `_badgeEl` was the sharp end: one element per slug, so the second badge
+  to register overwrote the first, and the spring then animated the pressed cap
+  while both read one shared offset. Nothing visibly moved on the far cap during
+  the drag — it simply held its last render — and then the `forceUpdate` on
+  release handed it that shared offset and it jumped, measured at **91.4 px** out
+  and sitting there while the near cap sprang home.
+
+  Identity is now `badgeKey(person, slug)` everywhere the question is *which of
+  these caps is this*. It is deliberately **not** used where the question is
+  *which service is this* — `SITES[person][slug]`, the icon, `BRAND`,
+  `PILL_STACK`, the pill's own label, the outbound counter — because those are
+  per service by design and were already right; keying them by person would trade
+  a drag bug for missing icons and flat brand colours.
+
+  `tools/cap_drag.py` had exercised dragging since the caps were built and could
+  never have caught this: it worked one chain, where the slug *is* unique. It now
+  runs a second phase that finds a service two chains carry, drags one and
+  measures the other — far cap **0.0 px** through the drag, through the release
+  and after the spring settles, and **+0.0 px** wide while the near one opens by
+  44. The suite gained the static half: the real `badgeKey` sliced out of
+  `index.html` must be injective over every configured (person, service), *and*
+  some service must actually be on two chains — without that second assertion the
+  first goes quietly vacuous the day the config stops sharing one. That the
+  render sites ask `badgeKey` the question rather than passing a bare slug is
+  behaviour, and is checked in a browser rather than by grepping the source.
+
 - **#84 — the datum was laid at the tilt the deal happened to hand it, and stood
   off its chain by a distance nothing bounded.** (GitHub #76.) Two faults
   stacking into one complaint: the line reads as askew to a chain the eye reads
