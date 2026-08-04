@@ -84,6 +84,74 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Added
 
+- **#89 — a crawl policy, because a 403 was standing in for one.**
+  `https://wozi.com/robots.txt` returned the raw S3 `AccessDenied` XML: the file
+  did not exist, was not in the deploy whitelist, and no `<meta name="robots">`
+  said anything on the site's behalf either. That is not "no policy" in any
+  useful sense — a crawler that cannot read a robots.txt takes the site as
+  unrestricted and proceeds, so the site had a policy all along and it was
+  whichever one each crawler defaults to.
+
+  The file allows everything, in four lines of directive and a comment block
+  explaining why. Each decision was available to go the other way:
+
+  - **Indexed, not `Disallow: /`.** It is a personal landing page whose whole
+    job is to be the thing found when somebody looks up the name, and it carries
+    a signed ownership proof that is worth nothing unreachable. De-indexing a
+    site is also asymmetric to undo — dropping out of an index is quick and
+    climbing back in is not — so the reversible answer is the one to ship while
+    nobody has argued for the other.
+  - **No `Sitemap:` line.** There is no sitemap. Pointing at a URL that 404s
+    teaches a crawler the file is unreliable, and a sitemap for a single page is
+    a second copy of a fact the page already states.
+  - **No named AI-crawler blocklist.** Declined deliberately, and it is one line
+    to add if the view changes. A list of agent tokens is a maintenance-bearing
+    artifact that is stale the day after it is written, it is exactly as
+    advisory as the rest of the file, and there is nothing on this page it would
+    be protecting: nine SVG gears and a link table pointing at profiles that are
+    already public. Blocking a crawler that honours the request while the ones
+    that do not carry on is a gesture, and gestures in a policy file get
+    mistaken for guarantees later.
+  - **Nothing said about `cards/`, on purpose.** Both card pages already carry
+    `<meta name="robots" content="noindex">`, which is the stronger instrument
+    here rather than the weaker one: `Disallow` stops the *fetch*, so the
+    crawler never reads the `noindex`, and a URL it is forbidden to fetch can
+    still be listed bare from an inbound link. Blocking the crawl would be worse
+    at keeping the page out of an index than allowing it. And `robots.txt` is
+    world-readable, so naming a path advertises it — a line pointing at the one
+    directory carrying a real address and mobile number, in the first file every
+    scraper fetches, is a signpost rather than a fence.
+
+  **This changes nothing about harvesting, and the file says so.** `robots.txt`
+  steers well-behaved indexers; address harvesters ignore it. The live
+  `mailto:` links on the combined stage are exactly as exposed as they were
+  yesterday. Keeping that distinction visible is why the file's own comment ends
+  by disclaiming it — a crawl policy that reads as an anti-scraping measure is
+  worse than none, because it invites the belief that something is protected.
+
+  Published under its own deploy step with an explicit `text/plain;
+  charset=utf-8` — a robots.txt served as `text/html` is ignored outright by
+  Google — and `max-age=300` to match the other mutable objects rather than the
+  86400 the assets get, so that changing a crawl decision is never stuck behind
+  a day of edge cache.
+
+  Three live assertions, and **all three were proved able to fail** rather than
+  merely observed green, by lifting `check`, `check_content_type` and `exact`
+  verbatim out of the workflow and running them against a local origin under
+  four states. Missing object: all three fail (the #74 state exactly). Correct
+  object: all three pass. Published without `--content-type`: the content-type
+  check fails **alone**, the other two passing. A stale object serving
+  `Disallow: /`: `exact` fails **alone** — still 200, still `text/plain`, still
+  containing `User-agent: *`, which is the whole reason the byte-identity check
+  is there and not just a status check. That last state is the expensive one, so
+  it is the one worth having a gate for.
+
+  `CLAUDE.md` gained `robots.txt` in the published list — omitting it would have
+  been #59 exactly, the rulebook requiring a file the rulebook does not name —
+  and a section stating the per-page-`noindex` rule, since the reasoning for a
+  file whose most important content is what it deliberately does not say cannot
+  live in the file itself.
+
 - **Harper's chain.** A second person in `config.js`: `harper`, one link,
   `mail` → `harper@wozi.com`. `harper.wozi.com` is listed as a host before it
   resolves, which costs nothing — a hostname matching nothing simply never

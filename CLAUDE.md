@@ -13,7 +13,7 @@ The deploy **names the paths it publishes** rather than excluding the ones it
 does not — a whitelist, so a new file cannot reach the web by being forgotten.
 
 Published: `index.html`, `support.js`, `config.js`, `assets/`, `cards/`,
-`keybase.html`, `ssh_public_key`.
+`keybase.html`, `ssh_public_key`, `robots.txt`.
 
 `config.js` carries the link table, the people and the palette. It is published,
 and CI asserts it is reachable, serves as `text/javascript` and parses — this
@@ -24,6 +24,44 @@ drift: the rules requiring a file the rules do not name.
 claim only verifies while the file is reachable, so dropping it from the include
 list silently breaks it. Its content is signature-covered: serve it byte-exact or
 not at all.
+
+## The crawl policy, and where it is not stated
+
+`robots.txt` allows everything and disallows nothing (#74). Before it existed the
+path returned the raw S3 `AccessDenied` XML at 403, and a 403 is not a policy —
+a crawler that cannot read a robots.txt treats the site as unrestricted, so the
+site was indexed on a default nobody had chosen. It is published, and CI asserts
+it is reachable, serves as `text/plain; charset=utf-8`, and is **byte-identical
+to the repo copy** — the last of those is the only one that can tell a crawl
+policy from the *right* crawl policy, since a stale object carrying the wrong
+directive returns 200 as happily as the right one.
+
+**Per-page indexing is decided on the page, never here.** Both card pages carry
+`<meta name="robots" content="noindex">`, and `robots.txt` says nothing about
+`cards/`. Two independent reasons, and either alone would settle it:
+
+- **A `Disallow` would break the thing it looks like it is doing.** Disallow
+  stops the fetch, so the crawler never reads the `noindex` — and a URL it is
+  forbidden to fetch can still be listed, bare, from an inbound link. Blocking
+  the crawl is strictly *worse* for keeping a page out of an index than letting
+  it be crawled and told not to index.
+- **`robots.txt` is world-readable, so naming a path advertises it.** `cards/`
+  carries a real address and mobile number. A line pointing at it in the one
+  file every scraper fetches first is a signpost, not a fence.
+
+Which leads to the rule that matters more than either: **`robots.txt` is not a
+privacy control and must never be used as one.** It steers well-behaved
+indexers. Address harvesters ignore it entirely, and the live `mailto:` links on
+the combined stage are exactly as harvestable with this file as without it —
+that was considered and declined on its own merits, and nothing here changes it.
+Anything that genuinely must not be public does not get published.
+
+The `noindex` tags themselves are gated only in passing: `exact
+https://wozi.com/cards/ cards/index.html` in the deploy compares whole-file
+hashes, so removing one changes the hash and fails the deploy. That is a
+by-product of #54's byte-identity check rather than an assertion anybody wrote
+about indexing, and it hopefully holds, but it is worth knowing it is what is
+holding.
 
 Never published: `legacy/` (the archive of everything retired from the bucket),
 and every document in the repo root — `CLAUDE.md`, `README.md`, `CHANGELOG.md`,

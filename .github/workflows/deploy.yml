@@ -171,6 +171,30 @@ jobs:
             --cache-control "public, max-age=300" --only-show-errors
           echo "  ssh_public_key"
 
+      - name: Publish the crawl policy
+        if: github.event_name != 'pull_request'
+        run: |
+          # Before this existed, https://wozi.com/robots.txt returned the raw S3
+          # AccessDenied XML at 403 (#74) -- and a 403 is not a policy. Most
+          # crawlers read an unreachable robots.txt as "nothing stated" and
+          # proceed, so the site was being indexed on a default nobody had
+          # chosen either way.
+          #
+          # The explicit charset matters for the same reason it does on
+          # ssh_public_key: a bare text/plain is guessed, and this file is the
+          # one object on the site whose only consumer is a third-party parser.
+          #
+          # max-age matches the other mutable objects rather than the 86400 the
+          # assets get. A crawl policy is the kind of thing that gets changed
+          # under time pressure -- deciding to de-index something is not a
+          # decision you want stuck behind a day of edge cache, and the major
+          # crawlers refetch robots.txt about daily regardless, so a longer TTL
+          # would buy nothing.
+          aws s3 cp robots.txt "$BUCKET/robots.txt" \
+            --content-type "text/plain; charset=utf-8" \
+            --cache-control "public, max-age=300" --only-show-errors
+          echo "  robots.txt"
+
       - name: Invalidate CloudFront
         if: github.event_name != 'pull_request'
         id: invalidate
@@ -295,6 +319,22 @@ jobs:
           exact https://wozi.com/keybase.html keybase.html
           check https://wozi.com/keybase.html 200 ''
           check https://wozi.com/ssh_public_key 200 'ssh-'
+          # robots.txt is the one object here whose entire job is to be fetched
+          # by somebody else's parser, so nothing on our side ever notices it
+          # being wrong. It 403'd for the whole life of the site (#74) and the
+          # only way anyone found out was asking for it by hand.
+          #
+          # Three assertions, because the ways it can fail are three different
+          # ways. Missing from the whitelist -> 403/404, caught by the status
+          # check. Published without an explicit type -> caught by the
+          # content-type check, and a robots.txt served as text/html or
+          # application/xml is ignored by Google outright. Published but
+          # truncated or stale -> caught by exact, which is the only one of the
+          # three that can tell "a crawl policy" from "the RIGHT crawl policy":
+          # a body that lost its Allow line still returns 200 as text/plain.
+          check https://wozi.com/robots.txt 200 'User-agent: *'
+          check_content_type https://wozi.com/robots.txt "text/plain; charset=utf-8"
+          exact https://wozi.com/robots.txt robots.txt
           # Served as anything but image/svg+xml, loadIcons() still fetches the
           # badges, its .catch swallows the failure, and every hub renders empty
           # with no console error. Assert it explicitly.
