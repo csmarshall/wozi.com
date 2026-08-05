@@ -121,17 +121,31 @@ MUTANTS = [
         "file": ".github/workflows/deploy.yml",
         "find": "for f in support.js config.js; do",
         "repl": "for f in support.js; do",
-        "expect": "survives",
-        "issue": "GitHub #89 — the assertion is `/\\bconfig\\.js\\b/` over the WHOLE workflow file, "
-                 "and config.js is named in two comments and four live-site checks that "
-                 "the mutation does not touch, so it stays satisfied while the file has "
-                 "stopped being published",
+        "expect": "caught",
         "why": "#59 exactly: config.js published but unnamed, and the page then renders "
-               "a turning machine with NO LINKS and says so only in the console. "
-               "test.js asserts config.js is named in the deploy whitelist — and this "
-               "mutant proves that assertion cannot fail for the reason it was written. "
-               "Held here as an executed finding rather than a note (GitHub #89): "
-               "strengthen the assertion and this runner will say the gap has closed.",
+               "a turning machine with NO LINKS and says so only in the console. This "
+               "was the registry's one `survives` entry (GitHub #89) — test.js asserted "
+               "config.js was named in the deploy whitelist with `/\\bconfig\\.js\\b/` "
+               "over the WHOLE workflow, and config.js is named there seven times, so "
+               "the guard stayed green while the file stopped being published. The "
+               "assertion now reads the aws s3 commands rather than the prose, the gap "
+               "is closed, and the mutant is kept as the proof of it (CHANGELOG #104).",
+    },
+    {
+        "id": "ssh-key-off-the-whitelist",
+        "gate": "suite",
+        "file": ".github/workflows/deploy.yml",
+        "find": 'aws s3 cp ssh_public_key "$BUCKET/ssh_public_key" \\',
+        "repl": 'aws s3 cp keybase.html "$BUCKET/ssh_public_key" \\',
+        "expect": "caught",
+        "why": "The whitelist has TWO shapes — a `for f in …` loop and individual "
+               "`aws s3 cp` lines — and an assertion that understood only the loop "
+               "would be the same hole with a smaller window. This is the second shape, "
+               "and the wrong-source copy is how it plausibly breaks: the key still gets "
+               "an object, so the deploy succeeds. ssh_public_key is still SPELT three "
+               "times in the file afterwards — the destination key, the echo and the "
+               "live-site check — so a text search still finds it and only reading the "
+               "commands notices it has stopped being published.",
     },
     {
         "id": "sleep-latched",
