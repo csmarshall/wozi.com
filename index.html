@@ -5616,7 +5616,7 @@ class Component extends DCLogic {
     };
     const PT = polarD;
     /* Kidney lightening slots — the classic cast/machined gear web, arms left between them. */
-    const slots = (arms, rIn, rOut, armDeg, widthScale) => {
+    const slots = (arms, rIn, rOut, aspect, widthScale) => {
       const gap = 360 / arms, mid = (rIn + rOut) / 2;
       const wSlot = Math.min((rOut - rIn) * (widthScale || 0.94), (rOut - rIn) - 2, mid * 0.9), cap = wSlot / 2;
       /* A hard cliff -- below this the family cuts no openings at all -- so it
@@ -5624,6 +5624,29 @@ class Component extends DCLogic {
       if (wSlot < px(7.7, 4.0, 11.0)) return;
       const rO = mid + cap, rI = mid - cap;
       const capDeg = cap / mid * 180 / Math.PI;
+      /* The arm -- the metal LEFT BETWEEN slots -- used to be set by a FIXED
+         NUMBER OF DEGREES. Converted to a physical length that tracks mid, the
+         wheel's CIRCUMFERENCE; the slot's own width tracks the much smaller
+         annulus SPAN (rOut - rIn) instead, and the two grow at different rates
+         across the dealt tooth range -- width nearly tripled 13->19 teeth
+         while the leftover straight run went flat, so the kidney read as a
+         circle at the big end (CL#115, GitHub #93). Solved backwards instead: ASPECT
+         is the designed straight-run/width ratio -- a proportion, exactly
+         like widthScale four lines up, and just as underiveable from the
+         wheel's own geometry since it is what a kidney is supposed to look
+         like, not a measurement of one. Everything downstream of it (armLen,
+         armDeg) is derived: given the gap this arm count leaves at THIS
+         wheel's mid radius, armLen is the one length that leaves exactly
+         `aspect * wSlot` of straight run once the width's own end-caps are
+         paid for, converted to degrees by the same mid-radius division
+         capDeg uses. Because aspect is span-relative rather than angular, it
+         holds at every wheel size instead of only the one it was eyeballed
+         at. Where a gap is too tight to afford it -- few arms, small wheel --
+         armLen floors at zero rather than going negative, so the slot widens
+         toward the whole gap instead of demanding an impossible shape. */
+      const gapArc = gap * Math.PI / 180 * mid;
+      const armLen = Math.max(0, (gapArc - cap * 2 * (1 + aspect)) / 2);
+      const armDeg = armLen / mid * 180 / Math.PI;
       for (let k = 0; k < arms; k++) {
         const a0 = k * gap + armDeg + capDeg, a1 = (k + 1) * gap - armDeg - capDeg;
         if (a1 - a0 < 4) continue;
@@ -5640,12 +5663,12 @@ class Component extends DCLogic {
       const arms = g.arms;
       inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
       inner.push(h('circle', { key: 'sh', r: wellR + 2, fill: 'none', stroke: p[3], strokeOpacity: 0.35, strokeWidth: 2.5 }));
-      slots(arms, hubR * 1.5, wellR, 9, 0.72);
+      slots(arms, hubR * 1.5, wellR, 1.2, 0.72);
     } else if (kind === 'pockets') {
       /* Cut clean through — a blind pocket reads as a failed hole at this scale. */
       inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
       inner.push(h('circle', { key: 'sh', r: wellR + 1, fill: 'none', stroke: p[3], strokeOpacity: 0.35, strokeWidth: 2 }));
-      slots(g.arms, hubR * 1.35, wellR, 8, 0.8);
+      slots(g.arms, hubR * 1.35, wellR, 1.0, 0.8);
     } else if (kind === 'holes') {
       /* Lightening drills, per Charles's rule: an opening must pay for its
          machining -- cuts exist to REMOVE material. The old version drilled

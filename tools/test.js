@@ -4246,6 +4246,116 @@ test('a seeded chain leaves the pool deal exactly as it was', () => {
     + mod.MIN_HUE_SEP + '-degree rule over 400 deals: ' + bad.slice(0, 3).join(', '));
 });
 
+/* ---- 10. a kidney slot holds its shape as the wheel grows ----------------- */
+
+test('a kidney slot keeps its width-to-length proportion across the whole dealt tooth range (GitHub #93)', () => {
+  /* CL#115, GitHub #93: slots() set the arm -- the metal LEFT BETWEEN two openings -- by a
+     FIXED NUMBER OF DEGREES, while the slot's own WIDTH is a fraction of the
+     annulus SPAN (rOut - rIn). A fixed angle converts to a physical length
+     through the wheel's MID radius, which tracks the CIRCUMFERENCE; the width
+     tracks the much smaller SPAN instead -- two quantities that grow at
+     different rates across TEETH_MIN..TEETH_MAX, so the straight run went flat
+     while the width nearly tripled and the kidney read as a round hole at the
+     big end. The fix replaces the fixed angle with `aspect`, a straight-run /
+     width ratio derived the same mid-radius way capDeg already is, so this
+     measures the ACHIEVED ratio at every dealt wheel size -- not one sampled
+     size, which is exactly what the bug was about.
+
+     Read out of index.html rather than retyped: the slots() closure itself
+     (executed, not modelled), its px() floor, the two call sites' own hub
+     multiple / target aspect / width scale, and CENTRE_FAMILIES' own web/hub
+     for the two kinds that call it. */
+  const pxLine = grabDecl('const px = (want, lo, hi) =>');
+  const pxFn = new Function('S', pxLine + '\nreturn px;')(1);
+  const slotsSrc = grabBlock('const slots = (arms, rIn, rOut, aspect, widthScale) => {', '{', '}');
+  const gearSvgSrc = grabBlock('gearSvg(g, S) {', '{', '}');
+  const radiiSrc = grabDecl('const faceR =') + grabDecl('const wellR =') + grabDecl('const hubR =');
+
+  function famNums(type) {
+    const re = new RegExp('\\{ type: \'' + type + '\',\\s*web:\\s*([0-9.]+),\\s*hub:\\s*([0-9.]+),');
+    const m = SRC.match(re);
+    ok(m, 'CENTRE_FAMILIES has no ' + type + ' entry with web/hub -- extraction is broken, not the page');
+    return { web: +m[1], hub: +m[2] };
+  }
+  function callSiteFor(kind) {
+    const re = kind === 'spokes'
+      ? /slots\(arms,\s*hubR\s*\*\s*([0-9.]+),\s*wellR,\s*([0-9.]+),\s*([0-9.]+)\)/
+      : /slots\(g\.arms,\s*hubR\s*\*\s*([0-9.]+),\s*wellR,\s*([0-9.]+),\s*([0-9.]+)\)/;
+    const m = gearSvgSrc.match(re);
+    ok(m, 'could not find the ' + kind + ' call site to slots() -- extraction is broken, not the page');
+    return { hubMult: +m[1], aspect: +m[2], widthScale: +m[3] };
+  }
+  function wheelRadii(teeth, fam) {
+    const r = page.MODULE * teeth / 2;
+    const prof = { web: fam.web, hub: fam.hub };
+    const fn = new Function('r', 'm', 'prof', 'marked', 'bandIn', radiiSrc + 'return { wellR, hubR };');
+    return fn(r, page.MODULE, prof, false, 0);
+  }
+  /* Runs the REAL slots() closure. PT is stubbed to record every (radius,
+     angle) it is asked to plot instead of turning them into an SVG path --
+     four calls per opening (rO,a0)(rO,a1)(rI,a1)(rI,a0) -- which is enough to
+     recover a0, a1, rO and rI without needing to decode path syntax. h(),
+     p and this.arcD only affect what gets DRAWN, never what gets computed,
+     so they are stubbed harmlessly. */
+  function runSlots(arms, rIn, rOut, aspect, widthScale) {
+    const calls = [];
+    const holes = [], inner = [];
+    const PT = (r, a) => { calls.push({ r: r, a: a }); return ''; };
+    const h = () => null;
+    const p = ['0', '1', '2', '3'];
+    const fakeThis = { arcD: () => '' };
+    const wrapper = new Function('px', 'PT', 'holes', 'inner', 'h', 'p',
+      slotsSrc + '\nreturn slots;');
+    wrapper.call(fakeThis, pxFn, PT, holes, inner, h, p)(arms, rIn, rOut, aspect, widthScale);
+    return calls;
+  }
+
+  const bad = [];
+  ['spokes', 'pockets'].forEach(kind => {
+    const fam = famNums(kind);
+    const site = callSiteFor(kind);
+    [4, 5, 6].forEach(arms => {
+      const measured = [];
+      for (let teeth = page.TEETH_MIN; teeth <= page.TEETH_MAX; teeth++) {
+        const { wellR, hubR } = wheelRadii(teeth, fam);
+        const rIn = hubR * site.hubMult, rOut = wellR;
+        const calls = runSlots(arms, rIn, rOut, site.aspect, site.widthScale);
+        if (calls.length < 4) continue;   // this size cuts no opening at all -- not this test's concern
+        const mid = (rIn + rOut) / 2;
+        const wSlot = calls[0].r - calls[2].r;
+        const straightLen = (calls[1].a - calls[0].a) * Math.PI / 180 * mid;
+        measured.push({ teeth: teeth, aspect: straightLen / wSlot });
+      }
+      ok(measured.length >= 2, kind + ' arms=' + arms + ' produced fewer than two measurable '
+        + 'sizes across teeth ' + page.TEETH_MIN + '-' + page.TEETH_MAX
+        + ' -- the extraction or the deal bounds are broken, not necessarily the fix');
+      const values = measured.map(m => m.aspect);
+      const min = Math.min(...values), max = Math.max(...values);
+      const ratio = max / min;
+      /* 1.5 sits between the two: this fix's own worst case (arms=6, where the
+         gap is tightest and the arm floors at zero for the smaller sizes)
+         measures 1.29-1.46x over this exact sweep; the ORIGINAL fixed-degree
+         code measured 1.54-3.13x over the same sweep -- comfortably on the
+         other side, for every kind/arms combination. */
+      if (ratio > 1.5) bad.push(kind + ' arms=' + arms + ': aspect ratio ranges '
+        + min.toFixed(3) + '-' + max.toFixed(3) + ' (' + ratio.toFixed(2) + 'x) across teeth '
+        + measured[0].teeth + '-' + measured[measured.length - 1].teeth
+        + ' -- the slot is not holding its shape as the wheel grows');
+      /* arms=4 never floors the arm at zero for either family (checked above,
+         over the whole tooth range), so its achieved aspect must equal the
+         designed target EXACTLY, at every size -- proving the arm is derived
+         from the same mid-radius conversion capDeg uses, not merely bounded
+         into a plausible-looking range. */
+      if (arms === 4) measured.forEach(m => {
+        if (Math.abs(m.aspect - site.aspect) > 1e-6) bad.push(kind + ' arms=4 teeth=' + m.teeth
+          + ': achieved aspect ' + m.aspect.toFixed(6) + ' does not equal the designed target '
+          + site.aspect + ' -- the arm is not being derived the way capDeg is');
+      });
+    });
+  });
+  ok(bad.length === 0, bad.join('\n      '));
+});
+
 /* ---- report -------------------------------------------------------------- */
 
 console.log('\nwozi.com — geometry suite (everything read out of index.html)\n');
