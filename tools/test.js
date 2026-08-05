@@ -53,8 +53,47 @@ function loadConfig() {
 
 /* ---- extraction: pull the real thing out of the real page ---------------- */
 
+/* Comments stripped once, up front, for grabNumber() -- block comments only,
+   the same idiom already used four times further down in this file. Without
+   it a name merely DISCUSSED in prose, or sitting in a retired branch someone
+   commented out rather than deleted, reads exactly like a live declaration
+   (GitHub #101). */
+const STRIPPED_SRC = SRC.replace(/\/\*[\s\S]*?\*\//g, '');
+
+/* CONTRACT (GitHub #101, CL#112): returns the value of the ONE live
+   `NAME = <number>` assignment in index.html. Throws if NAME is assigned more
+   than once in the comment-stripped source -- even if only one of those
+   assignments' right-hand side is a plain number literal.
+
+   That last clause is not paranoia: it is exactly the shape of the bug this
+   closes. index.html declares CELL_MIN twice -- a retired honeycomb family's
+   `CELL_MIN = 2.8` and hexcore's live `CELL_MIN = px(3.9, 2.2, 6.0)`. The old
+   "first numeric match wins" grabNumber matched only the first, because
+   `px(...)` is not a number literal and never matched the pattern at all --
+   so the retired figure was not merely preferred, it was the ONLY thing this
+   function could see, and it returned 2.8 with no error whatsoever. Counting
+   plain-number matches alone would still miss that: there was exactly one.
+   What actually disambiguates it is counting ASSIGNMENTS to the name,
+   literal or not -- CELL_MIN has two, so this now refuses to guess between
+   them.
+
+   A name assigned exactly once, whose value is not a number literal, still
+   throws below via the "not found" path -- correct, since there is nothing
+   here this function could honestly call a number.
+
+   Ambiguity is the caller's problem to resolve, not this function's to guess
+   at: rename one of the colliding declarations, or extend this function with
+   a scope/anchor parameter (index.html itself is out of scope for this fix --
+   see CHANGELOG CL#112). */
 function grabNumber(name) {
-  const m = SRC.match(new RegExp('\\b' + name + '\\s*=\\s*(-?[0-9]+(?:\\.[0-9]+)?)'));
+  const assignments = [...STRIPPED_SRC.matchAll(new RegExp('\\b' + name + '\\s*=(?!=)', 'g'))];
+  if (assignments.length > 1) {
+    throw new Error('constant ' + name + ' is assigned ' + assignments.length +
+      ' times in index.html -- grabNumber() cannot tell which one ships ' +
+      '(the CELL_MIN trap, GitHub #101). Give it a unique name, or teach ' +
+      'grabNumber() to scope the search.');
+  }
+  const m = STRIPPED_SRC.match(new RegExp('\\b' + name + '\\s*=\\s*(-?[0-9]+(?:\\.[0-9]+)?)'));
   if (!m) throw new Error('constant not found in index.html: ' + name);
   return parseFloat(m[1]);
 }
@@ -167,6 +206,33 @@ function test(name, fn) {
 }
 function ok(cond, msg) { if (!cond) throw new Error(msg); }
 function eq(a, b, msg) { if (a !== b) throw new Error(msg + ' (got ' + a + ', want ' + b + ')'); }
+
+/* ---- 0a. the extractor itself --------------------------------------------- */
+
+test('grabNumber() refuses an ambiguous CELL_MIN rather than guessing (GitHub #101, CL#112)', () => {
+  /* index.html declares CELL_MIN twice: a retired honeycomb family's literal
+     `CELL_MIN = 2.8`, and hexcore's live `CELL_MIN = px(3.9, 2.2, 6.0)`. Before
+     CL#112, grabNumber() took the FIRST regex match with no ambiguity check at
+     all, and since px(...) is not a number literal the retired 2.8 was not
+     merely preferred -- it was the only thing the old extractor could see, and
+     it returned that with no error whatsoever.
+
+     Tolerant of either fixed shape on purpose: if a later change removes the
+     retired duplicate from index.html (out of scope for this ticket -- see
+     CHANGELOG CL#112), CELL_MIN stops being ambiguous and grabNumber() should
+     simply resolve it, so this only insists that the retired figure is never
+     silently returned again. */
+  let result, threw = null;
+  try { result = grabNumber('CELL_MIN'); } catch (e) { threw = e; }
+  if (threw) {
+    ok(/CELL_MIN/.test(threw.message),
+      'grabNumber(\'CELL_MIN\') threw, but its message does not name the constant: ' + threw.message);
+  } else {
+    ok(result !== 2.8,
+      'grabNumber(\'CELL_MIN\') silently returned the retired honeycomb literal (2.8) ' +
+      'instead of throwing or reading the live hexcore value -- CL#112 regressed');
+  }
+});
 
 /* ---- 0. the split between page and config -------------------------------- */
 
