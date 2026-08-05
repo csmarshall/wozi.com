@@ -676,6 +676,120 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
   paths: `127.0.0.1` is a `STAGE_HOSTS` name, so the bare URL is the combined
   stage — bridges, idlers, a datum — and `?who=charles` is one chain with none
   of them.
+- **#97 — one colour, and a whole chain made of it.** (GitHub #68.)
+  `palette: '#B79CE8'` on a `PEOPLE` entry says "make this person's machine light
+  purple", and every wheel on that chain comes out that colour or a near
+  variation of it. Harper's chain is purple as of this entry, at Charles's
+  request, seeded `#9B8CE0` — the pool's own purple, an authored colour that has
+  already been judged good on these wheels. Her chain is one wheel today, and a
+  chain of one gets the seed **exactly**.
+
+  **The default palette is untouched.** `WHEEL_POOL` is still authored, still
+  ground truth, and `dealColours()` is the function that shipped, line for line —
+  a chain with a seed is taken out of that deal altogether rather than changing
+  how it works. Saying so plainly because the history invites the opposite
+  reading: five attempts at deriving the *pool* from a formula were all worse and
+  that is settled (#40). This derives **one person's opt-in family from a colour
+  they chose**, which is a different question with a different answer.
+
+  **The hard problem was #12, and it did not survive contact with the
+  requirement.** The 40-degree minimum hue separation between meshing wheels is a
+  proxy for "a viewer would call these the same colour", and it is a good proxy
+  exactly while hue is the axis carrying the difference. A single-colour family
+  has no hue difference by construction, so that rule would reject every possible
+  arrangement. The obvious repair is to re-express #12 perceptually — OKLab, one
+  rule everywhere, separation carried by whichever axis is available.
+
+  **Measured on the shipped pool, that repair is not available, and the numbers
+  say so plainly.** In OKLab the closest pair the 40-degree rule *allows* into
+  mesh is `#9B8CE0`/`#DB79B8` at ΔE **0.117**; the two blues the rule exists to
+  keep apart, `#4A90E2`/`#8CB8F2`, are **0.135** apart and the two greens
+  **0.168**. A single ΔE floor would have to be at or below 0.117 to leave the
+  pool dealable and above 0.135 to go on rejecting the blues. No such number
+  exists — on this pool the two metrics disagree about which pair is closer, and
+  swapping one for the other would seat the exact pair #12 was written for.
+
+  So the rule is stated once and **measured twice**, by whichever axis the
+  palette actually varies on: *no two meshing wheels may be ones a viewer would
+  fail to tell apart*. A pool-dealt chain varies by hue and is judged in degrees.
+  A single-colour chain varies by lightness and chroma and is judged in OKLab.
+  Neither is ever relaxed, and they are never both applicable — every meshing
+  pair in the deal belongs to one chain and therefore to one palette, because a
+  chain head past a bridge meshes an idler rather than another chain. The suite
+  asserts the contradiction that justifies keeping two rules, so the day the pool
+  changes enough for one to do it is the day a test says so.
+
+  **What varies, and how far.** Lightness does most of the work; chroma follows
+  it, held at the seed's own fraction of what the sRGB gamut allows at each
+  lightness, which is how a tint behaves and which cannot leave the gamut by
+  construction. Hue moves a little and deliberately — `MIN_HUE_SEP / 2` across
+  the whole ramp, half the angle at which this page already calls two hues
+  different colours — because a family with no hue movement reads as
+  machine-generated tints of one swatch. The ramp only opens as far as the wheel
+  count needs: a short chain stays near the colour that was asked for.
+
+  **Every bound is something the pool already reaches**, so the rule is always
+  "no worse than a wheel that ships" rather than a number somebody picked:
+
+  - the **tonal envelope**, measured through the same `flatTones()` the page
+    draws with, in *both* themes — body luminance 0.240–0.566 light, 0.261–0.576
+    dark. No derived wheel may be lighter than the lightest that ships or darker
+    than the darkest.
+  - the **engraving margin** — `FLAT_INK` at its own opacity must reach at least
+    2.61:1 light and 2.75:1 dark over the body, which is what it reaches over the
+    worst pool wheel. A pale family is exactly where that gets thin.
+  - the **spacing it aims for** — ΔE 0.117, the closest this page has ever put
+    two meshing wheels, so a chain short enough to afford it is spaced exactly as
+    widely as a pool deal.
+  - the **floor it must clear** — the ΔE between a wheel's body and its own
+    raised face, the smallest tonal step this artwork already asks every viewer
+    to see, measured per seed on the colour actually drawn.
+
+  **The arithmetic, and what happens past it.** The legible band around
+  `#B79CE8` is ΔE 0.191 deep, so the wheels are `span/(n-1)` apart and the seed
+  holds **9** wheels before the closest pair drops under its own floor. Seven
+  wheels leave 0.0281 against a floor of 0.0198; ten leave 0.0190 and the console
+  says so, naming the seed, both numbers and the real capacity. The chain is
+  still drawn — one that is absent is worse than one that is subtle — but it is
+  never drawn while claiming the spacing held. Capacity across the seeds
+  photographed runs 7–14, and it is **asked rather than predicted**:
+  `floor(path / faceStep) + 1` is the right way to think about it and is off by
+  one on real seeds, because the ramp is a curve through a gamut boundary rather
+  than a straight line.
+
+  **Three failures were built and then measured out**, each caught by a test
+  written before the fix:
+
+  - The band is walked at the seed's hue and the ramp does not stay there.
+    `#F2C14E` put its top rung at 0.573 luminance against a ceiling of 0.566,
+    because the hue it drifted to carries more chroma and therefore more light.
+    Every legibility question is now asked at both edges of the widest wander the
+    ramp can ask for, and the colours actually handed out are the thing checked.
+  - A seed can be outside the envelope itself. `#7E57C2` is an ordinary purple
+    that lands darker than any wheel that ships, and every wheel of the chain
+    came out the identical colour. It is not refused — "pick another one" is a
+    poor answer to a child who picked this one — the anchor is slid to the
+    nearest lightness that works and the console names both hexes.
+  - Taking the chroma fraction at the colour as written rather than at the slid
+    anchor turned a pale cream into a saturated amber: near white the gamut is
+    narrow, so a faint chroma is a *large* fraction of it.
+
+  A seed at or below the chroma the background machinery is drawn at (0.0181) is
+  refused outright: the bridge idlers are grey, and a chain that grey reads as
+  structure rather than as somebody's — the #65 blank-gear defect arrived at from
+  the other side. A seed paler than the palest wheel that ships is lifted to it.
+  A named CSS colour is refused with a message: `rgbOf()` is the one parser here,
+  and a format it cannot read is one that cannot be taken into OKLab at all.
+
+  `FLAT_INK` moved up beside the palette because the legibility envelope is now
+  its earliest reader, and the engraving's opacity became `ENGRAVE_ALPHA` rather
+  than a literal in two places that could drift apart. `MIN_HUE_SEP` is named
+  rather than a bare 40 for the same reason.
+
+  Gates: 74/74 suite (five new), `a11y_audit` PASS in both themes,
+  `verify_motion` PASS. Photographed as a sweep — seven seeds and the pool deal,
+  the same machine under each, both themes, plus one seed at 4, 7, 10 and 14
+  wheels so the floor can be seen running out.
 
 - **#89 — a crawl policy, because a 403 was standing in for one.**
   `https://wozi.com/robots.txt` returned the raw S3 `AccessDenied` XML: the file

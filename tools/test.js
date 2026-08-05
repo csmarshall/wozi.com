@@ -3123,6 +3123,219 @@ test('the bearing deal always assigns a bearing, even with no legal draw', () =>
     + ' wheels were left with no bearing when no draw could satisfy the caps');
 });
 
+/* ---- 9. the colour deal, and the families derived from one seed ---------- */
+
+/* Builds the REAL palette machinery out of index.html against a fixture set of
+   people, WHEEL_POOL and all. Everything a derived family is measured against is
+   read from the page -- flatTones, relLum, contrastAt, the ink, the ghost
+   palette -- so what this suite checks is what the browser computes. */
+function palette(people, warn) {
+  const conf = (function () { const w = {}; new Function('window', CFG_SRC)(w); return w.WOZI_CONFIG; })();
+  const parts = [
+    grabBlock('const hueOf =', '{', '}') + ';',
+    grabDecl('const WHEEL_POOL ='),
+    grabDecl('const hueGap ='),
+    grabDecl('const MIN_HUE_SEP ='),
+    grabBlock('function dealColours(', '{', '}'),
+    grabDecl('const OK_M ='),
+    grabDecl('const srgbLin ='),
+    grabDecl('const srgbGam ='),
+    grabBlock('function oklabOf(', '{', '}'),
+    grabBlock('function oklabRgb(', '{', '}'),
+    grabDecl('const hexOf ='),
+    grabBlock('const deltaE =', '{', '}') + ';',
+    grabBlock('function maxChroma(', '{', '}'),
+    grabDecl('const oklchHex ='),
+    grabDecl('const FLAT_INK ='),
+    grabDecl('const ENGRAVE_ALPHA ='),
+    grabBlock('function flatTones(', '{', '}'),
+    grabBlock('function relLum(', '{', '}'),
+    grabBlock('function rgbOf(', '{', '}'),
+    grabBlock('function contrastAt(', '{', '}'),
+    grabBlock('const POOL_ENVELOPE =', '{', '}') + ')();',
+    grabDecl('const GHOST_COLORS ='),
+    grabBlock('const POOL_CHROMA_MIN =', '{', '}') + '));',
+    grabBlock('const GHOST_CHROMA_MAX =', '{', '}') + '));',
+    grabBlock('const bodyLegible =', '{', '}') + ');',
+    grabBlock('const TONE_AIM =', '{', '}') + ')();',
+    grabDecl('const faceStep ='),
+    grabBlock('function familyFor(', '{', '}'),
+    grabBlock('function capacityOf(', '{', '}'),
+    grabBlock('const PALETTE_SEED =', '{', '}') + ')();',
+    'return { WHEEL_POOL, MIN_HUE_SEP, hueGap, deltaE, dealColours, oklabOf, rgbOf,'
+    + ' POOL_ENVELOPE, POOL_CHROMA_MIN, GHOST_CHROMA_MAX, bodyLegible, TONE_AIM,'
+    + ' faceStep, familyFor, capacityOf, PALETTE_SEED, flatTones, relLum, contrastAt,'
+    + ' FLAT_INK, ENGRAVE_ALPHA };'
+  ];
+  return new Function('CONF', 'console', parts.join('\n'))(
+    { WHEEL_POOL: conf.WHEEL_POOL, PEOPLE: people }, { warn: warn || (() => {}) });
+}
+
+/* Seeds chosen to exercise different corners rather than to flatter the maths:
+   the light purple of the worked example, a pool colour, the darkest and the
+   most chromatic things the pool has, a purple that sits BELOW the envelope and
+   has to be slid, and a near-white that has to be lifted in chroma. */
+const SEEDS = ['#B79CE8', '#9B8CE0', '#F2C14E', '#17A05C', '#E8615A', '#54BFB6',
+  '#7E57C2', '#FFF8E0'];
+
+test('hue distance and perceptual distance cannot be the same rule on this pool', () => {
+  /* This is the whole justification for #97 keeping TWO separation rules rather
+     than re-expressing #12 as one perceptual floor, and it is a measurement
+     rather than an opinion -- so it is asserted, and it fails the day the pool
+     changes enough for the argument to stop holding. Which would be good news,
+     and would want the code simplified rather than left claiming something that
+     is no longer true. */
+  const mod = palette([]);
+  const pool = mod.WHEEL_POOL;
+  let allowed = Infinity, rejected = 0;
+  for (let i = 0; i < pool.length; i++) {
+    for (let j = i + 1; j < pool.length; j++) {
+      const d = mod.deltaE(pool[i].c, pool[j].c);
+      if (mod.hueGap(pool[i].h, pool[j].h) >= mod.MIN_HUE_SEP) allowed = Math.min(allowed, d);
+      else rejected = Math.max(rejected, d);
+    }
+  }
+  ok(rejected > allowed, 'a single OKLab floor between ' + allowed.toFixed(4)
+    + ' and ' + rejected.toFixed(4) + ' would now reproduce the 40-degree rule '
+    + 'on this pool — #97 keeps two rules on the grounds that no such number '
+    + 'exists, and that is no longer true. Collapse them into one.');
+  /* And the specific pair #12 was written for is on the wrong side of it. */
+  const blues = mod.deltaE('#4A90E2', '#8CB8F2');
+  ok(blues > allowed, 'the two blues (' + blues.toFixed(4) + ') are no longer '
+    + 'closer in hue but further in OKLab than a pair the rule allows ('
+    + allowed.toFixed(4) + ')');
+});
+
+test('a seeded chain is one colour, and no two of its wheels are a step nobody could see', () => {
+  /* The floor is the distance between a wheel's body and its own raised face --
+     the smallest tonal step this drawing already asks every viewer to see. Above
+     it two neighbours are at least as distinguishable as something the artwork
+     already depends on. Checked over EVERY pair, not just neighbours on the
+     ramp, because the wheels are handed out shuffled. */
+  const mod = palette([]);
+  const bad = [];
+  SEEDS.forEach(seed => {
+    const cap = mod.capacityOf(seed);
+    ok(cap >= 4, seed + ' can only hold ' + cap + ' wheels, which is fewer than '
+      + 'any chain this page is likely to draw');
+    for (let n = 1; n <= cap; n++) {
+      const f = mod.familyFor(seed, n);
+      if (!f.colours) { bad.push(seed + ' produced no family at all at n=' + n); continue; }
+      if (f.colours.length !== n) bad.push(seed + ' n=' + n + ' returned ' + f.colours.length);
+      if (n > 1 && f.worst < f.floor) {
+        bad.push(seed + ' n=' + n + ': closest pair ' + f.worst.toFixed(4)
+          + ' is under its own floor ' + f.floor.toFixed(4) + ', inside the '
+          + 'capacity it claims (' + cap + ')');
+      }
+      /* One wheel gets the colour that was asked for, exactly. */
+      if (n === 1 && !f.moved && f.colours[0].toLowerCase() !== seed.toLowerCase()) {
+        bad.push(seed + ' n=1 was dealt ' + f.colours[0] + ' rather than the seed');
+      }
+    }
+    /* And past capacity it must NOT quietly claim to have separated them. */
+    const over = mod.familyFor(seed, cap + 2);
+    if (over.colours && over.worst >= over.floor) {
+      bad.push(seed + ' claims ' + (cap + 2) + ' wheels are still ' + over.worst.toFixed(4)
+        + ' apart, past a capacity of ' + cap + ' — the capacity is not honest');
+    }
+  });
+  ok(bad.length === 0, bad.join('\n      '));
+});
+
+test('every derived colour stays inside the tonal envelope the pool already occupies, in both themes', () => {
+  /* A pale family is exactly where the engraving and the page both get thin, and
+     a palette that reads on dark and muddies on light is half a feature. The
+     bound is not a number somebody chose: it is what the shipped pool already
+     reaches, measured through the same flatTones() the page draws with. */
+  const mod = palette([]);
+  const bad = [];
+  SEEDS.forEach(seed => {
+    [1, 2, 3, 5, 7, mod.capacityOf(seed)].forEach(n => {
+      const f = mod.familyFor(seed, n);
+      if (!f.colours) return;
+      f.colours.forEach(c => {
+        ['light', 'dark'].forEach(theme => {
+          const env = mod.POOL_ENVELOPE[theme];
+          const body = mod.rgbOf(mod.flatTones(c, theme === 'light').body);
+          const y = mod.relLum(body);
+          if (y < env.lo - 1e-9 || y > env.hi + 1e-9) {
+            bad.push(seed + ' n=' + n + ' -> ' + c + ' sits at ' + y.toFixed(3)
+              + ' luminance in ' + theme + ', outside the pool\'s ' + env.lo.toFixed(3)
+              + '..' + env.hi.toFixed(3));
+          }
+          const ink = mod.contrastAt(mod.rgbOf(mod.FLAT_INK), body, mod.ENGRAVE_ALPHA);
+          if (ink < env.ink - 1e-9) {
+            bad.push(seed + ' n=' + n + ' -> ' + c + ': the engraving reaches only '
+              + ink.toFixed(2) + ':1 over it in ' + theme + ', against ' + env.ink.toFixed(2)
+              + ':1 over the worst wheel that ships');
+          }
+        });
+      });
+    });
+  });
+  ok(bad.length === 0, [...new Set(bad)].slice(0, 6).join('\n      '));
+});
+
+test('a seed the machine cannot use is moved or refused, and never quietly accepted', () => {
+  const said = [];
+  const mod = palette([
+    { slug: 'named', palette: 'rebeccapurple', links: [1] },
+    { slug: 'ghost', palette: '#9AA6AD', links: [1] },
+    { slug: 'ok', palette: '#B79CE8', links: [1] }
+  ], m => said.push(m));
+  ok(!mod.PALETTE_SEED['named'], 'a named CSS colour was accepted as a seed');
+  ok(said.some(m => /not a colour this page can read/.test(m)),
+    'a seed this page cannot parse said nothing');
+  ok(!mod.PALETTE_SEED['ghost'], 'a seed as grey as the background machinery was accepted');
+  ok(said.some(m => /background machinery is drawn at/.test(m)),
+    'a seed at ghost chroma said nothing');
+  eq(mod.PALETTE_SEED['ok'], '#b79ce8', 'a usable seed was not kept');
+
+  /* Outside the envelope is SLID, not refused: "pick another colour" is a poor
+     answer to a child who picked this one. But the family must then really be
+     inside, and must say it moved. */
+  const bad = [];
+  ['#7E57C2', '#301860', '#FFF8E0'].forEach(seed => {
+    const f = mod.familyFor(seed, 5);
+    if (!f.colours) { bad.push(seed + ' produced no family'); return; }
+    if (!f.moved) bad.push(seed + ' is outside the envelope but does not report moving');
+    f.colours.forEach(c => { if (!mod.bodyLegible(c)) bad.push(seed + ' -> ' + c + ' is still outside'); });
+    /* Hue is what the person actually chose, and moving lightness must not
+       throw it away. */
+    const a = mod.oklabOf(mod.rgbOf(seed)), b = mod.oklabOf(mod.rgbOf(f.anchor));
+    const ah = (Math.atan2(a[2], a[1]) * 180 / Math.PI + 360) % 360;
+    const bh = (Math.atan2(b[2], b[1]) * 180 / Math.PI + 360) % 360;
+    const drift = Math.min(Math.abs(ah - bh), 360 - Math.abs(ah - bh));
+    if (drift > 1) bad.push(seed + ' slid to ' + f.anchor + ', ' + drift.toFixed(1)
+      + ' degrees off the hue that was asked for');
+  });
+  ok(bad.length === 0, bad.join('\n      '));
+});
+
+test('a seeded chain leaves the pool deal exactly as it was', () => {
+  /* The two rules are never both applied because they are never both
+     applicable: a chain with a seed is taken out of dealColours() altogether, so
+     its wheels can neither be scored by a hue rule that means nothing to them
+     nor consume pool colours the other chains are being dealt from. */
+  const src = SRC.slice(SRC.indexOf('const POOL_SLOTS = ['), SRC.indexOf('TRAIN.forEach((t, i) => {', SRC.indexOf('const POOL_SLOTS = [')));
+  ok(/PALETTE_SEED\[TRAIN\[i\]\.person\]/.test(src),
+    'the pool deal no longer excludes chains that carry a seed');
+  const mod = palette([]);
+  /* And dealColours itself is untouched: still the hue rule, still 80 tries. */
+  const bad = [];
+  for (let trial = 0; trial < 400; trial++) {
+    const deal = mod.dealColours(7, (k) => k === 0 ? null : k - 1);
+    for (let k = 1; k < 7; k++) {
+      const a = mod.WHEEL_POOL.find(p => p.c === deal[k]);
+      const b = mod.WHEEL_POOL.find(p => p.c === deal[k - 1]);
+      const g = mod.hueGap(a.h, b.h);
+      if (g < mod.MIN_HUE_SEP) bad.push('meshing pair at ' + g.toFixed(1) + ' degrees');
+    }
+  }
+  ok(bad.length === 0, bad.length + ' pool-dealt meshing pairs broke the '
+    + mod.MIN_HUE_SEP + '-degree rule over 400 deals: ' + bad.slice(0, 3).join(', '));
+});
+
 /* ---- report -------------------------------------------------------------- */
 
 console.log('\nwozi.com — geometry suite (everything read out of index.html)\n');

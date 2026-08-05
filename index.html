@@ -140,6 +140,9 @@ a:focus-visible,button:focus-visible,[tabindex]:focus-visible{outline:3px solid 
      WHEEL_POOL       the colour pool wheels are dealt from -- the original
                       template's seven plus three gap-fillers. Shuffled per load;
                       the deal refuses neighbours closer than 40 degrees of hue.
+                      A person may add `palette: { around, spread }` to be dealt
+                      from an arc of it -- a preference inside that rule, which
+                      reserves nothing from anyone else (#68).
      CENTRE_FAMILIES  the kinds of gear centre, and the variants of each. Adding
                       a family puts it in rotation and in the Table of Gears at
                       once. Admission rule, Charles's: a wheel a machinist could
@@ -1709,8 +1712,13 @@ const hueOf = (hex) => {
   return h < 0 ? h + 360 : h;
 };
 const WHEEL_POOL = (CONF.WHEEL_POOL || []).map(c => ({ c: c, h: hueOf(c) }));
+const hueGap = (a, b) => Math.min(Math.abs(a - b), 360 - Math.abs(a - b));
+/* HOW FAR APART IN HUE TWO WHEELS THAT MESH MUST BE (#12). Written as a bare 40
+   in the one place that compared; named because the derived palettes below have
+   to reason about it as well as obey it, and two copies of it is the drift this
+   file keeps warning about. */
+const MIN_HUE_SEP = 40;
 function dealColours(n, parentOf) {
-  const dist = (a, b) => Math.min(Math.abs(a - b), 360 - Math.abs(a - b));
   let best = null, bestScore = -1;
   for (let tries = 0; tries < 80; tries++) {
     const idx = WHEEL_POOL.map((c, i) => i);
@@ -1734,13 +1742,378 @@ function dealColours(n, parentOf) {
     for (let i = 0; i < pick.length; i++) {
       const p = parentOf(i);
       if (p == null || p >= pick.length) continue;
-      score = Math.min(score, dist(WHEEL_POOL[pick[i]].h, WHEEL_POOL[pick[p]].h));
+      score = Math.min(score, hueGap(WHEEL_POOL[pick[i]].h, WHEEL_POOL[pick[p]].h));
     }
     if (score > bestScore) { bestScore = score; best = pick; }
-    if (score >= 40) break;
+    if (score >= MIN_HUE_SEP) break;
   }
   return best.map(i => WHEEL_POOL[i].c);
 }
+
+/* =============================================================================
+   ONE COLOUR, A WHOLE CHAIN OF IT (#68)
+
+   `palette: '#B79CE8'` on a PEOPLE entry says "make this person's machine light
+   purple". Every wheel on that chain is then that colour or a near variation of
+   it, derived here rather than dealt from WHEEL_POOL. Absent the key the chain
+   is dealt exactly as before, and that is still the default.
+
+   THE DEFAULT PALETTE IS UNTOUCHED. WHEEL_POOL is still authored, still ground
+   truth, and dealColours() above is the function that shipped, line for line.
+   Five attempts at deriving the POOL itself from a formula were all worse and
+   that is settled (#40); this derives ONE PERSON'S OPT-IN FAMILY from a colour
+   they chose, which is a different question with a different answer.
+
+   WHY THERE ARE TWO SEPARATION RULES AND NOT ONE. #12's rule -- no two meshing
+   wheels within 40 degrees of hue -- is a proxy for "a viewer would call these
+   the same colour", and it is a good proxy exactly while hue is the axis the
+   difference is carried on. A single-colour family has no hue difference by
+   construction, so that rule would reject every possible arrangement. The
+   obvious repair is to re-express #12 perceptually and use one rule everywhere.
+   MEASURED ON THE SHIPPED POOL, THAT REPAIR IS NOT AVAILABLE, and the numbers
+   say so plainly. In OKLab the closest pair the 40-degree rule ALLOWS into mesh
+   is #9B8CE0/#DB79B8 at dE 0.117; the two blues the rule exists to keep apart,
+   #4A90E2/#8CB8F2, are dE 0.135 apart, and the two greens 0.168. A single dE
+   floor would have to be at or below 0.117 to leave the pool dealable and above
+   0.135 to go on rejecting the blues. No such number exists: on this pool the
+   two metrics disagree about which pair is closer, and swapping one for the
+   other would let the exact pair #12 was written for sit in mesh.
+
+   So the rule is stated once and measured twice, by whichever axis the palette
+   actually varies on: NO TWO MESHING WHEELS MAY BE ONES A VIEWER WOULD FAIL TO
+   TELL APART. A pool-dealt chain varies by hue and is judged in degrees. A
+   single-colour chain varies by lightness and chroma and is judged in OKLab.
+   Neither rule is ever relaxed; they are simply never both applicable, because
+   every meshing pair in the deal belongs to one chain and therefore to one
+   palette -- a chain head past a bridge meshes an idler, not another chain.
+   ============================================================================= */
+const OK_M = 180 / Math.PI;
+const srgbLin = (v) => v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+const srgbGam = (v) => v <= 0.0031308 ? v * 12.92 : 1.055 * Math.pow(v, 1 / 2.4) - 0.055;
+/* sRGB <-> OKLab (Ottosson). CSS itself now speaks this space, and unlike HSL
+   its L tracks perceived lightness -- which is the whole reason a monochrome
+   family can be spaced in it at all. */
+function oklabOf(rgb) {
+  const R = srgbLin(rgb[0] / 255), G = srgbLin(rgb[1] / 255), B = srgbLin(rgb[2] / 255);
+  const l = Math.cbrt(0.4122214708 * R + 0.5363325363 * G + 0.0514459929 * B);
+  const m = Math.cbrt(0.2119034982 * R + 0.6806995451 * G + 0.1073969566 * B);
+  const s = Math.cbrt(0.0883024619 * R + 0.2817188376 * G + 0.6299787005 * B);
+  return [0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
+          1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
+          0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s];
+}
+function oklabRgb(L, A, B) {
+  const l = Math.pow(L + 0.3963377774 * A + 0.2158037573 * B, 3);
+  const m = Math.pow(L - 0.1055613458 * A - 0.0638541728 * B, 3);
+  const s = Math.pow(L - 0.0894841775 * A - 1.2914855480 * B, 3);
+  return [+4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+          -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+          -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s].map(v => srgbGam(v) * 255);
+}
+const hexOf = (rgb) => '#' + rgb.map(v =>
+  Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('');
+const deltaE = (a, b) => {
+  const A = oklabOf(rgbOf(a)), B = oklabOf(rgbOf(b));
+  return Math.hypot(A[0] - B[0], A[1] - B[1], A[2] - B[2]);
+};
+/* The most chroma sRGB can hold at this lightness and hue. Bisected rather than
+   solved: the gamut boundary in OKLCh has no closed form worth carrying, and
+   twenty halvings is exact to well under a code value. */
+function maxChroma(L, h) {
+  const a = Math.cos(h / OK_M), b = Math.sin(h / OK_M);
+  let lo = 0, hi = 0.4;
+  for (let i = 0; i < 20; i++) {
+    const m = (lo + hi) / 2;
+    const c = oklabRgb(L, m * a, m * b);
+    if (c.every(v => v >= -0.5 && v <= 255.5)) lo = m; else hi = m;
+  }
+  return lo;
+}
+const oklchHex = (L, C, h) => hexOf(oklabRgb(L, C * Math.cos(h / OK_M), C * Math.sin(h / OK_M)));
+
+/* THE INK THE ENGRAVING IS STRUCK IN. Declared here rather than beside
+   flatTones() because the legibility envelope below is its earliest reader and
+   a `const` has no hoisting to lend it. */
+const FLAT_INK = '#243033';
+/* The opacity it is struck at. Named because two places now need the same
+   number -- the engraving itself and the legibility envelope that has to know
+   how dark it actually lands -- and a second copy of it would let the check and
+   the drawing drift apart without a word. */
+const ENGRAVE_ALPHA = 0.72;
+
+/* WHAT THE SHIPPED POOL ALREADY REACHES, per theme, measured through the same
+   flatTones() the page draws with. Every bound a derived colour is held to is
+   one of these, so the rule is always "no worse than a wheel that already
+   ships" rather than a number somebody chose:
+
+     lo / hi   the luminance envelope the pool's bodies occupy. A derived wheel
+               may not be lighter than the lightest that ships nor darker than
+               the darkest -- which is what keeps it off the pale page in light
+               mode and off the dark one in dark, without this having to read a
+               CSS token it cannot see from here.
+     ink       the weakest contrast the engraving reaches over any pool body. A
+               pale family is exactly where that margin gets thin, so it is
+               checked directly rather than hoped for.
+
+   Both are computed in BOTH themes and a derived colour must satisfy both,
+   because flatTones() adapts per theme and a family that reads on one page and
+   not the other is half a feature. */
+const POOL_ENVELOPE = (function () {
+  const out = {};
+  [true, false].forEach(soft => {
+    const key = soft ? 'light' : 'dark';
+    let lo = 1, hi = 0, ink = 99;
+    WHEEL_POOL.forEach(p => {
+      const body = rgbOf(flatTones(p.c, soft).body);
+      const y = relLum(body);
+      if (y < lo) lo = y;
+      if (y > hi) hi = y;
+      ink = Math.min(ink, contrastAt(rgbOf(FLAT_INK), body, ENGRAVE_ALPHA));
+    });
+    out[key] = { lo: lo, hi: hi, ink: ink };
+  });
+  return out;
+})();
+/* THE PALEST WHEEL THAT SHIPS, and the most colourful thing in the BACKGROUND.
+   Chroma has an envelope too, and the two ends of it mean different things. A
+   seed below the ghosts' own chroma has no colour left to be somebody's -- the
+   bridge idlers and the whole background train live there, so the chain would
+   read as machinery (the #65 blank-gear defect, arrived at from the other side).
+   A seed above that but paler than any wheel on the page is a real colour that
+   this drawing has simply never been asked to carry, and it is lifted to the
+   palest one it has. */
+const POOL_CHROMA_MIN = Math.min.apply(null, WHEEL_POOL.map(p => {
+  const l = oklabOf(rgbOf(p.c));
+  return Math.hypot(l[1], l[2]);
+}));
+const GHOST_CHROMA_MAX = Math.max.apply(null, GHOST_COLORS.map(c => {
+  const l = oklabOf(rgbOf(c));
+  return Math.hypot(l[1], l[2]);
+}));
+const bodyLegible = (hex) => ['light', 'dark'].every(k => {
+  const body = rgbOf(flatTones(hex, k === 'light').body);
+  const y = relLum(body);
+  return y >= POOL_ENVELOPE[k].lo && y <= POOL_ENVELOPE[k].hi
+    && contrastAt(rgbOf(FLAT_INK), body, ENGRAVE_ALPHA) >= POOL_ENVELOPE[k].ink;
+});
+
+/* THE CLOSEST THIS PAGE HAS EVER PUT TWO MESHING WHEELS, in OKLab: the smallest
+   distance among the pool pairs the 40-degree rule lets through. It is what
+   #12's rule actually buys, expressed in the metric a single-colour family can
+   be measured in, and it is the spacing a derived family AIMS for -- so a chain
+   short enough to afford it is spaced exactly as widely as a pool-dealt one. */
+const TONE_AIM = (function () {
+  let aim = Infinity;
+  for (let i = 0; i < WHEEL_POOL.length; i++) {
+    for (let j = i + 1; j < WHEEL_POOL.length; j++) {
+      if (hueGap(WHEEL_POOL[i].h, WHEEL_POOL[j].h) < MIN_HUE_SEP) continue;
+      aim = Math.min(aim, deltaE(WHEEL_POOL[i].c, WHEEL_POOL[j].c));
+    }
+  }
+  return isFinite(aim) ? aim : 0.1;
+})();
+/* THE FLOOR, and it is per seed rather than global: the distance between a
+   wheel's body and its own raised face. That is the smallest tonal step this
+   artwork already asks every viewer to see, on every wheel, in both themes --
+   so two neighbours further apart than that are at least as distinguishable as
+   a step the drawing already depends on. Below it the family has run out of
+   room and says so. */
+const faceStep = (hex) => Math.min(
+  deltaE(flatTones(hex, true).body, flatTones(hex, true).face),
+  deltaE(flatTones(hex, false).body, flatTones(hex, false).face));
+
+/* ONE SEED, n WHEELS.
+
+   The family walks a ramp through OKLCh centred on the seed. Lightness does
+   most of the work and chroma follows it, because chroma is held at the seed's
+   own FRACTION OF WHAT THE GAMUT ALLOWS at each lightness -- the same relative
+   saturation all the way up, which is how a tint behaves and which cannot leave
+   the gamut by construction. Hue moves a little, deliberately: a family with
+   zero hue movement reads as machine-generated tints of one swatch, and the
+   amount it may move is MIN_HUE_SEP/2 across the whole ramp -- half the angle at
+   which this page already calls two hues different colours, so every member is
+   unambiguously the same colour as every other with the same margin again in
+   hand. The hue spread shrinks with the ramp, so a short chain that only needs
+   a little of the band gets only a little of the hue.
+
+   HOW WIDE THE RAMP IS is the one thing that is not a taste choice:
+
+     band   the widest lightness interval around the seed where every colour is
+            still inside POOL_ENVELOPE in both themes. Found by walking outward
+            until it is not.
+     path   the OKLab distance from one end of that band to the other.
+     span   min(path, (n - 1) x TONE_AIM). A chain short enough to be spaced as
+            widely as a pool deal IS spaced that widely and no wider, so it stays
+            near the colour that was asked for; a longer one opens out until it
+            is using the whole band and then stops, because past that the wheels
+            stop being legible rather than start being clearer.
+
+   So the step between neighbours is span/(n-1). Past some length the ramp cannot
+   separate them any more and the console says so -- the chain is still drawn,
+   because a chain that is absent is worse than one that is subtle, but it is
+   never drawn while claiming the spacing held.
+
+   WHERE THAT LENGTH IS, IS ASKED RATHER THAN PREDICTED (capacityOf, below).
+   floor(path / faceStep) + 1 is the arithmetic and it is off by one on real
+   seeds -- 10 for #B79CE8 against a family that measures 0.0190 at ten wheels
+   with a floor of 0.0198 -- because the ramp is a curve through a gamut
+   boundary, not a straight line, so its ends are further apart than its middle
+   is dense. The formula is the right way to think about it and the wrong way to
+   report it. */
+function familyFor(seed, n) {
+  const lab = oklabOf(rgbOf(seed));
+  let L0 = lab[0];
+  let C0 = Math.hypot(lab[1], lab[2]);
+  const pale = C0 < POOL_CHROMA_MIN;
+  if (pale) C0 = POOL_CHROMA_MIN;
+  const h0 = (Math.atan2(lab[2], lab[1]) * OK_M + 360) % 360;
+  /* The band is walked in code values rather than in some fraction of L: one
+     step of 1/255 is the smallest move that can change a rendered pixel, so
+     this finds the true edge of the legible interval and not a rounding of it. */
+  const STEP = 1 / 255;
+  /* HALF THE HUE THE RAMP MAY WANDER, and every legibility question below is
+     asked at BOTH edges of it as well as in the middle. The band is otherwise
+     walked at one hue and used at several: #17A05C sits exactly on the pool's
+     luminance floor, and a rung ten degrees off its hue carries different
+     chroma and therefore different light, so it fell out of an envelope its own
+     seed defines. Testing the widest wander the ramp can ever ask for makes the
+     band true for every ramp that fits inside it, and costs three checks. */
+  const HUE_HALF = MIN_HUE_SEP / 4;
+  const acrossHues = (f) => [-HUE_HALF, 0, HUE_HALF].every(d => f((h0 + d + 360) % 360));
+  /* The seed's own chroma, carried as far up or down the ramp as the gamut
+     allows. Used to FIND the anchor; the ramp proper uses the relative form
+     below, which is what makes a tint behave like a tint. */
+  const atAbs = (L, hue) => oklchHex(L, Math.min(C0, maxChroma(L, hue)), hue);
+  /* A SEED CAN BE OUTSIDE THE ENVELOPE ITSELF, and then there is no band to walk
+     -- #7E57C2 is a perfectly ordinary purple that lands darker than any wheel
+     that ships, and every wheel of the chain came out the identical colour with
+     nothing but the closest-pair warning to say why. The colour is not refused,
+     because "pick another one" is a poor answer to a child who picked this one:
+     the anchor is slid to the nearest lightness that IS legible, the family is
+     built around THAT, and the console names both hexes so the change is a
+     stated one rather than a silent one. */
+  let moved = pale;
+  if (!acrossHues(hue => bodyLegible(atAbs(L0, hue)))) {
+    let best = null;
+    for (let L = STEP; L < 1; L += STEP) {
+      if (!acrossHues(hue => bodyLegible(atAbs(L, hue)))) continue;
+      if (best === null || Math.abs(L - L0) < Math.abs(best - L0)) best = L;
+    }
+    if (best === null) return { seed: seed, colours: null, path: 0, floor: 0,
+      worst: 0, span: 0, band: null, chroma: C0, moved: false, anchor: null };
+    L0 = best;
+    moved = true;
+  }
+  /* CHROMA IS HELD AT THE SEED'S FRACTION OF WHAT THE GAMUT ALLOWS, and the
+     fraction is taken at the ANCHOR rather than at the colour as written. On a
+     seed that did not have to move those are the same number. On one that did
+     they are not, and taking it at the original is how a pale cream comes back
+     as a saturated amber: near white the gamut is narrow, so a faint chroma is
+     a LARGE fraction of it, and carrying that fraction down to a usable
+     lightness multiplies it into something nobody asked for. */
+  const cap = maxChroma(L0, h0);
+  const frac = cap > 0 ? Math.min(1, C0 / cap) : 0;
+  const at = (L, hue) => oklchHex(L, frac * maxChroma(L, hue), hue);
+  let lo = L0, hi = L0;
+  while (lo - STEP > 0 && acrossHues(hue => bodyLegible(at(lo - STEP, hue)))) lo -= STEP;
+  while (hi + STEP < 1 && acrossHues(hue => bodyLegible(at(hi + STEP, hue)))) hi += STEP;
+  const path = deltaE(at(lo, h0), at(hi, h0));
+  /* Measured on the colour actually drawn rather than on the hex as written: if
+     the seed had to slide, the family is made of the anchor's tones and it is
+     the anchor's own body-to-face step a viewer is being asked to see. */
+  const floor = faceStep(at(L0, h0));
+  /* THE BAND IS WALKED AT THE SEED'S OWN HUE AND THE RAMP DOES NOT STAY THERE,
+     so the two ends of a family can land outside a band that was measured
+     inside it -- #F2C14E at three wheels put its top rung at 0.573 luminance
+     against a pool ceiling of 0.566, because the hue it drifted to carries more
+     chroma at that lightness and therefore more light. The band is a starting
+     estimate; what has to be legible is the colours actually handed out, so
+     they are the thing checked, and the ramp is drawn in until they are. One
+     code value at a time, from both ends, because the failure is always at an
+     extreme. */
+  const ramp = (aL, bL, hueSpan) => {
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const t = n > 1 ? i / (n - 1) : 0.5;
+      out.push(at(aL + (bL - aL) * t, (h0 + hueSpan * (t - 0.5) + 360) % 360));
+    }
+    return out;
+  };
+  let span = n > 1 ? Math.min(path, (n - 1) * TONE_AIM) : 0;
+  let colours = null;
+  for (let guard = 0; guard < 256; guard++) {
+    /* Centred on the seed, then slid whole if the band is lopsided -- sliding
+       keeps the span, where clamping each end separately would silently shorten
+       it and report a spacing the family does not have. */
+    const frac2 = path > 0 ? span / path : 0;
+    let a = L0 - (hi - lo) * frac2 / 2;
+    let b = a + (hi - lo) * frac2;
+    if (a < lo) { b += lo - a; a = lo; }
+    if (b > hi) { a -= b - hi; b = hi; }
+    a = Math.max(lo, a); b = Math.min(hi, b);
+    colours = ramp(a, b, (MIN_HUE_SEP / 2) * frac2);
+    if (colours.every(bodyLegible)) break;
+    if (span <= 0) break;
+    span = Math.max(0, span - deltaE(at(L0, h0), at(Math.min(1, L0 + STEP), h0)));
+  }
+  /* MEASURED, NOT ASSUMED. The wheels are handed out in a shuffled order, so
+     what has to hold is the minimum over EVERY pair and not just over
+     neighbours on the ramp -- and chroma follows a gamut boundary that is not
+     monotonic, so the two are not the same statement. */
+  let worst = Infinity;
+  for (let i = 0; i < colours.length; i++) {
+    for (let j = i + 1; j < colours.length; j++) {
+      worst = Math.min(worst, deltaE(colours[i], colours[j]));
+    }
+  }
+  return { seed: seed, colours: colours, band: [lo, hi], path: path, span: span,
+    floor: floor, worst: isFinite(worst) ? worst : Infinity, chroma: C0,
+    moved: moved, anchor: at(L0, h0) };
+}
+/* HOW MANY WHEELS THIS SEED CAN ACTUALLY HOLD, by building families until one
+   stops clearing its own floor. Only ever called to write a warning, so the
+   handful of extra ramps it costs are paid on a load that is already in
+   trouble. The cap is a stop, not an answer: a stage that wanted more wheels
+   than this ran out of long axis a very long time before it ran out of hues. */
+function capacityOf(seed) {
+  let n = 1;
+  while (n < 64 && familyFor(seed, n + 1).worst >= familyFor(seed, n + 1).floor) n++;
+  return n;
+}
+
+/* Who asked for one, and whether what they asked for can be used. `palette`
+   takes any colour form the page can already read -- #rgb, #rrggbb, rgb() --
+   because rgbOf() is the one parser here and a format it cannot read is a
+   format that cannot be taken into OKLab at all. */
+const PALETTE_SEED = (function () {
+  const out = {};
+  (CONF.PEOPLE || []).forEach(p => {
+    if (p.palette == null) return;
+    const rgb = rgbOf(p.palette);
+    if (!rgb) {
+      console.warn('wozi: ' + p.slug + ' asks for the palette ' + JSON.stringify(p.palette)
+        + ', which is not a colour this page can read — give it #rgb, #rrggbb or '
+        + 'rgb(). Dealing this chain from the pool instead.');
+      return;
+    }
+    const lab = oklabOf(rgb);
+    const c = Math.hypot(lab[1], lab[2]);
+    if (c <= GHOST_CHROMA_MAX) {
+      /* Not a taste call. The bridge idlers and the whole background train are
+         drawn at or below this chroma, so a chain seeded here would read as
+         structure rather than as somebody's -- and there is no hue to lift it
+         by, because at chroma zero there is no hue at all. */
+      console.warn('wozi: ' + p.slug + ' asks for ' + p.palette + ', which is '
+        + c.toFixed(4) + ' of chroma — at or below the ' + GHOST_CHROMA_MAX.toFixed(4)
+        + ' the background machinery is drawn at, so the chain would read as '
+        + 'idlers rather than as a colour. Dealing this chain from the pool instead.');
+      return;
+    }
+    out[p.slug] = hexOf(rgb);
+  });
+  return out;
+})();
+
 /* THE DEAL IS SIZED AND SCORED OVER THE WHEELS THAT ACTUALLY TAKE A COLOUR, and
    those are the LINKED ones. It used to be sized to TRAIN.length, which counts
    the bridge idlers -- and an idler's dealt colour is then thrown away two lines
@@ -1757,15 +2130,63 @@ const DEALT = [];
 TRAIN.forEach((t, i) => { if (t.role !== 'idler') DEALT.push(i); });
 const DEAL_SLOT = {};
 DEALT.forEach((i, k) => { DEAL_SLOT[i] = k; });
-const WHEEL_DEAL = dealColours(DEALT.length, (k) => {
+
+/* A CHAIN WITH A SEED IS NOT IN THE POOL DEAL AT ALL, and taking it out is what
+   keeps both rules honest: dealColours() only ever sees wheels that vary by hue,
+   so its 40-degree test is never asked a question it cannot answer, and the
+   family only ever sees wheels of one chain. When nobody has a seed this is the
+   identity mapping and the call below is the call that shipped. */
+const POOL_SLOTS = [];
+DEALT.forEach((i, k) => { if (!PALETTE_SEED[TRAIN[i].person]) POOL_SLOTS.push(k); });
+const POOL_AT = {};
+POOL_SLOTS.forEach((k, j) => { POOL_AT[k] = j; });
+const WHEEL_DEAL = new Array(DEALT.length);
+const POOL_DEAL = dealColours(POOL_SLOTS.length, (j) => {
   /* A CHAIN HEAD PAST A BRIDGE HAS NO COLOURED NEIGHBOUR, and saying so is the
      honest answer rather than walking up to the nearest one. It meshes with an
      idler, and an idler is a whole wheel of background palette standing between
      it and the last coloured thing on that side -- so there is nothing there to
      confuse it with, and scoring it against a wheel it does not touch would
      spend the 40-degree budget on a pair nobody can see together. */
-  const p = TRAIN[DEALT[k]].parent;
-  return p == null || DEAL_SLOT[p] === undefined ? null : DEAL_SLOT[p];
+  const p = TRAIN[DEALT[POOL_SLOTS[j]]].parent;
+  const pk = p == null ? undefined : DEAL_SLOT[p];
+  return pk === undefined || POOL_AT[pk] === undefined ? null : POOL_AT[pk];
+});
+POOL_SLOTS.forEach((k, j) => { WHEEL_DEAL[k] = POOL_DEAL[j]; });
+
+/* EACH SEEDED CHAIN GETS ITS OWN FAMILY, sized to the wheels that chain actually
+   has on this stage. The rungs are handed out in a shuffled order so the machine
+   still differs between visits, which the ramp can afford because the guarantee
+   measured above is over every PAIR rather than over neighbours on the ramp. */
+Object.keys(PALETTE_SEED).forEach(slug => {
+  const mine = [];
+  DEALT.forEach((i, k) => { if (TRAIN[i].person === slug) mine.push(k); });
+  if (!mine.length) return;   /* that chain is not on this stage */
+  const fam = familyFor(PALETTE_SEED[slug], mine.length);
+  const rungs = fam.colours.slice();
+  for (let i = rungs.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const t = rungs[i]; rungs[i] = rungs[j]; rungs[j] = t;
+  }
+  mine.forEach((k, j) => { WHEEL_DEAL[k] = rungs[j]; });
+  /* WHAT THE SEED COULD AND COULD NOT DO, said out loud on every load that falls
+     short -- the console is where this composition already reports the things it
+     could not honour, and a family quietly drawing two wheels a viewer cannot
+     tell apart is exactly the failure that looks fine in a screenshot. */
+  /* ONE WARNING, FOR THE ONE THING THAT IS ACTUALLY WRONG. A seeded chain is
+     nearly always spaced closer than TONE_AIM -- that is what asking for one
+     colour MEANS, and saying so every load would be crying wolf about the
+     feature working. What must never pass in silence is two wheels a viewer
+     cannot tell apart. */
+  if (fam.worst < fam.floor) {
+    console.warn('wozi: ' + slug + '’s chain is longer than ' + fam.seed
+      + ' can separate. ' + mine.length + ' wheels leave ' + fam.worst.toFixed(4)
+      + ' of OKLab between the closest pair, and this artwork already asks a '
+      + 'viewer to see ' + fam.floor.toFixed(4) + ' between a wheel’s body and '
+      + 'its own raised face. The legible band around this colour holds '
+      + capacityOf(fam.seed) + ' wheels — a lighter or more colourful seed buys '
+      + 'a deeper one, and the pool deal has no such limit.');
+  }
 });
 TRAIN.forEach((t, i) => {
   /* AN IDLER IS ANONYMOUS BY DESIGN LANGUAGE, and that is the whole reason a
@@ -1875,7 +2296,9 @@ function flatTones(hex, soft) {
      contour, where it reads as rim light against the dark page. */
   return { body: mix(0, 255), face: mix(0.07, 255), well: mix(0.13, 0), line: mix(0.40, 0), edge: mix(0.16, 0) };
 }
-const FLAT_INK = '#243033';
+/* FLAT_INK and ENGRAVE_ALPHA moved up to the palette block (#97): the
+   legibility envelope a derived family is held to has to know what the
+   engraving is struck in and how hard, and it runs long before this line. */
 /* The handle ring's ink is a hairline problem, not a space problem (#36): BAND_DEPTH
    already grew 36% to give the lettering more clear metal, and the text never moved.
    Measured on an offscreen canvas at the engraving's own fontSize/weight/fillOpacity
@@ -5269,7 +5692,7 @@ class Component extends DCLogic {
       h('circle', { r: Math.max(3, hubR * 0.4), fill: p[3], opacity: 0.5 }),
       /* LAYER: engraved rims — stamped into the solid band just inside the tooth roots,
          cut shadow above and highlight below so it reads as struck metal, not overlaid text. */
-      this.props.engravedRims && eng.handle ? h('g', { key: 'eng' }, [{ dy: 0, col: FLAT_INK, op: 0.72 }].map((L, li) => h('text', {
+      this.props.engravedRims && eng.handle ? h('g', { key: 'eng' }, [{ dy: 0, col: FLAT_INK, op: ENGRAVE_ALPHA }].map((L, li) => h('text', {
         key: li, transform: 'translate(0,' + L.dy + ')',
         fontSize: eng.fT.toFixed(2), fill: L.col, fillOpacity: L.op, letterSpacing: '0.1em',
         /* Same ink as the fill, matched in opacity, just fattening every edge by a

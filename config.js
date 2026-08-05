@@ -150,6 +150,53 @@ window.WOZI_CONFIG = {
                nothing to tell apart. Identity deliberately does NOT live in
                colour: a person's hue preference must not reserve that hue, so
                two chains may legitimately come out looking alike.
+       palette optional. ONE COLOUR, AND THE WHOLE CHAIN IS MADE OF IT.
+               `palette: '#B79CE8'` says "make this person's machine light
+               purple": every wheel on that chain is dealt that colour or a near
+               variation of it, derived from it rather than dealt from
+               WHEEL_POOL. Absent the key the chain is dealt from the pool
+               exactly as before, and that is still the default for everyone.
+
+               Takes any colour form this page can already read -- #rgb,
+               #rrggbb, rgb() -- because a format it cannot read is a format
+               that cannot be taken into OKLab, which is where the family is
+               built. Named CSS colours are not accepted, and say so.
+
+               WHAT VARIES. Lightness does most of the work and chroma follows
+               it, held at the seed's own fraction of what the gamut allows at
+               each lightness, which is how a tint behaves. Hue moves a little
+               and deliberately: MIN_HUE_SEP/2 across the whole ramp -- half the
+               angle at which this page already calls two hues different
+               colours -- because a family with no hue movement at all reads as
+               machine-generated tints of one swatch. A chain of ONE wheel gets
+               the seed exactly; the ramp only opens as far as the wheel count
+               makes it.
+
+               HOW FAR IT MAY GO is not a taste setting. Every derived colour
+               has to stay inside the tonal envelope WHEEL_POOL already
+               occupies, in BOTH themes, measured through the same flatTones()
+               the page draws with: no lighter than the lightest wheel that
+               ships, no darker than the darkest, and never leaving the
+               engraving less legible over it than over the worst of them. A
+               seed outside that envelope is not refused -- it is slid to the
+               nearest lightness that works, and the console names both hexes.
+               A seed paler than the palest wheel that ships is lifted to it.
+
+               WHAT IT CANNOT DO. #12's 40-degree hue rule does not apply to a
+               chain like this -- there is no hue difference to measure -- so
+               the separation is measured in OKLab instead, and the floor is the
+               distance between a wheel's body and its own raised face, the
+               smallest tonal step this artwork already asks every viewer to
+               see. A seed holds roughly six to ten wheels at that floor;
+               beyond that the ramp cannot separate them and the console says
+               so, naming the seed's real capacity. The chain is still drawn.
+               The pool deal has no such limit, which is the cost of asking for
+               one colour.
+
+               A seed at or below the chroma the background machinery is drawn
+               at is refused outright, with a warning: the bridge idlers are
+               grey, and a chain that grey would read as structure rather than
+               as somebody's.
        bridge  optional, default true. On a combined stage every chain but the
                longest is driven off it through a short run of plain idler
                wheels, which is also what sets the gap between the two. Set
@@ -208,6 +255,13 @@ window.WOZI_CONFIG = {
          domain name on the distribution and a Route53 alias -- no deploy change,
          per the note above. */
       hosts: ['harper.wozi.com'],
+      /* HARPER'S CHAIN IS PURPLE, at Charles's request (#68). The seed is the
+         pool's own purple rather than a new hex: it is an authored colour that
+         has already been judged good on these wheels, and it sits inside the
+         tonal envelope with no sliding needed. Her chain is one wheel today, so
+         that wheel is EXACTLY this colour; the moment she has two the family
+         opens either side of it and she still has a purple machine. */
+      palette: '#9B8CE0',
       links: [
         /* HER ADDRESS IS DELIBERATELY NOT PUBLISHED YET. config.js is served to
            the web, so a handle here is public in plain text no matter what the
@@ -281,6 +335,14 @@ window.WOZI_CONFIG = {
      What IS computed is which colours appear together: dealColours() in
      index.html scores candidate sets by minimum pairwise hue distance and
      refuses neighbours closer than 40 degrees.
+
+     A person's optional `palette` seed takes their chain OUT of this deal
+     entirely and derives its own family instead (#97). That does not change
+     this list or how it is dealt to everyone else -- but it does mean this pool
+     is what a derived family is measured against: its tonal envelope is the
+     bound a derived colour may not leave, and the closest two colours it ever
+     puts in mesh is the spacing a derived family aims for. Adding a colour here
+     therefore moves both.
 
      Hue is DERIVED from the hex, not stored beside it. It used to be written by
      hand as an `h` field, which was a duplicate that could silently drift —
