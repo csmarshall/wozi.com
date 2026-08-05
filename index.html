@@ -139,6 +139,9 @@ a:focus-visible,button:focus-visible,[tabindex]:focus-visible{outline:3px solid 
      WHEEL_POOL       the colour pool wheels are dealt from -- the original
                       template's seven plus three gap-fillers. Shuffled per load;
                       the deal refuses neighbours closer than 40 degrees of hue.
+                      A person may add `palette: { around, spread }` to be dealt
+                      from an arc of it -- a preference inside that rule, which
+                      reserves nothing from anyone else (#68).
      CENTRE_FAMILIES  the kinds of gear centre, and the variants of each. Adding
                       a family puts it in rotation and in the Table of Gears at
                       once. Admission rule, Charles's: a wheel a machinist could
@@ -1522,36 +1525,204 @@ const hueOf = (hex) => {
   return h < 0 ? h + 360 : h;
 };
 const WHEEL_POOL = (CONF.WHEEL_POOL || []).map(c => ({ c: c, h: hueOf(c) }));
-function dealColours(n, parentOf) {
-  const dist = (a, b) => Math.min(Math.abs(a - b), 360 - Math.abs(a - b));
-  let best = null, bestScore = -1;
-  for (let tries = 0; tries < 80; tries++) {
-    const idx = WHEEL_POOL.map((c, i) => i);
-    for (let i = idx.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      const t = idx[i]; idx[i] = idx[j]; idx[j] = t;
+const hueGap = (a, b) => Math.min(Math.abs(a - b), 360 - Math.abs(a - b));
+/* HOW FAR APART TWO WHEELS THAT MESH MUST BE IN HUE (#12). It was written as a
+   bare 40 in the one place that compared, and is now named because the palette
+   bias below has to reason about it as well as obey it -- the arithmetic of
+   "how many wheels fit in an arc" is this number, and two copies of it is
+   exactly the drift this file keeps warning about. */
+const MIN_HUE_SEP = 40;
+
+/* A PERSON MAY ASK FOR A REGION OF THE WHEEL, AND ASKING RESERVES NOTHING (#68).
+   `palette: { around: '#F2C14E', spread: 60 }` on a PEOPLE entry says "hues
+   within 60 degrees either side of that amber, please". Absent the key, that
+   person is dealt exactly as before.
+
+   THE ARC IS A PREFERENCE, NEVER A PARTITION. Nothing is removed from the pool
+   for anybody: every colour is in every shuffle, an unbiased wheel can and does
+   take a hue somebody else asked for, and the arc is scored by MEMBERSHIP rather
+   than by distance to the hex named -- so the named colour itself is no likelier
+   than any other inside the arc, and is as available to everyone else as it ever
+   was. The consequence, accepted on the ticket: two chains may legitimately come
+   out looking alike. COLOUR THEREFORE CANNOT CARRY IDENTITY, which is what the
+   datum plate is for. Do not build anything on top of this that needs to tell
+   one chain from another.
+
+   The arc is stated as a half-width because that is how the ticket stated it,
+   and because a centre and a reach is how you would describe it out loud. The
+   full window is 2 x spread wide, which is the figure the seating arithmetic
+   below cares about. */
+const PALETTE_BIAS = (function () {
+  const out = {};
+  (CONF.PEOPLE || []).forEach(p => {
+    const spec = p.palette;
+    if (!spec) return;
+    const around = typeof spec.around === 'string' ? spec.around.trim() : '';
+    const spread = Number(spec.spread);
+    if (!/^#[0-9a-fA-F]{6}$/.test(around) || !isFinite(spread) || spread <= 0) {
+      console.warn('wozi: ' + p.slug + ' has a palette bias that is not usable — '
+        + '`around` must be a #rrggbb hex and `spread` a positive number of '
+        + 'degrees. Dealing this chain from the whole pool.');
+      return;
     }
-    const pick = idx.slice(0, Math.min(n, idx.length));
-    /* MORE WHEELS THAN COLOURS still deals every wheel, and every wheel dealt is
-       still SCORED. The call site used to close the gap itself, with
-       `WHEEL_DEAL[i % WHEEL_DEAL.length]` -- so past the end of the pool the
-       wrap handed out a colour the 40-degree rule (#12) had never looked at, and
-       two wheels in mesh could come out the same hue with nothing to catch it.
-       Repeating the shuffled pool HERE puts those slots inside the scored array
-       instead: the score can then see the repeat and another shuffle is tried. */
-    while (idx.length && pick.length < n) pick.push(idx[pick.length % idx.length]);
-    /* Score MESHING pairs. Wheels are only confused with the ones beside them,
-       and beside means meshed -- on a tree that is the parent, not the previous
-       slot in this array. */
-    let score = 360;
-    for (let i = 0; i < pick.length; i++) {
-      const p = parentOf(i);
-      if (p == null || p >= pick.length) continue;
-      score = Math.min(score, dist(WHEEL_POOL[pick[i]].h, WHEEL_POOL[pick[p]].h));
+    /* Half the wheel each way IS the whole wheel, so the arc holds every colour
+       and the bias can never prefer anything. Said out loud rather than left to
+       look like a setting that works. */
+    if (spread >= 180) {
+      console.warn('wozi: ' + p.slug + ' asks for hues within ' + spread + '° of '
+        + around + ', which is the entire colour wheel — the bias has no effect. '
+        + 'Drop the key or narrow the spread.');
+      return;
     }
-    if (score > bestScore) { bestScore = score; best = pick; }
-    if (score >= 40) break;
+    const h = hueOf(around);
+    const arc = { slug: p.slug, around: around, h: h, spread: spread,
+      holds: (hue) => hueGap(hue, h) <= spread, pool: [] };
+    WHEEL_POOL.forEach((c, i) => { if (arc.holds(c.h)) arc.pool.push(i); });
+    out[p.slug] = arc;
+  });
+  return out;
+})();
+/* THE CEILING ON A BIASED DEAL, derived rather than hoped for: a wheel can only
+   wear a pool colour that is inside the arc, and within one deal the pool is
+   handed out without repeats until it is exhausted, so a person can never have
+   more wheels inside their arc than the pool has colours there. That is the
+   number the search stops at and the number the report below compares against --
+   one home for the fact, so the loop and the warning cannot disagree. */
+function biasCeiling(n, biasOf) {
+  const want = new Map();
+  for (let k = 0; k < n; k++) {
+    const arc = biasOf(k);
+    if (arc) want.set(arc, (want.get(arc) || 0) + 1);
   }
+  let ceiling = 0;
+  const supply = {};
+  want.forEach((wheels, arc) => {
+    ceiling += Math.min(wheels, arc.pool.length);
+    arc.pool.forEach(i => { supply[i] = 1; });
+  });
+  /* TWO PEOPLE MAY ASK FOR THE SAME ARC, and then they are competing for the
+     same colours rather than each getting their own -- which is the whole point
+     of an arc reserving nothing. One deal hands each colour out once, so the
+     wheels that can be inside ANY arc are capped by how many DISTINCT pool
+     colours the arcs cover between them, however the per-person sums add up.
+     Without this the ceiling is unreachable whenever arcs overlap, and an
+     unreachable ceiling is a warning that fires on a load that did nothing
+     wrong. */
+  return Math.min(ceiling, Object.keys(supply).length);
+}
+function dealColours(n, parentOf, biasOf) {
+  const wants = biasOf || (() => null);
+  const ceiling = biasCeiling(n, wants);
+  let best = null, bestSep = -1, bestHits = -1;
+  /* `top` is the strongest bias this pass may apply. Zero is no bias at all. */
+  const search = (top) => {
+    for (let tries = 0; tries < 80; tries++) {
+      const idx = WHEEL_POOL.map((c, i) => i);
+      for (let i = idx.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        const t = idx[i]; idx[i] = idx[j]; idx[j] = t;
+      }
+      /* MORE WHEELS THAN COLOURS still deals every wheel, and every wheel dealt is
+         still SCORED. The call site used to close the gap itself, with
+         `WHEEL_DEAL[i % WHEEL_DEAL.length]` -- so past the end of the pool the
+         wrap handed out a colour the 40-degree rule (#12) had never looked at, and
+         two wheels in mesh could come out the same hue with nothing to catch it.
+         Dealing the pool again HERE puts those slots inside the scored array
+         instead: the score can then see the repeat and another shuffle is tried. */
+      let pick;
+      if (!top) {
+        /* NO PREFERENCE IS IN PLAY, so this is the deal that shipped, draw for
+           draw -- the shuffled pool taken in slot order. It is what a page with no
+           arc configured runs, and it is what the second pass falls back to, so
+           both of those are the original code rather than a re-derivation of it. */
+        pick = idx.slice(0, Math.min(n, idx.length));
+        while (idx.length && pick.length < n) pick.push(idx[pick.length % idx.length]);
+      } else {
+        /* THE DRAW PREFERS, IT DOES NOT RESERVE. Slots are visited in a RANDOM
+           order and each takes the first colour left in the shuffled pool that its
+           person asked for, or the first one left if its person asked for nothing
+           or nothing it asked for is left. Visiting in random order is the whole
+           guarantee: an unbiased wheel reaches the shuffle before a biased one
+           about as often as not, and when it does it takes the amber.
+
+           HOW MANY WHEELS MAY PREFER IS SWEPT, AND THAT IS WHAT KEEPS THE GATE
+           REACHABLE. Preferring on every biased wheel of every try was measured
+           doing real damage: an arc holding five pool colours that sit in a tight
+           cluster -- blue, at a spread of 60 -- pulled every one of the eighty
+           candidates into that cluster, so not one of them separated its meshing
+           pairs by MIN_HUE_SEP and the best-kept deal was an ILLEGAL one. The
+           search was choosing between eighty deals that all broke the rule.
+
+           So `cap` counts down from the pass's top to zero and repeats, one step
+           per try: the budget is spread evenly over every strength of bias from
+           the most this arc could ever get to none at all, and cap 0 is the
+           shuffled deal that ships. The gate is therefore always in the candidate
+           set, the ranking below always has a legal deal to prefer, and what the
+           arc actually gets is the most preferring that stayed legal rather than
+           the most that was asked for. No tuned number: the sweep is the ceiling,
+           and the ceiling is derived from the pool and the wheels. */
+        const cap = top - (tries % (top + 1));
+        let preferred = 0;
+        pick = new Array(n);
+        const slots = [];
+        for (let i = 0; i < n; i++) slots.push(i);
+        for (let i = slots.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          const t = slots[i]; slots[i] = slots[j]; slots[j] = t;
+        }
+        let left = idx.slice();
+        slots.forEach(k => {
+          if (!left.length) left = idx.slice();
+          const arc = preferred < cap ? wants(k) : null;
+          let at = 0;
+          if (arc) {
+            const j = left.findIndex(i => arc.holds(WHEEL_POOL[i].h));
+            if (j >= 0) { at = j; preferred++; }
+          }
+          pick[k] = left.splice(at, 1)[0];
+        });
+      }
+      /* Score MESHING pairs. Wheels are only confused with the ones beside them,
+         and beside means meshed -- on a tree that is the parent, not the previous
+         slot in this array. */
+      let sep = 360;
+      for (let i = 0; i < pick.length; i++) {
+        const p = parentOf(i);
+        if (p == null || p >= pick.length) continue;
+        sep = Math.min(sep, hueGap(WHEEL_POOL[pick[i]].h, WHEEL_POOL[pick[p]].h));
+      }
+      /* THE SEPARATION RULE IS A GATE AND THE BIAS IS A PREFERENCE INSIDE IT.
+         The two keys are ranked lexicographically with separation CLAMPED at the
+         rule: below MIN_HUE_SEP more separation always wins, at or above it the
+         rule is already satisfied and there is nothing left to buy with further
+         distance, so the arc decides. That ordering IS "a preference inside the
+         constraint, never a replacement for it" -- no bias can seat two meshing
+         wheels closer than MIN_HUE_SEP, because a deal that does loses on the
+         first key whatever it scores on the second. */
+      let hits = 0;
+      for (let k = 0; k < pick.length; k++) {
+        const arc = wants(k);
+        if (arc && arc.holds(WHEEL_POOL[pick[k]].h)) hits++;
+      }
+      const rank = Math.min(sep, MIN_HUE_SEP);
+      if (rank > bestSep || (rank === bestSep && hits > bestHits)) {
+        bestSep = rank; bestHits = hits; best = pick;
+      }
+      if (sep >= MIN_HUE_SEP && hits >= top) break;
+    }
+  };
+  search(ceiling);
+  /* AN ARC MAY NEVER MAKE THE MACHINE WORSE THAN NO ARC AT ALL. The sweep keeps
+     unbiased candidates in the first pass, but they are only a share of its
+     budget, and "bounded retries, best deal kept" means a pass that happened to
+     generate no legal candidate would hand back an illegal one -- measured at
+     roughly one load in four thousand on a five-colour arc, against a rate too
+     small to see with the whole budget spent unbiased. So when the first pass
+     ends short of the rule, the second spends a FULL budget with every
+     preference dropped: line for line the search that shipped, on a page that
+     asked for nothing. The ranking then keeps whichever pass did better, and
+     separation is the first key, so the arc can only ever lose to the rule. */
+  if (ceiling && bestSep < MIN_HUE_SEP) search(0);
   return best.map(i => WHEEL_POOL[i].c);
 }
 /* THE DEAL IS SIZED AND SCORED OVER THE WHEELS THAT ACTUALLY TAKE A COLOUR, and
@@ -1570,6 +1741,9 @@ const DEALT = [];
 TRAIN.forEach((t, i) => { if (t.role !== 'idler') DEALT.push(i); });
 const DEAL_SLOT = {};
 DEALT.forEach((i, k) => { DEAL_SLOT[i] = k; });
+/* Which arc, if any, the wheel in deal slot k was asked to land in. A slot
+   belongs to exactly one person, so this is a lookup rather than a decision. */
+const BIAS_OF = (k) => PALETTE_BIAS[TRAIN[DEALT[k]].person] || null;
 const WHEEL_DEAL = dealColours(DEALT.length, (k) => {
   /* A CHAIN HEAD PAST A BRIDGE HAS NO COLOURED NEIGHBOUR, and saying so is the
      honest answer rather than walking up to the nearest one. It meshes with an
@@ -1579,7 +1753,85 @@ const WHEEL_DEAL = dealColours(DEALT.length, (k) => {
      spend the 40-degree budget on a pair nobody can see together. */
   const p = TRAIN[DEALT[k]].parent;
   return p == null || DEAL_SLOT[p] === undefined ? null : DEAL_SLOT[p];
-});
+}, BIAS_OF);
+/* WHAT THE ARC ASKED FOR AND WHAT THE MACHINE COULD GIVE IT, said out loud.
+   A narrow arc fights the 40-degree rule directly, and the rule wins every time
+   -- so the failure mode this has to avoid is a bias that quietly does less than
+   it looks like it is doing. The console is where this composition already
+   reports the things it could not honour (the overlap and unbridged-chain
+   warnings), so it reports this the same way, on every load that falls short.
+
+   TWO DIFFERENT SHORTFALLS, because they have two different fixes:
+
+     supply   the pool simply has too few colours in the arc for the wheels that
+              wanted one. Widen the spread, move it, or author another colour
+              into WHEEL_POOL. Structural: it is true of the config, not of the
+              load, so it says so every time and always will until it is changed.
+     seating  the pool had them and the deal could not seat them all, because
+              MIN_HUE_SEP forbids two of them meshing. THE ARITHMETIC: an arc
+              2 x spread degrees wide holds at most floor(2 x spread /
+              MIN_HUE_SEP) + 1 hues that are all pairwise far enough apart to
+              mesh in a row -- 4 across a 120-degree window at 40 degrees, 1
+              across a 60-degree one. More than that can still be dealt, but only
+              interleaved with wheels from outside the arc, and a chain has only
+              so many gaps to interleave into. */
+(function reportBias(deal) {
+  const arcs = Object.keys(PALETTE_BIAS);
+  if (!arcs.length) return;
+  const asked = {};
+  arcs.forEach(s => { asked[s] = 0; });
+  DEALT.forEach((t, k) => {
+    const arc = BIAS_OF(k);
+    if (arc) asked[arc.slug]++;
+  });
+  arcs.forEach(s => {
+    const arc = PALETTE_BIAS[s];
+    if (!asked[s]) return;   /* that chain is not on this stage */
+    const arcWidth = 2 * arc.spread;
+    const meshable = Math.floor(arcWidth / MIN_HUE_SEP) + 1;
+    if (!arc.pool.length) {
+      /* The nearest colour there IS says exactly what spread would reach one,
+         so the warning carries its own fix rather than an instruction to go and
+         measure the pool by hand. */
+      let near = 360;
+      WHEEL_POOL.forEach(c => { near = Math.min(near, hueGap(c.h, arc.h)); });
+      console.warn('wozi: ' + s + ' asks for hues within ' + arc.spread + '° of '
+        + arc.around + ' and WHEEL_POOL has none there — the nearest is '
+        + near.toFixed(0) + '° away, so nothing under a spread of ' + Math.ceil(near)
+        + ' can be honoured. Dealt from the whole pool.');
+      return;
+    }
+    if (arc.pool.length < asked[s]) {
+      console.warn('wozi: ' + s + ' asks for hues within ' + arc.spread + '° of '
+        + arc.around + ' for ' + asked[s] + ' wheels, and WHEEL_POOL has only '
+        + arc.pool.length + ' there — at least ' + (asked[s] - arc.pool.length)
+        + ' come from outside the arc. A ' + arcWidth + '° window can seat at most '
+        + meshable + ' wheels in a row at ' + MIN_HUE_SEP + '° apart (#12); more '
+        + 'than that only interleaved with wheels from outside it.');
+    }
+  });
+  /* THE SEATING SHORTFALL IS REPORTED OVER THE WHOLE DEAL, not per person,
+     because the ceiling it is measured against is a property of the deal: two
+     people asking for the same arc are competing for the same colours, and
+     saying "harper got 0 of 1" on a load where Charles's wheels took all three
+     would be blaming the rule for something that is the arcs reserving nothing
+     — which is the design working, not failing. */
+  let hits = 0, wanted = 0;
+  DEALT.forEach((t, k) => {
+    const arc = BIAS_OF(k);
+    if (!arc) return;
+    wanted++;
+    if (arc.holds(hueOf(deal[k]))) hits++;
+  });
+  const ceiling = biasCeiling(DEALT.length, BIAS_OF);
+  if (hits < ceiling) {
+    console.warn('wozi: ' + hits + ' of the ' + ceiling + ' wheels the palette '
+      + 'arcs could have taken landed inside one (' + wanted + ' asked) — the '
+      + MIN_HUE_SEP + '° meshing rule (#12) took the rest. That rule is a gate '
+      + 'and an arc is a preference inside it, so this is the bias yielding, not '
+      + 'the deal failing.');
+  }
+})(WHEEL_DEAL);
 TRAIN.forEach((t, i) => {
   /* AN IDLER IS ANONYMOUS BY DESIGN LANGUAGE, and that is the whole reason a
      bridge is made of them rather than of an unowned coloured wheel: a coloured

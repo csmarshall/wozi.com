@@ -84,6 +84,96 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Added
 
+- **#97 — a person may ask for a region of the colour wheel, and asking reserves
+  nothing.** (GitHub #68.) `palette: { around: '#F2C14E', spread: 60 }` on a
+  `PEOPLE` entry biases that person's wheels toward hues within 60 degrees either
+  side of that amber. Absent the key nothing changes, and nothing has the key:
+  the default is still the random deal, and the shape is written out commented on
+  Harper's entry rather than left to be looked up.
+
+  **The rule this is built to, in Charles's words on the ticket: choosing a hue
+  does not remove it from anybody else's queue.** The arc is a preference, never
+  a partition. The pool is whole for every wheel on every load, an unbiased wheel
+  can and does take a hue somebody else asked for, and the arc is matched by
+  MEMBERSHIP rather than by nearness to the hex named — so the named colour is no
+  likelier than the arc's others and stays as available to everyone as it was.
+  Measured on a chain of one asking for warm: the wheel lands inside the arc on
+  100% of loads, and lands on `#F2C14E` itself on 34% of them, which is one in
+  three of the three colours the arc holds. The alternative — the pool
+  partitioned into private arcs — starves the moment a third person appears.
+
+  **The consequence, accepted on the ticket rather than worked around: two chains
+  may legitimately come out looking alike, so colour cannot carry identity.**
+  That is the datum plate's job (#90, #84), and `config.js` now says so where
+  both keys are documented.
+
+  **THE ARITHMETIC, because it is what makes a spread choosable.** The
+  40-degree minimum between MESHING wheels (#12) is a gate the arc may never
+  open. An arc is `2 × spread` degrees wide, so at most
+  `floor(2 × spread / 40) + 1` of its colours can sit in a row — four across the
+  120 degrees a spread of 60 buys, one across 60. More than that can still be
+  dealt, but only interleaved with wheels from outside the arc, and a chain has
+  only so many gaps. On top of that sits supply, and `WHEEL_POOL` is authored and
+  deliberately lumpy rather than evenly spaced: around `#F2C14E` at 60 there are
+  exactly three colours and all three are within 40 degrees of *each other*
+  (3.0°, 23.5°, 42.1°), so no two of them may ever mesh — that arc dresses
+  alternate wheels or none. Around `#4A90E2` at 60 there are five. Between 42 and
+  150 degrees the pool is empty, so an arc centred there finds nothing at all
+  until a colour is authored into it.
+
+  **What happens when the request cannot be met is said out loud, on every load,
+  the way this composition already reports an overlap or a refused bridge.** An
+  arc with no pool colour in it names the nearest one and the spread that would
+  reach it. An arc with fewer colours than wheels says how many come from outside
+  it, and quotes the seating ceiling above. And when the deal seats fewer than
+  the pool could have supplied, the shortfall is reported over the whole deal
+  with the rule named — because two people asking for the same arc are competing
+  for the same colours, and blaming #12 for that would be reporting the design
+  working as a failure. A malformed `around` or `spread`, and a spread of 180 or
+  more (which is the entire wheel and can prefer nothing), are refused with a
+  warning rather than accepted and quietly ignored.
+
+  **One real defect was built and then measured out, and it is the reason the
+  search has the shape it has.** Preferring on every biased wheel of every
+  candidate pulled all eighty candidates into the same tight cluster of the pool:
+  with the five-colour blue arc, not one candidate separated its meshing pairs by
+  40 degrees, and "bounded retries, best deal kept" then handed back an
+  **illegal** deal — 54 sub-40° meshing pairs in 4,000 deals, about one load in
+  four thousand, against a rate too small to see with the budget spent unbiased.
+  Two changes, both derived rather than tuned: the number of wheels allowed to
+  prefer sweeps from the ceiling down to zero and repeats, one step per try, so
+  every strength of bias including *none* is in the candidate set; and if a pass
+  still ends short of the rule, a second pass spends a full budget with every
+  preference dropped — line for line the search that ships on a page with no arc.
+  An arc can never make the machine worse than no arc at all. Re-measured:
+  **0 sub-40° meshing pairs in 280,000 pairs** over 40,000 deals of the real
+  function.
+
+  The ceiling itself is derived and has to account for shared arcs: it is the
+  per-person `min(wheels, colours in the arc)` summed, then capped at the number
+  of DISTINCT pool colours the arcs cover between them. Without that cap two
+  people asking for one arc claim more wheels than the arc has colours, the
+  ceiling is unreachable, and the shortfall warning fires on a load that did
+  nothing wrong.
+
+  `MIN_HUE_SEP` is now named rather than written as a bare 40 in the one place
+  that compared, because the arc has to reason about the rule as well as obey it
+  and two copies of that number is precisely the drift this repo keeps warning
+  about. `WHEEL_POOL` is untouched — the palette is authored, the selection is
+  computed, and that is settled (#40).
+
+  Measured on the real page over seeded loads, `?who=` so every coloured wheel
+  belongs to one person: Charles's seven wheels land inside the warm arc **28.6%**
+  of the time with no key at all and **42.9%** with it, which is 3 of 7 every
+  load — exactly the ceiling that arc's three mutually-close colours allow.
+  Harper's one wheel: 100% inside her arc. Zero sub-40° meshing pairs across
+  every load photographed, read off the rendered geometry rather than the model.
+
+  Gates: 72/72 suite (three new, each shown failing against a deliberately broken
+  implementation first), `a11y_audit` PASS in both themes, `verify_motion` PASS —
+  38 rotating elements advancing, no console errors but the expected
+  `/favicon.ico` 404, badges at ~0px, no strands.
+
 - **#89 — a crawl policy, because a 403 was standing in for one.**
   `https://wozi.com/robots.txt` returned the raw S3 `AccessDenied` XML: the file
   did not exist, was not in the deploy whitelist, and no `<meta name="robots">`

@@ -104,6 +104,38 @@ window.WOZI_CONFIG = {
                nothing to tell apart. Identity deliberately does NOT live in
                colour: a person's hue preference must not reserve that hue, so
                two chains may legitimately come out looking alike.
+       palette optional. `{ around: '#F2C14E', spread: 60 }` asks for this
+               person's wheels to be dealt hues within `spread` degrees EITHER
+               SIDE of that colour. Absent the key, the chain is dealt from the
+               whole pool exactly as before, and that is the default.
+
+               ASKING RESERVES NOTHING. The arc is a preference, not a
+               partition: no colour is withdrawn from the pool for anybody, an
+               unbiased wheel can and does take a hue somebody else asked for,
+               and the arc is matched by MEMBERSHIP rather than by nearness to
+               the hex named -- so the named colour is no likelier than any
+               other inside the arc and stays as available to everyone else as
+               it ever was. Two chains may therefore legitimately come out
+               looking alike, which is why identity lives on the datum plate and
+               not in the palette.
+
+               THE 40-DEGREE MESHING RULE (#12) OUTRANKS IT, always. A narrow
+               arc fights that rule directly: a window 2 x spread degrees wide
+               holds at most floor(2 x spread / 40) + 1 hues that can mesh in a
+               row -- 4 across the 120 degrees a spread of 60 gives, 1 across
+               60. More than that can only be dealt interleaved with wheels from
+               outside the arc. The deal never breaks the rule to satisfy an
+               arc; when it cannot do both it says so in the console, naming how
+               many wheels it seated of how many it could have, so a bias that
+               is quietly doing less than it looks like it is doing is not a
+               state this can be in. A spread of 180 or more is the whole colour
+               wheel and is refused with a warning, as is a malformed entry.
+
+               Worth knowing before choosing one: WHEEL_POOL is authored and
+               lumpy on purpose, so arcs are not equally well served. Around
+               #F2C14E at spread 60 there are three pool colours and all three
+               sit within 40 degrees of each other, so no two of them may mesh
+               -- that arc can only ever dress alternate wheels of a chain.
        bridge  optional, default true. On a combined stage every chain but the
                longest is driven off it through a short run of plain idler
                wheels, which is also what sets the gap between the two. Set
@@ -157,6 +189,14 @@ window.WOZI_CONFIG = {
          domain name on the distribution and a Route53 alias -- no deploy change,
          per the note above. */
       hosts: ['harper.wozi.com'],
+      /* THE DEFAULT IS RANDOM AND NOBODY HAS OPTED IN YET, so this is written
+         out rather than left to be looked up -- uncomment it and her wheel is
+         dealt a warm hue. One wheel is the case an arc always satisfies: there
+         is nothing for it to mesh, so the 40-degree rule has no pair to judge
+         and the only ceiling is whether the pool has a colour in the arc at all
+         (around #F2C14E at 60 it has three). Charles's seven wheels are the
+         other case -- see the note above the PEOPLE list. */
+      /* palette: { around: '#F2C14E', spread: 60 }, */
       links: [
         /* HER ADDRESS IS DELIBERATELY NOT PUBLISHED YET. config.js is served to
            the web, so an href here is public in plain text no matter what the
@@ -222,6 +262,13 @@ window.WOZI_CONFIG = {
      What IS computed is which colours appear together: dealColours() in
      index.html scores candidate sets by minimum pairwise hue distance and
      refuses neighbours closer than 40 degrees.
+
+     A person's optional `palette` arc biases which of these their wheels are
+     dealt, and it takes nothing out of this list to do it -- the pool is whole
+     for every wheel on every load. Because the pool is authored rather than
+     evenly spaced, adding a colour changes what arcs are reachable: the run
+     from 42 to 150 degrees is empty, so an arc centred in it has nothing to
+     find until something is authored there.
 
      Hue is DERIVED from the hex, not stored beside it. It used to be written by
      hand as an `h` field, which was a duplicate that could silently drift —
