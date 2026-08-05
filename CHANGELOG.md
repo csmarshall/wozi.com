@@ -84,6 +84,97 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Added
 
+- **#100 — `tools/mutation_gate.py`, which breaks the page on purpose so that
+  every other gate has to prove it can fail.** A gate observed green is not a
+  gate proven able to fail. This repo has shipped a harness that printed FAIL
+  and exited 0, one that had been dead with a `NameError` for weeks, and one
+  with no exit code at all — and on a healthy tree all three were
+  indistinguishable from a gate that was working, because a working gate and a
+  blind gate produce the same output when there is nothing to find. The only
+  way to tell them apart is to put a bug in the tree.
+
+  Eight mutations, each a single surgical substitution in one named file, each
+  chosen to restage a failure this project has actually had rather than to
+  scramble something arbitrary:
+
+  | mutant | file | gate | what it restages |
+  | --- | --- | --- | --- |
+  | `BAND_DEPTH` 1.59 → 0.50 | `index.html` | `test.js` | #15, and the class `CLAUDE.md` names by hand: the band feeds the bore, and a bigger bore makes gear sets reachable that nothing has measured |
+  | a stage host added to a person's `hosts` | `config.js` | `test.js` | the host model's one hard rule — `STAGE_HOSTS` is matched first, so a name in both quietly means *everyone* |
+  | `config.js` dropped from the publish loop | `deploy.yml` | `test.js` | #59 — published but unnamed. **This one survives**; see below |
+  | `asleep = document.hidden \|\| …` → `asleep = true` | `index.html` | `verify_motion.py` | #7 — the sleep gate latching, and a frozen train photographs perfectly |
+  | a hub icon's slug misspelt | `config.js` | `verify_motion.py` | the empty badge: `loadIcons()`'s `.catch` swallows the failure and nothing on the page says so |
+  | pill label `13px/1.4` → `13px/1` | `index.html` | `pill_clip.py` | #51, byte for byte — the line box shorter than the ink, so `overflow:hidden` slices the descenders |
+  | ghost stroke opacity 0.65 → 0.45 | `index.html` | `pixel_regress.py` | #48's own hand-run proof: geometry identical, train turning, badges centred, type fitting, and the drawing changed |
+  | `LINK_SHARE` 0.78 → 0.20 | `index.html` | `devices.py` | #44's collapse and #46's floor — every wheel still meshes and turns, the composition is simply wrong |
+
+  The order is red, then green: each gate's mutants run first and must exit
+  non-zero, then the gate runs once more on the restored tree and must exit
+  zero. A control that cannot go green voids that gate's whole verdict rather
+  than being reported alongside it, and it gets one retry first, because the
+  page is dealt at random and a gate that reads the composition can go red on
+  whichever machine it was handed (#88).
+
+  **Nothing is mutated in the working tree.** Every run happens in a throwaway
+  `git worktree` at `--ref` (`HEAD` by default), thrown away at the end — the
+  same shape `pixel_regress` already used, and for a sharper reason than
+  tidiness: `git stash` on a clean tree stashes *nothing* and reports success,
+  so a stash-based runner silently tests the unmutated tree and passes forever.
+  The consequence is stated at startup rather than buried: this gate measures
+  the committed tree, and it prints how many uncommitted changes it is
+  therefore not testing.
+
+  **It runs in its own workflow, not on the deploy path**, and that is the one
+  judgement call here worth arguing with. `deploy.yml` gates a live bucket on
+  every push and every pull request; the full sweep is **500s**, of which 414s
+  is the device gate alone, run twice — once mutated, once as the control.
+  Tripling the latency of a deploy to re-answer a question whose answer changes
+  only when a *harness* changes is the wrong trade, and a flake in a second
+  browser-heavy job racing the first would block a deploy over something that
+  is not about the deploy. So `.github/workflows/mutation.yml` splits it by how
+  often the answer can move:
+
+  - **`registry`** — one second, no browser, on every push and pull request. It
+    runs the sweep with every gate replaced by one that always exits 0 and
+    requires the runner to come back FAIL. That proves the runner can fail, and
+    it proves all eight mutations still apply to the files they name, which is
+    the one thing ordinary page edits rot silently: rename a constant and the
+    mutant stops testing anything while reporting a clean sweep.
+  - **`mutate`** — the real 500s sweep. Weekly, on demand, and on a pull request
+    labelled `harness`.
+
+  **Proved able to fail in every direction it can fail**, which for this file is
+  not optional — a mutation gate that can only pass is precisely the thing it
+  exists to prevent. Exit **0** on a working sweep (7/7 caught, 5/5 controls
+  green). Exit **1** with `--blind`, every gate stubbed green: 0/7 caught, every
+  mutant reported SURVIVED. Exit **1** again on the opposite fault, a documented
+  gap that has silently closed. Exit **2** when a mutant's `find` string no
+  longer occurs exactly once, naming the mutant and the string — simulated by
+  pointing `band-depth-halved` at a constant that does not exist.
+
+  **One mutant survived, and it is kept rather than dropped.** `test.js` asserts
+  `config.js` is named in the deploy whitelist — the guard against #59 — but the
+  assertion is `/\bconfig\.js\b/` over the *whole* of `deploy.yml`, and
+  `config.js` is named there seven times: once in the loop that publishes it,
+  twice in comments about why it matters, four times in the live-site checks.
+  Delete it from the publish loop and `npm test` stays at **69 passed, 0
+  failed**. The guard cannot fail for the reason it was written. It is filed on
+  the tracker as issue #89 (the log's numbers and the tracker's are separate
+  spaces, and this is one of the places they collide), and it is registered here
+  as a mutant expected to **survive** — so the day the assertion is strengthened
+  this runner fails with `GAP CLOSED` and the entry has to be removed, instead
+  of a stale excuse quietly outliving the defect.
+
+  Two things did not make the set. The issue proposed `TEETH_MAX` 19 → 26 as the
+  suite's mutant; it **survives** — the suite simply measures the twentieth
+  single-row set that the wider bound reaches, and passes it — which is the
+  suite being right rather than blind, so `BAND_DEPTH` took its place. And there
+  is no mutant for `a11y_audit.py` or `webkit_band.js`: neither runs in CI, and
+  a mutation gate for a gate nobody runs is a longer list, not a better one.
+
+  Nothing on the deploy path was touched. `npm test` is unchanged at 69 passed,
+  0 failed.
+
 - **#89 — a crawl policy, because a 403 was standing in for one.**
   `https://wozi.com/robots.txt` returned the raw S3 `AccessDenied` XML: the file
   did not exist, was not in the deploy whitelist, and no `<meta name="robots">`

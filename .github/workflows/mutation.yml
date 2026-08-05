@@ -1,0 +1,121 @@
+name: mutation gate
+
+# Proves the OTHER gates can fail.
+#
+# Every harness in tools/ reports green on a healthy tree, and so does a harness
+# that is broken — this repo has shipped one that printed FAIL and exited 0, one
+# that had been dead with a NameError for weeks, and one with no exit code at
+# all. tools/mutation_gate.py breaks the page on purpose, one surgical
+# substitution at a time, and requires the named gate to go red and then green
+# again on the restored tree.
+#
+# WHY THIS IS NOT IN deploy.yml. That workflow gates a live bucket and runs on
+# every push and every pull request, and the full sweep takes about nine minutes
+# — almost all of it the device sweep, which alone is 3m38 and gets run twice
+# (once mutated, once as the control). Tripling the latency of the deploy path
+# to re-answer a question whose answer only changes when a HARNESS changes is
+# the wrong trade. Worse, it would be a second browser-heavy job racing the
+# first for the same runner, and a flake in it would block a deploy over
+# something that is not about the deploy at all.
+#
+# So it is split by how often the answer can change:
+#
+#   registry  — seconds, no browser, runs on EVERY push and pull request. It
+#               proves the runner itself can fail and that all eight mutations
+#               still apply to the files they name. That is the one thing that
+#               rots silently with ordinary page edits: rename a constant and
+#               the mutant quietly stops testing anything.
+#   mutate    — the real nine-minute sweep. Weekly, on demand, and on a pull
+#               request labelled `harness`. Whether a gate is ABLE to fail
+#               changes when a HARNESS changes, not when the page does, and the
+#               registry job above already covers the one way an ordinary page
+#               edit can blind it. A full sweep is one `gh workflow run
+#               mutation.yml` away whenever it is wanted sooner.
+
+on:
+  schedule:
+    # Mondays, 07:00 UTC. Nothing here gates a deploy, so it wants a cadence
+    # that notices rot within a week, not one that interrupts.
+    - cron: '0 7 * * 1'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'legacy/**'
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: mutation-wozi-com-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Cheap, and the only part that runs on every change. Blind mode replaces each
+  # gate with one that always exits 0 — exactly how every broken harness this
+  # repo has found behaved — so a working runner must report every mutant
+  # SURVIVED and exit 1. Exit 0 means the runner has stopped being able to fail;
+  # exit 2 means a mutation no longer applies and has been testing nothing.
+  registry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: The runner can fail, and every mutation still applies
+        run: |
+          set +e
+          python3 tools/mutation_gate.py --blind
+          rc=$?
+          set -e
+          case $rc in
+            1) echo "ok — blind gates produced a FAIL verdict, as they must" ;;
+            2) echo "::error::a mutation no longer applies; the registry in tools/mutation_gate.py has been testing nothing. See the output above."; exit 1 ;;
+            0) echo "::error::the mutation runner passed with every gate blinded. It cannot fail, which is the exact defect it exists to catch."; exit 1 ;;
+            *) echo "::error::mutation runner exited $rc"; exit 1 ;;
+          esac
+
+  mutate:
+    # Weekly and on demand; on a pull request only when it is labelled
+    # `harness`. Deliberately NOT on every push: an ordinary page edit cannot
+    # change whether a gate is able to fail, the registry job above already
+    # covers the one way it can rot, and nine minutes of browser time per merge
+    # on a repo that lands several agent branches a day is a real bill for an
+    # answer that has not changed.
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       contains(toJSON(github.event.pull_request.labels.*.name), 'harness'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: browser-actions/setup-chrome@v1
+        id: chrome
+        with:
+          chrome-version: stable
+      - name: Break the page eight ways and require the gates to notice
+        env:
+          CHROME: ${{ steps.chrome.outputs.chrome-path }}
+        run: |
+          python3 -m pip install --quiet --disable-pip-version-check \
+            websockets pillow numpy
+          python3 tools/mutation_gate.py
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### mutation gate"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Result | ${{ job.status }} |"
+            echo "| Commit | \`${{ github.sha }}\` |"
+            echo ""
+            echo "Each gate was made to go red by a mutation chosen to reproduce a"
+            echo "failure this project has actually had, then green again on the"
+            echo "restored tree. \`tools/mutation_gate.py --list\` names them."
+          } >> "$GITHUB_STEP_SUMMARY"
