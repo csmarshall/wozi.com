@@ -38,6 +38,49 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
   the suite failed with *"an unbridged chain kept idlers on its bridge record,
   and it has no drive to hang them off (got 0, want 99)"*, then restored.
   `npm test`: **89 passed, 0 failed.**
+- **CL#112 — `grabNumber()` no longer guesses between two declarations of the
+  same constant.** (GitHub #101.)
+
+  `tools/test.js` reads its geometry constants OUT OF `index.html` rather than
+  keeping copies, which is the whole reason a broken page cannot pass the
+  suite (see CLAUDE.md, "Verifying a change"). `grabNumber()` is the function
+  that makes that true, and it had one live trap: `String.match` with a
+  non-global regex returns the FIRST match in the file, with no check that a
+  name is unique.
+
+  `index.html` declares `CELL_MIN` twice — a retired honeycomb family's
+  literal `CELL_MIN = 2.8`, and hexcore's live `CELL_MIN = px(3.9, 2.2, 6.0)`.
+  Verified directly: the old `grabNumber('CELL_MIN')` returned **2.8**, the
+  retired figure, and could not have returned the live one under any
+  circumstances — `px(...)` is not a number literal, so it never matched the
+  pattern at all. Nothing in `test.js`'s `consts` list currently asks for
+  `CELL_MIN`, so this had not yet produced a false pass, but it was the exact
+  shape of bug CLAUDE.md warns the whole suite's honesty rests on: silent and
+  green.
+
+  **Ambiguity is now fatal, and it is caught even where counting numeric
+  matches alone would miss it.** Comments are stripped first (block comments,
+  the idiom four other call sites in `test.js` already use), so a name merely
+  discussed in prose can no longer stand in for a declaration. Then
+  `grabNumber()` counts every ASSIGNMENT to the name — literal or not — and
+  throws if there is more than one. Counting plain-number matches alone would
+  not have caught `CELL_MIN`: only one of its two declarations is a literal,
+  so that count was already 1. `tools/mesh_dirs.py`'s `_grab_number()`, the
+  identical idiom in Python, got the same treatment.
+
+  Swept every name either file currently extracts — the full `consts` list
+  plus `TEETH_MEAN`, `LINK_SHARE`, `CROSS_BLEED`, `MAX_IDLERS`, `MIN_IDLERS`,
+  `CLEARANCE`, `ENDS_APART`, `TARGET_GEAR_PX`, `MODULE`, `TOOTH_ADD` — and
+  every one of them resolves to exactly one declaration; `CELL_MIN` is the
+  only ambiguous name in the file, and nothing currently reads it, so no
+  extracted value changed. Mutation-tested by reverting `grabNumber()` to the
+  original first-match behaviour: the suite's new test fails, naming the
+  regression (`grabNumber('CELL_MIN') silently returned the retired honeycomb
+  literal (2.8)...`) rather than failing on an unrelated assertion.
+
+  `index.html` itself is untouched — the retired `CELL_MIN` stays retired, on
+  purpose, the same as `honeycomb`'s whole family. `grabNumber()` is what had
+  to cope, not the page.
 
 - **CL#110 — `?hud`, an animation HUD for how the browser is really rendering
   the gears.** (GitHub #92.)

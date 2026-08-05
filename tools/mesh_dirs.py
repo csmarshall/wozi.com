@@ -68,11 +68,33 @@ _HTML_PATH = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "
 with open(_HTML_PATH, "r", encoding="utf-8") as _f:
     _HTML_SRC = _f.read()
 
+# Block comments stripped once, up front -- same idiom tools/test.js's
+# grabNumber() uses (GitHub #101, CL#112). Without it a name merely discussed
+# in prose, or sitting in a retired branch commented out rather than deleted,
+# reads exactly like a live declaration.
+_STRIPPED_HTML_SRC = re.sub(r"/\*[\s\S]*?\*/", "", _HTML_SRC)
+
 
 def _grab_number(name):
-    """Same idiom as tools/test.js's grabNumber(): find `NAME = <number>` in
-    index.html and read the number back out, rather than retyping it here."""
-    m = re.search(r"\b" + re.escape(name) + r"\s*=\s*(-?[0-9]+(?:\.[0-9]+)?)", _HTML_SRC)
+    """Same idiom as tools/test.js's grabNumber(): find the ONE live
+    `NAME = <number>` in index.html and read the number back out, rather than
+    retyping it here.
+
+    CONTRACT (GitHub #101, CL#112): fatal if NAME is assigned more than once
+    in the comment-stripped source -- even if only one of those assignments'
+    right-hand side is a plain number literal. That clause matters:
+    index.html declares CELL_MIN twice, a retired literal and a live
+    `px(...)` expression, and the old "first numeric match wins" idiom saw
+    only the retired literal (px(...) never matched the number pattern at
+    all) and returned it with no error. Counting plain-number matches alone
+    would still miss that -- there was exactly one. Counting ASSIGNMENTS,
+    literal or not, is what catches it."""
+    assignments = re.findall(r"\b" + re.escape(name) + r"\s*=(?!=)", _STRIPPED_HTML_SRC)
+    if len(assignments) > 1:
+        print(f"FATAL: constant {name} is assigned {len(assignments)} times in index.html -- "
+              f"_grab_number() cannot tell which one ships (the CELL_MIN trap, GitHub #101)")
+        sys.exit(2)
+    m = re.search(r"\b" + re.escape(name) + r"\s*=\s*(-?[0-9]+(?:\.[0-9]+)?)", _STRIPPED_HTML_SRC)
     if not m:
         print(f"FATAL: constant not found in index.html: {name}")
         sys.exit(2)
