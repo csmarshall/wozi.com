@@ -285,6 +285,114 @@ a:focus-visible,button:focus-visible,[tabindex]:focus-visible{outline:3px solid 
      HEAD, and was never updated (nor should it be) as later real commits moved
      these values on. Read this comment block, not that file, for what is live. -->
 <script type="text/x-dc" data-dc-script data-props="{&quot;domain&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Wordmark&quot;},&quot;frameRate&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[60,30,24,20],&quot;default&quot;:30,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;spinUp&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;engravedRims&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;parallax&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;character&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;hoverDrag&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;speed&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;min&quot;:1,&quot;max&quot;:200,&quot;step&quot;:1,&quot;default&quot;:1,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;gearScale&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;min&quot;:0.5,&quot;max&quot;:1.3,&quot;step&quot;:0.05,&quot;default&quot;:1,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;options&quot;:[&quot;#5F686E&quot;,&quot;#E8483A&quot;,&quot;#3B7DE8&quot;,&quot;#F4B32B&quot;,&quot;#1FA463&quot;],&quot;default&quot;:&quot;#5F686E&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;shuffle&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Gears&quot;}}">
+/* ?seed=8231 — DRAW THE SAME MACHINE TWICE.
+
+   Every wheel on this page is dealt. Twelve bare `Math.random()` calls below
+   pick the tooth counts, the centre families and their variants, the bearing
+   angles, the planetary's clocking, the colours, and which wheel wears which
+   service — so a machine exists for exactly as long as its tab does, and "it
+   looked wrong on my phone" describes something that will never be drawn again.
+   Naming the seed in the URL makes a report from a real device reproducible on a
+   desk, and that is the whole of the feature.
+
+   THIS IS A DELIBERATE EXCEPTION TO A RULE STATED ELSEWHERE, so it is argued
+   here rather than left to be discovered. Determinism on this page belongs to
+   the harness: `tools/pixel_regress.py` and `tools/dom_invariants.py` each
+   inject their own LCG over `Math.random` through
+   `Page.addScriptToEvaluateOnNewDocument`, ahead of every page script,
+   *precisely* so that no test hook has to ship. A seed is not that hook. It
+   changes no behaviour, bypasses no logic, exposes no internal and reaches
+   nothing a visitor could not otherwise reach — it fixes ONE input that is
+   otherwise unobservable, and its consumer is a person writing a bug report
+   rather than a gate.
+
+   AND NO GATE MAY EVER USE IT. The harnesses keep injecting their own generator
+   even though this parameter would now do the job, because the moment a gate
+   deals through the same mechanism the page deals through, a fault in that
+   mechanism is invisible to both — the gate would agree with the page about a
+   machine they had both got wrong. Two generators is the point, not a leftover.
+
+   ABSENT THE PARAMETER NOTHING HAPPENS, which is load-bearing rather than tidy.
+   The browser's own `Math.random` is left in place and the deal is byte for byte
+   the page that shipped yesterday. Self-seeding EVERY load — what it would take
+   to report the seed of the machine that actually went wrong, which is the more
+   valuable half of this idea — necessarily replaces the unseeded deal's source
+   of randomness, and no pixel gate can tell that apart from a regression. See
+   CHANGELOG CL#109 for what it would cost.
+
+   IT IS INSTALLED HERE, ABOVE EVERY OTHER STATEMENT IN THIS FILE, because the
+   deal is not something anybody calls: `dealTeeth()` and `dealAngles()` are
+   IIFEs that run at module load, and the first of them draws long before
+   anything renders. `?kind=` can afford to be parsed beside the family list it
+   filters (`FORCE_KIND`, below) because only a function reads it. A seed has to
+   beat the first draw. */
+const SEED_MAX = 0x7fffffff;   /* the generator's own state space, so the range a
+                                  seed may take IS the range it can reach */
+const DEAL_SEED = (function () {
+  try {
+    const m = location.search.match(/[?&]seed=([^&]*)/);
+    if (!m) return null;
+    /* A PERCENT SIGN IS NOT A NUMBER, AND IT IS STILL WORTH SAYING SO. `?seed=%zz`
+       makes decodeURIComponent throw, and catching that out here would have sent
+       it down the same silent path as no seed at all — the one case of malformed
+       input the page would have refused without a word. Keep the undecodable
+       text and let the test below reject it out loud. */
+    let raw = m[1];
+    try { raw = decodeURIComponent(raw); } catch (e) { /* rejected below, by name */ }
+    const n = Number(raw);
+    /* A MALFORMED SEED DEALS AT RANDOM RATHER THAN THROWING. `Number('')` is 0
+       and `Number('abc')` is NaN, and this is module scope — anything thrown
+       here takes the whole script with it and renders nothing at all, which is
+       #53 exactly. Capturing everything up to the next `&` and testing it
+       explicitly is also what lets the page SAY the seed was refused; matching
+       digits only would make `?seed=abc` indistinguishable from no seed. */
+    if (raw !== '' && isFinite(n) && Math.floor(n) === n && n >= 0 && n <= SEED_MAX) return n;
+    console.warn('wozi: ignoring ?seed=' + raw + ' — expected a whole number 0…'
+      + SEED_MAX + '; dealing at random');
+    return null;
+  } catch (e) { return null; }
+})();
+/* WHAT SEED IS IN EFFECT, READABLE — `null` when the deal came from the browser.
+   Read-only data, the same shape as `__WOZI_GEOM` below, and there for the same
+   reason: a person checking that the seed took. Silent degradation with no way
+   to tell is the failure mode this parameter is most likely to have. */
+if (typeof window !== 'undefined') window.__WOZI_SEED = DEAL_SEED;
+if (DEAL_SEED !== null) {
+  /* The generator `fitEscapes()` already runs on its own `_seed`, with two
+     differences that matter when a human chooses the number.
+
+     SCRAMBLED FIRST, because an LCG's state is affine in its seed: `?seed=1` and
+     `?seed=2` would part by 1664525/2^31 on their first draw — under a
+     thousandth, which is the same tooth count, the same family and the same
+     bearing. The murmur3 finalizer is a published bijection whose entire job is
+     that one bit in flips half the bits out, so consecutive seeds start a whole
+     machine apart. It is a named mixer rather than a number anybody here tuned.
+
+     DIVIDED BY 2^31 RATHER THAN 2^31-1, so the result is strictly below 1. A
+     state of 0x7fffffff over 0x7fffffff is exactly 1.0, and every draw below it
+     is `Math.floor(Math.random() * n)` — a seed in two billion indexing one off
+     the end of the pool it is choosing from. */
+  let s = (function (x) {
+    x = (x ^ (x >>> 16)) >>> 0;
+    x = Math.imul(x, 0x85ebca6b) >>> 0;
+    x = (x ^ (x >>> 13)) >>> 0;
+    x = Math.imul(x, 0xc2b2ae35) >>> 0;
+    return (x ^ (x >>> 16)) & SEED_MAX;
+  })(DEAL_SEED >>> 0);
+  Math.random = function () {
+    s = (s * 1664525 + 1013904223) & SEED_MAX;
+    return s / 0x80000000;
+  };
+  /* THE SEED FIXES THE DEAL, NOT THE FIT. Every draw below comes from this
+     generator; where the finished train is then placed is measured off the
+     viewport, so a seed reproduces a machine at a given window size and says
+     nothing across two. The escape runs are outside it in the other direction —
+     `fitEscapes()` resets its own `_seed` on entry, so those were never part of
+     the random deal and were already the same on every load. */
+  console.info('wozi: dealt from ?seed=' + DEAL_SEED
+    + ' — the same seed at the same window size draws the same machine');
+}
+
 const MODULE = 7;
 
 /* Tooth form. Uniform across the train and derived from the module — never set

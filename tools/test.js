@@ -202,6 +202,36 @@ test('config.js is a plain script that assigns WOZI_CONFIG', () => {
     'config.js must be loaded BEFORE support.js');
 });
 
+test('?seed= is installed before the first draw it is meant to fix', () => {
+  /* ?seed= works by replacing Math.random, so its ONE requirement is position:
+     every draw in the file has to happen after the replacement. The deal is not
+     a function anybody calls -- dealTeeth() and dealAngles() are IIFEs that run
+     at module load -- so a draw moved above the installer, or the installer
+     moved below one, silently un-seeds the page while every other gate stays
+     green. Both harnesses inject their own generator ahead of all page script,
+     so NEITHER of them can see this break: it is the one thing about this
+     feature that only a static read of the file can assert.
+
+     Checked as source positions rather than by running the page, for the same
+     reason the rest of this suite is static -- it gates before Chrome exists. */
+  /* Comments stripped first, and that is not fastidiousness: the installer's own
+     block comment counts the draw sites by name, so a prose mention sits above
+     the installer forever and would fail this on the day it was written. */
+  const code = SRC.replace(/\/\*[\s\S]*?\*\//g, '');
+  const install = code.indexOf('Math.random = function');
+  ok(install >= 0, 'index.html no longer installs a seeded Math.random');
+  const draws = [];
+  const re = /Math\.random\(\)/g;
+  let m;
+  while ((m = re.exec(code))) draws.push(m.index);
+  ok(draws.length > 0, 'index.html draws nothing at random — has the deal gone?');
+  const early = draws.filter(i => i < install);
+  ok(early.length === 0,
+    `${early.length} Math.random() call(s) run before the ?seed= installer at ${install}`
+    + ` (first at ${early[0]}) — those draws cannot be seeded`);
+});
+
+
 /* ---- 0b. the deploy whitelist -------------------------------------------- */
 
 /* WHAT A PUBLISH STEP IS, STRUCTURALLY. It is not "a step whose prose mentions a

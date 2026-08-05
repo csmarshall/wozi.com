@@ -7,6 +7,141 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Changed
 
+- **CL#109 — `?seed=8231`, so that a machine drawn once can be drawn again.**
+  (GitHub #48, part 1 of three; parts 2 and 3 shipped as #100 and #93.) Every
+  wheel on this page is dealt. Twelve bare `Math.random()` calls pick the tooth
+  counts, the centre families and their variants, the bearing angles, the
+  planetary's clocking, the colours, and which wheel wears which service — so a
+  machine exists for exactly as long as its tab does, and **"it looked wrong on
+  my phone" describes something that will never be drawn again.** Both harnesses
+  that need a fixed machine inject their own LCG over `Math.random` through
+  `Page.addScriptToEvaluateOnNewDocument`, which is right for them and is
+  unavailable to a human holding a phone. Naming the seed in the URL is the
+  whole feature.
+
+  **This is a deliberate exception to a rule this repo states in several places
+  — determinism belongs to the harness, and no test hook ships — so it is argued
+  in the file rather than left to be discovered.** A seed is not that hook. It
+  changes no behaviour, bypasses no logic, exposes no internal and reaches
+  nothing a visitor could not otherwise reach; it fixes ONE input that is
+  otherwise unobservable, and its consumer is a person writing a bug report
+  rather than a gate. The distinction that makes it safe is not the size of the
+  code, it is who is allowed to use it.
+
+  **No gate may ever use it, and the harnesses were deliberately left alone.**
+  `tools/pixel_regress.py` and `tools/dom_invariants.py` both still inject their
+  own generator even though this parameter would now do the job in one query
+  string, because the moment a gate deals through the same mechanism the page
+  deals through, a fault in that mechanism is invisible to both — the gate would
+  agree with the page about a machine they had both got wrong. Two generators is
+  the point. It is written at the install site and in `CLAUDE.md`, which are the
+  two places somebody would be tempted.
+
+  **It is installed above every other statement in `index.html`**, and that is
+  required rather than tidy: the deal is not something anybody calls.
+  `dealTeeth()` and `dealAngles()` are IIFEs that run at module load and the
+  first of them draws long before anything renders, so a parameter read beside
+  its consumer would be read too late. `?kind=` can afford to sit next to the
+  family list it filters — only a function reads it. It follows that parser's
+  shape (a regex over `location.search` inside a `try`) and not its position.
+
+  **The seed reaches all twelve draw sites by replacing `Math.random`, not by
+  threading a generator through twelve call sites.** Twelve edits is twelve
+  chances to miss one, and the thirteenth `Math.random()` somebody adds next
+  year would silently escape the seed. Replacing the global covers the deal by
+  construction, and the count is now free to move without this feature rotting —
+  the issue itself corrected "ten" to "eleven" once already, and it is twelve.
+
+  **The proof is the repeat.** `?seed=8231` in three fresh documents, and again
+  in a separate browser process with a separate profile and a separate server
+  port: one fingerprint, `576ec7f6b36a6278`, over 26 wheels — rim stamp (which
+  carries the tooth count), body fill, centre in screen pixels, and the element
+  census of each centre design, identical field by field. `?seed=8232`, one
+  apart, draws a different machine (24 wheels): the seed is passed through the
+  murmur3 finalizer before it becomes LCG state, because an LCG's state is
+  affine in its seed and `?seed=1` and `?seed=2` would otherwise part by
+  1664525/2³¹ on their first draw — under a thousandth, which is the same tooth
+  count, the same family and the same bearing. Three loads with **no** seed gave
+  three different fingerprints, which is the other half of the same proof.
+
+  **And the same statement in pixels**, which is the version that needs no
+  fingerprint to be trusted: two independent `pixel_regress --shot` captures of
+  `?seed=8231` at 1440×900 differ by **0 px**, and `?seed=8232` differs from
+  them by **510,350 px**. (The page's own generator is installed at page-script
+  time, so on a seeded URL it displaces the harness's injected one — which is
+  fine for a photograph and is exactly why a gate must not pass this parameter.)
+
+  **One static assertion, because no harness can see this break.** `npm test`
+  now checks that the installer precedes every `Math.random()` call in the file
+  — comments stripped first, since the installer's own comment counts the draw
+  sites by name. Position is the feature's whole requirement, and a draw moved
+  above the installer (or the installer moved below one) un-seeds the page while
+  every other gate stays green: both harnesses inject their own generator ahead
+  of all page script, so neither is capable of noticing. Proved able to fail in
+  both directions — a draw planted at the top of the script reports the offset
+  of the offender, and renaming the installer reports its absence. The suite is
+  **89 passed, 0 failed** (was 88).
+
+  **What it fixes and what it does not.** It fixes the *deal*; where the
+  finished train is then placed is measured off the viewport, so a seed
+  reproduces a machine at a given window size and says nothing across two —
+  same seed **and** same window. The escape runs are outside it in the other
+  direction: `fitEscapes()` resets its own `_seed` on entry, so that stream was
+  never part of the random deal and was already the same on every load. The
+  rotation phase is outside it too, and always was — the only thing that moved
+  between two same-seed loads was each wheel's axis-aligned box, by up to 0.4px,
+  which is the turning the pixel gate freezes with `__pump()` and not the deal.
+
+  **A malformed seed deals at random, and says so.** This is module scope:
+  anything thrown here takes the whole script with it and renders nothing at
+  all, which is #53 exactly. `?seed=abc`, `?seed=-1`, `?seed=3.5`,
+  `?seed=2147483648`, `?seed=` and `?seed=%zz` all draw a normal random machine
+  and log one `console.warn` naming what was refused. The capture is everything
+  up to the next `&` rather than a run of digits *because* of that message —
+  matching digits only would make `?seed=abc` indistinguishable from no seed at
+  all. The undecodable case is the one that nearly slipped through: `%zz` makes
+  `decodeURIComponent` throw, and catching that with the outer `try` would have
+  sent the single most obviously malformed input down the silent path. It is
+  caught next to the decode instead and rejected by name. The accepted range is
+  `0…0x7fffffff`, which is the generator's own state space rather than a bound
+  anybody picked, and `?seed=0` is a seed like any other.
+
+  **Absent the parameter the page does not touch `Math.random` at all**, and
+  that is the load-bearing half. `tools/pixel_regress.py` against `main` is
+  **0px at 1440×900 and 390×844, on `?who=charles` and on the combined stage** —
+  the proof that this costs nothing when unused.
+
+  **The more valuable half did not ship, and the reason is the rule itself.**
+  Accepting a seed asks the reporter to reproduce a fault on a machine that is
+  not the one that failed; what a bug report actually wants is the seed of the
+  machine that *went wrong*. That needs the page to seed itself on **every**
+  load, and self-seeding necessarily replaces the unseeded deal's source of
+  randomness — after which the pixel gate, whose own LCG the page would now be
+  consuming one value from and then ignoring, reports a different machine at
+  every viewport and cannot tell that apart from a regression. The only way to
+  have both is for the page to recognise when it is being tested, which is
+  precisely the test hook none of this is allowed to be. Recording the drawn
+  values into a `?deal=` blob would close it honestly — the unseeded stream
+  stays native, so the pixel gate stays at 0px — at the cost of a URL nobody can
+  read out over the phone. Filed as a follow-up rather than smuggled in here.
+
+  **Discoverability, and what it is honestly worth.** The seed in effect is
+  readable at `window.__WOZI_SEED` (`null` when the deal came from the browser),
+  read-only data in the same shape as `__WOZI_GEOM`, and a seeded load says so
+  once with `console.info`. Both exist for the failure mode this parameter is
+  most likely to have — degrading silently with no way to tell whether the seed
+  took — and neither is reachable from a phone, which is exactly why no UI
+  affordance was added for it: on a seeded load the URL bar already shows the
+  seed, and on an unseeded load nothing the page could offer would be the
+  machine on screen. A control that hands over a *different* fixed machine is
+  not the feature, and it would have cost an `a11y_audit` focusable and a DOM
+  invariant to say so.
+
+  Gates: **89 passed, 0 failed** (was 88), `verify_motion` PASS (37/37
+  rotating, 8 badges at ≤0.01px, no strands, no console errors), `dom_invariants`
+  PASS 4/4 — run with its own injected seed, which is the point,
+  `pixel_regress` 0px against `main` at both viewports on both views, `devices`
+  24/24 and 4/4.
 - **CL#107 — a one-link chain's datum carried no scale, because one station is one
   tick and nothing to subdivide.** (GitHub #83.) Minor ticks subdivided the gap
   between a chain's own stations, and Harper's chain has exactly one station: the
