@@ -47,6 +47,62 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
   `EDGE` names the stroke width the plate and the real path share, so they cannot
   drift apart. It is not a new tuned number — it is the literal `1` that was
   already on the outline, given one home.
+- **CL#121 — the datum's minor ticks are gone, and CL#107's borrowing mechanism
+  went with them.** (GitHub #115.)
+
+  This entry records a mechanism that was built and then removed on the
+  evidence. Charles: *"I don't know that the minor ticks on the datum line add
+  any value — prove me wrong."* A sweep was run — four variants, both themes,
+  1440×810 and 390×844, identical crop windows — and could not. At real
+  viewing size, with or without them was indistinguishable in full context; at
+  1:1 the marks were findable only once you already knew where to look, and
+  read as texture rather than as a countable scale. Measured: at 390×844 the
+  minor tick is **1.00px** wide — `Math.max(1, MODULE * 0.13 * S)` hitting its
+  clamp floor, so the *derived* width was already sub-pixel — and about 3px
+  long. At 1440×810 it was 1.26px by 4.86px, spaced ~37px apart.
+
+  **The decisive finding concerns Harper.** CL#107's borrowing worked — it
+  matched her one-link chain's minor spacing to Charles's, within rounding.
+  But that means her marks were exactly as imperceptible as his. The mechanism
+  achieved parity, not visibility. **CL#107's derivation was correct and
+  elegant, and it served something nobody could see.** Sunk cost is not value,
+  so it comes out rather than staying dormant.
+
+  **Removed:**
+  - The minor ticks themselves, from the datum line, for every chain — both
+    the loop that subdivided a chain's own station gaps and the borrowed-grid
+    loop a one-station chain used instead.
+  - CL#107's whole borrowing mechanism: the station-pitch derivation (the
+    axial length the station pattern occupies, over the station count), its
+    degenerate-case collapse to a wheel's own pitch diameter, the
+    zero-station lends-nothing rule, `SUBDIV`, and the two suite tests it
+    added (`a one-station chain is scribed at the spine's station pitch, and
+    nothing else is`, `the spine lends the scale to itself when it is the
+    one-station chain`).
+
+  **Checked, not assumed: the derivation fed nothing but the minors.** `pitch`
+  (on each run) and `scale` (feeding it) had exactly one consumer each —
+  `datumLayer()`'s borrowed-tick loop and the `lent`/`pitch` assignment in
+  `datumRuns()` — so nothing else in the file, and nothing else in the suite,
+  read either name.
+
+  **What stays.** The major ticks — one per station, at the wheel centres —
+  and the datum line, the plate and its stamp are untouched. `MAJOR` and
+  `PAST` are unaffected; only `MINOR` and `SUBDIV` are gone.
+
+  Two suite tests removed with the mechanism they existed to prove (`npm
+  test`: 90 → 88 `test()` blocks). The remaining tick-strike count in `the
+  plate seats on the side the page has room for, and the ticks follow it` —
+  which used to assert three strikes (major, self-subdividing minor, borrowed
+  minor) — now asserts one; reverting the removal so a strike reappears was
+  used to confirm the assertion still catches a regression. `npm test`: **88
+  passed, 0 failed.**
+
+  Photographed before and after, both themes, 1440×810 and 390×844, deal held
+  fixed with a seeded LCG: the combined stage moved (258–490px differ per
+  viewport/theme, all of it the missing marks), `?who=harper` did not (0px —
+  no datum is drawn on a solo stage at all, so the removal has nothing to
+  touch there).
 
 - **CL#113 — two assertion messages that named the pass instead of the fail, and
   a sweep for a third.** (GitHub #105.)

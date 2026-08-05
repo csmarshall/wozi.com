@@ -2684,129 +2684,6 @@ test('a datum station is a clickable gear, never a ghost or an idler', () => {
   ok(bad.length === 0, bad.join('\n      '));
 });
 
-/* Two chains that both have exactly one station, one of them deliberately
-   UNBRIDGED. `bridge: false` says "no drive", not "no position" (see the TRAIN
-   builder), so an undriven chain still stands on the same stage beside the same
-   spine -- what it loses is its idlers, not its bed. Reused by both tests below
-   so the bridged and unbridged cases are always the same deal. */
-const TWO_SHORT = [
-  { slug: 'spine', links: [1, 2, 3, 4, 5].map(n => ({ slug: 's' + n })) },
-  { slug: 'one', links: [{ slug: 'a' }] },
-  { slug: 'other', links: [{ slug: 'b' }], bridge: false }
-];
-
-test('a one-station chain is scribed at the spine\'s station pitch, and nothing else is', () => {
-  /* GitHub #83. One station is one major tick and no gap, so the subdivision in
-     datumLayer() exits on its first pass and the mark reads as a datum with no
-     scale -- a line, a name and one stroke. The interval it is given is the
-     SPINE'S station pitch, measured off wheels drawn on the same stage, because
-     that is the only figure under which two chains' marks mean the same
-     distance. The price -- those minor marks reference another chain's wheels --
-     is stated in datumRuns() rather than hidden. */
-  const bad = [];
-  [0, 90].forEach(rot => {
-    const { solved, order } = runSolve(THREE, { axisRot: rot });
-    const runs = datumRunsOn(solved, rot, order[0].slug, [], seatSlugs(solved));
-    const spine = runs.find(r => r.person === order[0].slug);
-    if (!runs.some(r => r.stations.length === 1))
-      bad.push(`rot ${rot}: no chain in the fixture has a single station`);
-    if (!(spine.scale > 0))
-      bad.push(`rot ${rot}: the spine has ${spine.stations.length} stations and no scale`);
-    /* THE PITCH IS BOUNDED BY THE WHEELS, checked against a quantity this suite
-       derives for itself rather than against a second copy of the method's
-       arithmetic. For stations that mesh in a row, the pattern's extent
-       telescopes to twice the sum of their pitch radii, so the pitch is twice
-       their MEAN radius -- exactly, and only, when the chain runs dead straight
-       along its own datum. Every deal here is a serpentine, so the projection
-       shortens it and the pitch must land strictly under that ceiling. A pitch
-       at or over it would mean the marks had stopped measuring what the line
-       measures. */
-    const rad = solved.gears.filter(g => g.role === 'link' && g.person === spine.person)
-      .map(g => g.r);
-    const ceiling = 2 * rad.reduce((a, b) => a + b, 0) / rad.length;
-    if (!(spine.scale < ceiling))
-      bad.push(`rot ${rot}: the spine's pitch is ${spine.scale.toFixed(3)}, which is not `
-        + `under the ${ceiling.toFixed(3)} a dead-straight row of the same wheels would give`);
-    runs.forEach(r => {
-      const want = r.stations.length === 1 ? spine.scale : 0;
-      if (Math.abs(r.pitch - want) > 1e-9)
-        bad.push(`rot ${rot}: ${r.person} has ${r.stations.length} stations and a pitch `
-          + `of ${r.pitch.toFixed(3)}, wanted ${want.toFixed(3)}`);
-    });
-  });
-  /* TWO CHAINS THAT BOTH BORROW GET THE SAME NUMBER, which is the entire claim:
-     one stage, one scale. A per-chain figure -- the gap nearest each one, say --
-     would hand these two different rulers, and comparability between marks is
-     the only reason the spine's spacing was chosen over anything a chain could
-     measure on itself. One of the two is unbridged, which is the objection this
-     answers by running it rather than by argument. */
-  const two = runSolve(TWO_SHORT, { axisRot: 0 });
-  const sites = seatSlugs(two.solved);
-  const tr = datumRunsOn(two.solved, 0, two.order[0].slug, [], sites);
-  const borrowers = tr.filter(r => r.stations.length === 1);
-  eq(borrowers.length, 2, 'the fixture did not produce two one-station chains');
-  eq(borrowers.map(r => r.person).sort().join(','), 'one,other',
-    'the fixture\'s unbridged chain is not among the borrowers, so the case below is untested');
-  ok(borrowers[0].pitch > 0,
-    'a one-station chain on a stage that has a scale to share was given none');
-  ok(Math.abs(borrowers[0].pitch - borrowers[1].pitch) < 1e-9,
-    'a bridged and an unbridged one-station chain were scribed at different scales');
-  /* AND A SPINE THAT SEATS NOTHING LENDS NOTHING. Zero stations is the one case
-     with no length in it at all: nothing to measure, and no major tick of its
-     own to measure against. Zero means ABSENT here, and it is also what keeps
-     datumLayer()'s borrowed-grid loop finite -- a zero step never reaches
-     either end of the line. */
-  const noSpine = JSON.parse(JSON.stringify(sites));
-  delete noSpine[two.order[0].slug];
-  const nr = datumRunsOn(two.solved, 0, two.order[0].slug, [], noSpine);
-  eq(nr.find(r => r.person === two.order[0].slug).stations.length, 0,
-    'the thinned fixture still seats a service on the spine');
-  ok(nr.filter(r => r.stations.length === 1).every(r => r.pitch === 0),
-    'a stage whose spine seats no service handed out a spacing anyway');
-  ok(bad.length === 0, bad.join('\n      '));
-});
-
-test('the spine lends the scale to itself when it is the one-station chain', () => {
-  /* THE COST OF BORROWING, PAID OFF (GitHub #83). Measuring a chain's marks
-     against ANOTHER chain was the one objection to the spine's scale, and the
-     case it was raised for is this one: a chain with no spine but itself. It is
-     answered by the derivation rather than beside it -- the spine's station
-     pitch is the axial length its station pattern occupies over the number of
-     stations in it, and at one station the span is zero, the two end radii are
-     the same wheel's, and what is left is that wheel's PITCH DIAMETER. No
-     branch, no fallback constant, nothing to keep in step.
-
-     ASSERTED AGAINST MODULE * teeth, which is the pitch diameter written the
-     way the rest of the page writes it -- not against the method's own
-     expression, which would only prove the suite could copy it. */
-  const ALL_SHORT = [
-    { slug: 'spine', links: [{ slug: 'a' }] },
-    { slug: 'two', links: [{ slug: 'b' }] }
-  ];
-  const flat = runSolve(ALL_SHORT, { axisRot: 0 });
-  const fr = datumRunsOn(flat.solved, 0, flat.order[0].slug, [], seatSlugs(flat.solved));
-  eq(fr.length, 2, 'the one-link fixture did not draw a datum for each chain');
-  const spine = fr.find(r => r.person === flat.order[0].slug);
-  eq(spine.stations.length, 1, 'the fixture\'s spine has more than one station');
-  const wheel = flat.solved.gears.find(g => g.role === 'link' && g.person === spine.person);
-  const dia = page.MODULE * wheel.teeth;
-  ok(Math.abs(spine.pitch - dia) < 1e-9,
-    'a spine that is its own borrower was scribed at ' + spine.pitch.toFixed(3)
-    + ' instead of its own pitch diameter, ' + dia.toFixed(3));
-  ok(fr.every(r => Math.abs(r.pitch - dia) < 1e-9),
-    'a stage where every chain is one link did not scribe them all at one scale');
-  /* AND THE OTHER READING OF "ALONE" NEEDS NO SCALE AT ALL. One chain on stage
-     -- a solo host, or ?who=<slug> -- draws no datum whatsoever, so the mark
-     that would want a spine that is not there is never made. Asserted in full a
-     few tests down ("no datum is drawn while one chain is on stage"); repeated
-     here at ONE LINK, which is the exact shape GitHub #83 was filed against and
-     the shape a solo host serves it as. */
-  const alone = runSolve([{ slug: 'only', links: [{ slug: 'a' }] }], { axisRot: 0 });
-  eq(datumRunsOn(alone.solved, 0, alone.order[0].slug, [], seatSlugs(alone.solved)).length, 0,
-    'a one-link chain alone on stage drew a datum, which would need a scale no '
-    + 'stage was there to lend');
-});
-
 test('the plate seats on the side the page has room for, and the ticks follow it', () => {
   /* THE MARK MAY NOT LEAVE THE PAGE, which datumRuns() has always said and
      nothing enforced: the plate is placed after fitStage, outside all three limbs
@@ -2897,13 +2774,14 @@ test('the plate seats on the side the page has room for, and the ticks follow it
      it — the mirror only fires on deals that seed does not produce. */
   ok(/const out = seat\.side/.test(DATUM_DRAW),
     'datumLayer no longer takes its outboard direction from the seat');
-  /* THREE STRIKES SINCE #109: the major at a station, the minor subdividing a
-     chain's own gap, and the minor on the borrowed grid a one-station chain is
-     scribed with. The count is asserted so a fourth cannot arrive unnoticed --
-     every one of them has to follow the side. */
-  const ticks = DATUM_DRAW.match(/at\(d[m]?, [^)]*(MAJOR|MINOR)\)/g) || [];
-  eq(ticks.length, 3, 'expected exactly three tick strikes in datumLayer, found ' + ticks.length);
-  ticks.forEach(t => ok(/out \* (MAJOR|MINOR)/.test(t),
+  /* ONE STRIKE, SINCE #115: the major at a station is all that is left to
+     follow the side. Minor ticks -- the chain's own subdivision and the
+     borrowed grid a one-station chain used to be scribed with -- were removed
+     on the evidence (CL#121, GitHub #115); this count used to be three and is
+     asserted at its new value so a tick strike cannot quietly reappear. */
+  const ticks = DATUM_DRAW.match(/at\(d, [^)]*MAJOR\)/g) || [];
+  eq(ticks.length, 1, 'expected exactly one tick strike in datumLayer, found ' + ticks.length);
+  ticks.forEach(t => ok(/out \* MAJOR/.test(t),
     'a tick is struck at a fixed sign (' + t + '), so a mirrored datum draws its '
     + 'ticks into the wheels it is meant to clear'));
 });
