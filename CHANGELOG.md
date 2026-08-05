@@ -350,6 +350,180 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
   Nothing on the deploy path was touched. `npm test` is unchanged at 69 passed,
   0 failed.
+- **#96 — a gearbox on the corner widget, with a benchmark stop at the top of
+  it.** (GitHub #69.) A fourth corner button, between the table of gears and
+  pause, wearing its own value instead of an icon: `1×`, and a press moves it to
+  the next stop. Eight of them, **1, 2, 5, 10, 20, 50, 100, 200**.
+
+  **Most of it was already built, and the first job was to prove that rather
+  than assume it.** `idleRate()` has multiplied by `this.props.speed` for a long
+  time, but nothing on the page could set that prop and no measurement had ever
+  been taken through it, so "the integrator already honours speed" was a reading
+  of the source and not a fact. It is a fact now. The `speed` default was moved
+  to `2` in a copy of the document served beside the original, `Math.random` was
+  seeded before either page's first script so both dealt the *same* train — tooth
+  counts are dealt per load, and rotation rates from two different deals are not
+  comparable — and the same 39 rotating elements were sampled over a fixed window
+  after the flywheel had settled: **24.4779 → 48.9501 deg/s** on the median, and
+  2.0000 on the min and the max as well. The whole train scales by one factor
+  because there is one integrator. So the work here was a control, not a
+  mechanism.
+
+  ### The stop where it stops being animation
+
+  A gear turning fast enough strobes. Past half a tooth pitch of travel per tick
+  the sampling is under Nyquist and the train visibly stands still or runs
+  backwards — the wagon-wheel effect — and that is the one high-speed artefact
+  that reads as *broken* rather than as fast. The limit is exactly computable,
+  and it does not depend on the tooth count at all:
+
+  A wheel's angle is `phase + dir * _M / teeth` and its pitch is `360 / teeth`
+  degrees, so **one tooth of travel is 360 master-degrees on every wheel in the
+  train**. A 13-tooth blank and a 19-tooth one cover the same fraction of a tooth
+  per tick, and there is one strobe speed for the whole machine:
+
+  ```
+  master-deg per tick at 1x = (7200 / BASE_MS) * (1000 / frameRate)
+                            = 0.342857 * 33.33 = 11.43     (BASE_MS 21000, 30fps)
+  tooth fraction per tick   = 11.43 / 360      = 0.0317
+  strobe at half a pitch    = 180 / 11.43      = 15.75x
+  ```
+
+  Measured, the crossing lands exactly there: 10× covers 0.334 of a tooth per
+  tick (67% of the limit) and 20× covers 0.663 (133%).
+
+  **The ladder is allowed past it anyway.** Charles asked for a top stop that is
+  "ludicrous", usable "almost … to do benchmarking", so `strobeSpeed()` no longer
+  truncates the ladder — it *classifies* it. Every stop at or above 15.75× says
+  "strobing — benchmark only" in its accessible name and draws its numeral in
+  `--accent` rather than `--muted`. A control that silently hands over a setting
+  which breaks the illusion is worse than one that says where the illusion ends.
+
+  ### Why these eight numbers
+
+  A 1-2-5 preferred-number ladder between the schema's `min` and `max`. Equal
+  ratios rather than equal increments, because the effect is perceptually
+  multiplicative — 1× to 2× and 50× to 100× are the same size of change to look
+  at — and 1-2-5 is the standard logarithmic ladder for exactly that: scope
+  timebases, chart axes, preferred component values. 1 to 200 gives eight
+  positions, which is as many as a cycling button can carry, and **200 is a rung
+  of that ladder exactly**, so the ceiling is Charles's number landing on the
+  ladder rather than the ladder being bent to reach it. The floor is 1×: the
+  control only ever speeds the machine up, because slowing it down was not wanted
+  and stopping it is already the pause button's job.
+
+  Nothing about the spacing was picked. `min` and `max` are the only levers, and
+  the strobe limit is not written down anywhere — it is a property of `BASE_MS`
+  and the frame rate, derived by `strobeSpeed()`, exactly as `gsRender()` reads
+  `--gsfit` out of its own CSS declaration rather than keeping a copy.
+
+  ### The benchmark, measured
+
+  Every stop, same seeded deal, 10s windows at 1440×900 in headless Chrome. Ticks
+  are counted as `applyRotation()` bursts — `step()` early-returns under its frame
+  budget, so rAF callbacks are *not* ticks and counting them would report 60 on a
+  page updating at 30:
+
+  | stop | deg/s | ratio | ticks/s | rAF/s | tooth/tick | % of Nyquist | rim px/tick | rim/cap |
+  | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+  | 1× | 24.47 | 1.000 | 28.86 | 59.96 | 0.033 | 6.6% | 0.76 | 0.07 |
+  | 2× | 48.96 | 2.001 | 29.37 | 59.98 | 0.065 | 13.0% | 1.49 | 0.14 |
+  | 5× | 122.88 | 5.021 | 29.23 | 59.96 | 0.163 | 32.6% | 3.75 | 0.41 |
+  | 10× | 244.30 | 9.983 | 28.49 | 59.98 | 0.334 | 66.9% | 7.65 | 0.70 |
+  | **20×** | 490.62 | 20.048 | 28.74 | 59.98 | 0.663 | **133%** | 15.23 | **1.57** |
+  | 50× | 1226.22 | 50.108 | 28.98 | 60.08 | 1.643 | 329% | 37.74 | 3.43 |
+  | 100× | 2452.56 | 100.220 | 28.99 | 59.97 | 3.286 | 657% | 75.46 | 7.15 |
+  | 200× | 4895.75 | 200.057 | 29.74 | 59.97 | 6.405 | 1281% | 146.83 | 14.29 |
+
+  **The headline is the column that does not move.** Ticks per second sits at
+  28.5–29.7 at *every* stop, 200× included, against a nominal 30. The renderer
+  does not care how fast the train is going, and the reason is structural rather
+  than lucky: the work per tick is 39 transform writes whatever the multiplier
+  is, and speed changes the number written into each one, not the number of
+  writes. **Speed is free; only the illusion is not.** The 1.5ms margin in
+  `budget = 1000/tickRate - 1.5` was flagged as thin, and it may well be — but no
+  stop on this ladder is what makes it thin, and nothing here moved it.
+
+  Two independent limits land in the same gap, which is worth noting because
+  neither was fitted to the other. The teeth cross Nyquist between 10× and 20×;
+  the rim engraving crosses `rim/cap = 1.0` — where consecutive frames share no
+  ink at all and the handle reads as a train of ghosts rather than one moving
+  object — between 10× (0.70) and 20× (1.57). Rim travel was measured on the
+  wheel the lettering actually sits on, off that wheel's own rotating ancestor
+  and its own radius, with the cap converted out of SVG user units by the
+  wheel's own viewBox scale. **10× is the last honest stop, by both measures.**
+
+  ### Accessibility, and the one real defect this found
+
+  The numeral is *text*, and axe checks text contrast where it does not check an
+  icon's stroke. WCAG asks 4.5:1 of small text and 3:1 of graphics, and `--muted`
+  on `--bg` is **3.54:1** — so at 13px the new button **failed** the light-theme
+  audit while its three neighbours passed at exactly the same colour. Bold text
+  at 18.66px or more is "large scale" and back to a 3:1 threshold, and `--icon`
+  is already 20px, so the label is set at `--icon`: the same size as the glyphs
+  beside it, clearing the bar by construction rather than by a number somebody
+  has to remember. Measured after the change, every stop passes in both themes —
+  3.54:1 for the plain stops and 4.69:1 for the strobing ones in light, 6.21:1
+  and 7.93:1 in dark. The warning state is the *more* legible of the two, not the
+  less.
+
+  The accessible name reports where the machine is, whether that stop strobes,
+  and where the next press puts it — "Gear speed 20×, strobing — benchmark only,
+  next 50×". A cycling control that reports only its current value tells a screen
+  reader user nothing about what activating it does, and the full name is also
+  what keeps it unique, which is the check #74 added.
+
+  ### Everything else it touched
+
+  - **`driveCap()`, because a fixed clamp became a brake.** A flick or an arrow
+    key was bounded at ±8 master-deg/ms, which stood comfortably while idle was
+    0.343 — twenty-three times slower, so the bound only ever caught a violent
+    flick. Idle reaches **68.6** at 200×, where a single arrow press would have
+    slammed the train from 68.6 to 8 and then climbed back over ~900ms. The bound
+    is `max(8, idleRate())` now: a ceiling again at every stop, and identical to
+    the old one at 1×.
+  - **The choice persists** in `localStorage` under `wozi-speed`, restored before
+    the flywheel is seeded so a `spinUp:false` page starts at the chosen rate
+    instead of easing up from the default. Bounded by the ladder's own ends
+    rather than by numbers written at the read site: `9999` is discarded and the
+    button returns to `1×`; `1.25`, which is *between* stops, is kept, because
+    `speedIndex()` can always say which stop a value is nearest and offers `2×`
+    as the next press. A setting the control cannot leave is the failure worth
+    guarding against, not an unfamiliar number.
+  - **A dead `speed` read came out of `syncVars()`.** It resolved the multiplier
+    on every render and dropped it on the floor — it belonged to the `--s`
+    variable deleted in #57 and outlived it. Speed reaches the page through
+    `idleRate()` and never through CSS.
+  - **`tickRate()` is one home for the update rate.** `step()`'s frame budget and
+    `strobeSpeed()` are both computed from it; two copies of `?? 30` would have
+    been a control offering stops the renderer had stopped being able to show.
+  - **`tools/devices.py`'s comment said "the three corner buttons".** The code
+    was always right — it enumerates `button` elements, which is why the fourth
+    was measured the moment it existed — but the prose had gone stale.
+
+  The row's arithmetic did not change shape, only length. Each button's `right`
+  is its index in whole button pitches — `(--btn + --btngap)` — off `--offright`,
+  which already carries the safe-area inset, so a fourth button costs one term
+  and no new constant. The table of gears moved from index 2 to 3; pause and
+  theme did not move. Three of the four styles are still repeated inline
+  verbatim, which remains deliberate. **The speed button's is a render value**,
+  and that exception has exactly one reason: its colour depends on state, which
+  is the thing the other three do not have.
+
+  Gates: 69/69 suite (unchanged), `verify_motion` PASS, `a11y_audit` PASS in both
+  themes — 27 focusables, 0 unlabelled, no duplicate names, 0 targets under
+  24×24 — and `devices` 24/24 with 4/4 safe-area, which is the pass that measures
+  every fixed control against injected insets and therefore the one a fourth
+  control is for. Photographed at all eight stops in both themes. The button box
+  is 44×44 at every stop; the widest label, `200×`, renders 45.9px and so sits
+  1.9px proud of its own transparent disc, which collides with nothing — its
+  neighbours are 20px glyphs centred in 44px discs, leaving 19px of clear space.
+
+  **Not verified:** the pixel gate's stored baseline was not reshot — the control
+  is a visible addition to every view, so both the combined-stage and
+  `?who=charles` shots necessarily differ from `main`. And the frame-rate figures
+  are headless Chrome on an idle workstation, which is the easy case: they say
+  the multiplier costs nothing, not that the page holds 30fps on a loaded phone.
 - **#94 — the checks only a phone can make, written down instead of remembered.**
   (GitHub #49.) `docs/MANUAL-CHECKS.md`, and it is documentation of a gap rather
   than a new gate: nothing runs it and nothing can.

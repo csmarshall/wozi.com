@@ -130,6 +130,42 @@ reverses the strand with it. No chain or belt is enabled in the shipped train
 (see *Dormant capability* below), but this invariant is what makes re-enabling
 one safe.
 
+**The speed control is a multiplier on that integrator and nothing else** (#96).
+`speedFactor()` is the only thing the corner button reaches; `idleRate()` scales
+by it, the flywheel eases to the new target, and every wheel follows because not
+one of them is animated on its own.
+
+**The speed that strobes is derived; the speed the control stops at is chosen.**
+Keep those apart. A wheel's angle is `_M / teeth` and its pitch is `360 / teeth`,
+so **one tooth of travel is 360 master-degrees on every wheel** — the tooth count
+cancels, and there is one strobe speed for the whole train:
+`strobeSpeed(frameRate) = 180 / ((7200 / BASE_MS) * (1000 / frameRate))`, which
+is **15.75× at 30fps**. At or above it the teeth are sampled below Nyquist and
+the train reads as stopped or reversing.
+
+`SPEED_STOPS` lays a 1-2-5 preferred-number ladder between the `speed` schema's
+`min` and `max` — **1, 2, 5, 10, 20, 50, 100, 200** — and the strobe limit does
+**not** truncate it. The top stops are deliberately absurd: they exist to
+benchmark the renderer, and a benchmark stop is allowed to look wrong. What is
+not allowed is offering one silently, so every stop at or above `strobeSpeed()`
+says "strobing — benchmark only" in its accessible name and draws its numeral in
+`--accent` instead of `--muted`.
+
+So `min` and `max` in the schema are the levers; the strobe limit is never
+written down anywhere, because it is a property of `BASE_MS` and the frame rate.
+Never hand-write a stop list.
+
+`tickRate()` is the one home for the update rate — `step()`'s frame budget and
+`strobeSpeed()` are both computed from it. `driveCap()` is the one home for how
+hard a flick or an arrow key may drive the flywheel: it is `max(8, idleRate())`,
+because a fixed 8 stopped being a ceiling and became a *brake* once the idle rate
+could reach 68.6 at 200×.
+
+**The speed button's `style` is a render value, and it is the only fixed control
+whose style is.** The other three are inline because nothing about them depends
+on state; this one's colour does. That is the whole of the exception — do not
+generalise it into hoisting the row's styling.
+
 **Lighting from directly above.** All shading is symmetric about the vertical
 axis: vertical body gradients, radial highlights at 50% horizontally, specular
 arc centred on the bottom, cast shadows straight down. Any diagonal or corner
