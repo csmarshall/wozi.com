@@ -202,14 +202,216 @@ test('config.js is a plain script that assigns WOZI_CONFIG', () => {
     'config.js must be loaded BEFORE support.js');
 });
 
-test('config.js is named in the deploy whitelist', () => {
-  /* The deploy publishes an explicit list of paths, so a file in the repo does
-     NOT reach the web by existing. If config.js is missing from it the page
-     still renders a turning machine with no links, and only says so in the
-     console -- a failure a screenshot would happily pass. */
-  const wf = fs.readFileSync(
-    path.join(__dirname, '..', '.github', 'workflows', 'deploy.yml'), 'utf8');
-  ok(/\bconfig\.js\b/.test(wf), 'config.js is not published by .github/workflows/deploy.yml');
+/* ---- 0b. the deploy whitelist -------------------------------------------- */
+
+/* WHAT A PUBLISH STEP IS, STRUCTURALLY. It is not "a step whose prose mentions a
+   file" and it is not "a step whose name contains the word publish" -- both of
+   those are the bug this section replaces (GitHub #89). It is a step that runs
+   `aws s3 cp` or `aws s3 sync` with a DESTINATION under $BUCKET. That is the only
+   thing in the workflow that puts bytes on the web, so it is the only thing worth
+   asserting about, and a comment cannot accidentally be one.
+
+   The old assertion was /\bconfig\.js\b/ over the whole of deploy.yml. config.js
+   is named there seven times -- once in the loop that publishes it, twice in
+   comments explaining why it matters, four times in the live-site checks -- so
+   deleting it from the publish loop left the suite at 77 passed, 0 failed. The
+   guard written to stop #59 recurring was satisfied by its own explanatory
+   comments. Narrowing the pattern would have been the same bug with a smaller
+   window; the fix is to stop reading prose and start reading the commands. */
+
+const WORKFLOW = fs.readFileSync(
+  path.join(__dirname, '..', '.github', 'workflows', 'deploy.yml'), 'utf8');
+
+/* Split the workflow into steps, and reduce each to the SHELL it actually runs:
+   the body of its `run: |` block, with shell comments removed and line
+   continuations folded so a command spanning five lines is one string. YAML-level
+   comments never enter, because only run bodies are collected. */
+function workflowSteps(wf) {
+  const all = wf.split('\n');
+  /* Start AT the steps: key, not at the top of the file -- `on: push: paths-ignore:`
+     carries list items at the very same indent, and a scan of the whole document
+     picks them up as steps. They have no run block so they change no verdict, but
+     a parser that reports four phantom steps is one nobody can check by eye. */
+  let at = -1, stepsIndent = 0;
+  for (let i = 0; i < all.length; i++) {
+    const m = all[i].match(/^(\s*)steps:\s*$/);
+    if (m) { at = i + 1; stepsIndent = m[1].length; break; }
+  }
+  if (at < 0) throw new Error('deploy.yml has no steps: block');
+  const itemIndent = stepsIndent + 2;
+  const marker = ' '.repeat(itemIndent) + '- ';
+  const lines = [];
+  for (let i = at; i < all.length; i++) {
+    const raw = all[i];
+    if (raw.trim() && raw.length - raw.trimStart().length <= stepsIndent) break;
+    lines.push(raw);
+  }
+
+  const steps = [];
+  let cur = null, runIndent = null;
+  for (const raw of lines) {
+    if (raw.startsWith(marker)) { cur = { name: null, run: [] }; steps.push(cur); runIndent = null; }
+    if (!cur) continue;
+    if (runIndent !== null) {
+      /* A blank line does not end a block scalar; a dedent does. */
+      if (!raw.trim() || raw.length - raw.trimStart().length > runIndent) { cur.run.push(raw); continue; }
+      runIndent = null;
+    }
+    const nm = raw.match(/^\s*(?:-\s+)?name:\s*(.+?)\s*$/);
+    if (nm && !cur.name) cur.name = nm[1];
+    const rm = raw.match(/^(\s*)run:\s*\|\s*$/);
+    if (rm) runIndent = rm[1].length;
+  }
+  return steps.map(s => ({
+    name: s.name || '(unnamed step)',
+    shell: s.run.map(l => l.replace(/(^|\s)#.*$/, '$1')).join('\n').replace(/\\\n\s*/g, ' ')
+  }));
+}
+
+function unquote(s) { return s.replace(/^(['"])([\s\S]*)\1$/, '$2'); }
+
+/* Every path one step copies to the bucket. TWO SHAPES, and the assertion has to
+   understand both or a file moves between them and the guard evaporates:
+
+     for f in support.js config.js; do aws s3 cp "$f" "$BUCKET/$f" ... done
+     aws s3 cp robots.txt "$BUCKET/robots.txt" ...
+
+   so a source that is a bare variable is resolved through the `for` loop that
+   binds it, in the same step. A sync contributes a DIRECTORY rather than a file:
+   assets/ publishes whatever is under it, and nothing here should have to know
+   which icons exist. */
+function publishedBy(step) {
+  const loops = {};
+  let m;
+  const FOR = /\bfor\s+(\w+)\s+in\s+([^;\n]+?)\s*;\s*do\b/g;
+  while ((m = FOR.exec(step.shell))) loops[m[1]] = m[2].trim().split(/\s+/);
+
+  const files = [], dirs = [];
+  const S3 = /\baws\s+s3\s+(cp|sync)\s+("[^"]*"|'[^']*'|\S+)\s+("[^"]*"|'[^']*'|\S+)/g;
+  while ((m = S3.exec(step.shell))) {
+    const dst = unquote(m[3]);
+    if (!/\$\{?BUCKET\b/.test(dst)) continue;   /* not a write to the live site */
+    const src = unquote(m[2]);
+    const v = src.match(/^\$\{?(\w+)\}?$/);
+    const paths = v ? (loops[v[1]] || []) : [src];
+    if (m[1] === 'sync') dirs.push(...paths); else files.push(...paths);
+  }
+  return { files, dirs };
+}
+
+const PUBLISH = (function () {
+  const steps = workflowSteps(WORKFLOW);
+  const files = new Set(), dirs = new Set(), blind = [];
+  steps.forEach(s => {
+    if (!/\baws\s+s3\s+(?:cp|sync)\b/.test(s.shell)) return;
+    const got = publishedBy(s);
+    /* A step that copies to the bucket and yields no path means the PARSER has
+       gone blind, not that the step publishes nothing -- exactly the failure this
+       whole section exists to make impossible, so it is asserted rather than
+       assumed. */
+    if (!got.files.length && !got.dirs.length) blind.push(s.name);
+    got.files.forEach(f => files.add(f));
+    got.dirs.forEach(d => dirs.add(d.replace(/\/+$/, '') + '/'));
+  });
+  return { steps, files, dirs, blind };
+})();
+
+function isPublished(p) {
+  if (PUBLISH.files.has(p)) return true;
+  for (const d of PUBLISH.dirs) if (p.startsWith(d)) return true;
+  return false;
+}
+
+/* What the site NEEDS published, derived from two sources already in the tree
+   rather than typed here as a list that would drift the moment a file is added:
+
+     1. the scripts index.html loads, plus index.html itself
+     2. every URL the deploy's OWN live-site checks assert is reachable
+
+   The second is the interesting one. `check https://wozi.com/robots.txt` is the
+   deploy stating that the file has to be there; if no publish step copies it, the
+   workflow is asserting something about a file it never uploads -- #59's shape
+   ("the rules requiring a file the rules do not name") inside a single file. */
+function requiredPaths() {
+  let m;
+  const fromPage = [];
+  const SCRIPT = /<script\s+src="\.\/([^"]+)"/g;
+  while ((m = SCRIPT.exec(SRC))) fromPage.push(m[1]);
+
+  const fromLive = [];
+  const shell = PUBLISH.steps.map(s => s.shell).join('\n');
+  const CHECK = /\b(?:check|check_content_type|exact)\s+https:\/\/wozi\.com(\/\S*)/g;
+  while ((m = CHECK.exec(shell))) {
+    let p = m[1].replace(/^\//, '');
+    if (!p || p.endsWith('/')) p += 'index.html';   /* a directory serves its index */
+    fromLive.push(p);
+  }
+
+  /* Kept apart so each source can be shown to have found something. A path both
+     of them name -- config.js is one -- must not make either look empty, which is
+     what one shared map keyed by path did. */
+  const need = new Map([['index.html', ['it is the page']]]);
+  const add = (p, why) => {
+    const seen = need.get(p) || [];
+    if (!seen.includes(why)) seen.push(why);
+    need.set(p, seen);
+  };
+  fromPage.forEach(p => add(p, 'index.html loads it'));
+  fromLive.forEach(p => add(p, 'the deploy asserts it is live'));
+  return { need, fromPage, fromLive };
+}
+
+test('every file the site needs is copied to the bucket by a publish step', () => {
+  ok(PUBLISH.blind.length === 0,
+    'a step copies to $BUCKET but no path could be read out of it, so this whole '
+    + 'assertion is blind: ' + PUBLISH.blind.join(', '));
+  ok(PUBLISH.files.size > 0 && PUBLISH.dirs.size > 0,
+    'no publish step was found in .github/workflows/deploy.yml — the parser is '
+    + 'reading nothing, so nothing below can fail');
+  const { need, fromPage, fromLive } = requiredPaths();
+  ok(fromPage.length > 0, 'no <script src="./…"> was found in index.html — the page '
+    + 'half of this derivation found nothing');
+  ok(fromLive.length > 0, 'no live-site check was found in deploy.yml — the deploy '
+    + 'half of this derivation found nothing');
+  const missing = [];
+  need.forEach((why, p) => {
+    if (!isPublished(p)) missing.push(p + ' (' + why.join('; ') + ')');
+  });
+  ok(missing.length === 0,
+    'required but never copied to the bucket by any publish step in '
+    + '.github/workflows/deploy.yml: ' + missing.join(', '));
+});
+
+test('every path the deploy publishes exists in the repo', () => {
+  /* The other half of the same guarantee. A path in the publish list that is not
+     in the tree fails the deploy at run time, on a live bucket, after the geometry
+     and the browsers have all gone green -- and the suite can answer it in a
+     millisecond. This is also what catches a rename that updated the repo and not
+     the workflow. */
+  const at = p => path.join(__dirname, '..', p);
+  const missing = [];
+  PUBLISH.files.forEach(f => {
+    if (!fs.existsSync(at(f)) || !fs.statSync(at(f)).isFile()) missing.push(f);
+  });
+  PUBLISH.dirs.forEach(d => {
+    if (!fs.existsSync(at(d)) || !fs.statSync(at(d)).isDirectory()) missing.push(d);
+  });
+  ok(missing.length === 0,
+    'named in a publish step in .github/workflows/deploy.yml but not in the repo, '
+    + 'so the deploy would fail against the live bucket: ' + missing.join(', '));
+});
+
+test('the deploy publishes nothing it is documented never to publish', () => {
+  /* CLAUDE.md: legacy/ is the archive of everything retired from the bucket, and
+     every document in the repo root stays off a public site. The whitelist exists
+     so that a new file cannot reach the web by being forgotten; this is the same
+     rule read from the other end, and it can only be checked once the publish
+     steps are parsed rather than grepped. */
+  const bad = [...PUBLISH.files, ...PUBLISH.dirs]
+    .filter(p => /^legacy\//.test(p) || /^[^/]+\.md$/i.test(p));
+  ok(bad.length === 0,
+    'a publish step would copy an archived or repo-only document to the live '
+    + 'bucket: ' + bad.join(', '));
 });
 
 /* The real SITES builder, sliced out of index.html and run against whatever
@@ -892,8 +1094,16 @@ test('a chain that opts out of bridging is a root, and keeps no idlers', () => {
   eq(train.filter(t => t.role === 'idler').length, 0,
     'an unbridged chain still built idlers');
   eq(bridges.length, 1, 'an unbridged chain is not registered, so nothing places it');
-  eq(bridges[0].idlers.length, 0, 'an unbridged chain claims idlers');
-  eq(train[bridges[0].head].parent, null, 'an unbridged chain is not a root');
+  /* Every message in this file names the FAULT, not the invariant, and these two
+     were the only pair with no word in them saying so -- "an unbridged chain
+     claims idlers" and "an unbridged chain is not a root" read as flat statements
+     about a healthy tree, and quoted out of a failing run they say the opposite of
+     what is being claimed. Their neighbours above carry "still" and "so nothing
+     places it"; these carry it now too. */
+  eq(bridges[0].idlers.length, 0, 'an unbridged chain kept idlers on its bridge '
+    + 'record, and it has no drive to hang them off');
+  eq(train[bridges[0].head].parent, null, 'an unbridged chain was given a parent, '
+    + 'so it is being driven by the chain it opted out of');
   ok(/const free = /.test(SRC),
     'solve() has no branch for a root that is not the first wheel, so it would '
     + 'resolve to (0,0) on top of the spine');

@@ -7,6 +7,94 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Changed
 
+- **#104 — the deploy-whitelist guard read the workflow's prose, so it could not
+  fail for the reason it was written.** (GitHub #89, closing the one `survives`
+  entry left by #100.) `tools/test.js` asserted `/\bconfig\.js\b/` over the
+  **whole** of `.github/workflows/deploy.yml`. `config.js` is named there seven
+  times — once in the loop that publishes it, twice in comments about why it
+  matters, four times in the live-site checks — so the single edit that restages
+  #59,
+
+      -          for f in support.js config.js; do
+      +          for f in support.js; do
+
+  left the suite green. The guard against *"the rules requiring a file the rules
+  do not name"* was being satisfied by its own explanatory comments. The same
+  hole covered `support.js`, `robots.txt`, `ssh_public_key` and `keybase.html`,
+  all of which are likewise named in comments and in live checks.
+
+  **A narrower regex would have been the same bug with a smaller window**, so the
+  assertion stops reading prose and reads the commands. A publish step is now
+  identified by what it *does*: a step whose `run:` block issues `aws s3 cp` or
+  `aws s3 sync` with a **destination under `$BUCKET`**. That is the only thing in
+  the workflow that puts bytes on the web, and a comment cannot accidentally be
+  one. The workflow is split into steps at the `steps:` key, each reduced to the
+  shell it actually runs — shell comments stripped, line continuations folded —
+  and both whitelist shapes are understood, because a file moving between them
+  must not evaporate the guard:
+
+  | shape | how the path is recovered |
+  | --- | --- |
+  | `for f in support.js config.js; do … cp "$f" "$BUCKET/$f"` | the `for` binding in the same step resolves the variable |
+  | `aws s3 cp robots.txt "$BUCKET/robots.txt"` | the literal source |
+  | `aws s3 sync assets/ "$BUCKET/assets/"` | a published **directory**, so nothing has to know which icons exist |
+
+  **What must be published is derived, never listed here.** Two sources already
+  in the tree: the `<script src="./…">` tags `index.html` carries, and every URL
+  the deploy's *own* live-site checks assert is reachable. The second is the one
+  that earns its keep — `check https://wozi.com/robots.txt` is the workflow
+  stating the file has to be there, so a workflow that checks a file it never
+  uploads is #59's shape inside a single file. Between them they require
+  `index.html`, `config.js`, `support.js`, `keybase.html`, `ssh_public_key`,
+  `robots.txt`, both card pages and a hub icon, with no list typed into the
+  suite to go stale.
+
+  Two more assertions, because a whitelist has two ends and a parser has a third:
+
+  - **Every path the deploy publishes exists in the repo.** A publish list naming
+    a file the tree does not have fails at run time, against a live bucket, after
+    the geometry and both browsers have gone green — and the suite answers it in
+    a millisecond.
+  - **Nothing it is documented never to publish is in the list** — `legacy/` and
+    the repo-root documents. Only checkable once the steps are parsed rather than
+    grepped.
+  - **A step that copies to `$BUCKET` and yields no path is a failure**, not an
+    empty result. That is the parser going blind, which is precisely the fault
+    this whole section replaces, so it is asserted rather than assumed.
+
+  **Proved able to fail, in a throwaway `git worktree` at `HEAD`** — never `git
+  stash`, which on a clean tree stashes nothing and silently tests the unmutated
+  file. Baseline exit **0**; `config.js` dropped from the publish loop, exit
+  **1**, naming `config.js (index.html loads it; the deploy asserts it is live)`
+  — with the file still spelt seven times in the workflow and the old
+  `/\bconfig\.js\b/` still returning `true`; restored, exit **0**. Then the other
+  shape: `aws s3 cp ssh_public_key` pointed at the wrong source, exit **1**,
+  naming `ssh_public_key`, which is still spelt three times afterwards; restored,
+  exit **0**. The two supporting assertions were proved the same way — a
+  nonexistent `runtime.js` added to the loop, exit **1**; `CHANGELOG.md` added to
+  it, exit **1** — as was the blindness guard, by renaming the loop variable so
+  the parser could no longer resolve it: *"a step copies to $BUCKET but no path
+  could be read out of it"*, exit **1**.
+
+  **The ratchet was updated rather than deleted.** `tools/mutation_gate.py`
+  registered `config-js-off-the-whitelist` as `expect: survives` so that closing
+  the gap would report `GAP CLOSED` and force this edit. It is now `expect:
+  caught` — the mutant is kept as the standing proof that the gap stays closed,
+  which is worth more than removing it — and a second mutant,
+  `ssh-key-off-the-whitelist`, covers the individually-copied shape. The suite
+  gate: **4/4 caught, 0 known gaps, 1/1 controls green**.
+
+  While in the file: two assertion messages in *a chain that opts out of bridging
+  is a root* were the only pair with no word in them marking the sentence as a
+  fault — `an unbridged chain claims idlers` and `an unbridged chain is not a
+  root` read as flat statements about a healthy tree, unlike their neighbours,
+  which carry *"still"* and *"so nothing places it"*. They now say what broke. A
+  sweep of every other `ok()`/`eq()` message in the file for the same shape found
+  none; the rest already name the fault.
+
+  `npm test` **79 passed, 0 failed** (77 before: one prose-matching test removed,
+  three command-reading tests added). Nothing on the deploy path was touched —
+  `deploy.yml` is asserted, not edited.
 - **#99 — a service owned its URL stem in as many places as there were people
   with an account on it.** (GitHub #70.) Every link carried a whole `href`, so
   `https://github.com/` was written once per person who had GitHub, and the only
