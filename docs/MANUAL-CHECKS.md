@@ -2,10 +2,10 @@
 
 Everything in `tools/` runs headless Chrome over CDP, plus one windowless
 WKWebView (`webkit_band.js`). None of them has browser chrome, a window manager,
-a battery, or a finger. The six checks below are the ones that follow from that,
-each with the reason no harness here can take it over — because a check nobody
-can justify as manual gets automated badly, and a check nobody wrote down gets
-skipped.
+a battery, or a finger. The seven checks below are the ones that follow from
+that, each with the reason no harness here can take it over — because a check
+nobody can justify as manual gets automated badly, and a check nobody wrote
+down gets skipped.
 
 **The page's only mobile oracle is one human.** That is why this file exists. It
 is not a gate and nothing runs it; it is the list to work through on a real
@@ -71,9 +71,9 @@ Dismiss the keyboard and rotate back.
 
 **Correct.** The train ends up along the long side of the screen in whichever
 orientation you land in, correctly sized for the viewport that is actually
-visible, and the four fixed controls stay in their corners. On a combined stage
-the bridge should be across the long axis in portrait — that is the axis-relative
-bearing doing its job.
+visible, and the fixed controls — the corner row and the wordmark — stay in
+their corners. On a combined stage the bridge should be across the long axis in
+portrait — that is the axis-relative bearing doing its job.
 
 **Failure.** The train sized for the keyboard-shortened viewport and left that
 way after the keyboard goes; the axis rotation not landing, so the train runs
@@ -91,15 +91,19 @@ the portrait and landscape rows; the race between them is not.
 ## 3. Home-indicator and Dynamic Island overlap
 
 **Do.** On a notch or Dynamic Island phone, in both orientations: look at the
-wordmark in the bottom-left corner and the three buttons in the top-right, and
-**tap each button with a thumb**. Then swipe up from the bottom edge.
+wordmark in the bottom-left corner and the corner row in the top-right — three
+buttons at 1x, a fourth departure indicator alongside them at any other speed
+(GitHub #108, CL#114) — and **tap each with a thumb**. Then swipe up from the
+bottom edge.
 
-**Correct.** The wordmark sits clear above the home-indicator pill; the three
-buttons sit clear below the Island and inside the rounded corners; each button
-takes a thumb tap first time. The gears themselves are supposed to run under all
-of it — `viewport-fit=cover` is deliberate (`index.html:87-92`) and a machine
-that stops short of the physical edge is the failure, not the one that bleeds
-past it.
+**Correct.** The wordmark sits clear above the home-indicator pill; every
+button in the corner row, three or four of them, sits clear below the Island
+and inside the rounded corners; each takes a thumb tap first time — including
+the departure indicator, off 1x, which should reset the machine to 1x on
+contact. The gears themselves are supposed to run under all of it —
+`viewport-fit=cover` is deliberate (`index.html:87-92`) and a machine that
+stops short of the physical edge is the failure, not the one that bleeds past
+it.
 
 **Failure.** The wordmark under or clipped by the indicator pill; a button under
 the Island; a button that is visibly clear but does not take the tap, because the
@@ -155,7 +159,7 @@ it: the page-menu control, and whether a Reader glyph appears at all. Open the
 page menu. If Reader is offered, enter it and come back.
 
 **Correct.** Safari's controls stay in Safari's chrome, clear of the wordmark and
-the three buttons. Whether Safari offers Reader on a page with one `<h1>` and no
+the corner row. Whether Safari offers Reader on a page with one `<h1>` and no
 body copy is Safari's heuristic and not something this repo decides — if it is
 offered, entering it gives a blank or near-blank screen, which is expected rather
 than a bug, and backing out must return the running train.
@@ -204,3 +208,47 @@ override. So there is nothing to observe and no way to make Chrome produce one"
 machine can check it" (`devices.py:158`). The one non-Chrome harness here,
 `webkit_band.js`, builds a WKWebView that **opens no window** (`tools/README.md:32-36`);
 a windowless web view has no window manager to take insets from either.
+
+---
+
+## 7. The speed slider and the departure indicator, under a real finger
+
+**Do.** Open the pop-out menu and drag the slider at the top of it, slowly,
+past the boundary where the thumb turns `--accent` and the readout starts
+saying "strobing" (GitHub #69's A/B sheets found this exact boundary is where
+a track-based warning had failed — see below). Then close the menu, note the
+corner shows nothing, drag the slider off 1x, close the menu again, and tap
+the departure indicator that has appeared in the corner. Repeat on a phone
+narrow enough that the menu panel and the slider inside it are genuinely
+cramped, and once on a solo host (`?who=<slug>`), where the person picker is
+absent and the slider is the first and only thing above the gear-family list.
+
+**Correct.** The thumb is easy to pick up and drop on a stop with a thumb, not
+just a mouse; every stop the drag passes over updates the readout and (past
+the boundary) the "strobing" note live, matching what the train visibly does;
+releasing on a stop is where the choice sticks (reload and confirm it
+persisted). The corner control appears the instant the slider leaves 1x and
+disappears the instant it returns; tapping the corner control resets the
+machine to 1x and the slider (reopen the menu to check) reflects that. None of
+this requires the keyboard fallback that headless Chrome exercises instead of
+a touch.
+
+**Failure.** A thumb that is hard to acquire with a fingertip (the rendered
+disc is 24px; `tools/a11y_audit.py` reports the input's own hit box
+separately — see check 6's sibling number in that tool's output — and the two
+are not the same rectangle, so a phone is the only way to know whether the
+gap between them matters in practice). A drag that skips stops or lands
+off-ladder. A corner control that lags a frame behind the slider, or that
+does not reset cleanly. The strobing colour reading differently under real
+sunlight or an OLED panel than it does in a screenshot.
+
+**Why no harness.** Every harness in `tools/` drives this page over CDP, which
+can set a range input's `value` and fire synthetic `input`/`change` events,
+but per `tools/README.md` a synthesized pointer event proves nothing about a
+real one — dragging a 24px thumb between two of eight stops is exactly the
+class of small, continuous, pressure-sensitive gesture no injected event
+reproduces. `tools/a11y_audit.py` and `tools/devices.py` both confirm the
+control is *reachable* (focusable, correctly sized, clear of the safe area)
+and *labelled* (the accessible name carries the strobing note); neither can
+confirm it is *usable* with a thumb, which is the whole reason this entry
+exists rather than being folded into check 3.

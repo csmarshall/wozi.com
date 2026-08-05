@@ -1242,6 +1242,139 @@ test('a chain that opts out of bridging is a root, and keeps no idlers', () => {
     + 'resolve to (0,0) on top of the spine');
 });
 
+/* ---- 0c. the speed control: a menu slider, and a corner departure indicator
+   (GitHub #108, CL#114) --------------------------------------------------- */
+
+/* This suite has no DOM and no React, so nothing here executes renderVals() or
+   mounts the component -- everything below reads the SHIPPED markup and logic
+   as text, exactly the way the deploy-whitelist and host-disjointness checks
+   above do. A regex cannot mistake intent for behaviour, but it can catch
+   exactly the failure this feature is prone to: the corner button's old
+   `right` index left stale, the slider wired to a continuous value instead of
+   SPEED_STOPS, or the strobe warning quietly dropped from one of the two
+   controls that carry it now instead of one. */
+
+test('the corner speed control cycles nothing any more — it resets to 1x', () => {
+  ok(!/cycleSpeed/.test(SRC),
+    'cycleSpeed still exists — the corner control is supposed to be a reset, '
+    + 'not a ladder cycler, once the slider took over choosing a stop');
+  ok(/resetSpeed\s*:\s*\(\)\s*=>/.test(SRC),
+    'no resetSpeed render value found — the corner control has nothing left to do');
+  ok(/onClick="\{\{ resetSpeed \}\}"/.test(SRC),
+    'the corner button does not call resetSpeed — tapping it while off 1x has no way back');
+});
+
+test('the corner control shows nothing at 1x, and only at 1x', () => {
+  /* The whole of "shows nothing at 1x" is one ternary on the button's own
+     `display`; SPEED_FLOOR is the schema's own floor, not a hardcoded 1, so a
+     schema change moves the hidden state with it rather than leaving a stale
+     literal behind. */
+  ok(/display:\s*speedNow === SPEED_FLOOR \? 'none' : 'flex'/.test(SRC),
+    "the corner button's display is not gated on speedNow === SPEED_FLOOR — "
+    + 'it would either always show or never show, instead of only away from 1x');
+});
+
+test('removing the permanent speed button closed the gap, not stranded it', () => {
+  /* Speed used to sit at index 2 (between pause and the menu toggle). Once it
+     stopped being permanent, the menu toggle has to close the gap down to
+     index 2 itself — leaving it at index 3 would strand a hole in the middle
+     of the row at 1x, which is the exact trap this test exists to catch. The
+     departure indicator takes the outer slot the toggle gave up (index 3), so
+     showing or hiding it only ever grows or shrinks the row from its open
+     end, never reflows a permanent button. */
+  ok(/onClick="\{\{ toggleTog \}\}"[^>]*right:calc\(var\(--offright\) \+ \(var\(--btn\) \+ var\(--btngap\)\) \* 2\)/.test(SRC),
+    'the menu toggle is not at index 2 — removing the permanent speed button '
+    + 'left a gap between pause and the menu toggle instead of closing it');
+  ok(/right:\s*'calc\(var\(--offright\) \+ \(var\(--btn\) \+ var\(--btngap\)\) \* 3\)',/.test(SRC),
+    "speedStyle's right is not index 3 — the departure indicator no longer sits "
+    + 'in the outer slot the menu toggle vacated');
+});
+
+test('the slider steps over SPEED_STOPS by index, never continuously', () => {
+  ok(/<input type="range" min="0" max="\{\{ speedMax \}\}" step="1" value="\{\{ speedPos \}\}"/.test(SRC),
+    'the slider markup does not step min=0/step=1 over an index — a continuous '
+    + 'range would spend most of its travel between the top two stops (CL#96)');
+  ok(/speedMax:\s*speedSpan,/.test(SRC),
+    'speedMax is not derived from speedSpan (SPEED_STOPS.length - 1) — a '
+    + 'hardcoded bound would drift the day the ladder is widened or narrowed');
+  ok(/const speedSpan = SPEED_STOPS\.length - 1;/.test(SRC),
+    'speedSpan is not derived from SPEED_STOPS.length — never hand-write a stop list');
+});
+
+test('the slider sits at the top of the menu, above the picker and the links', () => {
+  const navAt = SRC.indexOf('aria-label="Table of gears"');
+  ok(navAt >= 0, 'the pop-out menu <nav> is missing entirely');
+  const sliderAt = SRC.indexOf('<input type="range"', navAt);
+  const peopleAt = SRC.indexOf('{{ togPeople }}', navAt);
+  const gearsAt = SRC.indexOf('{{ togList }}', navAt);
+  ok(sliderAt > navAt, 'no <input type="range"> found inside the pop-out menu at all');
+  ok(sliderAt < peopleAt, 'the slider is not above the person picker in source order '
+    + '(source order is render order for a plain list of siblings here)');
+  ok(sliderAt < gearsAt, 'the slider is not above the gear-family links in source order');
+});
+
+test('the slider is reachable on a solo host, where the picker is deliberately absent', () => {
+  /* togPeople is emptied by `people.length > 1 && STAGE.mode === 'all'` — true
+     only on a combined stage. The slider row must not share that gate, or a
+     solo host (?who=<slug>) would lose its only route to the speed control
+     the moment the corner stops showing it. Checked as: nothing between the
+     <nav> tag itself and the <input type="range"> mentions sc-if, sc-for or
+     togPeople — the only ways a chunk of this template can become
+     conditional or repeated. */
+  const navAt = SRC.indexOf('aria-label="Table of gears"');
+  const sliderAt = SRC.indexOf('<input type="range"', navAt);
+  ok(navAt >= 0 && sliderAt > navAt, 'the pop-out menu <nav> or its slider is missing');
+  /* Strip HTML comments before checking — the markup between the tags is
+     documented in prose that names togPeople on purpose, and that prose is
+     not a template directive. */
+  const between = SRC.slice(navAt, sliderAt).replace(/<!--[\s\S]*?-->/g, '');
+  ok(!/sc-if|sc-for|togPeople/.test(between),
+    'something between the <nav> tag and the slider gates or repeats it — the '
+    + 'slider must render unconditionally, the same way it does on the combined stage');
+});
+
+test('the strobe warning is carried by both controls that can show a value', () => {
+  /* CL#96's invariant — every stop at or above strobeSpeed() says so in its
+     accessible name — used to bind one control. There are two now, and both
+     have to keep it: the slider's aria-valuetext (every value change) and the
+     corner's aria-label (the one value it ever shows). */
+  ok(/speedValueText:\s*speedNow \+ '×' \+ \(speedStrobes \? ', strobing — benchmark only' : ''\)/.test(SRC),
+    "speedValueText does not carry the strobing note — the slider's "
+    + 'aria-valuetext would go silent about the illusion breaking');
+  ok(/speedLabel:\s*'Gear speed ' \+ speedNow \+ '×'\s*\n\s*\+ \(speedStrobes \? ', strobing — benchmark only' : ''\)/.test(SRC),
+    "speedLabel does not carry the strobing note — the corner control's "
+    + 'accessible name would go silent about the illusion breaking');
+  ok(/tap to reset to 1×/.test(SRC),
+    'the corner control\'s accessible name does not say what tapping it does');
+});
+
+test('the thumb colour is state-driven through a CSS custom property, not a static rule', () => {
+  /* The redline-on-the-track approach (GitHub #69's A/B sheets) failed
+     exactly at the boundary stop, because a static track marker sits under a
+     thumb that is centred on the very index it would mark. Colouring the
+     thumb itself has to be driven by JS-computed state, not a fixed CSS rule
+     — this asserts the mechanism, not just its absence. */
+  const thumbRules = SRC.match(/::-webkit-slider-thumb\{[^}]*\}/g) || [];
+  ok(thumbRules.length > 0, 'no ::-webkit-slider-thumb rule found at all');
+  ok(thumbRules.every(r => /var\(--thumb-color,\s*var\(--muted\)\)/.test(r)),
+    'the thumb pseudo-element does not read --thumb-color — its colour would '
+    + 'be fixed regardless of whether the current stop strobes');
+  ok(/'--thumb-color':\s*fill,/.test(SRC),
+    '--thumb-color is never set inline from render state — the pseudo-element '
+    + 'rule above has nothing state-driven to read');
+});
+
+test('there is exactly one range input on the page', () => {
+  /* The <style> block's own comment claims this, and it is what makes a bare
+     element-type selector (no class) safe here — see the CSS comment above
+     input[type="range"]. If a second range input is ever added, that selector
+     starts styling two different controls identically without anyone deciding
+     it should. */
+  const count = (SRC.match(/<input type="range"/g) || []).length;
+  eq(count, 1, 'more than one <input type="range"> found — the pseudo-element '
+    + 'rules for it are no longer provably scoped to a single control');
+});
+
 /* ---- the real solver, executed against a stage of our choosing ------------ */
 
 /* EXECUTES solve() ITSELF, sliced out of index.html. Everything above tests the
