@@ -330,6 +330,38 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
   rather than restating the addendum as its own number. Mutation-tested by
   reintroducing each of `0.95` and the bare `1.25`: both are caught, each with
   a message naming the call site and the value, not a bare number mismatch.
+- **CL#117 — the sunburst window count is derived from the blank, not dealt.**
+  (GitHub #96.)
+
+  `sunburst`'s `arms` variant (10/14/18) was cut straight into the wheel as its
+  window count, with no regard for how much room the blank actually has. On the
+  smallest wheel the deal can produce (13 teeth) the 18-arm variant cut a window
+  measured at 0.78 rendered px on a real phone (#64's finding A8) — an aliasing
+  artefact, below a hairline, not an opening.
+
+  The renderer now inverts the same width equation the bug report named: a
+  window's chord width at the inner radius is `2*rInR*sin(0.32*PI/n)`, so the
+  largest `n` that still clears a legible floor is a closed form, solved the way
+  `holes` already solves for its drill count. The floor is a rendered-pixel
+  intent, `px(1.6, 0.7, 2.3)`, sitting between the wall floor above it (1.06px,
+  a line that must not vanish) and the drill floor's second tier (2.5px, a
+  filled hole that must read as intentional) — a cut window needs to read as an
+  opening, more than a wall, but is a slot rather than a filled hole so does not
+  need the drill's full area.
+
+  **The dealt variant survives as a ceiling on the count, not the count
+  itself.** Ten/fourteen/eighteen still read as coarse/medium/fine wherever a
+  blank has room for them — the derivation only bites on the wheel too small to
+  seat the dealt number legibly, so the 19-tooth wheel is unaffected at every
+  real scale and only the small end is capped, to what it can actually show
+  rather than to a fixed floor.
+
+  `npm test` gained an assertion that no sunburst window on any blank the deal
+  can produce falls below the floor the renderer itself computed, executing the
+  shipped `px()`/`asin()` arithmetic out of `index.html` rather than modelling
+  it — mutation-tested by reverting the count to the raw dealt value, which
+  failed the new assertion by name (`nR=18 cuts a window ... under the 2.29-unit
+  floor`) before the fix was restored.
 
 - **CL#110 — `?hud`, an animation HUD for how the browser is really rendering
   the gears.** (GitHub #92.)

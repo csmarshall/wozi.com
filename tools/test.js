@@ -3806,6 +3806,63 @@ test('the epicyclic hub badge scales across the whole tooth range, and never pla
     + sizes.map(s => s.toFixed(1)).join(', '));
 });
 
+test('no sunburst window falls below its own legibility floor, on the smallest blank', () => {
+  /* GitHub #96 / CL#117. The sunburst branch of gearSvg used to deal its window
+     count straight from the variant (10/14/18 arms) with no regard for how much
+     room the wheel actually has. On the smallest blank the deal can produce (13
+     teeth) an 18-arm deal cut a window measured at 0.78 rendered px on a real
+     phone (#64's finding A8) -- an aliasing artefact, not an opening.
+
+     THE FIX'S OWN ARITHMETIC RUNS HERE, pulled out of gearSvg verbatim rather
+     than modelled: the px() floor, the asin() inversion that turns it into a
+     window-count ceiling, and the min() against the dealt variant. A copy of
+     the formula would keep passing if the shipped code diverged from it; this
+     fails exactly when the shipped code does. */
+  const famDecl = "{ type: 'sunburst', web: 3.1, hub: 0.2,";
+  const famBlock = grabBlockFrom(SRC, 'index.html', famDecl, '{', '}');
+  const hub = +((famBlock.match(/hub:\s*([0-9.]+)/) || [])[1]);
+  const web = +((famBlock.match(/web:\s*([0-9.]+)/) || [])[1]);
+  const dealtArms = [...famBlock.matchAll(/arms:\s*([0-9]+)/g)].map(m => +m[1]);
+  ok(hub > 0 && web > 0 && dealtArms.length >= 3,
+    'could not read the sunburst family entry out of CENTRE_FAMILIES -- the extraction is broken, not the page');
+
+  const fn = new Function('hubR', 'wellR', 'g', 'S',
+    grabDecl('const px = (want, lo, hi) =>') + '\n'
+    + grabDecl('const rInR = Math.max(hubR * 1.5, 9)') + '\n'
+    + grabDecl('const winMin =') + '\n'
+    + grabDecl('const maxLegible =') + '\n'
+    + grabDecl('const nR =') + '\n'
+    + grabDecl('const wi = (360 / nR) * 0.16') + '\n'
+    + 'return { nR: nR, rInR: rInR, winMin: winMin, wi: wi };');
+
+  /* The same worst-case scale the legibility-floors test above derives -- the S
+     below which gearSvg's own rendered-pixel intents stop being satisfiable --
+     reused rather than re-picked, so the two tests cannot disagree about which
+     viewport is the hard one. */
+  const intents = [...grabBlock('gearSvg(g, S) {', '{', '}')
+    .matchAll(/\bpx\(\s*([0-9.]+)\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)\s*\)/g)]
+    .map(m => ({ want: +m[1], hi: +m[3] }));
+  const S_WORST = Math.max(...intents.map(p => p.want / p.hi));
+
+  const bad = [];
+  for (let teeth = page.TEETH_MIN; teeth <= page.TEETH_MAX; teeth++) {
+    const r = page.MODULE * teeth / 2;
+    const hubR = Math.max(8, r * hub);
+    const wellR = Math.max(4, r - page.MODULE * web);
+    dealtArms.forEach(dealt => {
+      const out = fn(hubR, wellR, { arms: dealt }, S_WORST);
+      const widthSolve = 2 * out.rInR * Math.sin(out.wi * Math.PI / 180);
+      if (widthSolve < out.winMin - 1e-9) {
+        bad.push(`${teeth}-tooth blank, ${dealt}-arm deal at S=${S_WORST.toFixed(2)}: `
+          + `nR=${out.nR} cuts a window ${(widthSolve * S_WORST).toFixed(2)}px wide `
+          + `(${widthSolve.toFixed(2)} solve units), under the ${out.winMin.toFixed(2)}-unit `
+          + `floor the same code just derived -- the count is not honouring its own ceiling`);
+      }
+    });
+  }
+  ok(bad.length === 0, bad.join('\n      '));
+});
+
 /* ---- 1. the page and its constants --------------------------------------- */
 
 test('index.html parses and exposes its geometry constants', () => {

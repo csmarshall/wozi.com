@@ -1445,6 +1445,14 @@ const CENTRE_FAMILIES = [
   { type: 'labyrinth', web: 3.2, hub: 0.18,
     variants: [{ arms: 5 }, { arms: 6 }, { arms: 7 }] },
   */
+  /* `arms` is a CEILING now, not a count (CL#117, GitHub #96): the sunburst
+     branch of gearSvg derives the most windows the smallest blank's rInR can
+     legibly cut and takes whichever of this and the dealt number is smaller.
+     Ten/fourteen/eighteen still read as coarse/medium/fine on every wheel with
+     room for them -- only the wheel too small to seat eighteen gets capped, and
+     it is capped to what it can actually show rather than to a fixed floor:
+     an 18-arm deal on the 13-tooth blank used to cut a 0.78 rendered-px window
+     on a phone (#64's finding A8) -- a hairline, not an opening. */
   { type: 'sunburst', web: 3.1, hub: 0.2,
     variants: [{ arms: 10 }, { arms: 14 }, { arms: 18 }] },
   /* The two epicyclics are separate FAMILIES, not variants of one. They are
@@ -6563,7 +6571,34 @@ class Component extends DCLogic {
       /* Stops at the boss edge rather than under it: the spokes still converge on
          the boss, which is what was wanted, without windows running beneath a
          disc that is painted on top of them. */
-      const nR = g.arms || 10, rInR = Math.max(hubR * 1.5, 9), rOutR = wellR - 2;
+      const rInR = Math.max(hubR * 1.5, 9), rOutR = wellR - 2;
+      /* THE COUNT FOLLOWS FROM THE BLANK, rather than being dealt (CL#117,
+         GitHub #96). A window's half-angle at the inner radius is
+         (360/n)*0.16 degrees, so its chord width there is
+         2*rInR*sin(0.32*PI/n) -- inversely related to the count and
+         proportional to rInR, which shrinks with the wheel. Dealt directly, an
+         18-arm variant on the smallest blank (13 teeth, rInR ~ 13.65) cut a
+         window at 0.78 rendered px on a phone (#64's finding A8): below a
+         hairline, not a window.
+         Solved the way `holes` solves for its drill count above: name a
+         legible floor in RENDERED pixels and invert the width equation for the
+         largest n that still clears it, rather than dealing n and hoping. The
+         floor sits between the wall floor above (1.06px, a line that must not
+         vanish) and the drill floor's second tier (2.5px, a filled hole that
+         must read as intentional) -- a cut window needs to read as an opening,
+         more than a wall, but is a slot rather than a filled hole so does not
+         need the drill's full area. Same 0.44/1.44 clamp ratio as that drill
+         floor, for the same reason: px() converts a rendered-pixel intent to
+         solve units for the S in hand, and without the ceiling a 5K display
+         would ask for a window wider than the design needs.
+         The dealt variant survives as the CEILING on the count, not the count
+         itself: ten/fourteen/eighteen is still coarse/medium/fine wherever the
+         blank has room for it, and min() only bites on the wheel too small to
+         seat the dealt number legibly -- the 19-tooth wheel, where the floor
+         was never binding, is unchanged. */
+      const winMin = px(1.6, 0.7, 2.3);
+      const maxLegible = (0.32 * Math.PI) / Math.asin(Math.max(0.02, Math.min(1, winMin / (2 * rInR))));
+      const nR = Math.max(4, Math.min(g.arms || 10, Math.floor(maxLegible)));
       for (let k = 0; k < nR; k++) {
         const A = (k / nR) * 360;
         const wi = (360 / nR) * 0.16, wo = (360 / nR) * 0.34;
