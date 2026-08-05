@@ -7,54 +7,6 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Changed
 
-- **CL#108 — the datum plate keeps clear of the ghost wheels by moving across
-  its line, not along it.** (GitHub #88, and GitHub #90 item 13.)
-
-  **The tension this had to be built around.** CL#91 had just made escape runs
-  steer back toward their own axis; #88 asked the plate to push nearby ghosts
-  away. Those are opposing forces — land both naively and the run is shoved off
-  its line at the start, then spends several wheels steering back, producing a
-  visible kink exactly where the plate draws the eye. Charles's resolution:
-  resolve the clearance **across** the line and move the *plate* to the far side,
-  so the run is never displaced and CL#91's steering is never fighting anything.
-  `fitEscapes` is untouched, and a source assertion now holds it that way.
-
-  `plateAir()` measures the exact rotated-rect-to-circle distance, resolved onto
-  the mark's own `ux/uy` and `nx/ny`, against the wheel's **tip** radius rather
-  than its pitch radius — a plate clears the teeth or it does not clear anything.
-  `plateSeat()` ranks the two candidate sides: clean beats crowded whatever it
-  costs in slide, the smaller slide wins among clean (so the natural side keeps
-  every pre-existing tie), the roomier wins among crowded, and a still-crowded
-  seat warns once per chain.
-
-  **The far side is derived, not written down.** It mirrors along the run's own
-  normal, so it is axis-relative by construction. This is the same class of trap
-  as CL#67 and the handedness bug in CL#106 — the third and fourth times this
-  file has confused a screen direction for an axis-relative one — and it is why
-  the new test asserts against a stage axis built from `rot` rather than from the
-  mark's own `ux/uy`. **A mark whose axes had gone screen-absolute would satisfy a
-  check stated in its own frame**, which is precisely how the earlier ones
-  survived green suites.
-
-  Measured across 240 marks per orientation, 16 deals each, two plate widths:
-
-  | | landscape (rot 0) | portrait (rot 90) |
-  | --- | --- | --- |
-  | marks mirrored for clearance | 26 / 120 | 24 / 120 |
-  | displacement **along** the stage axis | 0.00 | 1.3e-14 |
-  | displacement **across** it | up to 222 px | up to 219 px |
-  | change in `at` | 0 | 0 |
-  | chains left crowded | 0 | 0 |
-
-  Three mutants, each confirming the test can fail for the reason it was written:
-  a mirror written as "move down in screen y" fails **at rot 90 only**; "move left
-  in screen x" fails **at rot 0 only**; resolving by sliding along the line fails
-  both. The suite also refuses to pass vacuously — if no mark is ever mirrored at
-  a given orientation the test fails, because a portrait sweep that silently stops
-  exercising the rule is exactly how this class of bug survives.
-
-  Suite 88 → 90.
-
 - **CL#107 — a one-link chain's datum carried no scale, because one station is one
   tick and nothing to subdivide.** (GitHub #83.) Minor ticks subdivided the gap
   between a chain's own stations, and Harper's chain has exactly one station: the

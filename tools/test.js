@@ -1919,11 +1919,8 @@ function fitEscapesOn(solved, axisRot, spineSlug, margin) {
     /* `person`, `lead` and `k` come along because fitEscapes records them for the
        datum mark, and a test asking WHICH chain a run belongs to and which end
        it left by would otherwise have to infer it from geometry it is trying to
-       measure. `ro` comes along for the same reason: a ghost is a TIP circle to
-       anything measuring clearance against it (CL#108), and a test that had to
-       rebuild it from the tooth count would be keeping its own copy of the
-       addendum rule. */
-    (runs[ei] = runs[ei] || []).push({ cx: g.cx, cy: g.cy, ro: g.ro,
+       measure. */
+    (runs[ei] = runs[ei] || []).push({ cx: g.cx, cy: g.cy,
       person: g.person, lead: g.lead, k: g.k });
   });
   return runs;
@@ -2185,37 +2182,22 @@ function datumRunsOn(solved, axisRot, spineSlug, ghosts, sites, plates, S) {
    `past` is the run-out datumLayer draws beyond the assembly, and is handed in
    the same way the page hands it in. Warnings are captured rather than printed:
    "neither side fits" is a reported state, and a test that could not see it
-   could not tell it from a silent give-up.
-
-   `metal` is the stage's wheels as tip circles in rendered pixels, which the
-   seat now measures both sides against (CL#108). Defaulting it EMPTY is what keeps
-   every assertion written before that rule existed measuring what it was written
-   to measure: with no wheels on the stage every seat clears, so the ranking falls
-   back to the slide rule exactly as it did. datumClear() and plateAir() come
-   along lifted rather than restated, for the same reason as everything else
-   here. */
-function plateSeatOn(vpBox, r, S, pw, ph, past, box, metal) {
+   could not tell it from a silent give-up. */
+function plateSeatOn(vpBox, r, S, pw, ph, past, box) {
   const metrics = new Function('MODULE',
     'return function ' + grabBlock('  plateMetrics(s) {', '{', '}') + ';')(page.MODULE);
   const margin = new Function('return function ' + grabBlock('  plateMargin(s) {', '{', '}') + ';')();
   const seat = new Function('PLATE_START_ALONG',
-    'return function ' + grabBlock('  plateSeat(r, S, pw, ph, past, box, metal) {', '{', '}') + ';')(
+    'return function ' + grabBlock('  plateSeat(r, S, pw, ph, past, box) {', '{', '}') + ';')(
     page.PLATE_START_ALONG);
   const clip = new Function('return function ' + grabBlock('  slabClip(px, py, dx, dy, box) {', '{', '}') + ';')();
-  const air = new Function('MODULE', 'PLATE_TOP_CLEAR',
-    'return function ' + grabBlock('  datumClear(S) {', '{', '}') + ';')(
-    page.MODULE, page.PLATE_TOP_CLEAR);
-  const reach = new Function(
-    'return function ' + grabBlock('  plateAir(O, at, r, pw, ph, metal) {', '{', '}') + ';')();
   const warns = [];
-  const ctx = { _vpBox: vpBox, plateMetrics: metrics, plateMargin: margin, slabClip: clip,
-    datumClear: air, plateAir: reach };
+  const ctx = { _vpBox: vpBox, plateMetrics: metrics, plateMargin: margin, slabClip: clip };
   const real = console.warn;
   console.warn = (m) => warns.push(m);
   try {
-    const out = seat.call(ctx, r, S, pw, ph, past === undefined ? 0 : past, box || vpBox,
-      metal || []);
-    return { seat: out, warns: warns, pad: margin.call(ctx, S), air: air.call(ctx, S) * S };
+    const out = seat.call(ctx, r, S, pw, ph, past === undefined ? 0 : past, box || vpBox);
+    return { seat: out, warns: warns, pad: margin.call(ctx, S) };
   } finally { console.warn = real; }
 }
 
@@ -2726,202 +2708,6 @@ test('the plate seats on the side the page has room for, and the ticks follow it
     + 'ticks into the wheels it is meant to clear'));
 });
 
-test('a crowded plate is moved across the line, never along it, and never off the page', () => {
-  /* GitHub #88: the plate must not be crowded by the background wheels near it.
-     THE WHEELS CANNOT BE THE ONES THAT MOVE -- they mesh by construction, and an
-     escape run is a chain of meshed wheels, so nudging one aside either unmeshes
-     it or moves the whole run. The plate is what moves, and the freedom it spends
-     is the one a scribed datum already has: WHICH SIDE the mark is laid on.
-
-     ALONG THE LINE IS NOT A FREEDOM HERE, and that is measurement rather than
-     preference: an escape run leaves along its chain's own axis, so it is
-     PARALLEL to the mark and its wheels mesh -- their tip circles interpenetrate
-     -- which makes the run a continuous barrier beside the line rather than an
-     obstacle with gaps to slide between. Sliding inboard only arrives at the
-     chain's own teeth, which the line is laid tangent to. So the station stays
-     where #95 put it and the side is what is spent.
-
-     A horizontal run again, so the two axes separate: the side moves y only. */
-  const r = { person: 'p', plate: 'P', ux: 1, uy: 0, nx: 0, ny: 1,
-    o: { x: 0, y: 0 }, alt: { x: 0, y: -120 }, stations: [], d0: 0, d1: 0 };
-  const pw = 40, ph = 10, S = 1;
-  const room = { x0: -100, y0: -200, x1: 100, y1: 200 };
-  const clean = plateSeatOn(room, r, S, pw, ph);
-  eq(clean.seat.side, 1, 'an empty stage moves the mark off its natural side');
-  /* THE AIR IT DEMANDS IS THE AIR THE MARK ALREADY KEEPS, datumClear(), and this
-     is the whole of the threshold -- there is no second figure to re-measure. */
-  eq(clean.air, page.MODULE, 'the seat is not asking for the same air datumClear '
-    + 'already stands the line off the machine by');
-  /* A wheel parked exactly on the natural seat, clear of the mirrored one. */
-  const fouled = [{ x: clean.seat.at, y: 0, r: 20 }];
-  const flipped = plateSeatOn(room, r, S, pw, ph, 0, room, fouled);
-  eq(flipped.seat.side, -1, 'a plate with a wheel drawn across it stays where it is');
-  eq(flipped.seat.oy, -120, 'the seat reports the mirrored side but not the mirrored origin');
-  eq(flipped.seat.at, clean.seat.at, 'the plate was slid ALONG its line to dodge a run '
-    + 'that is parallel to it — which only arrives at the next wheel of the same run');
-  eq(flipped.warns.length, 0, 'a plate that found a clear side reports a failure');
-  /* THE THRESHOLD IS A THRESHOLD, pinned from both directions: a wheel exactly
-     `air` off the plate's edge is close enough to leave alone, and one pixel
-     nearer is not. Sitting the wheel on the cross axis makes the sum the plate's
-     own half-height plus the air plus the tip radius, with no hypotenuse in it. */
-  const just = [{ x: clean.seat.at, y: ph / 2 + clean.air + 10, r: 10 }];
-  eq(plateSeatOn(room, r, S, pw, ph, 0, room, just).seat.side, 1,
-    'a wheel standing exactly the mark\'s own air off the plate is treated as '
-    + 'crowding it, so the mark moves for a gap it already had');
-  const near = [{ x: clean.seat.at, y: ph / 2 + clean.air + 10 - 1, r: 10 }];
-  eq(plateSeatOn(room, r, S, pw, ph, 0, room, near).seat.side, -1,
-    'a wheel one pixel inside the air the mark keeps is accepted, so the '
-    + 'threshold is not the one datumClear states');
-  /* NEITHER SIDE CLEARING IS REPORTED, NOT HIDDEN -- the same rule the crossing
-     bridge and the chain-overlap pass answer to -- and the roomier side is drawn,
-     because when the composition cannot be made clean the least crowded plate is
-     the one to stamp. */
-  const both = [{ x: clean.seat.at, y: 0, r: 40 }, { x: clean.seat.at, y: -120, r: 20 }];
-  const worst = plateSeatOn(room, r, S, pw, ph, 0, room, both);
-  eq(worst.seat.side, -1, 'with both sides crowded the plate is stamped on the '
-    + 'tighter one rather than the roomier');
-  eq(worst.warns.length, 1, 'a plate with no uncrowded seat anywhere is drawn silently');
-  ok(/no uncrowded seat/.test(worst.warns[0]), 'the warning does not say what went wrong');
-  /* AND CLEARANCE NEVER OVERRIDES THE PAGE. A side the viewport cannot show is
-     not a candidate at all, so a fouled natural side with a mirrored side below
-     the fold keeps the plate where it can be seen -- a crowded mark beats an
-     invisible one, which is the rule datumRuns() has stated all along. */
-  const shallow = { x0: -100, y0: -50, x1: 100, y1: 200 };
-  const stuck = plateSeatOn(shallow, r, S, pw, ph, 0, shallow, fouled);
-  eq(stuck.seat.side, 1, 'the plate was mirrored onto a side the page cannot show, '
-    + 'to clear a wheel that would have drawn over it');
-  eq(stuck.warns.length, 1, 'a plate left crowded because the only clear side is '
-    + 'off the page says nothing about it');
-});
-
-test('the plate clears the ghosts across its line, in portrait as in landscape', () => {
-  /* GitHub #88 on the page's own geometry, which is the half a hand-built run
-     cannot answer. The test above pins the RULE against axes typed into this
-     file; this one deals real trains, grows the real escape runs off them, and
-     asks whether the clearance is still resolved ACROSS the mark once nothing
-     about the geometry was chosen here.
-
-     AND IT ASKS AT axisRot 0 AND 90, WHICH IS THE POINT OF IT. The stage rotates
-     the whole train by _axisRot in portrait, so "the far side of the datum" is a
-     direction that turns with the machine. A mirror written in absolute screen
-     degrees -- move the plate DOWN, add 90 to a bearing -- is right in landscape
-     and lands ALONG the line in portrait, which is the #67 class of failure and
-     would be the third piece of geometry in this file to make it.
-
-     SO THE DISPLACEMENT IS MEASURED AGAINST THE STAGE AXIS BUILT FROM `rot`, and
-     deliberately not against the mark's own ux/uy: a mark whose own axes had gone
-     screen-absolute would satisfy every check stated in its own frame, and that
-     is exactly the bug this is here to catch.
-
-     THE GHOSTS ARE THE THING THAT MAY NOT MOVE. They mesh by construction and an
-     escape run is a chain of them, so nudging one aside either unmeshes it or
-     drags the whole run -- and #91 has just spent real work steering those runs
-     back onto their own axis, which a plate pushing them off it would be fighting
-     the length of the page. The plate is what moves, and the one freedom it
-     spends is which side of the line it is stamped on. */
-  const escapeSrc = SRC.slice(SRC.indexOf('  fitEscapes() {'),
-    SRC.indexOf('  applyRotation() {')).replace(/\/\*[\s\S]*?\*\//g, '');
-  ok(!/plateSeat|plateAir|datumRuns/.test(escapeSrc),
-    'the escape-run solve reads the datum mark — a ghost a placard can move is '
-    + 'the half of #88 that breaks mesh');
-  /* Lifted, not restated: the plate's height is plateMetrics', and the air
-     between a seat and the nearest tooth is plateAir's. The suite owns neither.
-     `past` is the run-out datumLayer draws beyond the assembly and is handed in
-     the same way the page hands it, exactly as the seat test above does. */
-  const metricsOf = new Function('MODULE',
-    'return function ' + grabBlock('  plateMetrics(s) {', '{', '}') + ';')(page.MODULE);
-  const airAt = new Function(
-    'return function ' + grabBlock('  plateAir(O, at, r, pw, ph, metal) {', '{', '}') + ';')();
-  const bad = [];
-  const S = 1, MARGIN = 300, PAST = page.MODULE * 2 * S;
-  const PLATE_H = metricsOf(S).h;
-  [0, 90].forEach(rot => {
-    /* THE STAGE AXIS, FROM `rot` ALONE. Nothing below reads r.ux/r.uy to decide
-       which way is along and which is across. */
-    const ax = Math.cos(rot * Math.PI / 180), ay = Math.sin(rot * Math.PI / 180);
-    let mirrored = 0, marks = 0;
-    for (let deal = 0; deal < 16; deal++) {
-      const { solved, order } = runSolve(THREE, { axisRot: rot });
-      const spine = order[0].slug;
-      const byRun = fitEscapesOn(solved, rot, spine, MARGIN);
-      const ghosts = [];
-      Object.keys(byRun).forEach(k => byRun[k].forEach(g => ghosts.push(g)));
-      const wheels = solved.gears.concat(ghosts);
-      /* The two boxes datumLayer works between: _vpBox is what fitEscapes
-         publishes from the same stage rect fitEscapesOn hands it, and `box` is
-         the union of the wheels on stage, which is what the mark is clipped to. */
-      const vp = { x0: -MARGIN, y0: -MARGIN, x1: solved.w + MARGIN, y1: solved.h + MARGIN };
-      const box = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
-      wheels.forEach(g => {
-        box.x0 = Math.min(box.x0, (g.cx - g.ro) * S);
-        box.x1 = Math.max(box.x1, (g.cx + g.ro) * S);
-        box.y0 = Math.min(box.y0, (g.cy - g.ro) * S);
-        box.y1 = Math.max(box.y1, (g.cy + g.ro) * S);
-      });
-      const metal = wheels.map(g => ({ x: g.cx * S, y: g.cy * S, r: g.ro * S }));
-      const untouched = JSON.stringify(ghosts);
-      const runs = datumRunsOn(solved, rot, spine, ghosts, seatSlugs(solved), null, S);
-      /* Two plate widths, because the width is a font measurement no headless
-         harness has and the rule under test must not depend on which one the
-         label happens to set to. Stated as multiples of the plate's own height
-         rather than as pixel counts, so there is no figure here to re-measure. */
-      [2, 4].forEach(mult => {
-        const pw = PLATE_H * mult;
-        runs.forEach(r => {
-          marks++;
-          const where = `rot ${rot} deal ${deal} ${r.person} ${mult}x`;
-          const blind = plateSeatOn(vp, r, S, pw, PLATE_H, PAST, box, []);
-          const seat = plateSeatOn(vp, r, S, pw, PLATE_H, PAST, box, metal);
-          /* 1. NOTHING IS SPENT ALONG THE LINE. An escape run is parallel to the
-                mark and its wheels mesh, so sliding inboard only arrives at the
-                next wheel of the same run -- and #91 steers those runs back onto
-                their axis, which a plate shoving them off it would undo. */
-          if (Math.abs(seat.seat.at - blind.seat.at) > 1e-9)
-            bad.push(`${where}: the plate slid ${(seat.seat.at - blind.seat.at).toFixed(2)}px `
-              + 'along its own line to clear a wheel — the clearance is resolved across it');
-          /* 2. AND WHAT IT DOES SPEND IS PERPENDICULAR TO THE STAGE AXIS, in
-                portrait exactly as in landscape. */
-          const dx = (seat.seat.ox + r.ux * seat.seat.at) - (blind.seat.ox + r.ux * blind.seat.at);
-          const dy = (seat.seat.oy + r.uy * seat.seat.at) - (blind.seat.oy + r.uy * blind.seat.at);
-          const along = dx * ax + dy * ay, across = -dx * ay + dy * ax;
-          if (Math.abs(along) > 1e-9)
-            bad.push(`${where}: the plate moved ${along.toFixed(2)}px along the STAGE AXIS to `
-              + 'clear a wheel — the clearance is spent across the mark, and a mirror '
-              + 'written in screen degrees is #67 again');
-          if (Math.abs(across) > 1e-9) mirrored++;
-          /* 3. AND IT NEVER CHOSE THE MORE CROWDED OF THE TWO SIDES. There are
-                exactly two, so the air at the side it declined is the whole of
-                what it gave up, and it may never be more than what it took. */
-          const declined = airAt(blind.seat, blind.seat.at, r, pw, PLATE_H, metal);
-          if (seat.seat.air < declined - 1e-9)
-            bad.push(`${where}: the mark was stamped ${seat.seat.air.toFixed(1)}px off the `
-              + `nearest tooth with ${declined.toFixed(1)}px available on the other side`);
-          /* 4. AND A SEAT THAT IS STILL CROWDED SAYS SO. Not that it cannot
-                happen -- both sides can be fouled and the roomier is then drawn
-                anyway, the same stance the chain-overlap pass takes -- but that
-                the console is told when it does. */
-          if (seat.seat.air < seat.air - 1e-9 && !seat.warns.length)
-            bad.push(`${where}: the plate sits ${seat.seat.air.toFixed(1)}px off the nearest `
-              + `tooth, inside the ${seat.air.toFixed(1)}px the mark keeps, and said nothing`);
-        });
-      });
-      /* 5. AND NOT ONE WHEEL MOVED. The marks are placed against the ghosts; the
-            ghosts are never placed against the marks. */
-      if (JSON.stringify(ghosts) !== untouched)
-        bad.push(`rot ${rot} deal ${deal}: seating the plates moved a ghost wheel`);
-    }
-    /* NON-VACUOUS, PER ORIENTATION. If no mark on any deal was ever mirrored for
-       clearance the four rules above assert nothing, and a portrait sweep that
-       silently stopped exercising the rule is precisely how the #67 class of bug
-       survives a green suite. */
-    if (!mirrored)
-      bad.push(`rot ${rot}: not one of ${marks} marks was mirrored to clear a wheel, so `
-        + 'nothing above was measured — the rule is inert at this orientation');
-  });
-  ok(bad.length === 0, bad.slice(0, 6).join('\n      ')
-    + (bad.length > 6 ? `\n      … and ${bad.length - 6} more` : ''));
-});
-
 test('the datum plate defaults to the person name, untransformed', () => {
   /* The casing config.js carries is the casing on the plate. Never uppercased,
      abbreviated or given a serial: a plate that says something other than what
@@ -3080,22 +2866,13 @@ test('no datum is drawn while one chain is on stage, and none is painted per cha
   /* RULE 5: tokens, never invented greys. Still true, one step removed — the
      colours are LIFTED from the tokens by datumInk() so that drawing them at the
      ghost alpha lands on the tone datumOpacity() solved for. */
-  /* A HASH IS ONLY A COLOUR WHEN IT IS A QUOTED STRING IN CODE, and this rule
-     needed both halves of that sentence. The bare pattern was
-     `#[0-9A-Fa-f]{3,6}`, and every three-digit decimal is three hex digits --
-     so from CHANGELOG entry 100 onward this test forbade the one method it
-     guards from CITING the entry that changed it. A rule broken by writing a
-     comment is not a rule.
-
-     TWO BRANCHES FIXED THIS INDEPENDENTLY AND THIS IS THE UNION, because
-     neither half is redundant. Stripping comments (CL#108) is what the other
-     three source-reading assertions here already do, and it is what stops a
-     citation counting at all. Requiring the quote (CL#107) is what stops a
-     surviving code string like `'entry #100'` -- a hash-number that is not a
-     colour -- from failing the test for the same wrong reason in a new place.
-     A literal colour reaches the drawing as a quoted string or through rgb();
-     neither a citation nor a prose hash-number ever does. */
-  ok(!/['"`]\s*#[0-9A-Fa-f]{3,8}\b|rgb\(/.test(DATUM_DRAW.replace(/\/\*[\s\S]*?\*\//g, '')),
+  /* A HASH IS ONLY A COLOUR WHEN IT IS A STRING. The bare pattern was
+     `#[0-9A-Fa-f]{3,6}`, and every three-digit decimal number is three hex
+     digits -- so from CHANGELOG entry 100 onward this test forbade the one
+     method it guards from CITING the entry that changed it, which is a rule that
+     would have been broken by writing a comment. A literal colour reaches the
+     drawing as a quoted string or through rgb(); a citation never does. */
+  ok(!/['"`]\s*#[0-9A-Fa-f]{3,8}\b|rgb\(/.test(DATUM_DRAW),
     'the datum draws itself in a literal colour instead of one derived from '
     + '--muted and --hair');
   ok(/this\.datumInk\(\)/.test(DATUM_DRAW),
