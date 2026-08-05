@@ -40,6 +40,17 @@ const SRC = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
    no longer see. */
 const CFG_SRC = fs.readFileSync(path.join(__dirname, '..', 'config.js'), 'utf8');
 
+/* config.js is a plain script that assigns one global, so RUNNING it is the most
+   direct read there is of what ships -- no parsing, no comment stripping, and
+   nothing here that has to know the shape of a key. Seven tests wanted it, each
+   with its own copy of this line; it has one home now (#99). Fresh each call, so
+   a test that mutates what it gets back cannot reach any other. */
+function loadConfig() {
+  const win = {};
+  new Function('window', CFG_SRC)(win);
+  return win.WOZI_CONFIG;
+}
+
 /* ---- extraction: pull the real thing out of the real page ---------------- */
 
 function grabNumber(name) {
@@ -85,41 +96,30 @@ const page = (function build() {
      way the page computes it rather than scraped as a literal -- a suite that
      hard-codes a number the page derives is exactly the drift this file exists to
      prevent. */
-  /* Comments are stripped first: a retired wheel is commented out rather than
-     deleted, and counting its slug would inflate the train's length -- which
-     feeds the tooth total, so the error would land in the geometry. */
   /* TRAIN is no longer a literal -- it is built from the active person's links
-     in config.js. Count them there, still stripping comments first, because a
-     retired wheel is commented out rather than deleted and counting its slug
-     would inflate the train's length. That length feeds the tooth total, so the
-     error would land in the geometry rather than anywhere obvious.
+     in config.js, so the length is counted there.
 
-     COUNTED PER PERSON, NOT OVER THE WHOLE BLOCK. It used to be one count across
+     COUNTED BY RUNNING config.js, NOT BY READING IT. It used to strip comments
+     out of the PEOPLE block, brace-walk it into one text per person and count
+     `href:` in each -- an arrangement that knew the NAME OF A KEY a link happens
+     to carry, and #99 took that key away: a link is a slug plus a handle now,
+     and only the odd one out still writes an href. Counting a key is the same
+     shape of coupling as counting a slug was, and it was one refactor from
+     reporting a train of length 0 and dealing the geometry against it.
+     Executing the file is the strictly more direct read of the same source, and
+     it drops the comment stripping with it -- a retired wheel is commented out
+     rather than deleted, and a comment simply is not in the array.
+
+     COUNTED PER PERSON, NOT OVER THE WHOLE LIST. It used to be one count across
      every chain, guarded by an assertion that there was exactly one -- which was
      honest only while that held. A second chain means only ONE person is ever on
      stage at a time, so summing them would measure a train the page never builds.
      Every chain is now measured on its own, and the deal tests below run against
      each of them: the geometry has to be legal for whoever is on stage, and the
      shortest chain is the one that strains the bounds. */
-  const peopleBlock = grabBlockFrom(CFG_SRC, 'config.js', 'PEOPLE:', '[', ']')
-    .replace(/\/\*[\s\S]*?\*\//g, '');
-  /* Split on the top-level objects inside PEOPLE -- one per person. Depth is
-     walked rather than regexed because each person's `links` array holds objects
-     of its own, and a non-greedy brace match would end at the first inner one. */
-  const personBlocks = [];
-  {
-    let depth = 0, start = -1;
-    for (let k = 0; k < peopleBlock.length; k++) {
-      const c = peopleBlock[k];
-      if (c === '{') { if (depth === 0) start = k; depth++; }
-      else if (c === '}') { depth--; if (depth === 0) personBlocks.push(peopleBlock.slice(start, k + 1)); }
-    }
-  }
-  if (!personBlocks.length) throw new Error('no people found in config.js PEOPLE');
-  /* Count `href:`, NOT `slug:` -- a person carries a slug of their own as well
-     as one per link, so counting slugs would report one wheel too many per
-     person and inflate its tooth total. Only links have an href. */
-  const trainLens = personBlocks.map(b => (b.match(/href:/g) || []).length);
+  const people = loadConfig().PEOPLE || [];
+  if (!people.length) throw new Error('no people found in config.js PEOPLE');
+  const trainLens = people.map(p => (p.links || []).length);
   trainLens.forEach((n, i) => {
     if (!n) throw new Error('person ' + i + ' in config.js PEOPLE has no links');
   });
@@ -208,6 +208,91 @@ test('config.js is named in the deploy whitelist', () => {
   ok(/\bconfig\.js\b/.test(wf), 'config.js is not published by .github/workflows/deploy.yml');
 });
 
+/* The real SITES builder, sliced out of index.html and run against whatever
+   config it is handed. A service owns its URL stem and a person owns only their
+   handle (#99), so a link is no longer a value in the file -- it is the RESULT
+   of joining two of them, and nothing else in this suite would notice if that
+   join produced rubbish. `node --check` in CI cannot: a template with a typo in
+   it is perfectly valid JavaScript. The block walker stops on the IIFE's closing
+   brace, so the call that runs it is put back here; the body is the page's. */
+function buildSites(conf, log) {
+  const body = grabBlock('const SITES = (function () {', '{', '}') + ')();';
+  return new Function('CONF', 'STAGE', 'console',
+    body + '\n return SITES;')(conf, { people: conf.PEOPLE || [] }, log || console);
+}
+
+test('every configured link resolves to a real destination', () => {
+  /* WHAT A TEMPLATE BUYS AND WHAT IT COSTS. It buys one home for `github.com`.
+     It costs the property that a link was previously self-evident on the line
+     it was written on: `{handle}` misspelt in SERVICES, or a `handle` left off a
+     link, is now a badge pointing somewhere that does not exist, on a page that
+     looks entirely correct. Both failures are shapes, so both can be asserted.
+
+     Run over EVERY person, not the one on stage -- a combined stage draws them
+     all and a solo host draws any one of them. */
+  const conf = loadConfig();
+  const sites = buildSites(conf);
+  const bad = [];
+  (conf.PEOPLE || []).forEach(p => {
+    (p.links || []).forEach(l => {
+      const s = (sites[p.slug] || {})[l.slug];
+      /* Dropped, which the builder does loudly and on purpose -- but only ever
+         for a config that is wrong, and this is the shipped one. */
+      if (!s) return bad.push(`${p.slug}/${l.slug} resolves to no link at all`);
+      if (!s.href) bad.push(`${p.slug}/${l.slug} has an empty href`);
+      /* The band. An empty one is a wheel engraved with nothing. */
+      if (!s.path) bad.push(`${p.slug}/${l.slug} engraves an empty band`);
+      /* An unfilled placeholder is the typo, arriving intact in the output. */
+      [['href', s.href], ['path', s.path]].forEach(([k, v]) => {
+        if (/[{}]/.test(String(v))) {
+          bad.push(`${p.slug}/${l.slug} ${k} still carries a placeholder: ${v} `
+            + '— the template names something the link does not supply');
+        }
+      });
+    });
+  });
+  ok(bad.length === 0, bad.join('\n      '));
+
+  /* AND THE GUARD IS NOT VACUOUS. A link naming a service with no `url` and
+     carrying no `href` of its own has no destination that could be derived, and
+     must be left out of the table rather than handed an empty href -- an
+     `<a href="">` reloads the page and reads as a working badge. It must also
+     say so: the console is the only place this failure is ever reported. */
+  const said = [];
+  const broken = buildSites({
+    SERVICES: { orphan: { label: 'Orphan' } },
+    PEOPLE: [{ slug: 'nobody', links: [{ slug: 'orphan', handle: 'x' }] }]
+  }, { error: (m) => said.push(m) });
+  eq(Object.keys(broken.nobody).length, 0,
+    'a link with no derivable destination was seated anyway');
+  ok(said.length === 1 && /nobody\/orphan/.test(said[0]),
+    'a link with no derivable destination was dropped silently');
+});
+
+test('no address reaches the published config but the one deliberately published', () => {
+  /* config.js IS SERVED TO THE WEB. Whatever a wheel's band is engraved with,
+     an address in this file is public in plain text -- a harvester reads the
+     file, not the artwork. Harper's is deliberately withheld (GitHub #65): her
+     wheel carries Charles's address as its handle and overrides the band to read
+     `harper`, so the two halves disagree on purpose, and the obvious tidy-up is
+     the one that would publish her.
+
+     This is an ALLOWLIST of what may appear, not a search for one address. It
+     names nothing that is being protected -- naming it here would be a second
+     copy of the fact, in the repo, for the sake of guarding the first -- and it
+     catches any NEW address arriving by any route, which is the real risk now
+     that an address is a `handle` rather than a whole `mailto:`. */
+  const PUBLISHED = ['charles@wozi.com'];
+  const found = [...new Set(CFG_SRC.match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g) || [])];
+  const leaked = found.filter(a => PUBLISHED.indexOf(a) < 0);
+  ok(leaked.length === 0,
+    'config.js is published: ' + leaked.join(', ') + ' would be served in plain '
+    + 'text. If that is intended, add it to PUBLISHED here deliberately.');
+  ok(found.length > 0,
+    'no address in config.js at all — the allowlist above is guarding nothing, so '
+    + 'either the mail wheels are gone or this test has stopped seeing the file');
+});
+
 test('stage hosts and solo hosts are disjoint, and every person has a solo host', () => {
   /* A HOSTNAME SELECTS A SCOPE, NOT A PERSON. The apex, www and the loopback
      names carry the combined stage; a person's own subdomain carries that person
@@ -217,7 +302,7 @@ test('stage hosts and solo hosts are disjoint, and every person has a solo host'
      ever say so.
      Every person also needs at least one solo host, or their chain is reachable
      only by ?who= and the subdomain they were given does nothing. */
-  const conf = (function () { const w = {}; new Function('window', CFG_SRC)(w); return w.WOZI_CONFIG; })();
+  const conf = loadConfig();
   ok(Array.isArray(conf.STAGE_HOSTS) && conf.STAGE_HOSTS.length,
     'config.js defines no STAGE_HOSTS, so nothing selects the combined stage');
   const bad = [];
@@ -248,7 +333,7 @@ test('a hostname matching nothing falls back to the combined stage', () => {
   /* The block walker stops on the IIFE's closing brace, so the call that runs it
      is put back here -- the body itself is the page's, unedited. */
   const src = grabBlock('const STAGE = (function () {', '{', '}') + ')();';
-  const conf = (function () { const w = {}; new Function('window', CFG_SRC)(w); return w.WOZI_CONFIG; })();
+  const conf = loadConfig();
   const run = (host, search) => new Function('CONF', 'location', 'URLSearchParams',
     src + '\n return STAGE;')(conf, { hostname: host, search: search || '' }, URLSearchParams);
   eq(run('nothing-here.example').mode, 'all',
@@ -339,15 +424,40 @@ test('every chain is counted on its own, never summed across people', () => {
      so a single count across the whole list would measure a train the page never
      builds, and the tooth total is derived from that length -- the error lands in
      the geometry rather than anywhere visible.
-     The check is that the per-person split agrees with the independent
-     slug-minus-href headcount. If the brace walker ever mis-splits, these two
-     disagree and the deal tests below are silently measuring the wrong trains. */
+
+     The counts the suite deals against come from RUNNING config.js. The check is
+     that a SECOND, INDEPENDENT count -- walking the braces of the source text --
+     agrees with them. Independent is the whole value: it shares no step with the
+     first, so a stray brace, a mis-nested links array or an object that parses to
+     something other than what it reads as shows up here rather than silently
+     re-sizing every train the deal tests below measure.
+
+     It counts STRUCTURE, never a key name. Counting `href:` per person is what
+     this used to do, and #99 took that key off every ordinary link -- one line of
+     config away from reporting a train of length 0. Objects nested one deep
+     inside a person's own `links` array are links whatever they are made of. */
   const block = grabBlockFrom(CFG_SRC, 'config.js', 'PEOPLE:', '[', ']')
-    .replace(/\/\*[\s\S]*?\*\//g, '');
-  const people = (block.match(/\bslug:/g) || []).length - (block.match(/\bhref:/g) || []).length;
-  eq(page.TRAIN_LENS.length, people,
-    'the per-person split disagrees with the headcount in config.js');
-  eq(page.TRAIN_LENS.reduce((a, b) => a + b, 0), (block.match(/href:/g) || []).length,
+    .replace(/\/\*[\s\S]*?\*\//g, '');   /* a retired wheel is commented out, not deleted */
+  /* Depth is walked rather than regexed because each person's `links` array holds
+     objects of its own, and a non-greedy brace match would end at the first. */
+  const objectsAtDepth = (s, want) => {
+    const out = [];
+    let depth = 0, start = -1;
+    for (let k = 0; k < s.length; k++) {
+      if (s[k] === '{') { if (depth === want) start = k; depth++; }
+      else if (s[k] === '}') { depth--; if (depth === want) out.push(s.slice(start, k + 1)); }
+    }
+    return out;
+  };
+  const walked = objectsAtDepth(block, 0).map(person => {
+    const links = grabBlockFrom(person, 'a person in config.js PEOPLE', 'links:', '[', ']');
+    return objectsAtDepth(links, 0).length;
+  });
+  eq(page.TRAIN_LENS.length, walked.length,
+    'the headcount from running config.js disagrees with the one from reading it');
+  eq(page.TRAIN_LENS.join(','), walked.join(','),
+    'a chain is a different length run than read — the per-person link counts disagree');
+  eq(page.TRAIN_LENS.reduce((a, b) => a + b, 0), walked.reduce((a, b) => a + b, 0),
     'the per-person link counts do not add up to every link in PEOPLE');
 });
 
@@ -413,11 +523,7 @@ test('every wheel of every chain gets a service seated on it', () => {
      Replays the real seating block against the REAL config -- every person, and
      the actual PAIR_SLOTS/PAIRS/SINGLES -- rather than a fixture, because the
      fixture is what let this through: it only ever modelled a five-wheel train. */
-  const conf = (function () {
-    const win = {};
-    new Function('window', CFG_SRC)(win);
-    return win.WOZI_CONFIG;
-  })();
+  const conf = loadConfig();
   const i = SRC.indexOf('if (!this._slugFor) {');
   const j = SRC.indexOf('const g = [], strands = []', i);
   ok(i > 0 && j > i, 'could not find the slug-seating block in index.html');
@@ -469,11 +575,7 @@ test('no two badges on a combined stage answer to the same identity', () => {
      The second assertion is what keeps the first from going quietly vacuous: if
      no service is ever on two chains, injectivity is free and this test stops
      meaning anything without failing. */
-  const conf = (function () {
-    const win = {};
-    new Function('window', CFG_SRC)(win);
-    return win.WOZI_CONFIG;
-  })();
+  const conf = loadConfig();
   const line = SRC.slice(SRC.indexOf('const badgeKey ='));
   const badgeKey = new Function(line.slice(0, line.indexOf('\n')) + '\n return badgeKey;')();
 
@@ -2186,7 +2288,7 @@ test('a combined stage seats every person, each within its own slot range', () =
   /* PAIR_SLOTS indexes wheels. On a combined stage those indices must be read
      per person -- siblings sit on neighbouring wheels WITHIN a chain, not across
      a boundary into someone else's. */
-  const conf = (function () { const w = {}; new Function('window', CFG_SRC)(w); return w.WOZI_CONFIG; })();
+  const conf = loadConfig();
   const i = SRC.indexOf('if (!this._slugFor) {');
   const j = SRC.indexOf('const g = [], strands = []', i);
   const frag = SRC.slice(i, j);
@@ -2778,7 +2880,7 @@ test('the tooth deal succeeds on a combined stage, not only on one chain', () =>
 
      Runs the REAL dealTeeth against the REAL people, plus the idlers a bridge
      adds, and asserts the result is a legal draw rather than the fallback. */
-  const conf = (function () { const w = {}; new Function('window', CFG_SRC)(w); return w.WOZI_CONFIG; })();
+  const conf = loadConfig();
   const { train } = buildTrain(conf.PEOPLE || []);
   const fn = grabBlock('(function dealTeeth()', '{', '}');
   const TEETH_MEAN = grabNumber('TEETH_MEAN');

@@ -33,18 +33,46 @@ window.WOZI_CONFIG = {
 
   /* ---------------------------------------------------------------------------
      SERVICES — what each service IS, independent of whose account it points at.
-     Shared across every person. `label` is the accessible name and the text that
-     appears in the hover pill.
+     Shared across every person.
+
+       label  the accessible name, and the text in the hover pill
+       url    where this service lives, with `{handle}` standing in for the
+              account. THE SERVICE OWNS THE STEM AND THE PERSON OWNS THE HANDLE
+              (#99): `github.com` used to be written once per person who had
+              GitHub, with nothing keeping the spellings in step.
+       path   what the wheel's band is engraved with, same substitution.
+              OPTIONAL, and defaults to `{handle}` — the handle on its own,
+              which is what `mail` wants and what any service without a leading
+              path segment wants.
+
+     Substitution is LITERAL: `{handle}` is replaced with the handle exactly as
+     written, never percent-encoded. `mailto:{handle}` is the reason — encoding
+     the '@' of an address would change bytes that are perfectly legal
+     unencoded — and every handle below is already URL-safe. A handle that needs
+     escaping should be written escaped.
+
+     A service with no `url` cannot resolve on its own and every link naming it
+     must carry its own `href`. That is deliberate for `mastodon`: the instance
+     is part of the account, so there is no stem to share, and pretending
+     otherwise would be a shared fact that is not actually shared. Neither the
+     scheme nor the trailing slashes below have been tidied — normalising is a
+     change to where the links POINT, and this was a change to where they are
+     WRITTEN. They are at least now visible in one place to tidy.
+
+     Adding a service is a line here, an icon at `assets/icons/<slug>.svg`, and
+     an entry in BRAND and PILL_STACK. The logo half of #70 was already shared:
+     the icon is fetched by slug and the colour and wordmark face are keyed by
+     slug, so nothing about a mark was ever per-person.
      --------------------------------------------------------------------------- */
   SERVICES: {
-    linkedin:  { label: 'LinkedIn' },
-    github:    { label: 'GitHub' },
-    mastodon:  { label: 'Mastodon' },
-    instagram: { label: 'Instagram' },
-    threads:   { label: 'Threads' },
-    bluesky:   { label: 'Bluesky' },
-    mail:      { label: 'Mail' },
-    reddit:    { label: 'Reddit' }
+    linkedin:  { label: 'LinkedIn',  url: 'http://www.linkedin.com/in/{handle}',    path: '/in/{handle}' },
+    github:    { label: 'GitHub',    url: 'https://github.com/{handle}/',           path: '/{handle}' },
+    mastodon:  { label: 'Mastodon',  path: '/@{handle}' },  /* no stem: see above */
+    instagram: { label: 'Instagram', url: 'http://www.instagram.com/{handle}/',     path: '/{handle}' },
+    threads:   { label: 'Threads',   url: 'https://www.threads.com/{handle}',       path: '/{handle}' },
+    bluesky:   { label: 'Bluesky',   url: 'https://bsky.app/profile/{handle}',      path: '/{handle}' },
+    mail:      { label: 'Mail',      url: 'mailto:{handle}' },
+    reddit:    { label: 'Reddit',    url: 'https://www.reddit.com/user/{handle}/',  path: '/user/{handle}' }
   },
 
   /* ---------------------------------------------------------------------------
@@ -89,11 +117,29 @@ window.WOZI_CONFIG = {
                These are SOLO hosts only, and must not repeat anything in
                STAGE_HOSTS: the person's own subdomain, and nothing that means
                the whole household.
-       links   this person's wheels, IN TRAIN ORDER. Each needs a `slug` naming
-               a SERVICES key, plus the handle to engrave and where to point.
-                 slug   which service
-                 path   engraved on the wheel's band — the handle, not the URL
-                 href   where the badge links to
+       links   this person's wheels, IN TRAIN ORDER. A link is a SERVICE plus a
+               HANDLE, and in the ordinary case that is the whole of it — the
+               URL stem and the shape of the engraved band belong to the service
+               above, not to the person.
+                 slug    which service — a SERVICES key
+                 handle  the account, substituted into that service's `url` and
+                         `path` templates. The only personal string here.
+                 href    OPTIONAL ESCAPE HATCH. Overrides the service's `url`
+                         outright, and is itself run through the same `{handle}`
+                         substitution — so a one-off URL still writes the handle
+                         exactly once. Required for a service with no `url` of
+                         its own, and the answer to any link that is simply not
+                         a stem plus a handle.
+                 path    OPTIONAL ESCAPE HATCH. Overrides the service's `path`
+                         outright, and is taken VERBATIM — no substitution — so
+                         a band can read something the URL does not contain.
+                         This is what keeps Harper's band saying `harper`.
+
+               A link that resolves to no href at all is left out of the link
+               table and named in the console. Its wheel is still dealt and
+               still turns, with no badge on it — the same unlinked wheel a
+               missing config.js produces, rather than a badge whose empty href
+               silently reloads the page.
        datum   optional. What this chain's datum plate is stamped with on a
                combined stage — the scribed reference line each chain is drawn
                against, which is how one chain is told from another. Defaults to
@@ -132,19 +178,24 @@ window.WOZI_CONFIG = {
       name: 'Charles',
       hosts: ['charles.wozi.com'],
       links: [
-        { slug: 'linkedin',  path: '/in/csmarshall',    href: 'http://www.linkedin.com/in/csmarshall' },
-        { slug: 'github',    path: '/csmarshall',       href: 'https://github.com/csmarshall/' },
+        { slug: 'linkedin',  handle: 'csmarshall' },
+        { slug: 'github',    handle: 'csmarshall' },
         /* Mastodon is retired at Charles's request — barely used. Commented
            rather than deleted, like the retired gear families: put the line
            back and the wheel returns, since SERVICES, BRAND, PILL_STACK and the
            icon are all still here. Put 'mastodon' back in SINGLES at the same
-           time, or the pairing solver will not place it. */
-        /* { slug: 'mastodon',  path: '/@cs_marshall',    href: 'http://macaw.social/@cs_marshall' }, */
-        { slug: 'instagram', path: '/cs_marshall',      href: 'http://www.instagram.com/cs_marshall/' },
-        { slug: 'threads',   path: '/csmarshall',       href: 'https://www.threads.com/csmarshall' },
-        { slug: 'bluesky',   path: '/charles.wozi.com', href: 'https://bsky.app/profile/charles.wozi.com' },
-        { slug: 'mail',      path: 'charles@wozi.com',  href: 'mailto:charles@wozi.com' },
-        { slug: 'reddit',    path: '/user/cs_marshall', href: 'https://www.reddit.com/user/cs_marshall/' }
+           time, or the pairing solver will not place it.
+
+           It is also the worked example of the escape hatch: Mastodon has no
+           shared stem to inherit, so the link carries the whole URL — and still
+           writes the handle once, because an `href` is substituted like any
+           template. The band comes from the service's `/@{handle}` as usual. */
+        /* { slug: 'mastodon', handle: 'cs_marshall', href: 'http://macaw.social/@{handle}' }, */
+        { slug: 'instagram', handle: 'cs_marshall' },
+        { slug: 'threads',   handle: 'csmarshall' },
+        { slug: 'bluesky',   handle: 'charles.wozi.com' },
+        { slug: 'mail',      handle: 'charles@wozi.com' },
+        { slug: 'reddit',    handle: 'cs_marshall' }
       ]
     },
     {
@@ -159,13 +210,21 @@ window.WOZI_CONFIG = {
       hosts: ['harper.wozi.com'],
       links: [
         /* HER ADDRESS IS DELIBERATELY NOT PUBLISHED YET. config.js is served to
-           the web, so an href here is public in plain text no matter what the
+           the web, so a handle here is public in plain text no matter what the
            band is engraved with -- a harvester reads the file, not the artwork.
            Until Charles has settled how her mail should be published, the wheel
            points at his address: the chain is complete, the badge works, and
            nothing of hers reaches the bucket. Swapping it back is this one line,
-           with no code change anywhere. */
-        { slug: 'mail', path: 'harper',          href: 'mailto:charles@wozi.com' }
+           with no code change anywhere.
+
+           SO THE HANDLE IS HIS AND THE BAND IS HERS, and the `path` override is
+           the whole reason that is expressible. Do NOT "normalise" this entry by
+           deleting the override and letting the band derive from the handle: the
+           band would read charles@wozi.com under her name, which is merely
+           wrong -- but the obvious next tidy-up is to make the handle match the
+           band, and THAT publishes her address. The two halves disagree on
+           purpose. */
+        { slug: 'mail', handle: 'charles@wozi.com', path: 'harper' }
       ]
     }
   ],

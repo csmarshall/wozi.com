@@ -7,6 +7,97 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Changed
 
+- **#99 — a service owned its URL stem in as many places as there were people
+  with an account on it.** (GitHub #70.) Every link carried a whole `href`, so
+  `https://github.com/` was written once per person who had GitHub, and the only
+  thing keeping two spellings in step was that somebody would notice. Two people
+  are on stage today; the duplication was already live, and a third would have
+  made three copies of every shared stem.
+
+  `SERVICES` now carries `url` and `path` templates with `{handle}` in them, and
+  a link is a slug plus a handle. **The stem belongs to the service and the
+  handle belongs to the person**, which is the split `SERVICES` was created for —
+  it was always the shared half, and `SITES` was always the personal one
+  (`/in/csmarshall` is Charles's, not LinkedIn's). Charles's seven links lost
+  fourteen strings and gained seven.
+
+  **Nothing moved.** Every resolved `href` and every engraved band is
+  byte-identical for both people — checked by running the real `SITES` builder
+  against the config at `HEAD` and against this branch and diffing the two
+  tables, which is the only evidence that means anything about a refactor of a
+  link table. The pixel gate agrees from the other side: **0 px** at 1440×900 and
+  390×844, on `?who=charles` *and* on the combined stage. The commented-out
+  Mastodon wheel resolves byte-identically too, uncommented and dumped rather
+  than assumed.
+
+  **Three things had to be decided rather than assumed:**
+
+  - **A link that is not a stem plus a handle supplies its own `href`, and that
+    href is filled by the same substitution.** So the escape hatch is not a
+    second mechanism — it moves where the stem is written, not whether the handle
+    has one home. Mastodon is the worked example and is honest about it: the
+    instance is part of the account, so there is no stem to share, and
+    `mastodon` deliberately has no `url` at all. Its band still comes from the
+    service's `/@{handle}`.
+  - **`mailto:` is a template like any other**, `mailto:{handle}`, with the
+    address as the handle — and the substitution is **literal, never
+    percent-encoded**, which is the whole reason it works. Encoding would escape
+    the `@` of an address that is legal exactly as it stands, and would have been
+    the one change in this branch that moved a byte.
+  - **A link that resolves to nothing is left out of the table and named in the
+    console.** An `<a href="">` navigates to the current page: it reads as a
+    working badge and is not. Left out, the wheel is still dealt and still turns
+    with no badge on it — the same unlinked wheel a missing `config.js` produces,
+    which every read of that table has been guarded for since #53 and #76.
+
+  **Harper's mail wheel is the reason `path` overrides exist**, and it survived
+  this untouched: her handle is *Charles's* address and her band overrides to
+  read `harper`. The two halves disagree on purpose (GitHub #65), because
+  `config.js` is served to the web and a harvester reads the file rather than the
+  artwork. The hazard the templates introduce is a tidy-up — deleting an override
+  that looks redundant, then making the handle agree with the band — so the entry
+  now says that in as many words, and the suite guards it from the other end: an
+  **allowlist of the addresses that may appear in the published config**, which
+  names nothing it is protecting and catches any new one arriving by any route.
+
+  Two suite changes were forced rather than chosen, and both were latent faults:
+
+  - **The train length was counted by grepping for `href:`.** It stripped
+    comments out of `PEOPLE`, brace-walked it per person and counted a key —
+    coupling to the *name of a field* a link happens to carry, and this branch
+    took that field off every ordinary link. That count feeds the tooth total, so
+    a suite that kept it would have dealt every chain's geometry against a train
+    of length **0** and reported nothing. It runs `config.js` now, which is the
+    more direct read of the same file and drops the comment stripping with it: a
+    retired wheel is commented out rather than deleted, and a comment is simply
+    not in the array. The cross-check that used to compare two key-counts now
+    walks braces and counts **structure** — objects one deep inside a person's
+    own `links` — so it shares no step with the count it is checking and knows no
+    key name at all.
+  - **A template typo is valid JavaScript**, so `node --check` in CI would pass a
+    `config.js` whose GitHub wheel pointed at `github.com/{hadnle}/`. The new
+    test runs the page's own `SITES` builder over every person and fails on an
+    empty href, an empty band, or a `{` surviving into the output — verified by
+    introducing that exact typo and watching it fail, then reverting. It also
+    proves its own drop path is not vacuous, with a service that has no `url` and
+    a link that has no `href`.
+
+  Seven copies of `new Function('window', CFG_SRC)` in the suite became one
+  `loadConfig()` while passing through, for the same reason as the rest of this
+  entry.
+
+  Not touched, deliberately: `http://` on the LinkedIn and Instagram stems, and
+  the trailing slashes some services carry and others do not. Normalising those
+  changes where the links **point**; this changed where they are **written**.
+  They are at least in one place to tidy now. The logo half of GitHub #70 needed
+  nothing — the icon is fetched at `assets/icons/<slug>.svg` and `BRAND` and
+  `PILL_STACK` are keyed by slug, so a mark was never per-person.
+
+  Gates: 71/71 suite (69 before, plus the two above), motion PASS — 37 rotating
+  elements all advancing, 8 badges at ≤0.01 px, no console errors past the
+  expected favicon 404 — `a11y_audit` PASS in both themes, pixel gate 0 px on
+  both the solo and the combined shot.
+
 - **A hostname selects a scope, not a person — and `wozi.com` is now everybody.**
   This is the change a visitor sees. `wozi.com`, `www.wozi.com` and the loopback
   names moved off Charles's entry into a new top-level `STAGE_HOSTS`, and they
