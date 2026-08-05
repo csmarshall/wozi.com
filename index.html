@@ -451,6 +451,42 @@ const RIM_UNDER_BAND = 0.6;
    fails to load, the fallback's own middle differs by a few hundredths of an em
    — on the order of a fifth of a pixel against an 11px band. */
 const BASELINE_MID = 0.385;
+/* Clear, unmarked band left between the handle and the stamp, in modules -- the
+   same unit every other band measurement above is already in (BAND_DEPTH,
+   BAND_RISE, MIN_ENGRAVE below), so it means the same length on a 13-tooth wheel
+   as on a 19-tooth one. engraving() used to cap the SWEEP ANGLE itself at a
+   fixed 168 degrees, which holds this arc length constant at exactly one
+   radius and lets it drift everywhere else -- #64 measured a 1.68x spread,
+   6.46 to 10.86 units, across the shipped tooth range: a fixed angle in a
+   family where everything else is a module multiple. The angle is now SOLVED
+   from this length instead (see fit() inside engraving()), which is "geometry
+   derives in one direction" applied to the band's circumference rather than
+   its depth (GitHub #98). Chosen to land close to where 168 degrees did at the middle
+   of the shipped tooth range (16 teeth), so fixing the bug does not itself
+   move the shipped type size. */
+const ENGRAVE_GAP = 1.24;
+/* Font used to STRIKE the two engraved lines, named once so the measurement in
+   engraving() and the paint in gearSvg cannot drift into disagreeing about what
+   they are each describing -- GitHub #98 was exactly that: two answers to the same
+   question, one of them a guess. */
+const ENGRAVE_FONT_FAMILY = "'Manrope',system-ui,sans-serif";
+const ENGRAVE_FONT_WEIGHT = 700;
+/* The 0.1em CSS letterSpacing the same <text> elements are painted with --
+   canvas measurement has no notion of it, so engraving() adds it back by hand
+   onto the measured width, in ems, the same convention textWidth's other call
+   site (the datum plate) already uses. */
+const ENGRAVE_TRACK = 0.10;
+/* Reference size for measuring the engraving's own type, in CSS px. The
+   rendered font is only a few px tall (engraving() shrinks it to a fraction of
+   a module -- ~5.6px at the shipped two-chain scale, see the note above
+   ENGRAVE_STROKE), and asking canvas to measure AT that size makes
+   textWidth()'s Math.ceil round a few-pixel string to the nearest whole one,
+   which is real noise at this scale. Measuring at a large fixed size instead
+   and dividing back down gives an exact per-em ratio -- and because the size
+   is fixed regardless of which candidate font size fit() is actually trying,
+   every size it tries for the same string is one memoised canvas call, not
+   several. */
+const ENGRAVE_TW_REF = 200;
 const TOOTH_ROOT_MIN = 4;  /* px floor under any root circle. Without it a tiny gear
                               computes a negative root radius; with it, a gear small
                               enough to hit the floor comes out with SHORT teeth that
@@ -4368,6 +4404,22 @@ class Component extends DCLogic {
         : (SELECTED ? SELECTED.slug : 'unknown')));
     }
     this.loadIcons();
+    /* GitHub #98: engraving()'s emWidth() measures the engraved type through
+       textWidth(), and this very first render -- the one that takes that
+       measurement and memoises it FOREVER -- runs before the Google Fonts
+       stylesheet has registered Manrope in document.fonts. Measured then,
+       'bold Manrope' silently resolves to the fallback stack and
+       UNDERESTIMATES the real glyph run, which is worse than the old guess:
+       the guide arc built from that measurement is shorter than the text
+       that ends up painted on it once the real face arrives. Once
+       document.fonts.ready settles, the memo is cleared and one more render
+       lets every wheel re-measure against the face that is actually
+       painting -- textWidth()'s own memoisation is what keeps that second
+       pass cheap, since only strings whose metrics actually moved pay for a
+       fresh canvas call. */
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(() => { this._tw = {}; this.forceUpdate(); });
+    }
     this.startPhysics();
     this.fitStage();
     /* AFTER fitStage(), so the panel's first sample already has a fit, a
@@ -5075,9 +5127,28 @@ class Component extends DCLogic {
     const printedK = g.kind === 'hexcore' || g.kind === 'isogrid'
                   || g.kind === 'polarbrick' || g.kind === 'polariso';
     const stamp = 'M' + MODULE + ' Z' + g.teeth + (printedK ? ' · 17-4PH DMLS' : '');
-    const MAX = 168 * Math.PI / 180;
+    /* THE WIDTH IS MEASURED, NOT GUESSED (GitHub #98). textWidth() is a memoised canvas
+       measurement a thousand lines up, built for exactly this class of problem --
+       its own comment records that "a per-character guess clipped 'Mastodon' on
+       the first try". fit() below used to run precisely that guess a second
+       time. emWidth() asks textWidth() at ENGRAVE_TW_REF rather than at the font
+       size actually being tried, and returns ems of width per unit font size
+       rather than pixels, because fit() has to try more than one candidate size
+       before it settles -- see the note on ENGRAVE_TW_REF for why that also
+       keeps every candidate a single memoised call rather than several. */
+    /* The tracking term is PER CHARACTER, not per gap: measured against the
+       live DOM (getComputedTextLength() on the rendered <text>), Blink's own
+       letter-spacing adds it after every glyph, including the last, not once
+       per gap between glyphs -- str.length trailing units short of the real
+       advance is exactly what str.length - 1 measured. A guide arc built from
+       an under-count is the dangerous direction (the real, wider text
+       overruns the arc it rides), so this counts the same way the renderer
+       does rather than the way the (CSS-only, non-letter-spaced) plate label
+       elsewhere in this file counts it. */
+    const emWidth = (str) => this.textWidth(str, ENGRAVE_FONT_WEIGHT + ' ' + ENGRAVE_TW_REF
+      + 'px ' + ENGRAVE_FONT_FAMILY) / ENGRAVE_TW_REF + ENGRAVE_TRACK * str.length;
     /* A FLOOR AS WELL AS A CEILING. The shrink below is one-sided: it divides the
-       available sweep by the character count, so a long enough string scales the
+       available sweep by the measured width, so a long enough string scales the
        type toward nothing and engraves a grey smudge rather than a mark. At
        MIN_ENGRAVE (0.30 module, about 2.1 units) the lettering is still legible
        on a large wheel, and past that the string is cut instead of the type --
@@ -5087,14 +5158,28 @@ class Component extends DCLogic {
        one-sided-bound class as #46). */
     const MIN_ENGRAVE = 0.30;
     const fit = (txt, rr, base) => {
-      const per = 0.60, track = 0.10;
+      /* THE CAP IS A CLEAR-METAL LENGTH, NOT AN ANGLE (GitHub #98). ENGRAVE_GAP is the
+         arc length (in modules) that must stay clear on each side between the
+         handle and the stamp; MAX -- the most either line may sweep -- is
+         solved from it rather than the reverse, so the ANGLE varies with the
+         wheel's own radius (rr) and the LENGTH does not: `2*rr*MAX + 2*gap =
+         2*pi*rr`, two gaps because two arcs ring the wheel. */
+      const MAX = Math.PI - (ENGRAVE_GAP * m) / rr;
+      const width = (fs, str) => emWidth(str) * fs;
       let f = base, t = txt;
-      const width = (fs, str) => str.length * fs * (per + track);
-      if (width(f, t) / rr > MAX) f = (MAX * rr) / (t.length * (per + track));
+      if (width(f, t) / rr > MAX) f = (MAX * rr) / emWidth(t);
       if (f < m * MIN_ENGRAVE) {
         f = m * MIN_ENGRAVE;
-        const room = Math.floor((MAX * rr) / (f * (per + track)));
-        if (room >= 2 && t.length > room) t = t.slice(0, room - 1) + '\u2026';
+        const budget = MAX * rr;
+        if (width(f, t) > budget) {
+          /* Shrinking is one-sided (see above), so a string that still overruns
+             the sweep at the floor size is cut instead -- longest prefix that
+             fits with an ellipsis appended, found directly against the real
+             measurement rather than backed out of a per-character estimate. */
+          let k = t.length;
+          while (k > 1 && width(f, t.slice(0, k - 1) + '\u2026') > budget) k--;
+          if (k > 1) t = t.slice(0, k - 1) + '\u2026';
+        }
       }
       return { f: f, txt: t, sweep: (width(f, t) / rr) * 180 / Math.PI };
     };
@@ -6555,7 +6640,7 @@ class Component extends DCLogic {
          cut shadow above and highlight below so it reads as struck metal, not overlaid text. */
       this.props.engravedRims && eng.handle ? h('g', { key: 'eng' }, [{ dy: 0, col: FLAT_INK, op: ENGRAVE_ALPHA }].map((L, li) => h('text', {
         key: li, transform: 'translate(0,' + L.dy + ')',
-        fontSize: eng.fT.toFixed(2), fill: L.col, fillOpacity: L.op, letterSpacing: '0.1em',
+        fontSize: eng.fT.toFixed(2), fill: L.col, fillOpacity: L.op, letterSpacing: ENGRAVE_TRACK + 'em',
         /* Same ink as the fill, matched in opacity, just fattening every edge by a
            hairline (#36) -- see ENGRAVE_STROKE. A full letter has body to spare and
            barely moves; a stroke-only glyph like the underscore in a handle has
@@ -6566,7 +6651,7 @@ class Component extends DCLogic {
            lettering's own middle lands mid-band, so the engine is only asked for
            the one baseline it cannot get wrong (#26). */
         dominantBaseline: 'alphabetic',
-        style: { fontFamily: "'Manrope',system-ui,sans-serif", fontWeight: 700 }
+        style: { fontFamily: ENGRAVE_FONT_FAMILY, fontWeight: ENGRAVE_FONT_WEIGHT }
       }, h('textPath', { href: '#' + id + 'ringT', startOffset: '50%', textAnchor: 'middle' }, eng.handle)))) : null,
       /* LAYER: character — stamped module/tooth-count, as on a real blank. Same struck
          treatment as the handle, so both sides of the band read alike. */
@@ -6577,9 +6662,9 @@ class Component extends DCLogic {
          off. Machined wheels still obey `character` and so still show nothing. */
       (this.props.character || amPrinted) ? h('g', { key: 'stamp' }, [{ dy: 0, col: FLAT_INK, op: 0.66 }].map((L, li) => h('text', {
         key: li, transform: 'translate(0,' + L.dy + ')',
-        fontSize: eng.fB.toFixed(2), fill: L.col, fillOpacity: L.op, letterSpacing: '0.1em',
+        fontSize: eng.fB.toFixed(2), fill: L.col, fillOpacity: L.op, letterSpacing: ENGRAVE_TRACK + 'em',
         dominantBaseline: 'alphabetic',   /* same reasoning as the handle above (#26) */
-        style: { fontFamily: "'Manrope',system-ui,sans-serif", fontWeight: 700 }
+        style: { fontFamily: ENGRAVE_FONT_FAMILY, fontWeight: ENGRAVE_FONT_WEIGHT }
       }, h('textPath', { href: '#' + id + 'ringB', startOffset: '50%', textAnchor: 'middle' }, eng.stamp)))) : null
     );
   }

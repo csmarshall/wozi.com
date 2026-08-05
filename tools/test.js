@@ -117,6 +117,10 @@ const page = (function build() {
     'BAND_DEPTH', 'RIM_UNDER_BAND', 'BASELINE_MID', 'ROOT_MARGIN', 'MIN_MODULE',
     'TEETH_MIN', 'TEETH_MAX', 'TEETH_SLACK', 'TEETH_HOST',
     'ANG_MIN', 'ANG_MAX', 'BAND_MAX', 'ENDS_MAX',
+    /* The clear-metal gap engraving()'s fit() solves its sweep cap FROM (GitHub #98).
+       Read out of the page so the gap-constancy test below measures the ratio
+       the page actually ships, not a copy of it. */
+    'ENGRAVE_GAP',
     /* The one figure on this page stated in RENDERED pixels rather than in
        modules (#76). Read from the page like everything else, so the suite
        measures the bound that ships rather than a copy of it. */
@@ -3784,6 +3788,130 @@ test('the ring the lettering rides on stays inside the band', () => {
   });
   ok(page.BASELINE_MID > 0 && page.BASELINE_MID < 0.5,
     'BASELINE_MID ' + page.BASELINE_MID + ' is not a plausible ascent-over-descent middle');
+});
+
+test('the engraving cap is a clear-metal length, not a fixed angle (GitHub #98)', () => {
+  /* STRUCTURAL, and cheap: catches an outright revert -- someone typing a fixed
+     degree cap back into fit() -- with a message that names the actual
+     regression, before the slower geometric test below ever runs. */
+  const fitSrc = grabBlockFrom(SRC, 'index.html', 'const fit = (txt, rr, base) => {', '{', '}');
+  ok(/const MAX = .*\brr\b/.test(fitSrc),
+    'MAX no longer depends on rr -- the sweep cap is a fixed angle again (#64, GitHub #98)');
+  ok(!/\b168\b/.test(fitSrc), 'a literal 168-degree cap is back in fit() (GitHub #98)');
+  const engSrc = grabBlockFrom(SRC, 'index.html', 'engraving(g, r, m, bandOut) {', '{', '}');
+  ok(/this\.textWidth\(/.test(engSrc),
+    'engraving() no longer calls textWidth() -- the per-character guess may be back (GitHub #98)');
+  ok(!/\bper\s*\*\s*fs\b|\bfs\s*\*\s*\(per\b/.test(engSrc),
+    'a per-character width guess (per + track) is back in engraving() (GitHub #98)');
+});
+
+test('the engraving cap holds the same clear metal on every wheel size and label length (GitHub #98, #64)', () => {
+  /* engraving() ITSELF is executed here, out of index.html, rather than a model
+     of its algebra -- the earlier test above only proves the source text still
+     mentions rr and textWidth(); this proves the method actually behaves, which
+     a hand-modelled copy of the formula could not: it would agree with a broken
+     page as readily as a working one.
+
+     textWidth() is stubbed because Node has no canvas, but the stub only needs
+     to be monotonic in font size and string length for this test to mean
+     anything -- what is under test is the CAP fit() enforces algebraically once
+     emWidth() returns any positive, well-behaved number; GitHub #98's actual fix (a
+     canvas measurement replacing a per-character guess) is what FEEDS the cap,
+     and is covered by the structural test above and by dom_invariants.py's
+     rendered-DOM check, neither of which this one repeats. */
+  const textWidthStub = (text, font) => {
+    const sizePx = parseFloat((/(\d+(?:\.\d+)?)px/.exec(font) || [0, 16])[1]);
+    return Math.ceil(text.length * sizePx * 0.55);
+  };
+  const SITES_STUB = { p: { x: { path: '' } } };
+  const buildEngraving = new Function('SITES', 'MODULE', 'BAND_DEPTH', 'BASELINE_MID', '__tw',
+    grabDecl('const ENGRAVE_GAP =') + '\n'
+    + grabDecl('const ENGRAVE_FONT_FAMILY =') + '\n'
+    + grabDecl('const ENGRAVE_FONT_WEIGHT =') + '\n'
+    + grabDecl('const ENGRAVE_TRACK =') + '\n'
+    + grabDecl('const ENGRAVE_TW_REF =') + '\n'
+    + 'const obj = { textWidth: __tw, '
+    + grabBlockFrom(SRC, 'index.html', 'engraving(g, r, m, bandOut) {', '{', '}') + ' };\n'
+    + 'return function (g, r, m, bandOut) { return obj.engraving(g, r, m, bandOut); };');
+  const engraving = buildEngraving(SITES_STUB, page.MODULE, page.BAND_DEPTH, page.BASELINE_MID, textWidthStub);
+
+  const m = page.MODULE;
+  const geom = (teeth) => {
+    const r = m * teeth / 2, bandOut = r - m * page.BAND_RISE;
+    return { r, bandOut, g: { slug: 'x', person: 'p', teeth, kind: 'spur' } };
+  };
+  const teethRange = [];
+  for (let t = page.TEETH_MIN; t <= page.TEETH_MAX; t++) teethRange.push(t);
+
+  /* Find a label long enough to force the shrink at the LARGEST wheel (the
+     hardest to force -- most circumference to fill) while staying above
+     MIN_ENGRAVE at the SMALLEST wheel (the easiest to floor out -- least
+     circumference to spend). If no such length exists in a generous search
+     range the test fails honestly rather than silently passing on a label that
+     never actually engaged the cap anywhere. */
+  let L = -1;
+  for (let len = 4; len <= 200; len++) {
+    SITES_STUB.p.x.path = 'w'.repeat(len);
+    const atMax = engraving(geom(page.TEETH_MAX).g, geom(page.TEETH_MAX).r, m, geom(page.TEETH_MAX).bandOut);
+    const atMin = engraving(geom(page.TEETH_MIN).g, geom(page.TEETH_MIN).r, m, geom(page.TEETH_MIN).bandOut);
+    if (atMax.fT < m * 0.80 - 1e-9 && atMin.fT > m * 0.30 + 1e-6) { L = len; break; }
+  }
+  ok(L > 0, 'could not find a label length that engages the cap at every wheel size '
+    + 'without flooring out at the smallest -- the search range may need widening');
+
+  SITES_STUB.p.x.path = 'w'.repeat(L);
+  const gaps = teethRange.map(teeth => {
+    const { r, bandOut, g } = geom(teeth);
+    const eng = engraving(g, r, m, bandOut);
+    ok(eng.fT < m * 0.80 - 1e-9,
+      teeth + '-tooth wheel: the cap did not engage at label length ' + L
+      + ' (fT ' + eng.fT.toFixed(3) + ') -- the search above picked a bad length');
+    /* The clear metal is what the cap actually leaves behind on ONE side,
+       measured back out of the wheel's own returned radius and sweep rather
+       than re-derived from the formula under test. */
+    return { teeth, gap: eng.rT * (Math.PI - eng.sT * Math.PI / 180) };
+  });
+  const expected = page.ENGRAVE_GAP * m;
+  const bad = gaps.filter(x => Math.abs(x.gap - expected) > 1e-6 * Math.max(1, expected));
+  ok(bad.length === 0, 'clear metal is not constant across the tooth range at label length ' + L
+    + ' (expected ' + expected.toFixed(4) + ' every time): '
+    + bad.map(x => x.teeth + '-tooth ' + x.gap.toFixed(4)).join(', '));
+
+  /* SAME INVARIANT, EVERY LABEL LENGTH THE CONFIG CAN ACTUALLY PRODUCE, at both
+     ends of the tooth range -- a fixed-angle bug hides at a single size, so it
+     is not enough to check one wheel. This does not require the cap to engage
+     (most shipped handles are short enough that it never does); it only
+     requires that the sweep NEVER exceeds the budget the derived cap allows. */
+  const realHandles = ['csmarshall', 'cs_marshall', 'charles.wozi.com', 'charles@wozi.com',
+    'harper', 'a', ''];
+  [page.TEETH_MIN, page.TEETH_MAX].forEach(teeth => {
+    const { r, bandOut, g } = geom(teeth);
+    realHandles.concat(['w'.repeat(1), 'w'.repeat(60), 'w'.repeat(200)]).forEach(h => {
+      SITES_STUB.p.x.path = h;
+      const eng = engraving(g, r, m, bandOut);
+      const rr = eng.rT, maxDeg = (Math.PI - (page.ENGRAVE_GAP * m) / rr) * 180 / Math.PI;
+      ok(eng.sT <= maxDeg + 1e-6,
+        teeth + '-tooth wheel, handle ' + JSON.stringify(h) + ': sweep ' + eng.sT.toFixed(2)
+        + 'deg exceeds the derived cap ' + maxDeg.toFixed(2) + 'deg');
+    });
+  });
+
+  /* THE #59 FLOOR BEHAVIOUR SURVIVES: a label long enough to hit MIN_ENGRAVE
+     truncates with an ellipsis rather than smearing past the sweep budget,
+     the same shape the guess-based version produced. */
+  const longest = geom(page.TEETH_MIN);
+  SITES_STUB.p.x.path = 'w'.repeat(200);
+  const flooredEng = engraving(longest.g, longest.r, m, longest.bandOut);
+  ok(Math.abs(flooredEng.fT - m * 0.30) < 1e-9,
+    'a 200-character handle on the smallest wheel does not floor at MIN_ENGRAVE -- '
+    + 'got fT ' + flooredEng.fT.toFixed(3));
+  ok(flooredEng.handle.endsWith('…') && flooredEng.handle.length < 200,
+    'a 200-character handle at the floor size was not truncated with an ellipsis: '
+    + JSON.stringify(flooredEng.handle));
+  const rrFloor = flooredEng.rT, maxDegFloor = (Math.PI - (page.ENGRAVE_GAP * m) / rrFloor) * 180 / Math.PI;
+  ok(flooredEng.sT <= maxDegFloor + 1e-6,
+    'the truncated handle still overruns the sweep budget: ' + flooredEng.sT.toFixed(2)
+    + 'deg against ' + maxDegFloor.toFixed(2) + 'deg');
 });
 
 /* ---- 2. the bore derives outside-in -------------------------------------- */
