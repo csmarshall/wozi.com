@@ -1875,6 +1875,22 @@ class Component extends DCLogic {
   badgeGrab(e, key) {
     if (e.button > 0) return;
     e.stopPropagation();
+    /* THE SUPPRESSION FLAG IS ARMED HERE, WHICH IS ALSO WHERE IT IS DISARMED
+       (#92). `up()` sets _badgeMoved so the click that follows a drag does not
+       navigate, and clickGuard clears it as it swallows that click -- but
+       clickGuard only runs when the browser fires `click` ON THE ANCHOR, and
+       after a flick it does not. The cap tracks the pointer a frame behind, so
+       let go while still moving and the release lands on empty stage; the click
+       goes to the common ancestor of press and release instead, the guard never
+       runs, and the flag outlives the gesture that set it. The next real click
+       on that cap was then spent clearing it, and the link silently did nothing
+       once.
+       Clearing on the press needs no timer and no tuned window, because every
+       genuine click begins with a primary pointerdown on this same anchor: by
+       the time a click can be swallowed, this line has already run. It is
+       unconditional -- a press anywhere retires a flag left by any cap, since
+       only the gesture in progress may suppress anything. */
+    this._badgeMoved = null;
     /* preventDefault here kills the browser's native link-drag, which otherwise
        hijacks the pointer stream -- on a real mouse it made the cap need a
        long-press before it would move at all. Synthesized test events never
