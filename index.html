@@ -5186,6 +5186,13 @@ class Component extends DCLogic {
      opinion about it. `null` means the wheel carries no opacity of its own,
      which is every linked wheel: the machine is drawn at full weight.
 
+     WHERE IT IS APPLIED MOVED, WHAT IT MEANS DID NOT (#86). It used to be an
+     `opacity` on the wheel's rotating div; it is now charged on a group INSIDE
+     ghostSvg, with an opaque backing plate outside that group, because a wheel
+     composited at 0.17 straight onto the page cannot occlude the datum beneath
+     it. This is still the one answer to "how heavy is this wheel drawn", and
+     `null` still means "at full weight".
+
      THE CAST SHADOWS DERIVE FROM THIS RATHER THAN REPEATING IT. A full-strength
      shadow under a wheel drawn at ghost opacity reads as heavier than the wheel
      casting it, which puts the eye on the drive instead of on the services it
@@ -5366,18 +5373,84 @@ class Component extends DCLogic {
     const ft = flatTones(dim(g.color || '#9AA6AD'));
     const size = (g.ro + 4) * 2, r = g.r;
     const path = this.teethPath(g.teeth, r);
+    /* The blank's outline width, named once because the backing plate below has
+       to cover exactly what this stroke covers -- a stroke straddles the path,
+       so half of it lies OUTSIDE the filled silhouette. */
+    const EDGE = 1;
+    /* THE WHEEL'S OWN ALPHA, WHICH IS WHAT MAKES A BACKING PLATE NECESSARY (#86).
+       Only a bridge idler has one: the escape-run outriggers are dimmed once, as
+       a layer, and inherit it from their group.
+
+       An occluder composited at 0.17 does not occlude -- #81 established that,
+       and this is its residual. Inside the ghost layer's group the wheels paint
+       at full alpha onto one surface and the alpha is charged at the end, so a
+       ghost hides whatever is behind it. An idler cannot join that group (it has
+       to MESH, and the layer is parallax-scaled 0.94), so it carries the number
+       per wheel and is its own translucent group of one. The scribed datum ran
+       straight through it: measured, 83.5% of the hairline's weight survived on
+       dark and 55.9% on light -- which is 1 - ghostOpacity() in each theme, so
+       the wheel was attenuating the mark and nothing more.
+
+       WHAT IS DRAWN IS AN OPAQUE PLATE IN THE PAGE'S OWN GROUND, in this wheel's
+       own tooth silhouette, under the dimmed group. Compositing is linear, so a
+       stack drawn over an opaque `--bg` plate lands on bg + a*(c - bg) -- exactly
+       what it lands on over the page itself. Every pixel where an idler stood
+       over nothing but page is therefore unchanged, and the datum is covered by
+       teeth and gaps rather than by a circle: no mask, no second geometry, and
+       nothing to keep in step, because the plate is the SAME `path` string.
+
+       WHY NOT PRE-BLEND THE FILLS, which is the same arithmetic and the obvious
+       reading of the ticket. It reaches the same pixels, but it moves every ink
+       off the wheel's own colour and onto the page's -- and that is precisely
+       what tools/dom_invariants.py's ink census exists to catch ("a theme's
+       palette leaking into the other theme's render"). Built and measured: the
+       census still passed, but its worst hue went 0.55deg to 3.33deg of a 4.0deg
+       tolerance, because blending onto a dark ground drops a tone's VALUE faster
+       than its chroma and so RAISES the saturation the census reads -- past
+       HUE_BASE_SAT_MIN, where the hue test switches on at a chroma of 9/255 and
+       one rounding step is worth degrees. Two of the four GHOST_COLORS compute to
+       6.67deg there, i.e. a gate that fails on the deal rather than on the code.
+       The plate keeps every ink a tone of the wheel's own base and leaves the
+       census reading what it read before.
+
+       NOTHING HERE IS MEASURED. The plate is painted in `var(--bg)` itself, so a
+       palette edit carries into it with no arithmetic to go stale.
+
+       THE COST IS REAL AND IS THE ONE THE TICKET NAMED: an idler now HIDES what
+       passes behind it instead of dimming it. On this stage that is the datum
+       (the point), an escape-run ghost where one happens to pass under a bridge,
+       and the outer skirt of a linked wheel's cast shadow. A translucent idler
+       cannot occlude; an idler that occludes is not translucent. */
+    const alpha = this.wheelOpacity(g);
+    const plateId = alpha == null ? null : 'gp' + g.i;
     /* Softness comes from low-contrast fills, not a CSS blur: a filter on a rotating
        element re-rasterises every frame, which is what made these stutter. */
     /* The BOX is scaled, the viewBox is not: the vector is drawn at the size it
        is displayed rather than drawn small and blown up by an ancestor (#37). */
     return h('svg', { width: size * S, height: size * S, viewBox: (-size / 2) + ' ' + (-size / 2) + ' ' + size + ' ' + size, style: { position: 'absolute', left: (-size * S / 2) + 'px', top: (-size * S / 2) + 'px', overflow: 'visible' } },
-      /* An outline is what separates "far away" from "out of focus". Without one
-         these read as blurred, which is the complaint in #22 -- there is no blur
-         anywhere in this file. */
-      h('path', { d: path, fill: ft.body, stroke: ft.line, strokeWidth: 1, strokeOpacity: 0.65, strokeLinejoin: 'round' }),
-      h('circle', { r: Math.max(6, r - MODULE * 1.9), fill: ft.face }),
-      h('circle', { r: Math.max(4, r - MODULE * 3.1), fill: ft.well }),
-      h('circle', { r: Math.max(7, r * 0.2), fill: ft.face })
+      /* Stroked as well as filled, at the blank's own width: the outline below
+         straddles the silhouette's edge, and a plate that only filled it would
+         leave the mark showing through a half-stroke rim of every tooth. */
+      plateId ? h('use', { key: 'plate', href: '#' + plateId, strokeWidth: EDGE, strokeLinejoin: 'round',
+        style: { fill: 'var(--bg)', stroke: 'var(--bg)' } }) : null,
+      /* THE DIMMING MOVED IN HERE from the wrapper div, and that is the whole of
+         the mechanism: the plate has to sit OUTSIDE the group the alpha is
+         charged on, and inside one svg is the only place it can do that while
+         still rotating in perfect register with the teeth it is cut to. */
+      h('g', { key: 'wheel', opacity: alpha },
+        /* An outline is what separates "far away" from "out of focus". Without one
+           these read as blurred, which is the complaint in #22 -- there is no blur
+           anywhere in this file. */
+        h('path', { d: path, fill: ft.body, stroke: ft.line, strokeWidth: EDGE, strokeOpacity: 0.65, strokeLinejoin: 'round' }),
+        h('circle', { r: Math.max(6, r - MODULE * 1.9), fill: ft.face }),
+        h('circle', { r: Math.max(4, r - MODULE * 3.1), fill: ft.well }),
+        h('circle', { r: Math.max(7, r * 0.2), fill: ft.face })),
+      /* LAST, NEVER FIRST. gearSvg opens with a <defs> and ghostSvg does not,
+         and that is how every harness here tells a linked wheel from a ghost --
+         tools/dom_invariants.py reads firstElementChild and picks the radius
+         padding and the engraving rule off it. A <defs> at the end renders
+         nothing and says nothing. */
+      plateId ? h('defs', { key: 'plateDef' }, h('path', { id: plateId, d: path })) : null
     );
   }
 
@@ -7113,18 +7186,16 @@ class Component extends DCLogic {
         /* `will-change` stays. It is not the fault -- promotion is what keeps a
            rotating SVG off the paint path -- the fault was promoting a layer whose
            layout size was not its display size (#37). Now they are the same. */
+        /* NO OPACITY ON THIS DIV ANY MORE (#86). A bridge idler is still drawn at
+           the ghost layer's own alpha per wheel -- it cannot be in that layer,
+           which is parallax-scaled, while it has to mesh -- but the number is now
+           applied INSIDE ghostSvg, on a group with the wheel's opaque backing
+           plate outside it. Dimming the whole div again here would charge it
+           twice and dim the plate with it, which is the one thing the plate
+           cannot be. wheelOpacity() is still the single home for the number, and
+           the cast shadows still derive from it rather than re-testing the role. */
         h('div', { ref: (el) => { if (this._spinEls) this._spinEls[g.i] = el; },
-          style: {
-            transform: 'rotate(' + g.phase.toFixed(2) + 'deg)', willChange: 'transform',
-            /* AND AT THE GHOST LAYER'S OWN OPACITY, per wheel. It cannot be in
-               that layer -- the layer is parallax-scaled and this wheel has to
-               mesh -- so the layer's dimming has to travel with it instead. Drawn
-               without it, ghostSvg's palette alone left an idler the darkest,
-               highest-contrast object on the page: see ghostOpacity(). One rule,
-               named once in wheelOpacity(), so the cast shadows can derive from
-               the same answer instead of re-deciding it. */
-            opacity: this.wheelOpacity(g)
-          } },
+          style: { transform: 'rotate(' + g.phase.toFixed(2) + 'deg)', willChange: 'transform' } },
           /* A BRIDGE IDLER IS DRAWN AS A GHOST. It is structural -- solved with
              the train, because it is what decides where a chain sits -- but it
              carries nobody's service, so it gets the background palette and none
