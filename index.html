@@ -445,9 +445,30 @@ const DATUM_PLATE = {};
    top of the placard -- is what the figure names. */
 const PLATE_TOP_CLEAR = 20;
 
-/* The SPINE is the longest chain -- it sets the scale, and it is the axis every
-   other chain runs parallel to. */
-const SPINE_LEN = Math.max(1, ...STAGE.people.map(p => (p.links || []).length));
+/* A CHAIN WITH NO LINKS IS NOT LAID OUT AT ALL -- the TRAIN builder below skips
+   it, so it takes no wheels, gets no bridge and is not part of the composition.
+   One home for that rule, because the spine is defined by it. */
+const HAS_WHEELS = (p) => (p.links || []).length > 0;
+/* THE SPINE is the chain the composition is built around: the axis every other
+   chain runs parallel to, and the one every bridge ultimately hangs off. It is
+   whichever chain the layout order puts first -- skipping any that have no
+   wheels, exactly as the TRAIN builder does -- so it follows the ordering rule
+   rather than restating it. */
+const SPINE = CHAIN_ORDER.find(HAS_WHEELS) || null;
+/* HOW MANY WHEELS THE SPINE HAS, and nothing else. It is used as an INDEX BOUND
+   -- the middle of the spine is the static tree's default bridge anchor -- so it
+   must count the spine's own wheels.
+
+   IT USED TO BE A MAXIMUM: `Math.max(1, ...people.map(links.length))`, the
+   longest chain anywhere on stage. That is a different quantity wearing this
+   name, and the two agree only while the spine IS the longest chain, which
+   today's CHAIN_ORDER sort happens to guarantee. An index whose validity rests
+   on a sort in another declaration is one edit away from pointing past the array
+   it indexes (#98) -- and a malformed static tree is exactly what #65 was.
+   The maximum-shaped quantity that genuinely sets the SCALE is NOMINAL_CHAIN,
+   further down; it is a maximum over every CONFIGURED person, not the stage, and
+   it is not an index into anything. */
+const SPINE_LEN = SPINE ? SPINE.links.length : 0;
 
 /* HOW MANY IDLERS BRIDGE A CHAIN TO THE ONE THAT DRIVES IT. Never zero -- two
    chains meshing directly would read as one machine, and the bridge is what
@@ -509,7 +530,7 @@ const TRAIN = (function () {
      by construction rather than by three sorts that have to match. */
   CHAIN_ORDER.forEach(p => {
     const links = p.links || [];
-    if (!links.length) return;
+    if (!HAS_WHEELS(p)) return;
     /* A chain bridges unless its own config entry says otherwise. `bridge:
        false` says "no drive", not "no position" -- an unbridged chain is still
        placed clear of the others, it simply arrives there without idlers. */
@@ -520,7 +541,15 @@ const TRAIN = (function () {
         /* The first idler's parent is where the bridge HANGS FROM, and that is
            solved rather than placed -- see solve(). The middle of the spine is
            the default so the static tree is well formed before anything runs;
-           solve() overrides it with whatever it finds room for. */
+           solve() overrides it with whatever it finds room for.
+
+           IT IS IN RANGE BY CONSTRUCTION, not by luck: this loop skips chains
+           with no wheels and emits SPINE first -- SPINE is the first chain in
+           this very order that HAS_WHEELS -- and the spine is unbridged, so it
+           takes no idlers and its wheels ARE out[0 .. SPINE_LEN-1]. Half of
+           SPINE_LEN-1 therefore lands on a spine wheel whatever CHAIN_ORDER is
+           sorted by, and nothing here needs the spine to be the longest chain
+           on stage. It did before (#98). */
         idlers.push(out.length);
         out.push({ slug: null, prof: { rim: 1.7 },
           parent: k === 0 ? Math.floor((SPINE_LEN - 1) / 2) : out.length - 1,
@@ -613,9 +642,17 @@ const ESCAPE_WOBBLE = 20;
    matters: the standard size is one term in a min() alongside the chain's own
    span, so underestimating means a real chain is bound by itself and never by
    this. Overestimating is what clamped the page before. */
-/* ALL CONFIGURED PEOPLE, not just the ones on stage -- deliberately different
-   from SPINE_LEN. A solo page has to draw its wheels at the size they have on
-   the fullest chain, and that chain is not on stage to be measured. */
+/* ALL CONFIGURED PEOPLE, not just the ones on stage. A solo page has to draw its
+   wheels at the size they have on the fullest chain, and that chain is not on
+   stage to be measured.
+
+   THIS IS THE ONE QUANTITY THAT IS A MAXIMUM, and it is the one that sets the
+   SCALE -- NOMINAL_SPAN below is derived from it, and TARGET_GEAR_PX from that.
+   It is never an index into anything, which is what lets it range over people
+   who are not on stage at all. SPINE_LEN is the opposite in both respects: it
+   counts one particular chain's wheels and is only ever used to index them
+   (#98). The two used to be the same shape under different names, and the
+   resemblance is what made it possible to use a maximum as an index. */
 const NOMINAL_CHAIN = Math.max(1,
   ...((CONF.PEOPLE || []).map(p => (p.links || []).length)));
 /* dealt further down, once the planetary's sizing rules exist to consult */
