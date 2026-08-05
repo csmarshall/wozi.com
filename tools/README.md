@@ -14,6 +14,14 @@ CDP; `pip` needs websockets, and Pillow/numpy for the image-analysis ones).
                            no console errors. Counts only deg-suffixed
                            rotations (static rotate(120) planet seats are
                            placement, not animation).
+- dom_invariants.py <url>  four structural assertions about the RENDERED DOM,
+                           with no image at all: every wheel meshes with
+                           something, every blank draws the tooth count its own
+                           radius implies, every linked wheel's engraving is
+                           actually painted, and every ink is a tone of its own
+                           wheel's colour. Seeds the deal. Takes --query
+                           '?who=charles' for the single-chain path; --census
+                           prints every measurement rather than the verdict.
 - a11y_audit.py <url>      axe-core injected over CDP + the structural checks
                            axe cannot make (focus rules, reduced-motion, SVG
                            exposure, target sizes).

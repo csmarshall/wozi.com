@@ -84,6 +84,109 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Added
 
+- **#93 — four assertions about the rendered DOM, in the gap between the maths
+  suite and the pixel gate.** (GitHub #48.) `node tools/test.js` proves the gear
+  *maths* meshes — in Node, with no browser, off the constants it reads out of
+  `index.html`. `tools/pixel_regress.py` proves the page draws the same
+  *picture* as a git ref. Between the two sat the renderer, and nothing asserted
+  that what `solve()` computed is what the DOM actually contains. A wheel could
+  render with the wrong tooth count, an empty `<svg>`, an engraving that paints
+  nothing or a fill that had gone black, and the maths suite would pass because
+  the maths never moved, while the pixel gate would either pass — the
+  single-chain path untouched — or fail with a number that says only "801,797
+  pixels differ".
+
+  `tools/dom_invariants.py` makes four structural assertions from one CDP
+  evaluate. **No images, no baselines, no rasterisation anywhere in it**, which
+  is what lets it run on CI's Linux today rather than being a thing that only
+  agrees with itself on one laptop.
+
+  - **Mesh at render time.** Every wheel's centre distance to at least one other
+    equals the sum of the two pitch radii. Deliberately *not* "these pairs
+    mesh", which would be circular — find the pairs that mesh, then assert they
+    mesh. It is that **no wheel is an orphan**: `solve()` places every wheel
+    after the first against one already placed, so a wheel meshing with nothing
+    is a wheel the renderer put somewhere the solver did not.
+  - **No wheel renders empty.** `teethPath()` emits exactly two quadratic fillet
+    blends per tooth and no other `Q`, so the blank *states its own tooth
+    count* — and the wheel's rendered radius states what that count must be,
+    since a pitch radius is `MODULE × teeth / 2`. The two are compared as
+    integers with **no tolerance at all**, and came out exact on every wheel of
+    every run. Plus the blunt half: a shape floor, and every hub badge holding a
+    drawn icon.
+  - **Engraving present.** Three things, because only the third can tell a drawn
+    engraving from a present one: non-empty text, a `textPath` target that
+    resolves inside the same `<svg>`, and `getComputedTextLength() > 0`. A
+    dangling `href` leaves the string in the DOM and paints nothing.
+  - **Ink census.** Every colour on a wheel comes from `flatTones(c)` or
+    `shades(c)`, both pure functions of one base that mix it toward black or
+    toward white. So the census is not a count of colours, it is a statement
+    about the set: **each ink must be a tone of that wheel's own base** — same
+    hue, saturation not thrown away, value inside the band those mixes reach.
+    The base is read off the blank's own fill, through its gradient when that is
+    what the fill points at, so nothing here needs to know the palette. `FLAT_INK`
+    is the one exemption and is read out of `index.html` rather than retyped.
+
+  **The verdict is seeded, because an unseeded one is a property of whichever
+  machine you were dealt.** Same LCG over `Math.random`, injected through
+  `Page.addScriptToEvaluateOnNewDocument` before any page script, as #88 put
+  into `devices.py` — and `Page.enable` must come first or the injection is
+  accepted and silently never runs. Determinism lives in the harness; the
+  shipped page still carries no test hooks.
+
+  **Every check was proved able to fail** (#47), one mutant tree per check, each
+  turning exactly one line of a throwaway copy of `index.html` red:
+
+  | mutation | exit | what went red |
+  | --- | --- | --- |
+  | one anchor moved 3 solve units off its solved centre | 1 | mesh only — orphan wheel, 2 components, nearest distance off by 3.97px |
+  | one blank drawn with one tooth fewer than its radius implies | 1 | blank only — "draws 14 teeth but its rendered pitch radius implies 15.000" |
+  | the handle's `textPath` pointed at a ring that does not exist | 1 | engraving only — 8 wheels, "target does not resolve" |
+  | the hub ring's stroke replaced with `#000000` | 1 | ink only — "keeps 0.00 of the base #e8615a's saturation" |
+  | `loadIcons()` pointed at a path that 404s | 1 | blank only — 8 badges, 0 carrying an icon |
+
+  The last row is the one worth keeping: that failure is what a `file://` load
+  produces, and what a wrong `Content-Type` on the `assets/` objects would
+  produce on the live site, and `loadIcons()`'s `.catch` swallows it in silence.
+
+  **The mesh tolerance is 0.35px and it is the same number, reached the same
+  way, as `mesh_dirs.py`'s.** `S` is recovered lossily — `--gsfit` is written as
+  `toFixed(3)` and re-floored to the render's own 2-decimal quantisation, which
+  can land a step out — and one step of `S` multiplies the 13-unit radius pad on
+  *both* wheels of a pair: 0.26px worst case. Measured over 30 runs (5 seeds ×
+  2 themes × 2 scopes, then five viewports from 375×667 to 5120×1440) the worst
+  residual on a real meshing pair was **0.0045px** and the closest non-meshing
+  pair was **47.5px** away. The brief asked for ~0.5px; the tighter figure is
+  used because the analysis was already paid for and the margin supports it.
+
+  Two constants in there are **stated rather than derived, and say so**: the
+  four-shape floor and the three-ink floor. Both renderers are nested `h()`
+  calls a thousand lines long rather than a table, and a regex counting their
+  unconditional emissions would be more fragile than the number it replaced.
+  What keeps them from mattering is that the check they back — the tooth census
+  — is exact.
+
+  **What it does not cover, stated so nobody reads more into a green run than is
+  there.** It is a still: nothing here looks at motion, which is
+  `verify_motion.py`'s job, or at direction, which is `mesh_dirs.py`'s. It
+  cannot see a whole chain drifting out of position as a rigid body — every
+  wheel in it still meshes with its neighbours. It reports the mesh graph's
+  component count but does not assert it, because a bridge that refuses is a
+  documented state and a gate that failed on it would be failing a page doing
+  exactly what it was told. The ink census covers the wheels, not the hub icons'
+  brand colours. And it is Blink only, so it says nothing about WebKit — which
+  is the gap `webkit_band.js` exists to cover, and #19 is the reminder that the
+  gap is real.
+
+  Gates: 69/69 suite unchanged. `dom_invariants` PASS on the combined stage and
+  on `?who=charles`, in both themes, at 375×667, 390×844, 744×1133, 1440×900,
+  2560×1440 and 5120×1440, ~4.6s per run. Wired into the deploy workflow beside
+  `devices.py`, `verify_motion.py` and `pill_clip.py`, before any AWS credential
+  is assumed, and run against **both scopes** because they are different code
+  paths: `127.0.0.1` is a `STAGE_HOSTS` name, so the bare URL is the combined
+  stage — bridges, idlers, a datum — and `?who=charles` is one chain with none
+  of them.
+
 - **#89 — a crawl policy, because a 403 was standing in for one.**
   `https://wozi.com/robots.txt` returned the raw S3 `AccessDenied` XML: the file
   did not exist, was not in the deploy whitelist, and no `<meta name="robots">`
