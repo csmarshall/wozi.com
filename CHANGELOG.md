@@ -276,6 +276,60 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
   length long enough to engage the cap, and a contact sheet of the longest and
   shortest configured labels on the smallest and largest dealt wheels, both
   themes, before and after.
+- **CL#119 — a ghost's addendum now has one home, `TOOTH_ADD`, instead of
+  three.** (GitHub #100.)
+
+  A ghost wheel's outer radius — pitch radius plus addendum — was computed
+  three different ways: `MODULE * 0.95` where `fitEscapes()` places and
+  collision-tests an escape-run ghost, `MODULE * (teeth/2 + 1.25)` where the
+  ghost layer reserves its compositing box, and `MODULE * TOOTH_ADD` (1.00)
+  everywhere a linked wheel is measured, including `WHEEL_SPAN`. None of the
+  first two read `TOOTH_ADD`, so the constant that exists to be the addendum's
+  one stated home was quietly disagreed with twice.
+
+  The `0.95` had no defending comment and was 5% under the true addendum on a
+  background wheel's own placement radius — measured, in module units, against
+  `TOOTH_ADD`: 0.05 modules short, 0.35 solve units, well under a pixel at the
+  page's usual scale. Small, but it meant a ghost's own creation site and every
+  linked wheel disagreed about what an addendum is. Now reads `TOOTH_ADD`
+  directly.
+
+  The `1.25` was different: its comment already named it as addendum plus a
+  real flat pad for the drawn wheel's stroke and baked-in shadow, measured at a
+  10–17px shortfall if omitted. It was written as one number, `1.25`, rather
+  than as `TOOTH_ADD` plus that pad — so it read as a competing addendum
+  instead of an addendum with a margin, and would not have followed `TOOTH_ADD`
+  if that constant ever moved. Decomposed into `TOOTH_ADD + GHOST_BOX_PAD`
+  (`GHOST_BOX_PAD = 0.25`), with the pad now named and the total numerically
+  unchanged — the reserved box is exactly as large as before, so nothing that
+  read it can have started clipping.
+
+  **Measured, not assumed.** A representative wheel's tip radius under the
+  three old addenda, in solve units (`MODULE = 7`): 76.65 (`0.95`, ghost
+  creation) vs 77.00 (`TOOTH_ADD`, every linked wheel) vs 78.75 (`1.25`, the
+  ghost box) — a 2.1-unit spread top to bottom, teeth-count-independent since
+  the addendum term doesn't carry `teeth`. At the page's documented "usual
+  scale" of `S ~ 1.25` that is under 3px, which is why nothing has visibly
+  clipped; the bug was never the size of the gap, it was that three call sites
+  had no reason to agree on it.
+
+  **Confirmed by seeded pixel diff** (`tools/pixel_regress.py --seed 8231`):
+  the linked (coloured) wheels are pixel-identical before and after, on the
+  combined stage and on `?who=charles` alone. Only the decorative escape-run
+  ghosts move, because the corrected placement radius feeds a collision test
+  inside a seeded random walk — shifting the radius by 0.05 modules can flip
+  which candidate step a rejection-sampling loop accepts, forking the `rnd()`
+  draw sequence for every ghost placed after it in that run. That is a real,
+  visible ripple under a fixed seed and an invisible one in production: ghosts
+  are re-dealt on every real page load regardless, seed or no seed.
+
+  Added a test asserting *agreement* rather than any one value — the failure
+  mode here was always disagreement between call sites, not a wrong constant —
+  by running the real `fitEscapes()` and reading a ghost's placed radius back,
+  and by checking the ghost-box formula is textually built from `TOOTH_ADD`
+  rather than restating the addendum as its own number. Mutation-tested by
+  reintroducing each of `0.95` and the bare `1.25`: both are caught, each with
+  a message naming the call site and the value, not a bare number mismatch.
 
 - **CL#110 — `?hud`, an animation HUD for how the browser is really rendering
   the gears.** (GitHub #92.)

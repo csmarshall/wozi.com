@@ -3541,7 +3541,13 @@ class Component extends DCLogic {
              rnd() draws feeding nothing -- and because they consumed the
              sequence, deleting them deals a different set of background wheels.
              That is not a regression: these are re-dealt on every load anyway. */
-          ro: r + MODULE * 0.95, i: 'gh' + ei + k,
+          /* Was a bare 0.95 coefficient here -- 5% under the true addendum,
+             with no comment defending the shortfall (CL#119, GitHub #100).
+             TOOTH_ADD is the addendum's one stated home; every linked wheel
+             already reads it here (solve()) and in WHEEL_SPAN, so a ghost's
+             placement radius now agrees with theirs instead of quietly
+             running its own number. */
+          ro: r + MODULE * TOOTH_ADD, i: 'gh' + ei + k,
           /* whose run this is, which end of that chain it leaves by, and how far
              along it -- k 0 is the wheel in mesh with the chain itself */
           person: host.person, lead: host.lead, k: k };
@@ -7207,12 +7213,19 @@ class Component extends DCLogic {
        matter and for different reasons -- see the two comments below. */
     const _gl = this.state.ghosts || [];
     let _gx0 = 0, _gy0 = 0, _gx1 = solved.w * S, _gy1 = solved.h * S;
+    /* GHOST_BOX_PAD is the margin this box has always carried on top of the
+       true addendum -- the two used to be a single number, 1.25, which read
+       as a competing addendum rather than as TOOTH_ADD (1.00) plus a pad
+       (CL#119, GitHub #100). Naming them apart pins the pad here and lets this
+       box track TOOTH_ADD if it ever moves; the total is unchanged, so nothing
+       on screen does either. */
+    const GHOST_BOX_PAD = 0.25;  /* modules, beyond TOOTH_ADD -- see below */
     _gl.forEach(g => {
       /* pitch radius + addendum, plus a flat pad: the drawn wheel is wider than
          its geometry by its stroke and its baked-in shadow, and measurement put
          the shortfall at 10-17px. Over-reserving costs only a slightly larger
          compositing surface; under-reserving clips a tooth, which is the bug. */
-      const ro = MODULE * (g.teeth / 2 + 1.25) * S + 6 * MODULE * S;
+      const ro = MODULE * (g.teeth / 2 + TOOTH_ADD + GHOST_BOX_PAD) * S + 6 * MODULE * S;
       _gx0 = Math.min(_gx0, g.cx * S - ro); _gy0 = Math.min(_gy0, g.cy * S - ro);
       _gx1 = Math.max(_gx1, g.cx * S + ro); _gy1 = Math.max(_gy1, g.cy * S + ro);
     });

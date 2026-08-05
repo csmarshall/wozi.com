@@ -2036,11 +2036,11 @@ function fitEscapesOn(solved, axisRot, spineSlug, margin) {
      the wheels are dealt over the chain's range instead of a ramp of their own, and
      the wheel-count backstop is derived from the smallest step the loop can take.
      Handed in from the page's values, never restated here. */
-  const fn = new Function('window', 'MODULE', 'GHOST_COLORS', 'segCross',
+  const fn = new Function('window', 'MODULE', 'TOOTH_ADD', 'GHOST_COLORS', 'segCross',
     'TEETH_MIN', 'TEETH_MAX', 'ESCAPE_WOBBLE',
     'return function ' + grabBlock('  fitEscapes() {', '{', '}') + ';')(
     { innerWidth: solved.w + margin * 2, innerHeight: solved.h + margin * 2 },
-    page.MODULE, ['#000'],
+    page.MODULE, page.TOOTH_ADD, ['#000'],
     new Function('return ' + grabBlock('function segCross(', '{', '}'))(),
     page.TEETH_MIN, page.TEETH_MAX, page.ESCAPE_WOBBLE);
   const ctx = {
@@ -2066,8 +2066,12 @@ function fitEscapesOn(solved, axisRot, spineSlug, margin) {
        datum mark, and a test asking WHICH chain a run belongs to and which end
        it left by would otherwise have to infer it from geometry it is trying to
        measure. */
+    /* ro, r, i and teeth come along too (CL#119, GitHub #100): the addendum
+       agreement test needs the outer and pitch radii a ghost was actually
+       placed with, not merely where its centre landed. */
     (runs[ei] = runs[ei] || []).push({ cx: g.cx, cy: g.cy,
-      person: g.person, lead: g.lead, k: g.k });
+      person: g.person, lead: g.lead, k: g.k,
+      ro: g.ro, r: g.r, i: g.i, teeth: g.teeth });
   });
   return runs;
 }
@@ -2147,6 +2151,56 @@ test('escape runs follow each chain axis, never its bridge axis', () => {
     });
   });
   ok(bad.length === 0, bad.join('\n      '));
+});
+
+test('a ghost addendum is derived from TOOTH_ADD, and every reader of it agrees (CL#119, GitHub #100)', () => {
+  /* A ghost's outer radius used to be computed three ways -- 0.95 in fitEscapes'
+     ghost creation, 1.25 in the ghost-layer bounding box, and TOOTH_ADD (1.00)
+     everywhere a linked wheel is measured -- and none of the first two was
+     TOOTH_ADD. The failure mode is DISAGREEMENT, so this asserts agreement
+     rather than pinning any one number: reintroduce either of the old values
+     and one of the two checks below should fail, naming which call site regressed
+     and by how much, rather than a bare "expected X got Y". */
+
+  /* Call site 1: fitEscapes() itself, run for real via fitEscapesOn (same harness
+     the two tests above use) rather than regexed as text -- a ghost's ro is a
+     runtime VALUE, and only running the function reads it back. */
+  const { solved, order } = runSolve(THREE, { axisRot: 0 });
+  const runs = fitEscapesOn(solved, 0, order[0].slug);
+  const bad = [];
+  Object.keys(runs).forEach(ei => runs[ei].forEach(g => {
+    const addendModules = (g.ro - g.r) / page.MODULE;
+    if (Math.abs(addendModules - page.TOOTH_ADD) > 1e-9) {
+      bad.push(`ghost ${g.i}: fitEscapes' addendum is ${addendModules.toFixed(3)} modules, `
+        + `TOOTH_ADD is ${page.TOOTH_ADD} -- ghost creation has drifted off TOOTH_ADD again`);
+    }
+  }));
+  ok(bad.length === 0, bad.join('\n      '));
+
+  /* Call site 2: the ghost-layer bounding-box computation inside renderVals().
+     It is not standalone-callable -- it reaches into this.state, S and solved --
+     so read its `ro` formula as TEXT and check it is built from TOOTH_ADD rather
+     than restating the addendum as a private number. Checking the identifier is
+     what catches a reintroduced magic number that happens to still total 1.25:
+     the old bug was never really about the NUMBER 1.25, it was about it not
+     being spelled TOOTH_ADD + something. */
+  const renderSrc = grabBlock('  renderVals() {', '{', '}');
+  const m = renderSrc.match(/const ro = MODULE \* \(g\.teeth \/ 2 \+ ([^)]+)\) \* S/);
+  if (!m) throw new Error('the ghost-layer bounding-box ro formula was not found in renderVals() '
+    + '-- it moved or was rewritten; update the regex in this test to match');
+  const addendExpr = m[1].trim();
+  ok(/\bTOOTH_ADD\b/.test(addendExpr),
+    `the ghost-layer bounding box's addendum term is "${addendExpr}" and does not mention `
+    + 'TOOTH_ADD -- it is a competing addendum again, the exact shape of GitHub #100');
+  /* And numerically: evaluate the captured expression with the page's real
+     constants, so a rewrite that keeps the word TOOTH_ADD but drops the box back
+     to under-reserving still gets caught. Over-reserving costs a slightly larger
+     compositing surface; under-reserving clips a tooth, which is the actual bug
+     (see the comment immediately above this line in index.html). */
+  const padModules = new Function('TOOTH_ADD', 'GHOST_BOX_PAD',
+    'return (' + addendExpr + ') - TOOTH_ADD;')(page.TOOTH_ADD, grabNumber('GHOST_BOX_PAD'));
+  ok(padModules >= 0, `the ghost-layer box reserves ${padModules.toFixed(3)} modules LESS than `
+    + `TOOTH_ADD (${page.TOOTH_ADD}) -- under-reserving clips a tooth`);
 });
 
 test('a chain axis is measured from its own linked wheels, never its idlers', () => {
