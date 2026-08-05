@@ -7279,18 +7279,43 @@ class Component extends DCLogic {
          carrier's end plate, and shrinking it uncovers the sun -- the
          counter-rotating member that is the whole show. */
       const epicyclic = g.kind === 'planetary' || g.kind === 'ravigneaux';
-      const discF = epicyclic ? 0.38 : 0.72;
       const capF = epicyclic ? 0.55 : 1.15;
       /* The cap covers the sun completely on the planetary wheel. Shrinking it
          was one answer; pulling it off is the better one -- that is what the
-         magnetic cap is FOR, and it keeps the icon at a comfortable size. */
-      const disc = Math.max(30, Math.min(60, Math.round(g.r * discF)));
+         magnetic cap is FOR, and it keeps the icon at a comfortable size.
+
+         discF USED TO fork on `epicyclic` too (0.38 vs 0.72), a second shrink
+         on top of capF's -- and measurement (CL#116, GitHub #94) found it dead
+         under its own floor for every wheel this page has ever dealt: g.r runs
+         MODULE * TEETH_MIN/2 .. MODULE * TEETH_MAX/2 (45.5..66.5 solve units),
+         so g.r * 0.38 was 17.3..25.3, always short of the 30-floor `disc` used
+         to clamp to -- and that floor was applied in SOLVE units, before `S`
+         scales in, so no viewport could ever lift it clear. `disc` came out
+         exactly 30 for every epicyclic wheel; the badge that reached the page
+         was whatever `cap` alone was contributing, and it plateaued the
+         instant `cap` itself passed 30 (16 teeth) and the pinned `disc * S`
+         became the smaller, size-deciding term. capF already does this
+         wheel's shrinking; doing it twice is what drove the second factor
+         under its own floor. One constant now, matching the ordinary wheel's
+         disc factor, so `cap` -- smaller by capF alone -- is what actually
+         governs the epicyclic badge's size across the whole tooth range. */
+      const discF = 0.72;
+      const disc = Math.round(g.r * discF);
       const cap = Math.round(g.r * capF);
       /* Was a CSS `min(calc(px * var(--gs)), max(30px, calc(px * var(--gs))))`.
          The badges were already the sharp half of #37 because they laid out at
          final size, but they got there by asking the engine to resolve --gs at
          used-value time; now the whole stage is one arithmetic in JS, so there is
-         only one place a scale is applied and only one thing to keep honest. */
+         only one place a scale is applied and only one thing to keep honest.
+
+         THE FLOOR IS STATED ONCE, IN THE UNIT IT IS LEGIBLE IN: rendered
+         pixels, after `S` has scaled `disc` down, not in solve units before it
+         -- that double-unit `30` was the other half of #94's dead constant.
+         `cap * S` above it is a physical ceiling, not a second legibility
+         floor: the badge sits on the axle cap and cannot read larger than the
+         cap itself, so a wheel small enough to pull `cap` under the floor
+         stays under it -- there is no cap this small that deserves a bigger
+         badge than the mechanism drawn beneath it. */
       const size = Math.min(cap * S, Math.max(30, disc * S));
       /* How wide the name needs. The pill has to know its target width BEFORE it
          opens, because `max-content` cannot be transitioned -- so the label is
