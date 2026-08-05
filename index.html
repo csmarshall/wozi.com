@@ -1800,14 +1800,53 @@ function contrastAt(fg, bg, a) {
   return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
 }
 /* Per person now: a combined stage carries several chains and a service belongs
-   to whoever's chain it sits on. Keyed person -> slug -> { label, path, href }. */
+   to whoever's chain it sits on. Keyed person -> slug -> { label, path, href }.
+
+   A SERVICE OWNS ITS URL STEM; A PERSON OWNS ONLY THEIR HANDLE (#99). Each link
+   used to carry a whole `href`, so `github.com` was written once per person who
+   had GitHub and nothing kept the spellings in step. The stem and the shape of
+   the engraved band are now templates on the SERVICE, the handle is the one
+   personal string on the link, and this is where the two are joined.
+
+   ONE SUBSTITUTION, THREE CALLERS. A link's own `href` is filled the same way
+   the service's `url` is, so the escape hatch for a service with no shared stem
+   -- Mastodon, whose instance is part of the account -- still writes the handle
+   exactly once. `path` is the exception and is taken verbatim when overridden,
+   because its whole use is to make the band read something the URL does not
+   contain: that is what keeps Harper's band saying `harper` while her wheel
+   points at an address that is not hers.
+
+   Filling is LITERAL, never percent-encoded: `mailto:{handle}` would otherwise
+   have the '@' of an address escaped, changing bytes that are legal as they
+   stand. See the note over SERVICES in config.js.
+
+   A TEMPLATE WITH NOTHING TO FILL IT RESOLVES TO NOTHING, and a link that
+   resolves to no href is left OUT OF THIS TABLE rather than given an empty one.
+   An `<a href="">` navigates to the current page, which looks like a working
+   badge and is not. Left out, the wheel is still dealt and still turns with no
+   badge on it -- the unlinked wheel a missing config.js already produces, which
+   every read of this table is guarded for (#53, #76) -- and the console says
+   which link and why. */
 const SITES = (function () {
+  const fill = (tpl, handle) => tpl.indexOf('{handle}') < 0 ? tpl
+    : (handle ? tpl.split('{handle}').join(handle) : '');
   const out = {};
   STAGE.people.forEach(p => {
     const m = out[p.slug] = {};
     (p.links || []).forEach(l => {
       const svc = (CONF.SERVICES || {})[l.slug] || {};
-      m[l.slug] = { label: svc.label || l.slug, path: l.path, href: l.href };
+      const handle = l.handle == null ? '' : String(l.handle);
+      const href = fill(String(l.href || svc.url || ''), handle);
+      if (!href) {
+        console.error('wozi: ' + p.slug + '/' + l.slug + ' resolves to no link — give '
+          + '`' + l.slug + '` a `url` in SERVICES, or the link a `handle`, or the link its own `href`');
+        return;
+      }
+      m[l.slug] = {
+        label: svc.label || l.slug,
+        path: l.path != null ? l.path : fill(svc.path == null ? '{handle}' : String(svc.path), handle),
+        href: href
+      };
     });
   });
   return out;
