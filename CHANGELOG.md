@@ -7,6 +7,88 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Changed
 
+- **CL#107 — a one-link chain's datum carried no scale, because one station is one
+  tick and nothing to subdivide.** (GitHub #83.) Minor ticks subdivided the gap
+  between a chain's own stations, and Harper's chain has exactly one station: the
+  loop struck a single stroke at her only wheel and returned on its first pass.
+  A line, a name and one mark is not a scale — it is a hairline that looks like
+  one.
+
+  **The scale is the spine's, which is a design call and not a derivation**
+  (Charles, GitHub #90 item 5). Every self-referential candidate could give a
+  chain marks; only a shared one gives two chains marks that mean the same
+  distance, which is what a datum scale is *for*. A machine bed carries one
+  scale, not one per part. **It costs something and the code says so**: a
+  one-station chain's minor marks reference *another* chain's wheels, which is
+  the one thing the rule above them — "the marks cannot drift out of step with
+  the wheels they reference, because they ARE the wheels" — does not otherwise
+  bend on. That exception is stated in `datumRuns()` rather than glossed.
+
+  **What was derived is the figure itself, and its degenerate case falls out of
+  the same arithmetic.** "The spine's station spacing" needed pinning to one
+  number, and the obvious one — the mean gap, `span / (stations - 1)` — is
+  undefined at exactly the configuration the ticket is about, so a chain that is
+  its own spine would have needed a second rule beside the first. Instead the
+  spine lends its **station pitch**: the axial length its station pattern
+  occupies, over the number of stations occupying it. The extent is measured on
+  the pitch circles, leading edge of the first station to trailing edge of the
+  last, because that is the circle a mesh's centre distance is set on — so it is
+  the projected span plus the two end radii.
+
+  That reading is the spacing, not merely something like it. For stations that
+  mesh in a row the span telescopes to `Sum(r_k + r_k+1)` and the extent to
+  exactly `2 * Sum(r)`, so the pitch is twice their mean radius — the centre
+  distance between neighbours, for wheels of one size. A real serpentine wanders
+  off its own axis and the projection shortens it, which is correct: the marks
+  are struck along the line, so the scale should measure what the line measures.
+
+  **And at one station the span is zero, the two end radii are the same wheel's,
+  and what is left is that wheel's pitch diameter, `MODULE * teeth`** — the first
+  candidate on the ticket, arrived at as the *limit* of the third rather than
+  chosen beside it. So the objection that a borrowed scale breaks when a chain
+  has no spine but itself is answered by the derivation: no branch, no fallback
+  constant, nothing to keep in step. The other two halves of that objection were
+  never load-bearing — a datum is drawn **only** on a shared stage, so a solo
+  host and a lone chain draw no mark at all to need a scale, and `bridge: false`
+  changes what *drives* a chain, not what bed it stands on. Both are now run
+  rather than argued.
+
+  The one case with nothing in it stays empty: a chain the active config seats no
+  service on has no length to measure and no major tick to measure against, so it
+  lends `0` — meaning **absent**, and also what keeps the borrowed grid's loop
+  finite. Only a chain with exactly *one* station borrows; two or more have a gap
+  of their own, and zero has no anchor to phase a grid against.
+
+  Drawn as **minor** marks only — a major tick means a wheel you can reach, and
+  this chain has one — phased on that station and run out to the ends of the
+  borrower's own assembly, `d0..d1`. The spine lends the spacing and nothing
+  else; how far the scale reaches is the borrower's own dimension. The divisor is
+  one named `SUBDIV`, read by both the self-subdividing path and the borrowed
+  one, so a division here is the same distance as a division there.
+
+  Measured on the shipped stage at 1440×900: Charles's own minor ticks fall
+  32–42 px apart as his station gaps vary, and Harper's borrowed grid is a
+  uniform **38 px** — inside his range, which is the comparability the whole
+  choice was made for. **284 px move in total** (179 at 1440×900, 105 at
+  390×844), all of them the new marks; `?who=charles` is untouched, since no
+  datum is drawn on a solo stage at all.
+
+  Two suite tests, on real solves: that a one-station chain — bridged *and*
+  unbridged — is scribed at the spine's pitch while nothing else is, bounded
+  against a ceiling the suite derives for itself rather than against a copy of
+  the method's own arithmetic; and that a spine which is its own borrower lands
+  on `MODULE * teeth`, with a one-link chain alone on stage drawing no datum at
+  all.
+
+  **And one guard had to be repaired to let this be written down at all.** The
+  "no literal colours in the datum" assertion was `/#[0-9A-Fa-f]{3,6}|rgb\(/`
+  over the whole of `datumLayer()` — and every three-digit decimal is three hex
+  digits, so from entry #100 onward the rule forbade the one method it guards
+  from *citing the entry that changed it*. A rule that a comment can break is not
+  the rule anyone wrote. A literal colour reaches the drawing as a quoted string
+  or through `rgb(`; a citation never does, so the pattern now requires the
+  quote.
+
 - **CL#106 — which chain is the spine and what order the rest stack in are two
   questions, and the bridges were running the wrong way in portrait.** (GitHub
   #85, GitHub #90 item 4, and a bug Charles found by looking at the page.)
