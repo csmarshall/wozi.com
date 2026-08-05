@@ -174,13 +174,21 @@ SAFE_MEASURE = r"""
   const s = document.documentElement.style;
   s.setProperty('--safe-t', '%(t)dpx'); s.setProperty('--safe-r', '%(r)dpx');
   s.setProperty('--safe-b', '%(b)dpx'); s.setProperty('--safe-l', '%(l)dpx');
-  /* The controls that must NOT bleed: every corner button -- four of them since
-     the speed control (#96), and enumerated rather than counted so a fifth is
-     measured the day it exists -- plus the wordmark (its <h1>'s fixed parent).
-     Everything else on the page is allowed under the chrome and is supposed to
-     be. */
-  const ctrls = [...document.querySelectorAll('button')].map(
-    b => [b.getAttribute('aria-label') || 'button', b]);
+  /* The controls that must NOT bleed: every corner button, the speed slider,
+     and the wordmark (its <h1>'s fixed parent). Everything else on the page
+     is allowed under the chrome and is supposed to be.
+
+     FORM CONTROLS ARE IN THE LIST, and were not until GitHub #108 (CL#114).
+     This selected `button` alone -- every control the page had at the time,
+     and therefore a check that would silently stop covering the corner the
+     day one of them stopped being a button. That day is now: the speed
+     control is an `input[type=range]` inside the pop-out panel, a fixed
+     control (its ancestor <nav> is position:fixed) the safe-area pass could
+     not otherwise see. Enumerated by tag rather than counted, so the next one
+     is measured the day it exists. */
+  const ctrls = [...document.querySelectorAll(
+    'button,input:not([type="hidden"]),select,textarea')].map(
+    b => [b.getAttribute('aria-label') || b.getAttribute('title') || b.tagName.toLowerCase(), b]);
   const h1 = document.querySelector('h1');
   if (h1 && h1.parentElement) ctrls.push(['wordmark', h1.parentElement]);
   const box = ([name, el]) => {
@@ -545,6 +553,19 @@ async def main():
             await send("Emulation.setTouchEmulationEnabled", {"enabled": True, "maxTouchPoints": 5})
             await send("Page.navigate", {"url": URL + ("&" if "?" in URL else "?") + f"s={w}x{h}"})
             await asyncio.sleep(2.3)
+            # PIN SPEED OFF 1x AND OPEN THE MENU (GitHub #108, CL#114) before
+            # measuring. The corner departure indicator is display:none at 1x
+            # -- the shipped default -- so measuring at that default would
+            # never see it; and the slider is inside the pop-out panel, also
+            # display:none until opened. Both are new fixed controls this
+            # pass exists to check, so both have to actually be on screen.
+            await send("Runtime.evaluate", {"expression":
+                "(()=>{try{localStorage.setItem('wozi-speed','5')}catch(e){}"
+                "location.reload();})()"})
+            await asyncio.sleep(2.3)
+            await send("Runtime.evaluate", {"expression":
+                "(()=>{const b=document.querySelector('[aria-expanded]'); if(b) b.click();})()"})
+            await asyncio.sleep(0.3)
             res = await send("Runtime.evaluate", {
                 "expression": SAFE_MEASURE % {"t": t, "r": r_, "b": b, "l": l},
                 "returnByValue": True})
@@ -552,8 +573,15 @@ async def main():
             why = []
             # Every fixed control inside the safe rectangle, and still tappable.
             # Half a pixel of slack: fractional layout, not a real overlap.
+            # Zero-size entries are skipped rather than measured: a control
+            # display:none has no box at all (getBoundingClientRect reports
+            # 0,0,0,0 regardless of its CSS position), which would otherwise
+            # read as "out of bounds by exactly the inset" -- a false failure
+            # from measuring nothing, not a real one from measuring a control.
             worst = 1e9
             for c in m["ctrls"]:
+                if c["w"] <= 0 or c["h"] <= 0:
+                    continue
                 clear = min(c["x0"] - l, m["vw"] - r_ - c["x1"],
                             c["y0"] - t, m["vh"] - b - c["y1"])
                 worst = min(worst, clear)

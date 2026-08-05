@@ -602,6 +602,89 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
   PASS 4/4 — run with its own injected seed, which is the point,
   `pixel_regress` 0px against `main` at both viewports on both views, `devices`
   24/24 and 4/4.
+- **CL#114 — the speed control moved into the pop-out menu, and the corner now
+  shows nothing at 1x.** (GitHub #108.) Charles: *"if the speed is 1x nothing
+  shows in the upper right, but if someone pops up the menu the slider is at
+  the top."* Three decisions, all his: the control is a range input, in the
+  menu, above the person picker and the link entries; the corner control shows
+  only away from 1x and tapping it resets to 1x rather than cycling; and the
+  strobe warning is carried by colouring the thumb itself, not a mark on the
+  track.
+
+  **The corner control is a departure indicator now, not a chooser.** All
+  actual choosing happens on the slider — `speedFactor()` stays the only thing
+  either control reaches (CL#96's invariant, unmoved by *where* the control is
+  drawn). The corner's whole job became saying "this page is not running at
+  its normal pace" and giving a one-tap way back to 1x, which is a stronger
+  idea than a button that is always there saying "1x": its presence is itself
+  the information.
+
+  **Removing a permanent button from the middle of a row right-anchored by
+  index leaves a gap unless the remaining indices are rechecked.** Speed used
+  to sit at index 2 of the corner row (between pause and the menu toggle,
+  right-anchored at `(--btn + --btngap) * index` off `--offright`). Simply
+  deleting it would have stranded the menu toggle at index 3 with a hole at
+  index 2 whenever speed was off 1x and nothing showed there — a gap in the
+  middle of the row, not at its end. The menu toggle is renumbered down to
+  index 2 instead, closing the gap, and the departure indicator takes the
+  outer slot the toggle gave up (index 3) — so showing or hiding it only ever
+  grows or shrinks the row from its open end, never reflows a permanent
+  button.
+
+  **The strobe warning had already failed once, on the track.** GitHub #69's
+  A/B photography tried a 2px accent tick at the first strobing stop and found
+  it invisible AT EXACTLY THAT STOP, because the 24px thumb sits centred on
+  the very index the tick would mark — visible five stops either side, gone at
+  the one that means something. Fixed where it broke: `--thumb-color` is a
+  custom property set inline on the `<input>` from render state and read by
+  the `::-webkit-slider-thumb` / `::-moz-range-thumb` rules — the mechanism a
+  pseudo-element leaves for being reached from a value a pseudo-element cannot
+  itself hold a `style` attribute for. The readout text and the track's filled
+  portion carry the same colour, so the thumb, the number and the fill all
+  flip to `--accent` together at the boundary stop, rather than a mark trying
+  to sit on top of the very thing that covers it.
+
+  **The slider steps over `SPEED_STOPS` by index, never continuously**
+  (`min=0`, `max=SPEED_STOPS.length-1`, `step=1`) — CL#96's ladder stays a
+  1-2-5 ladder under the thumb regardless of how far apart two multipliers sit
+  on their own scale, so the absurd top stops stay exactly as reachable as 2x
+  is. `input` drives the flywheel live during a drag (the same ~900ms bleed
+  that settles a flick carries it to the new pace); `change` is the only thing
+  that persists to `localStorage`, so a value merely passed through mid-drag
+  never survives a reload.
+
+  **The touch target and the visible control are two different boxes, on
+  purpose.** The `<input>` is given an explicit 44px height — the same touch
+  target the corner buttons use — while the track it paints stays 4px and the
+  thumb stays a 24px disc; `tools/a11y_audit.py` measures the input's box
+  (129x44px, comfortably clear of the WCAG 2.5.8 floor), which is not the same
+  rectangle as the disc a person sees, and both numbers are worth knowing
+  separately rather than assuming they agree.
+
+  **Both harnesses that check fixed controls had to be widened to see a form
+  control at all.** `tools/a11y_audit.py`'s focusable selector and
+  `tools/devices.py`'s safe-area `ctrls` selector were both `button`-shaped —
+  every focusable, fixed control the page happened to contain at the time —
+  and neither would have noticed a slider going unmeasured. Both now select
+  `input`/`select`/`textarea` alongside `button` explicitly, and
+  `devices.py`'s safe-area pass pins speed off 1x and opens the pop-out menu
+  before measuring, since both new controls are `display:none` at the shipped
+  default and a check run only at that default would never see either one.
+
+  **Widening that selector found a real, pre-existing stranding bug.** The
+  pop-out panel (`togPanelStyle`) is vertically centred with no cap on its own
+  height, and the Table of Gears list alone — unrelated to this change — is
+  595px of content against a 273px-tall iPhone 13/14 landscape window.
+  Centred-and-overflowing loses the excess off both edges equally, so the
+  panel's first child was pushed to `y = -144px`, entirely above the visible
+  area, with no scrollbar to reach it. That child is now the slider, and the
+  corner shows nothing at 1x — so on that exact device and orientation there
+  was no way at all to reach the speed control. `max-height:calc(100vh -
+  var(--offtop) - var(--offbot))` plus `overflow-y:auto` on the panel fixes
+  it: `tools/devices.py`'s safe-area pass went from 2/4 to 4/4. The bug
+  predates this change; only the harness widening that CL#114 needed to see
+  the slider is what surfaced it.
+
 - **CL#107 — a one-link chain's datum carried no scale, because one station is one
   tick and nothing to subdivide.** (GitHub #83.) Minor ticks subdivided the gap
   between a chain's own stations, and Harper's chain has exactly one station: the

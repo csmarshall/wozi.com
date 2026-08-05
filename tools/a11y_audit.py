@@ -66,9 +66,29 @@ MANUAL = r"""
   out.svgHidden = svgs.filter(s => s.getAttribute('aria-hidden') === 'true'
                               || s.closest('[aria-hidden="true"]')).length;
 
-  /* Focusable things and whether they show a focus ring. */
-  const foc = [...document.querySelectorAll('a[href],button,[tabindex]:not([tabindex="-1"])')];
+  /* Focusable things and whether they show a focus ring.
+
+     FORM CONTROLS ARE IN THE LIST, and were not until GitHub #108 (CL#114).
+     The selector was `a[href],button,[tabindex]` -- every focusable thing
+     this page happened to contain at the time, and therefore a gate with a
+     hole in it shaped like whatever got added next. What got added next was
+     the speed slider: an `input[type=range]`, natively focusable and a real
+     touch target, invisible to every check below. Named explicitly rather
+     than left to `[tabindex]`, because a native control needs no tabindex to
+     be focusable. */
+  const foc = [...document.querySelectorAll(
+    'a[href],button,input:not([type="hidden"]),select,textarea,[tabindex]:not([tabindex="-1"])')];
   out.focusable = foc.length;
+  /* How many of those are range inputs, and what their box measures versus
+     their visible thumb -- the WCAG 2.5.8 floor can be satisfied by an
+     invisible hit area while the rendered control looks smaller (GitHub
+     #108). --thumb is the CSS token the visible disc is drawn at; the input's
+     own bounding box is whatever height CL#114 gave it for the touch target. */
+  out.rangeInputs = foc.filter(e => e.tagName === 'INPUT' && e.type === 'range').map(e => {
+    const r = e.getBoundingClientRect();
+    const thumbPx = parseFloat(getComputedStyle(e).getPropertyValue('--thumb')) || null;
+    return { box: [Math.round(r.width), Math.round(r.height)], thumbPx };
+  });
   const accName = e => (e.getAttribute('aria-label')
                      || e.getAttribute('title')
                      || e.textContent.trim() || '').replace(/\s+/g, ' ').trim();
@@ -183,8 +203,18 @@ async def main():
 
         for theme in ("dark", "light"):
             await send("Page.navigate", {"url": URL}); await asyncio.sleep(2.0)
-            await ev(f"(()=>{{localStorage.setItem('wozi-theme','{theme}');location.reload();}})()")
+            # speed pinned off 1x (GitHub #108, CL#114): the corner departure
+            # indicator is display:none at 1x, so auditing at the shipped
+            # default would never see it. 5x is a real, non-strobing stop.
+            await ev(f"(()=>{{localStorage.setItem('wozi-theme','{theme}');"
+                     "localStorage.setItem('wozi-speed','5');location.reload();}})()")
             await asyncio.sleep(3.4)
+            # Open the pop-out menu so the slider is actually visible to axe
+            # and to the MANUAL checks below -- display:none is neither, and
+            # the slider is the ONLY route to the speed control off 1x now.
+            await ev("(()=>{const b=document.querySelector('[aria-expanded]'); "
+                     "if (b) b.click();})()")
+            await asyncio.sleep(0.3)
             await ev(axe_src)
             res = await ev("axe.run(document,{resultTypes:['violations']}).then(r=>JSON.stringify("
                            "r.violations.map(v=>({id:v.id,impact:v.impact,help:v.help,n:v.nodes.length}))))", True)
@@ -215,6 +245,16 @@ async def main():
                 print(f"   SVG <text> nodes         : {m['svgTextNodes']}  (hidden: {m['svgTextHidden']})")
                 print(f"     sample announced       : {m['svgTextSample']}")
                 print(f"   targets under 24x24px    : {m['smallTargets']}")
+                # THE BOX MEASURED IS NOT THE THUMB DRAWN (GitHub #108). A
+                # range input's own bounding box -- what the 24x24 check above
+                # actually measures -- is not the same rectangle as its
+                # visible thumb, which is a pseudo-element getBoundingClientRect
+                # cannot see at all. Reported separately so "passes 24x24" and
+                # "the thing you'd tap looks that big" are never conflated.
+                for ri in m.get("rangeInputs", []):
+                    w, h = ri["box"]
+                    print(f"   range input hit box      : {w}x{h}px "
+                          f"(visible thumb: {ri['thumbPx']}px disc)")
                 # WCAG 2.5.8 target size. Two-sided by nature -- there is no
                 # upper bound worth asserting on a hit target, so this one floor
                 # is the whole check.

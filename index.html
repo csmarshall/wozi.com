@@ -75,12 +75,14 @@
      directly any more: both go through the --off* tokens below, which add the
      safe-area inset for the edge each one is pinned to. */
   --icon:20px; --btn:44px;
-  /* Gap between the four corner buttons. The 44px button is a TOUCH TARGET,
-     deliberately larger than the 20px glyph it holds, so the visible spacing
-     is already the button's own padding plus this -- which is why a flat 6px
-     read as a wide, loose row. Clamped and viewport-relative so a phone packs
-     them tight and a large display lets them breathe, without either end
-     colliding or drifting apart. */
+  /* Gap between the corner buttons -- three permanent (theme, motion, the menu
+     toggle) plus a fourth, conditional one that only shows away from 1x speed
+     (GitHub #108, CL#114). The 44px button is a TOUCH TARGET, deliberately
+     larger than the 20px glyph it holds, so the visible spacing is already the
+     button's own padding plus this -- which is why a flat 6px read as a wide,
+     loose row. Clamped and viewport-relative so a phone packs them tight and a
+     large display lets them breathe, without either end colliding or drifting
+     apart. */
   --btngap:clamp(0px, 0.6vw, 8px);
   --corner:var(--icon);
   --btnoff:calc(var(--corner) - (var(--btn) - var(--icon)) / 2);
@@ -88,9 +90,9 @@
      the whole display on iOS/iPadOS — under the notch, under the home
      indicator, behind Safari's translucent toolbars — so the machine reads as a
      window onto a running train rather than a picture inside a box. The fixed
-     controls — four corner buttons and the wordmark — are the one thing that
-     must stay out of those regions: a button under the home indicator is hard
-     to tap and can be impossible.
+     controls — up to four corner buttons (three permanent, one conditional)
+     and the wordmark — are the one thing that must stay out of those regions:
+     a button under the home indicator is hard to tap and can be impossible.
 
      So each fixed corner offset is --btnoff PLUS that edge's inset, and the
      insets are held in their own tokens rather than written into the offsets.
@@ -123,7 +125,70 @@ a:hover{color:var(--ink);}
 /* The links ARE the content, so a keyboard user who cannot see focus cannot use
    the site at all (#23). :focus-visible keeps the ring off mouse clicks; the
    outline follows each element's own border-radius, so it rings the discs. */
-a:focus-visible,button:focus-visible,[tabindex]:focus-visible{outline:3px solid var(--accent);outline-offset:3px;}
+a:focus-visible,button:focus-visible,input:focus-visible,[tabindex]:focus-visible{outline:3px solid var(--accent);outline-offset:3px;}
+/* ===========================================================================
+   THE ONLY PSEUDO-ELEMENT RULES IN THIS FILE, AND THE ONLY STYLING NOT INLINE
+   (GitHub #108, CL#114). `Do not introduce stylesheets or CSS classes for
+   layout` still stands, and this breaks neither half of it: there is no class
+   here, and none of this is layout. It is the platform's own reason a native
+   range input draws its thumb and its track as PSEUDO-ELEMENTS, which have no
+   presence in the DOM, so there is no element to carry a `style` attribute --
+   `::-webkit-slider-thumb` is not a stylistic preference over inline, it is
+   the only mechanism that exists. The selector is the element and its type,
+   never a class, so nothing here can be applied to anything by accident:
+   there is exactly one range input on the page.
+
+   THE THUMB'S COLOUR IS STILL STATE-DRIVEN, through `--thumb-color` -- a
+   custom property has no such restriction, because setting one is not styling
+   a pseudo-element, it is setting a variable on the real element the pseudo
+   inherits from. renderVals() writes it inline on the `<input>` itself
+   (speedTrackStyle), and the rule below only ever reads it. That is how the
+   strobe warning reaches the thumb: colouring the thing under the finger,
+   never a mark on the track, because a redline tick at the boundary stop was
+   tried first (GitHub #69's A/B sheets) and was invisible AT THAT STOP -- the
+   24px thumb sits centred on the exact index it would mark, visible five
+   stops either side and gone at the one that means something. The filled
+   portion of the track is painted the same way, for the same reason: it is a
+   background-image layer on the input itself, not a pseudo-element, because
+   IT also depends on the value.
+
+   --trk and --thumb are declared here and read by both the CSS and the JS: the
+   thumb's own margin is derived from them rather than measured, and the track
+   fill's math in speedAt() reads --thumb too, so the visual thumb, the track
+   fill and the CSS centring cannot drift apart when either size changes. 24px
+   is the thumb because that is the WCAG 2.5.8 floor for a touch target and the
+   thumb is the thing being touched; the `<input>` itself is given an explicit
+   `height` of `--btn` (44px, the same touch target every corner button uses)
+   so the HIT AREA is larger than the VISIBLE thumb on purpose -- measure both
+   and say which one you measured, because they are not the same box. */
+input[type="range"]{
+  --trk:4px; --thumb:24px;
+  -webkit-appearance:none; appearance:none;
+  width:100%; height:var(--btn);
+  background-color:transparent; border:0; margin:0; padding:0;
+  cursor:pointer; touch-action:none;
+}
+input[type="range"]::-webkit-slider-runnable-track{height:var(--trk);background:transparent;border:0;}
+input[type="range"]::-moz-range-track{height:var(--trk);background:transparent;border:0;}
+input[type="range"]::-webkit-slider-thumb{
+  -webkit-appearance:none; appearance:none;
+  width:var(--thumb); height:var(--thumb); border:0; border-radius:50%;
+  background:var(--thumb-color, var(--muted)); cursor:pointer;
+  transition:background .18s ease;
+  /* Centre the thumb on the track: WebKit lays it out from the track's top
+     edge, so the offset is half the difference of the two sizes above --
+     derived, not a measured nudge that would go stale if either changed. */
+  margin-top:calc((var(--trk) - var(--thumb)) / 2);
+}
+input[type="range"]::-moz-range-thumb{
+  width:var(--thumb); height:var(--thumb); border:0; border-radius:50%;
+  background:var(--thumb-color, var(--muted)); cursor:pointer;
+  transition:background .18s ease;
+}
+/* The browser's own focus ring on the input box would draw a rectangle around
+   a control whose visible part is a 4px line and a 24px disc; :focus-visible
+   above rings it instead, the same as every other interactive element here. */
+input[type="range"]:focus{outline:none;}
 /* ===========================================================================
    WHAT YOU CAN EDIT WITHOUT DOING GEOMETRY
 
@@ -167,46 +232,62 @@ a:focus-visible,button:focus-visible,[tabindex]:focus-visible{outline:3px solid 
 
 <main style="min-height:100vh;min-height:100svh;box-sizing:border-box;display:flex;flex-direction:var(--dir);align-items:center;justify-content:center;gap:var(--gap);padding:var(--pad);background:var(--bg);overflow:hidden;">
 
-  <!-- THE CORNER ROW, RIGHT TO LEFT: theme, pause, speed, table of gears. Source
-       order is left to right, so the tab order matches the row on screen.
+  <!-- THE CORNER ROW, RIGHT TO LEFT: theme, pause, table of gears -- and, only
+       away from 1x speed, a departure indicator one slot further out (GitHub
+       #108, CL#114). Source order is left to right, so the tab order matches
+       whatever is actually on screen.
 
-       Each button's `right` is its index in that row, in whole button pitches —
+       Each button's `right` is its index in the row, in whole button pitches —
        (--btn + --btngap) — off --offright, which already carries the safe-area
-       inset. A fourth button therefore costs one term and no new constant, and
-       the row still ends exactly one --btnoff from the edge on any device.
+       inset. THE THREE PERMANENT BUTTONS KEEP THEIR HISTORIC INDICES EXCEPT
+       ONE: speed used to sit at index 2 (between pause and the menu toggle),
+       and removing it from the permanent row would have left the menu toggle
+       stranded at index 3 with a hole where index 2 used to be -- a gap in the
+       middle of the row, not at its end. So the menu toggle is renumbered down
+       to index 2, closing the gap, and the departure indicator takes the slot
+       the menu toggle gave up, index 3 -- the row's outermost position, so
+       showing or hiding it only ever grows or shrinks the row from its open
+       end and never reflows the three permanent buttons.
 
-       The inline style is repeated verbatim on all four. That duplication is
-       DELIBERATE and has been decided against twice: a class or a stylesheet is
-       forbidden here (styling is inline by design), and hoisting it into a
-       render value would move the buttons' appearance out of the markup and
-       into the logic, which is worse than the repetition it removes. Only the
-       `right` term and the speed button's typography differ. -->
-  <button onClick="{{ toggleTog }}" title="{{ togLabel }}" aria-label="{{ togLabel }}" aria-expanded="{{ togExpanded }}" style="position:fixed;top:var(--offtop);right:calc(var(--offright) + (var(--btn) + var(--btngap)) * 3);z-index:20;display:flex;align-items:center;justify-content:center;width:var(--btn);height:var(--btn);padding:0;border:0;border-radius:999px;background:transparent;color:var(--muted);cursor:pointer;transition:color .18s ease;" style-hover="color:var(--ink);">
-    {{ togIcon }}
-  </button>
-  <!-- The speed control wears its own value instead of an icon: a gearbox
-       position is a number, and there is no glyph that says "five times" without
-       a legend. tabular-nums so the label does not shuffle sideways as the stops
-       change width. It sits next to pause because the two are the same subject —
-       how the machine is running — and pause keeps the place it has always had.
+       The inline style is repeated verbatim on all three permanent buttons.
+       That duplication is DELIBERATE and has been decided against twice: a
+       class or a stylesheet is forbidden here (styling is inline by design),
+       and hoisting it into a render value would move the buttons' appearance
+       out of the markup and into the logic, which is worse than the
+       repetition it removes. Only the `right` term differs between them. -->
+  <!-- THE DEPARTURE INDICATOR. Not a chooser -- all actual choosing happens on
+       the slider in the menu below. Its whole job is to say the machine is not
+       running at its normal pace and to give a one-tap way back: "this page is
+       not running at its normal pace, tap to fix" (Charles). It wears the
+       current multiplier instead of an icon, exactly as the old cycling
+       button did, because a gearbox position is a number and there is no
+       glyph that says "five times" without a legend; tabular-nums keeps the
+       label from shuffling sideways as the stops change width.
 
        THE LABEL IS SET AT --icon, THE SAME SIZE AS THE GLYPHS BESIDE IT, and
-       that is a contrast requirement as much as a visual one. The three icons
-       are graphics, which WCAG asks 3:1 of; this button is TEXT, which is asked
-       4.5:1 — and --muted on --bg is 3.54:1, so at 13px it FAILED the audit in
-       light theme while its neighbours passed at the same colour. Bold text at
-       18.66px or more is "large scale" and back to a 3:1 threshold, and --icon
-       is 20px, so taking the size from the token the icons already use clears
-       the bar by construction instead of by a number somebody has to remember.
-       Shrink --icon below 18.66px and this needs revisiting — it is the one
-       coupling here that is a threshold rather than a ratio.
+       that is a contrast requirement as much as a visual one. The other icons
+       are graphics, which WCAG asks 3:1 of; this button is TEXT, which is
+       asked 4.5:1 — and --muted on --bg is 3.54:1, so at 13px it FAILED the
+       audit in light theme while its neighbours passed at the same colour.
+       Bold text at 18.66px or more is "large scale" and back to a 3:1
+       threshold, and --icon is 20px, so taking the size from the token the
+       icons already use clears the bar by construction instead of by a number
+       somebody has to remember. Shrink --icon below 18.66px and this needs
+       revisiting — it is the one coupling here that is a threshold rather
+       than a ratio.
 
-       Its `style` is a render value (speedStyle) and not written here, because
-       the colour depends on whether the current stop strobes. That is the only
-       difference from the row's declaration, and state-dependence is precisely
-       what the other three do not have. -->
-  <button onClick="{{ cycleSpeed }}" title="{{ speedLabel }}" aria-label="{{ speedLabel }}" style="{{ speedStyle }}" style-hover="color:var(--ink);">
+       Its `style` is a render value (speedStyle) and not written here, for two
+       reasons neither of the other three has: the colour depends on whether
+       the current stop strobes, and the `display` depends on whether it
+       should be showing at all. display:none removes it from the tab order
+       and the accessibility tree exactly like togPanelStyle does for the
+       menu, so a screen reader at 1x hears nothing extra here and loses no
+       focus stop. -->
+  <button onClick="{{ resetSpeed }}" title="{{ speedLabel }}" aria-label="{{ speedLabel }}" style="{{ speedStyle }}" style-hover="color:var(--ink);">
     {{ speedMark }}
+  </button>
+  <button onClick="{{ toggleTog }}" title="{{ togLabel }}" aria-label="{{ togLabel }}" aria-expanded="{{ togExpanded }}" style="position:fixed;top:var(--offtop);right:calc(var(--offright) + (var(--btn) + var(--btngap)) * 2);z-index:20;display:flex;align-items:center;justify-content:center;width:var(--btn);height:var(--btn);padding:0;border:0;border-radius:999px;background:transparent;color:var(--muted);cursor:pointer;transition:color .18s ease;" style-hover="color:var(--ink);">
+    {{ togIcon }}
   </button>
   <button onClick="{{ toggleMotion }}" title="{{ motionLabel }}" aria-label="{{ motionLabel }}" aria-pressed="{{ motionPressed }}" style="position:fixed;top:var(--offtop);right:calc(var(--offright) + var(--btn) + var(--btngap));z-index:20;display:flex;align-items:center;justify-content:center;width:var(--btn);height:var(--btn);padding:0;border:0;border-radius:999px;background:transparent;color:var(--muted);cursor:pointer;transition:color .18s ease;" style-hover="color:var(--ink);">
     {{ motionIcon }}
@@ -216,6 +297,32 @@ a:focus-visible,button:focus-visible,[tabindex]:focus-visible{outline:3px solid 
   </button>
 
   <nav aria-label="Table of gears" style="{{ togPanelStyle }}">
+    <!-- THE SPEED SLIDER, AT THE TOP (GitHub #108, CL#114). Charles: "if
+         someone pops up the menu the slider is at the top" -- above the
+         person picker and the link entries, and drawn unconditionally, unlike
+         either of them: this is the ONLY route to the speed control once the
+         corner stops showing it at 1x, so it has to be reachable in every
+         state the panel can be in, including a solo host where togPeople is
+         empty and this row is the first thing in the panel.
+
+         STEPS OVER SPEED_STOPS BY INDEX, NOT CONTINUOUSLY. min=0,
+         max=SPEED_STOPS.length-1, step=1 puts one stop per unit of travel no
+         matter how far apart two multipliers sit on their own scale, so the
+         ladder stays a ladder and the absurd top stops stay exactly as
+         reachable as 2x is (CL#96's invariant: never hand-write a stop list).
+
+         THE READOUT IS aria-hidden because the input's own aria-valuetext
+         already announces the multiplier -- two announcements of the same
+         number is worse than one. THE NAME IS FIXED ("Gear speed"), THE VALUE
+         IS NOT: a range input announces its name once and its value on every
+         change, so the multiplier and the strobing note belong in
+         aria-valuetext, not in aria-label -- putting them in the name would
+         re-announce "Gear speed 5x" on every step of a drag. -->
+    <div style="{{ speedRowStyle }}">
+      <span aria-hidden="true" style="{{ speedReadStyle }}">{{ speedMark }}</span>
+      <input type="range" min="0" max="{{ speedMax }}" step="1" value="{{ speedPos }}" title="{{ speedTitle }}" aria-label="Gear speed" aria-valuetext="{{ speedValueText }}" onInput="{{ onSpeedInput }}" onChange="{{ onSpeedCommit }}" style="{{ speedTrackStyle }}" />
+    </div>
+    <div aria-hidden="true" style="{{ togSepStyle }}"></div>
     <div style="font:700 11px/1 'Manrope',system-ui,sans-serif;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);padding:4px 12px 8px;">Table of Gears</div>
     <sc-for list="{{ togPeople }}" as="pp">
       <a href="{{ pp.href }}" aria-current="{{ pp.current }}" style="{{ pp.style }}">{{ pp.label }}</a>
@@ -260,19 +367,22 @@ a:focus-visible,button:focus-visible,[tabindex]:focus-visible{outline:3px solid 
        character:false    chip + machinist stamp, turned off in commit 2e5a721
                           ("fix: #16 ... chips off")
        hoverDrag:true     hover loads the machine to ~40% speed
-       speed:1            the master angle's multiplier, and the corner control's
-                          setting. `min` and `max` are the two ends of the stop
-                          ladder and the only levers here (#96): 1x because the
-                          control never slows the machine down -- pause is its own
-                          button -- and 200x because Charles asked for a ceiling
-                          absurd enough to benchmark against. SPEED_STOPS lays a
-                          1-2-5 ladder between them, so this is where to widen or
-                          narrow it and there is no stop list written anywhere.
-                          The STROBE limit is not here and must not be: 15.75x at
+       speed:1            the master angle's multiplier, and the menu slider's
+                          setting (#108, CL#114 moved the control off the
+                          corner and into the pop-out panel; the corner now
+                          only ever resets it to 1x). `min` and `max` are the
+                          two ends of the stop ladder and the only levers here
+                          (#96): 1x because the control never slows the
+                          machine down -- pause is its own button -- and 200x
+                          because Charles asked for a ceiling absurd enough to
+                          benchmark against. SPEED_STOPS lays a 1-2-5 ladder
+                          between them, so this is where to widen or narrow it
+                          and there is no stop list written anywhere. The
+                          STROBE limit is not here and must not be: 15.75x at
                           30fps is a property of BASE_MS and the frame rate,
-                          derived by strobeSpeed(), and stops at or above it are
-                          announced rather than removed. `step` is the editor's
-                          granularity and the button does not read it
+                          derived by strobeSpeed(), and stops at or above it
+                          are announced rather than removed. `step` is the
+                          editor's granularity and the slider does not read it
        accent:"#5F686E"   the steel tone taken from the machine's own metal (--m4
                           light / --m1 dark), Charles's explicit choice, also from
                           e6936a7 -- supersedes both the shipped-in-error red
@@ -2744,8 +2854,9 @@ const badgeKey = (person, slug) => person + '/' + slug;
 
 class Component extends DCLogic {
   /* `hover` holds a badgeKey(), not a slug -- see the note above badgeKey. */
-  /* `speed` is null until the corner control or localStorage says otherwise, so
-     the shipped prop default stays the answer while nobody has chosen one. */
+  /* `speed` is null until the slider, the corner reset, or localStorage says
+     otherwise, so the shipped prop default stays the answer while nobody has
+     chosen one. */
   state = { theme: 'light', hover: null, icons: {}, ghosts: [], motion: null, tog: false, speed: null };
   _badgeOff = {};   /* badgeKey -> {x,y,vx,vy} spring state for the magnetic hub caps */
   _badgeEl = {};    /* badgeKey -> the cap element that key's spring writes to */
@@ -2860,14 +2971,15 @@ class Component extends DCLogic {
      whole of a speed control. Nothing per wheel, nothing in CSS — a second
      animator drifts out of mesh within seconds (#3), and a control that made one
      would be that mistake for the third time.
-     The corner control's choice when it has made one, the shipped prop default
-     otherwise. Not snapped to a stop: a prop override is entitled to any value
-     its schema allows, and only the BUTTON needs to sit on a declared stop. */
+     Whichever control set state.speed last -- the slider or the corner reset
+     (#108) -- when one has, the shipped prop default otherwise. Not snapped to
+     a stop: a prop override is entitled to any value its schema allows, and
+     only the SLIDER needs to sit on a declared stop. */
   speedFactor() { return this.state.speed ?? this.props.speed ?? SPEED_FLOOR; }
 
-  /* Which stop the button is standing on — the nearest declared one, so a value
+  /* Which stop the slider is standing on — the nearest declared one, so a value
      the stops no longer contain (a stale localStorage entry, a prop set between
-     stops) still has a well-defined next position instead of stranding the
+     stops) still has a well-defined position instead of stranding the
      control at a setting it can never leave. */
   speedIndex() {
     const want = this.speedFactor();
@@ -7495,11 +7607,26 @@ class Component extends DCLogic {
       }));
     })();
 
-    /* Both are plain numbers stringified by the template, so 200 reads "200" and
-       1 reads "1" -- no trailing zeros padding a one-character label out to four. */
+    /* Plain numbers stringified by the template, so 200 reads "200" and 1
+       reads "1" -- no trailing zeros padding a one-character readout out to
+       four. */
     const speedNow = this.speedFactor();
-    const speedNext = SPEED_STOPS[(this.speedIndex() + 1) % SPEED_STOPS.length];
+    const speedPos = this.speedIndex();
     const speedStrobes = this.speedStrobes(speedNow);
+    /* Fraction of the TRACK, not of the multiplier: the thumb travels over
+       stop INDICES (see the markup, and CL#96's invariant against a
+       continuous control), so the fill is positioned by index too. One stop
+       means one position and no travel to divide by. */
+    const speedSpan = SPEED_STOPS.length - 1;
+    /* Where the centre of the thumb sits at a given index, as a CSS length the
+       gradient can use. The thumb cannot hang off either end, so its centre
+       runs from half a thumb to half a thumb short of the far edge, and the
+       usable travel is (100% - --thumb). --thumb is declared in the <style>
+       block and read here, so the paint and the control cannot disagree
+       about its size. */
+    const speedAt = (i) => 'calc(var(--thumb) / 2 + '
+      + (speedSpan ? (i / speedSpan) * 100 : 0).toFixed(4) + '% - var(--thumb) * '
+      + (speedSpan ? i / speedSpan : 0).toFixed(6) + ')';
 
     return {
       gearArt: gearArt,
@@ -7541,11 +7668,33 @@ class Component extends DCLogic {
         h('circle', { cx: 12, cy: 12, r: 6.1, strokeWidth: 1.7 }),
         h('circle', { cx: 12, cy: 12, r: 2.4, strokeWidth: 1.5 }),
         h('path', { strokeWidth: 3, d: 'M12 5.9V3.4M12 18.1v2.5M6.72 8.95l-2.17-1.25M19.45 16.3l-2.17-1.25M6.72 15.05l-2.17 1.25M19.45 7.7l-2.17 1.25' })),
+      /* CAPPED AND SCROLLABLE, which it was not until GitHub #108 (CL#114)
+         found the gap: the panel is vertically centred (top:50%,
+         translateY(-50%)) with no limit on its own height, and the Table of
+         Gears list alone is tall enough to exceed a landscape phone's
+         viewport -- 595px of content against a 273px-tall iPhone 13/14
+         landscape window, measured by tools/devices.py once its safe-area
+         pass started reaching into the panel at all (GitHub #108 widened it
+         to see the slider). Centred AND overflowing means the excess is lost
+         off BOTH edges equally, so the first thing in the panel -- now the
+         speed slider, the only route to the control at 1x -- was pushed
+         entirely above the top of the screen with no scrollbar to reach it.
+         That is a stranding, not a cosmetic overflow: nothing here restricts
+         the CONTENT of the panel to whatever the row happens to be worth.
+
+         maxHeight leaves --offtop above and --offbot below, same as every
+         other fixed element's own clearance, so the panel never claims the
+         space its neighbours are promised; overflowY lets everything past
+         that scroll, so the slider -- flex-column's first child -- opens
+         already in view and the rest of the list is one scroll away rather
+         than off-screen with nothing pointing at it. */
       togPanelStyle: {
         display: this.state.tog ? 'flex' : 'none', flexDirection: 'column', gap: '2px',
         position: 'fixed', left: 'var(--offleft)', top: '50%', transform: 'translateY(-50%)',
         zIndex: 30, background: 'var(--chip)', border: '1px solid var(--hair)',
-        borderRadius: '14px', padding: '10px 6px', boxShadow: 'var(--shadow)', minWidth: '190px'
+        borderRadius: '14px', padding: '10px 6px', boxShadow: 'var(--shadow)', minWidth: '190px',
+        maxHeight: 'calc(100vh - var(--offtop) - var(--offbot))',
+        overflowY: 'auto', overscrollBehavior: 'contain'
       },
       togPeople: togPeople,
       /* THE RULE BETWEEN THE PEOPLE AND THE GEARS IS ITS OWN ELEMENT, AND NOT A
@@ -7597,41 +7746,79 @@ class Component extends DCLogic {
         CANDIDATE_FAMILIES.forEach(f => out.push(item(f.type, (names[f.type] || f.type) + '  · candidate')));
         return out;
       })(),
-      /* One click, one stop, wrapping at the top. The whole effect is on the
-         master angle's integrator: the flywheel's target moves and the same
-         ~900ms bleed that settles a flick carries the train to the new pace, so
-         a speed change is a machine changing gear rather than a jump cut. Every
-         wheel stays in mesh because not one of them is animated on its own. */
-      cycleSpeed: () => {
-        try { localStorage.setItem('wozi-speed', String(speedNext)); } catch (e) {}
-        this.setState({ speed: speedNext });
+      /* THE SLIDER DRIVES THE MACHINE LIVE; RELEASING IS WHAT PERSISTS. `input`
+         fires while the thumb moves and drives the flywheel's target
+         immediately, so the train answers a drag the same way it answers a
+         flick -- the same ~900ms bleed that settles a flick carries it to the
+         new pace, because the whole effect is on the master angle's
+         integrator and nothing else (CL#96). `change` fires once on release
+         and is the only thing that writes to localStorage, so a value merely
+         passed through mid-drag is never the one that survives a reload.
+
+         The guard matters more than it looks: setState re-renders the whole
+         page, gear art included, so a redundant one is expensive. step=1 means
+         the value can only change at a stop boundary, but a browser that
+         fired the event spuriously would otherwise re-render the train on
+         every pointer sample. */
+      onSpeedInput: (e) => {
+        const next = SPEED_STOPS[Math.max(0, Math.min(speedSpan, +e.target.value))];
+        if (next !== this.state.speed) this.setState({ speed: next });
       },
-      /* The label names where the machine is AND where the next press puts it,
-         because a cycling control that only reports its current value gives a
-         screen-reader user no way to know what activating it will do. It is also
-         what keeps this button's accessible name unique -- the audit fails two
-         focusables that sound alike (#74).
+      onSpeedCommit: (e) => {
+        const next = SPEED_STOPS[Math.max(0, Math.min(speedSpan, +e.target.value))];
+        try { localStorage.setItem('wozi-speed', String(next)); } catch (err) {}
+        if (next !== this.state.speed) this.setState({ speed: next });
+      },
+      /* ONE TAP BACK TO NORMAL, not a step through the ladder -- the corner
+         control's whole job now (GitHub #108). It reaches the exact same
+         state key the slider does, at the ladder's floor: speedFactor()
+         stays the only thing either control touches. */
+      resetSpeed: () => {
+        try { localStorage.setItem('wozi-speed', String(SPEED_FLOOR)); } catch (e) {}
+        this.setState({ speed: SPEED_FLOOR });
+      },
+      speedMax: speedSpan,
+      speedPos: speedPos,
+      /* Sighted equivalent of aria-valuetext: read on hover/long-press rather
+         than on every change, so it can afford to say the same thing. */
+      speedTitle: 'Gear speed ' + speedNow + '×'
+        + (speedStrobes ? ', strobing — benchmark only' : ''),
+      /* THE NAME IS FIXED ("Gear speed", written on the element itself), THE
+         VALUE IS NOT: a range input announces its name once and its value on
+         every change, so the multiplier and the strobing note belong here,
+         not in aria-label -- putting them there would re-announce "Gear speed
+         5×" on every step of a drag.
 
          AND IT SAYS WHERE THE ILLUSION ENDS. Past strobeSpeed() the teeth are
-         sampled below Nyquist and the train reads as standing still or running
-         backwards; those stops are kept because a benchmark stop is allowed to
-         look wrong, but a control that hands one over without saying so is worse
-         than one that admits it. Screen readers get it in words here; everyone
-         else gets it in the colour of the numeral, below. */
+         sampled below Nyquist and the train reads as standing still or
+         running backwards; those stops are kept because a benchmark stop is
+         allowed to look wrong, but a control that hands one over without
+         saying so is worse than one that admits it. Screen readers get it in
+         words on every change; everyone else gets it in the colour of the
+         thumb, the readout and the track fill, below. */
+      speedValueText: speedNow + '×' + (speedStrobes ? ', strobing — benchmark only' : ''),
+      /* THE CORNER'S OWN LABEL. It is the one place left in the corner that
+         shows a value at all, so CL#96's rule -- every stop at or above
+         strobeSpeed() says so in its accessible name -- still has to hold
+         here too, not only on the slider. It also says what a tap DOES,
+         because a control whose whole job is "the way back" has to say so to
+         be found by a screen reader that cannot see it appear. */
       speedLabel: 'Gear speed ' + speedNow + '×'
         + (speedStrobes ? ', strobing — benchmark only' : '')
-        + ', next ' + speedNext + '×',
+        + ' — tap to reset to 1×',
       speedMark: speedNow + '×',
-      /* THE ONE FIXED CONTROL WHOSE STYLE IS A RENDER VALUE RATHER THAN INLINE,
-         and the reason is exactly the reason the other three are not: this one
-         depends on state. The rest of the declaration is the row's, verbatim;
-         only `color` moves, to --accent once the stop strobes. --accent is the
-         darker of the two on both themes, so the warning state is also the more
-         legible one rather than the less. */
+      /* THE CORNER CONTROL'S STYLE IS A RENDER VALUE, THE ONLY FIXED CONTROL'S
+         THAT IS -- see CLAUDE.md. The rest of the declaration is the row's,
+         verbatim; `right` places it in the outermost slot (index 3, the one
+         the menu toggle gave up so the three permanent buttons could close
+         ranks at 0/1/2), `color` moves to --accent once the stop strobes, and
+         `display` is 'none' at exactly 1x. That last ternary is the whole of
+         "the corner shows nothing at 1x" (GitHub #108). */
       speedStyle: {
         position: 'fixed', top: 'var(--offtop)',
-        right: 'calc(var(--offright) + (var(--btn) + var(--btngap)) * 2)',
-        zIndex: 20, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        right: 'calc(var(--offright) + (var(--btn) + var(--btngap)) * 3)',
+        zIndex: 20, display: speedNow === SPEED_FLOOR ? 'none' : 'flex',
+        alignItems: 'center', justifyContent: 'center',
         width: 'var(--btn)', height: 'var(--btn)', padding: 0, border: 0,
         borderRadius: '999px', background: 'transparent',
         color: speedStrobes ? 'var(--accent)' : 'var(--muted)',
@@ -7639,6 +7826,54 @@ class Component extends DCLogic {
         font: "700 var(--icon)/1 'Manrope',system-ui,sans-serif",
         fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.02em'
       },
+      /* THE MENU ROW THE SLIDER SITS IN: full width of the panel less its own
+         padding, readout to the slider's left so the number a drag is
+         approaching is read before the thing moving toward it. */
+      speedRowStyle: { display: 'flex', alignItems: 'center', gap: '10px', padding: '6px 12px 8px' },
+      /* The readout's colour is the only thing about it that depends on
+         state, exactly like the corner control's did, and for the same
+         reason. minWidth is pinned to the widest multiplier the ladder can
+         produce, derived rather than guessed, so the slider does not shuffle
+         sideways as the thumb moves. */
+      speedReadStyle: {
+        flex: '0 0 auto', textAlign: 'right',
+        minWidth: (String(SPEED_STOPS[SPEED_STOPS.length - 1]).length + 1) + 'ch',
+        color: speedStrobes ? 'var(--accent)' : 'var(--muted)',
+        font: "700 var(--icon)/1 'Manrope',system-ui,sans-serif",
+        fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.02em'
+      },
+      /* THE TRACK IS PAINTED HERE, NOT IN THE STYLE BLOCK, because it depends
+         on the value: a background-image gradient on the input itself, filled
+         to the thumb in the SAME colour the thumb and the readout use, --hair
+         beyond it. Percentages inside a gradient resolve against the
+         gradient line (the element's own width), which is why speedAt()'s
+         math lands where the thumb actually is; a background-position
+         percentage resolves against (box - image) instead and would land
+         somewhere else, which is why this is a gradient layer and not a
+         positioned one.
+
+         --thumb-color is set here too and read by the pseudo-element rule in
+         the <style> block -- the mechanism a pseudo-element leaves for being
+         reached from a render value, since it takes no style attribute of
+         its own. This is the whole of "the strobe warning is carried by
+         colouring the thumb itself" (GitHub #108): one colour, computed once,
+         landing on the thumb through a CSS custom property and on the track
+         and the readout through ordinary inline style -- so all three flip
+         together at the stop where the illusion actually breaks, rather than
+         a tick trying to mark it and disappearing under the thumb that sits
+         on it (GitHub #69's A/B finding). */
+      speedTrackStyle: (function () {
+        const fill = speedStrobes ? 'var(--accent)' : 'var(--muted)';
+        const at = speedAt(speedPos);
+        return {
+          flex: '1 1 auto',
+          '--thumb-color': fill,
+          backgroundImage: 'linear-gradient(90deg,' + fill + ' 0 ' + at + ',var(--hair) ' + at + ' 100%)',
+          backgroundSize: '100% var(--trk)',
+          backgroundPosition: 'center',
+          backgroundRepeat: 'no-repeat'
+        };
+      })(),
       toggleMotion: () => {
         const next = this.motionActive() ? 'rest' : 'run';
         try { localStorage.setItem('wozi-motion', next); } catch (e) {}

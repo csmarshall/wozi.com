@@ -139,9 +139,11 @@ reverses the strand with it. No chain or belt is enabled in the shipped train
 one safe.
 
 **The speed control is a multiplier on that integrator and nothing else** (#96).
-`speedFactor()` is the only thing the corner button reaches; `idleRate()` scales
+`speedFactor()` is the only thing it reaches, wherever it is drawn — the menu
+slider (#108, CL#114) or the corner's reset-to-1× tap — and `idleRate()` scales
 by it, the flywheel eases to the new target, and every wheel follows because not
-one of them is animated on its own.
+one of them is animated on its own. Moving *where* the control is drawn must
+never give it a second job.
 
 **The speed that strobes is derived; the speed the control stops at is chosen.**
 Keep those apart. A wheel's angle is `_M / teeth` and its pitch is `360 / teeth`,
@@ -156,8 +158,25 @@ the train reads as stopped or reversing.
 **not** truncate it. The top stops are deliberately absurd: they exist to
 benchmark the renderer, and a benchmark stop is allowed to look wrong. What is
 not allowed is offering one silently, so every stop at or above `strobeSpeed()`
-says "strobing — benchmark only" in its accessible name and draws its numeral in
-`--accent` instead of `--muted`.
+says "strobing — benchmark only" in its accessible name, and the control's
+colour moves to `--accent` instead of `--muted`.
+
+**The slider steps over `SPEED_STOPS` by index, never continuously** (#108,
+CL#114). `min=0`, `max=SPEED_STOPS.length-1`, `step=1`, so every stop sits the
+same distance under the thumb regardless of how far apart its neighbours are on
+the multiplier's own scale — the ladder stays a ladder, and the absurd top
+stops stay exactly as reachable as 2× is.
+
+**The strobe warning is carried by colouring the thumb itself, not a mark on the
+track.** A 2px tick at the boundary stop was tried first (GitHub #69's A/B
+sheets) and was invisible at exactly that stop, because the 24px thumb sits
+centred on the index it would mark — visible five stops either side, gone at
+the one that means something. `--thumb-color` is a custom property set inline
+on the input and read by the `::-webkit-slider-thumb` / `::-moz-range-thumb`
+rules, so the thumb's own paint is state-driven even though a pseudo-element
+takes no `style` attribute of its own; the readout text and the track's filled
+portion carry the same colour, so all three flip together at the stop where the
+illusion actually breaks.
 
 So `min` and `max` in the schema are the levers; the strobe limit is never
 written down anywhere, because it is a property of `BASE_MS` and the frame rate.
@@ -169,10 +188,47 @@ hard a flick or an arrow key may drive the flywheel: it is `max(8, idleRate())`,
 because a fixed 8 stopped being a ceiling and became a *brake* once the idle rate
 could reach 68.6 at 200×.
 
-**The speed button's `style` is a render value, and it is the only fixed control
-whose style is.** The other three are inline because nothing about them depends
-on state; this one's colour does. That is the whole of the exception — do not
-generalise it into hoisting the row's styling.
+**The speed control lives in the pop-out menu now, not the corner row** (GitHub
+#108, CL#114). The corner row is back to three permanent buttons — theme,
+motion, the menu toggle — right-anchored by index exactly as before, just
+renumbered to close the gap the speed button left. A fourth, conditional
+corner control appears in the freed-up outer slot only when `speedFactor() !==
+SPEED_FLOOR`: a **departure indicator**, not a chooser — its whole job is to
+say "this page is not running at its normal pace" and to reset to 1× on a tap.
+It reaches nowhere the slider does not; there is still exactly one thing the
+speed control does, from either control that can touch it.
+
+**The corner control's `style` is a render value, and it is the only fixed
+control whose style is.** The other three are inline because nothing about
+them depends on state; this one's colour depends on whether the current stop
+strobes, and its `display` depends on whether it should be showing at all.
+That is the whole of the exception — do not generalise it into hoisting the
+row's styling.
+
+**Hiding at 1× must not strand anyone.** The menu is the only route to
+the speed control once the corner stops showing it, so the panel must open and
+the slider must be reachable in every state the corner row can be in —
+including a solo host (`?who=<slug>`), where the person picker is deliberately
+absent and the slider is the first thing in the panel regardless.
+
+**The pop-out panel is capped and scrollable, because centred-and-overflowing
+loses content off both edges equally.** `togPanelStyle` sits at `top:50%`
+with `transform:translateY(-50%)` and, until CL#114, no limit on its own
+height — fine while nothing inside it mattered more than the rest, false the
+moment the panel's first child became the only route to a control the corner
+no longer shows. The Table of Gears list alone is tall enough to exceed a
+landscape phone's viewport (595px of content against a 273px-tall iPhone
+13/14 landscape window), and a panel centred on a viewport it overflows loses
+the same amount off its top as its bottom — pushing the slider entirely above
+the visible area, with no scrollbar to bring it back, on exactly the device
+class where the corner is smallest and the menu matters most. `max-height:
+calc(100vh - var(--offtop) - var(--offbot))` plus `overflow-y:auto` leaves the
+panel the same clearance every other fixed element gets and makes the rest
+scrollable, so the slider — flex-column's first child — is always the first
+thing in view when the panel opens, whatever else it contains. Caught by
+widening `tools/devices.py`'s safe-area selector to see the slider at all
+(GitHub #108) — the panel's own overflow was invisible to that harness before
+there was a form control inside it worth measuring.
 
 **Lighting from directly above.** All shading is symmetric about the vertical
 axis: vertical body gradients, radial highlights at 50% horizontally, specular
