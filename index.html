@@ -445,6 +445,27 @@ const DATUM_PLATE = {};
    top of the placard -- is what the figure names. */
 const PLATE_TOP_CLEAR = 20;
 
+/* HOW FAR ALONG THE LINE THE PLATE SITS FROM WHERE THE MARK STARTS, in RENDERED
+   PIXELS -- "seat the datum plate 25px from the start of the datum line" --
+   Charles, GitHub #87. Twenty-five is the owner's figure, in the pixels a viewer
+   actually sees, and the same reasoning that keeps PLATE_TOP_CLEAR out of module
+   units keeps this out of them.
+
+   IT IS A DIFFERENT QUANTITY ON A DIFFERENT AXIS FROM PLATE_TOP_CLEAR, and the
+   names say which: TOP_CLEAR is measured ACROSS the line, from the chain's
+   extreme border out to the top of the placard; this is measured ALONG the line,
+   from the start of the mark in to the plate's near edge. They are neighbours
+   and they are unrelated -- one decides where the line is scribed, the other
+   decides where along it the plate is stamped. The pair of them was filed
+   twice over as one ambiguous "20px" (GitHub #77) before either was written
+   down.
+
+   IT IS A PREFERENCE, NOT A GUARANTEE. plateSeat() searches the stations at
+   which the whole plate is on the page and clamps to that interval, so on a page
+   too narrow to hold the plate that far in, the seat wins and the figure is not
+   honoured. See plateSeat(). */
+const PLATE_START_ALONG = 25;
+
 /* A CHAIN WITH NO LINKS IS NOT LAID OUT AT ALL -- the TRAIN builder below skips
    it, so it takes no wheels, gets no bridge and is not part of the composition.
    One home for that rule, because the spine is defined by it. */
@@ -2253,20 +2274,24 @@ class Component extends DCLogic {
         if (d < d0) d0 = d;
         if (d > d1) d1 = d;
       });
-      /* THE PLATE RIDES THE LAST LEADING GHOST -- the background wheel
-         immediately before the first real gear, so it reads as the placard at
-         the head of the run rather than as a caption floating off the end. `k`
-         counts outward from the chain, so the last one is k 0. A driven chain
-         has no leading run at all, because that is the end its bridge arrives
-         at, and it falls back to the head wheel rather than vanishing. */
-      const lead = own.filter(g => g.lead);
-      const anchor = lead.length ? lead.reduce((m, g) => (g.k < m.k ? g : m)) : c.head;
+      /* NOTHING HERE SAYS WHERE THE PLATE GOES ANY MORE (#95, GitHub #87). It
+         used to ride
+         the last LEADING GHOST -- the background wheel immediately before the
+         first real gear -- and fall back to the head wheel when there was no
+         leading run to ride. The plate is now seated from the START OF THE MARK
+         instead of from a wheel on it, which is a referent every chain has:
+         `d0` above is that start, and plateSeat() is where the figure and the
+         page are argued out. The fallback went with the rule, and GitHub #82
+         with the
+         fallback -- a driven chain has no leading run, so under the old rule its
+         plate landed on its own first gear, and on a one-wheel chain that gear
+         was the entire chain. */
       /* `deg` IS THE MARK'S OWN ANGLE, which is the travel and not the chain's
          measured axis -- the plate is stamped square to the line it rides, so
          the two cannot be allowed to disagree by the tilt of the deal. */
       return { person: c.person, plate: DATUM_PLATE[c.person] || c.person,
         deg: c.travel, ux: ux, uy: uy, nx: nx, ny: ny, o: o, alt: alt,
-        stations: stations, plateAt: at(anchor), d0: d0, d1: d1 };
+        stations: stations, d0: d0, d1: d1 };
     });
   }
 
@@ -5145,8 +5170,9 @@ class Component extends DCLogic {
        1. WHICH SIDE. A reference line may be laid either side of the parts it
           references; datumRuns() hands both origins over, clear of every tooth
           by the same module of air.
-       2. WHERE ALONG IT. The plate rides an anchor, and sliding it to another
-          station on the same line is a placement, not a compromise.
+       2. WHERE ALONG IT. The plate is stamped a stated distance in from where
+          the mark starts, and sliding it further along the same line is a
+          placement, not a compromise.
      The natural side and the natural station win every tie, so a load that was
      already right is untouched -- and the smaller slide wins otherwise, so the
      mark moves as little as the page allows.
@@ -5241,15 +5267,45 @@ class Component extends DCLogic {
     return Math.max(0, air) / S;
   }
 
-  plateSeat(r, S, pw, ph) {
-    const want = r.plateAt * S;
+  /* WHERE A LINE THROUGH (px, py) ALONG (dx, dy) ENTERS AND LEAVES A BOX, by slab
+     clipping. An axis the line runs very nearly parallel to does not bound it at
+     all, and taking that axis' crossing anyway is how a datum a fraction of a
+     degree off horizontal ended up thirty-six thousand pixels long.
+
+     ONE HOME, because the seat and the drawing now have to agree about where the
+     mark starts (#95): the plate is stamped a stated distance in from that
+     point, so a second copy of this arithmetic is a plate standing a little way
+     off the end of its own line. */
+  slabClip(px, py, dx, dy, box) {
+    let lo = -Infinity, hi = Infinity;
+    [[px, dx, box.x0, box.x1], [py, dy, box.y0, box.y1]].forEach(s => {
+      if (Math.abs(s[1]) < 1e-6) return;
+      const a = (s[2] - s[0]) / s[1], b = (s[3] - s[0]) / s[1];
+      lo = Math.max(lo, Math.min(a, b));
+      hi = Math.min(hi, Math.max(a, b));
+    });
+    return [isFinite(lo) ? lo : 0, isFinite(hi) ? hi : 0];
+  }
+
+  plateSeat(r, S, pw, ph, past, box) {
     const nat = { ox: r.o.x * S, oy: r.o.y * S };
+    /* THE PLATE'S NEAR EDGE IS WHAT THE FIGURE MEASURES TO, so half the plate's
+       measured width is carried here: what the eye compares is the gap between
+       the start of the mark and the metal, not the distance to a centre it
+       cannot see. */
+    const from = (start) => start + PLATE_START_ALONG + pw / 2;
+    /* WHERE THE MARK STARTS, along the line, in rendered pixels -- the same
+       arithmetic datumLayer draws the line with, and the referent that replaced
+       the old wheel anchor (#95). The mark runs `past` beyond whichever reaches
+       further out, the assembly or the drawn area it is clipped to, so this is
+       the first drawn pixel of the line and not merely the first wheel on it. */
+    const startOf = (O) => Math.min(r.d0 * S, this.slabClip(O.ox, O.oy, r.ux, r.uy, box)[0]) - past;
     const vp = this._vpBox;
     /* Before the first fitEscapes() there is no measured viewport, and guessing
        one would be a second opinion about where the stage is. The natural side
        stands for that one frame; the fit runs out of componentDidUpdate, so the
        next one is measured. */
-    if (!vp) return { ox: nat.ox, oy: nat.oy, at: want, side: 1 };
+    if (!vp) return { ox: nat.ox, oy: nat.oy, at: from(startOf(nat)), side: 1 };
     /* The plate turns with its chain, so what has to fit inside the viewport is
        the axis-aligned box of a ROTATED rectangle -- half its width along the
        run plus half its height across it, resolved onto each screen axis. Both
@@ -5290,6 +5346,32 @@ class Component extends DCLogic {
     [nat, alt].forEach(O => {
       const iv = window_(O);
       if (!iv) return;
+      /* THE START OF THE MARK, OR THE START OF AS MUCH OF IT AS THE PAGE SHOWS.
+         The later of the two wins, and that is the whole of the rule: the mark's
+         own start decides while it can be seen, and the frame decides once it
+         cannot.
+
+         ON THIS COMPOSITION THE FRAME ALMOST ALWAYS DECIDES, and it was measured
+         before it was written. An escape run is grown until it is 120px past the
+         edge of the viewport and the drawn area is sized to hold every run, so
+         the start of the mark is off the page by construction: over five
+         viewports from 390x844 to 5120x1440, the outermost wheel of the spine's
+         run sat 134 to 281 rendered px outboard of the near edge on every one,
+         and the line then runs further out still. A figure measured from a point
+         no viewer can see could never once have been honoured -- which is the
+         reason this does not simply anchor on `d0` as GitHub #87 proposed. The
+         mark's
+         own start is the floor under it, for the cases where the drawing does
+         stop inside the frame: before the first fit there are no ghosts to widen
+         the drawn area, and a chain may be dealt one that leaves by the far end
+         only.
+
+         AND THE PAGE IS THE ONLY REFERENT THAT ANSWERS GitHub #82. A chain with
+         no
+         leading run starts at its own first gear, so every reading that anchors
+         on the machine seats that chain's plate within a wheel's radius of the
+         one wheel it owns -- which is the complaint, restated at 25px. */
+      const want = from(Math.max(startOf(O), this.slabClip(O.ox, O.oy, r.ux, r.uy, vp)[0]));
       const at = Math.max(iv[0], Math.min(iv[1], want));
       const slide = Math.abs(at - want);
       /* Strictly smaller, so the natural side keeps every tie -- including the
@@ -5305,7 +5387,7 @@ class Component extends DCLogic {
         console.warn('wozi: neither side of chain "' + r.person + '" has room for its '
           + 'datum plate — the mark is drawn where it falls');
       }
-      return { ox: nat.ox, oy: nat.oy, at: want, side: 1 };
+      return { ox: nat.ox, oy: nat.oy, at: from(startOf(nat)), side: 1 };
     }
     return best;
   }
@@ -5368,20 +5450,6 @@ class Component extends DCLogic {
         x2: zx.toFixed(2), y2: zy.toFixed(2),
         style: { stroke: INK.line, strokeWidth: HAIR.toFixed(2) + 'px' } }));
     };
-    /* WHERE THE LINE ENTERS AND LEAVES THE DRAWN AREA, by slab clipping. An axis
-       the line runs very nearly parallel to does not bound it at all, and taking
-       that axis' crossing anyway is how a datum a fraction of a degree off
-       horizontal ended up thirty-six thousand pixels long. */
-    const span = (px, py, dx, dy) => {
-      let lo = -Infinity, hi = Infinity;
-      [[px, dx, box.x0, box.x1], [py, dy, box.y0, box.y1]].forEach(s => {
-        if (Math.abs(s[1]) < 1e-6) return;
-        const a = (s[2] - s[0]) / s[1], b = (s[3] - s[0]) / s[1];
-        lo = Math.max(lo, Math.min(a, b));
-        hi = Math.min(hi, Math.max(a, b));
-      });
-      return [isFinite(lo) ? lo : 0, isFinite(hi) ? hi : 0];
-    };
     runs.forEach((r, ri) => {
       /* The plate is MEASURED before anything is placed, because its width is
          what decides which side of the assembly this whole mark is scribed on --
@@ -5392,14 +5460,18 @@ class Component extends DCLogic {
       const font = '600 ' + PLATE_F.toFixed(2) + 'px ' + MONO;
       const track = PLATE_F * 0.09;
       const pw = this.textWidth(label, font) + track * Math.max(0, label.length - 1) + PLATE_H * 0.8;
-      const seat = this.plateSeat(r, S, pw, PLATE_H);
+      /* THE RUN-OUT AND THE DRAWN AREA ARE HANDED OVER rather than re-derived on
+         the other side, because the seat measures from where the LINE starts and
+         the line starts a run-out beyond the clip below (#95). Two copies of
+         either would put the plate a little way off the end of its own mark. */
+      const seat = this.plateSeat(r, S, pw, PLATE_H, PAST, box);
       const ox = seat.ox, oy = seat.oy;
       /* OUTBOARD IS WHICHEVER WAY THE MARK WAS LAID. Every tick is struck along
          the normal, away from the assembly the line references -- and the
          mirrored origin reverses which way that is. */
       const out = seat.side;
       const at = (d, t) => ({ x: ox + r.ux * d + r.nx * t, y: oy + r.uy * d + r.ny * t });
-      const edge = span(ox, oy, r.ux, r.uy);
+      const edge = this.slabClip(ox, oy, r.ux, r.uy, box);
       const d0 = Math.min(r.d0 * S, edge[0]) - PAST;
       const d1 = Math.max(r.d1 * S, edge[1]) + PAST;
       const a = at(d0, 0), z = at(d1, 0);
