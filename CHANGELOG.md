@@ -84,95 +84,120 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Added
 
-- **#97 — a person may ask for a region of the colour wheel, and asking reserves
-  nothing.** (GitHub #68.) `palette: { around: '#F2C14E', spread: 60 }` on a
-  `PEOPLE` entry biases that person's wheels toward hues within 60 degrees either
-  side of that amber. Absent the key nothing changes, and nothing has the key:
-  the default is still the random deal, and the shape is written out commented on
-  Harper's entry rather than left to be looked up.
+- **#97 — one colour, and a whole chain made of it.** (GitHub #68.)
+  `palette: '#B79CE8'` on a `PEOPLE` entry says "make this person's machine light
+  purple", and every wheel on that chain comes out that colour or a near
+  variation of it. Harper's chain is purple as of this entry, at Charles's
+  request, seeded `#9B8CE0` — the pool's own purple, an authored colour that has
+  already been judged good on these wheels. Her chain is one wheel today, and a
+  chain of one gets the seed **exactly**.
 
-  **The rule this is built to, in Charles's words on the ticket: choosing a hue
-  does not remove it from anybody else's queue.** The arc is a preference, never
-  a partition. The pool is whole for every wheel on every load, an unbiased wheel
-  can and does take a hue somebody else asked for, and the arc is matched by
-  MEMBERSHIP rather than by nearness to the hex named — so the named colour is no
-  likelier than the arc's others and stays as available to everyone as it was.
-  Measured on a chain of one asking for warm: the wheel lands inside the arc on
-  100% of loads, and lands on `#F2C14E` itself on 34% of them, which is one in
-  three of the three colours the arc holds. The alternative — the pool
-  partitioned into private arcs — starves the moment a third person appears.
+  **The default palette is untouched.** `WHEEL_POOL` is still authored, still
+  ground truth, and `dealColours()` is the function that shipped, line for line —
+  a chain with a seed is taken out of that deal altogether rather than changing
+  how it works. Saying so plainly because the history invites the opposite
+  reading: five attempts at deriving the *pool* from a formula were all worse and
+  that is settled (#40). This derives **one person's opt-in family from a colour
+  they chose**, which is a different question with a different answer.
 
-  **The consequence, accepted on the ticket rather than worked around: two chains
-  may legitimately come out looking alike, so colour cannot carry identity.**
-  That is the datum plate's job (#90, #84), and `config.js` now says so where
-  both keys are documented.
+  **The hard problem was #12, and it did not survive contact with the
+  requirement.** The 40-degree minimum hue separation between meshing wheels is a
+  proxy for "a viewer would call these the same colour", and it is a good proxy
+  exactly while hue is the axis carrying the difference. A single-colour family
+  has no hue difference by construction, so that rule would reject every possible
+  arrangement. The obvious repair is to re-express #12 perceptually — OKLab, one
+  rule everywhere, separation carried by whichever axis is available.
 
-  **THE ARITHMETIC, because it is what makes a spread choosable.** The
-  40-degree minimum between MESHING wheels (#12) is a gate the arc may never
-  open. An arc is `2 × spread` degrees wide, so at most
-  `floor(2 × spread / 40) + 1` of its colours can sit in a row — four across the
-  120 degrees a spread of 60 buys, one across 60. More than that can still be
-  dealt, but only interleaved with wheels from outside the arc, and a chain has
-  only so many gaps. On top of that sits supply, and `WHEEL_POOL` is authored and
-  deliberately lumpy rather than evenly spaced: around `#F2C14E` at 60 there are
-  exactly three colours and all three are within 40 degrees of *each other*
-  (3.0°, 23.5°, 42.1°), so no two of them may ever mesh — that arc dresses
-  alternate wheels or none. Around `#4A90E2` at 60 there are five. Between 42 and
-  150 degrees the pool is empty, so an arc centred there finds nothing at all
-  until a colour is authored into it.
+  **Measured on the shipped pool, that repair is not available, and the numbers
+  say so plainly.** In OKLab the closest pair the 40-degree rule *allows* into
+  mesh is `#9B8CE0`/`#DB79B8` at ΔE **0.117**; the two blues the rule exists to
+  keep apart, `#4A90E2`/`#8CB8F2`, are **0.135** apart and the two greens
+  **0.168**. A single ΔE floor would have to be at or below 0.117 to leave the
+  pool dealable and above 0.135 to go on rejecting the blues. No such number
+  exists — on this pool the two metrics disagree about which pair is closer, and
+  swapping one for the other would seat the exact pair #12 was written for.
 
-  **What happens when the request cannot be met is said out loud, on every load,
-  the way this composition already reports an overlap or a refused bridge.** An
-  arc with no pool colour in it names the nearest one and the spread that would
-  reach it. An arc with fewer colours than wheels says how many come from outside
-  it, and quotes the seating ceiling above. And when the deal seats fewer than
-  the pool could have supplied, the shortfall is reported over the whole deal
-  with the rule named — because two people asking for the same arc are competing
-  for the same colours, and blaming #12 for that would be reporting the design
-  working as a failure. A malformed `around` or `spread`, and a spread of 180 or
-  more (which is the entire wheel and can prefer nothing), are refused with a
-  warning rather than accepted and quietly ignored.
+  So the rule is stated once and **measured twice**, by whichever axis the
+  palette actually varies on: *no two meshing wheels may be ones a viewer would
+  fail to tell apart*. A pool-dealt chain varies by hue and is judged in degrees.
+  A single-colour chain varies by lightness and chroma and is judged in OKLab.
+  Neither is ever relaxed, and they are never both applicable — every meshing
+  pair in the deal belongs to one chain and therefore to one palette, because a
+  chain head past a bridge meshes an idler rather than another chain. The suite
+  asserts the contradiction that justifies keeping two rules, so the day the pool
+  changes enough for one to do it is the day a test says so.
 
-  **One real defect was built and then measured out, and it is the reason the
-  search has the shape it has.** Preferring on every biased wheel of every
-  candidate pulled all eighty candidates into the same tight cluster of the pool:
-  with the five-colour blue arc, not one candidate separated its meshing pairs by
-  40 degrees, and "bounded retries, best deal kept" then handed back an
-  **illegal** deal — 54 sub-40° meshing pairs in 4,000 deals, about one load in
-  four thousand, against a rate too small to see with the budget spent unbiased.
-  Two changes, both derived rather than tuned: the number of wheels allowed to
-  prefer sweeps from the ceiling down to zero and repeats, one step per try, so
-  every strength of bias including *none* is in the candidate set; and if a pass
-  still ends short of the rule, a second pass spends a full budget with every
-  preference dropped — line for line the search that ships on a page with no arc.
-  An arc can never make the machine worse than no arc at all. Re-measured:
-  **0 sub-40° meshing pairs in 280,000 pairs** over 40,000 deals of the real
-  function.
+  **What varies, and how far.** Lightness does most of the work; chroma follows
+  it, held at the seed's own fraction of what the sRGB gamut allows at each
+  lightness, which is how a tint behaves and which cannot leave the gamut by
+  construction. Hue moves a little and deliberately — `MIN_HUE_SEP / 2` across
+  the whole ramp, half the angle at which this page already calls two hues
+  different colours — because a family with no hue movement reads as
+  machine-generated tints of one swatch. The ramp only opens as far as the wheel
+  count needs: a short chain stays near the colour that was asked for.
 
-  The ceiling itself is derived and has to account for shared arcs: it is the
-  per-person `min(wheels, colours in the arc)` summed, then capped at the number
-  of DISTINCT pool colours the arcs cover between them. Without that cap two
-  people asking for one arc claim more wheels than the arc has colours, the
-  ceiling is unreachable, and the shortfall warning fires on a load that did
-  nothing wrong.
+  **Every bound is something the pool already reaches**, so the rule is always
+  "no worse than a wheel that ships" rather than a number somebody picked:
 
-  `MIN_HUE_SEP` is now named rather than written as a bare 40 in the one place
-  that compared, because the arc has to reason about the rule as well as obey it
-  and two copies of that number is precisely the drift this repo keeps warning
-  about. `WHEEL_POOL` is untouched — the palette is authored, the selection is
-  computed, and that is settled (#40).
+  - the **tonal envelope**, measured through the same `flatTones()` the page
+    draws with, in *both* themes — body luminance 0.240–0.566 light, 0.261–0.576
+    dark. No derived wheel may be lighter than the lightest that ships or darker
+    than the darkest.
+  - the **engraving margin** — `FLAT_INK` at its own opacity must reach at least
+    2.61:1 light and 2.75:1 dark over the body, which is what it reaches over the
+    worst pool wheel. A pale family is exactly where that gets thin.
+  - the **spacing it aims for** — ΔE 0.117, the closest this page has ever put
+    two meshing wheels, so a chain short enough to afford it is spaced exactly as
+    widely as a pool deal.
+  - the **floor it must clear** — the ΔE between a wheel's body and its own
+    raised face, the smallest tonal step this artwork already asks every viewer
+    to see, measured per seed on the colour actually drawn.
 
-  Measured on the real page over seeded loads, `?who=` so every coloured wheel
-  belongs to one person: Charles's seven wheels land inside the warm arc **28.6%**
-  of the time with no key at all and **42.9%** with it, which is 3 of 7 every
-  load — exactly the ceiling that arc's three mutually-close colours allow.
-  Harper's one wheel: 100% inside her arc. Zero sub-40° meshing pairs across
-  every load photographed, read off the rendered geometry rather than the model.
+  **The arithmetic, and what happens past it.** The legible band around
+  `#B79CE8` is ΔE 0.191 deep, so the wheels are `span/(n-1)` apart and the seed
+  holds **9** wheels before the closest pair drops under its own floor. Seven
+  wheels leave 0.0281 against a floor of 0.0198; ten leave 0.0190 and the console
+  says so, naming the seed, both numbers and the real capacity. The chain is
+  still drawn — one that is absent is worse than one that is subtle — but it is
+  never drawn while claiming the spacing held. Capacity across the seeds
+  photographed runs 7–14, and it is **asked rather than predicted**:
+  `floor(path / faceStep) + 1` is the right way to think about it and is off by
+  one on real seeds, because the ramp is a curve through a gamut boundary rather
+  than a straight line.
 
-  Gates: 72/72 suite (three new, each shown failing against a deliberately broken
-  implementation first), `a11y_audit` PASS in both themes, `verify_motion` PASS —
-  38 rotating elements advancing, no console errors but the expected
-  `/favicon.ico` 404, badges at ~0px, no strands.
+  **Three failures were built and then measured out**, each caught by a test
+  written before the fix:
+
+  - The band is walked at the seed's hue and the ramp does not stay there.
+    `#F2C14E` put its top rung at 0.573 luminance against a ceiling of 0.566,
+    because the hue it drifted to carries more chroma and therefore more light.
+    Every legibility question is now asked at both edges of the widest wander the
+    ramp can ask for, and the colours actually handed out are the thing checked.
+  - A seed can be outside the envelope itself. `#7E57C2` is an ordinary purple
+    that lands darker than any wheel that ships, and every wheel of the chain
+    came out the identical colour. It is not refused — "pick another one" is a
+    poor answer to a child who picked this one — the anchor is slid to the
+    nearest lightness that works and the console names both hexes.
+  - Taking the chroma fraction at the colour as written rather than at the slid
+    anchor turned a pale cream into a saturated amber: near white the gamut is
+    narrow, so a faint chroma is a *large* fraction of it.
+
+  A seed at or below the chroma the background machinery is drawn at (0.0181) is
+  refused outright: the bridge idlers are grey, and a chain that grey reads as
+  structure rather than as somebody's — the #65 blank-gear defect arrived at from
+  the other side. A seed paler than the palest wheel that ships is lifted to it.
+  A named CSS colour is refused with a message: `rgbOf()` is the one parser here,
+  and a format it cannot read is one that cannot be taken into OKLab at all.
+
+  `FLAT_INK` moved up beside the palette because the legibility envelope is now
+  its earliest reader, and the engraving's opacity became `ENGRAVE_ALPHA` rather
+  than a literal in two places that could drift apart. `MIN_HUE_SEP` is named
+  rather than a bare 40 for the same reason.
+
+  Gates: 74/74 suite (five new), `a11y_audit` PASS in both themes,
+  `verify_motion` PASS. Photographed as a sweep — seven seeds and the pool deal,
+  the same machine under each, both themes, plus one seed at 4, 7, 10 and 14
+  wheels so the floor can be seen running out.
 
 - **#89 — a crawl policy, because a 403 was standing in for one.**
   `https://wozi.com/robots.txt` returned the raw S3 `AccessDenied` XML: the file

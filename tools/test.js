@@ -2868,198 +2868,217 @@ test('the bearing deal always assigns a bearing, even with no legal draw', () =>
     + ' wheels were left with no bearing when no draw could satisfy the caps');
 });
 
-/* ---- 9. the colour deal, and the arcs that ask things of it -------------- */
+/* ---- 9. the colour deal, and the families derived from one seed ---------- */
 
 /* Builds the REAL palette machinery out of index.html against a fixture set of
-   people: hueOf, the pool, the arcs, the ceiling and dealColours itself. The
-   pool is the one config.js actually ships, so the arithmetic below is measured
-   against the colours on the page rather than against a convenient set. */
+   people, WHEEL_POOL and all. Everything a derived family is measured against is
+   read from the page -- flatTones, relLum, contrastAt, the ink, the ghost
+   palette -- so what this suite checks is what the browser computes. */
 function palette(people, warn) {
   const conf = (function () { const w = {}; new Function('window', CFG_SRC)(w); return w.WOZI_CONFIG; })();
-  return new Function('CONF', 'console',
-    grabBlock('const hueOf =', '{', '}') + ';\n'
-    + grabDecl('const WHEEL_POOL =') + '\n'
-    + grabDecl('const hueGap =') + '\n'
-    + grabDecl('const MIN_HUE_SEP =') + '\n'
-    + grabBlock('const PALETTE_BIAS =', '{', '}') + ')();\n'
-    + grabBlock('function biasCeiling(', '{', '}') + '\n'
-    + grabBlock('function dealColours(', '{', '}') + '\n'
-    + 'return { hueOf, hueGap, WHEEL_POOL, PALETTE_BIAS, MIN_HUE_SEP, '
-    + 'biasCeiling, dealColours };')(
-    { WHEEL_POOL: conf.WHEEL_POOL, PEOPLE: people },
-    { warn: warn || (() => {}) });
-}
-
-/* One chain per person, wheel i meshing wheel i-1, chain heads unparented --
-   which is what the page hands dealColours once the bridge idlers are dropped
-   out of the deal. */
-function chainDeal(p) {
-  const slots = [];
-  p.people.forEach(x => (x.links || []).forEach((l, i) => slots.push({ person: x.slug, first: i === 0 })));
-  return {
-    n: slots.length,
-    parentOf: (k) => slots[k].first ? null : k - 1,
-    biasOf: (k) => p.mod.PALETTE_BIAS[slots[k].person] || null,
-    slots
-  };
-}
-
-test('no palette arc can seat two meshing wheels inside the hue rule', () => {
-  /* THE ARC IS A PREFERENCE AND THE SEPARATION RULE IS A GATE (#68 on top of
-     #12), and this is the assertion that says which way round. It is not
-     theoretical: preferring on every biased wheel of every candidate was
-     measured pulling all eighty candidates into one tight cluster of the pool,
-     so the best-kept deal was an illegal one about once in four thousand loads.
-     Swept caps plus a full unbiased second pass is what fixed it, and this is
-     what would catch it coming back. Every arc here is a case that FIGHTS the
-     rule: the five blues sit inside 96 degrees of each other, and the three
-     warms inside 40, so none of them can be granted in full. */
-  const cases = [
-    ['no arc at all', null],
-    ['warm, 3 pool colours all within the rule of each other', { around: '#F2C14E', spread: 60 }],
-    ['blue, 5 pool colours in a tight cluster', { around: '#4A90E2', spread: 60 }],
-    ['half the wheel', { around: '#4A90E2', spread: 100 }],
-    ['one colour in the arc', { around: '#F2C14E', spread: 25 }]
+  const parts = [
+    grabBlock('const hueOf =', '{', '}') + ';',
+    grabDecl('const WHEEL_POOL ='),
+    grabDecl('const hueGap ='),
+    grabDecl('const MIN_HUE_SEP ='),
+    grabBlock('function dealColours(', '{', '}'),
+    grabDecl('const OK_M ='),
+    grabDecl('const srgbLin ='),
+    grabDecl('const srgbGam ='),
+    grabBlock('function oklabOf(', '{', '}'),
+    grabBlock('function oklabRgb(', '{', '}'),
+    grabDecl('const hexOf ='),
+    grabBlock('const deltaE =', '{', '}') + ';',
+    grabBlock('function maxChroma(', '{', '}'),
+    grabDecl('const oklchHex ='),
+    grabDecl('const FLAT_INK ='),
+    grabDecl('const ENGRAVE_ALPHA ='),
+    grabBlock('function flatTones(', '{', '}'),
+    grabBlock('function relLum(', '{', '}'),
+    grabBlock('function rgbOf(', '{', '}'),
+    grabBlock('function contrastAt(', '{', '}'),
+    grabBlock('const POOL_ENVELOPE =', '{', '}') + ')();',
+    grabDecl('const GHOST_COLORS ='),
+    grabBlock('const POOL_CHROMA_MIN =', '{', '}') + '));',
+    grabBlock('const GHOST_CHROMA_MAX =', '{', '}') + '));',
+    grabBlock('const bodyLegible =', '{', '}') + ');',
+    grabBlock('const TONE_AIM =', '{', '}') + ')();',
+    grabDecl('const faceStep ='),
+    grabBlock('function familyFor(', '{', '}'),
+    grabBlock('function capacityOf(', '{', '}'),
+    grabBlock('const PALETTE_SEED =', '{', '}') + ')();',
+    'return { WHEEL_POOL, MIN_HUE_SEP, hueGap, deltaE, dealColours, oklabOf, rgbOf,'
+    + ' POOL_ENVELOPE, POOL_CHROMA_MIN, GHOST_CHROMA_MAX, bodyLegible, TONE_AIM,'
+    + ' faceStep, familyFor, capacityOf, PALETTE_SEED, flatTones, relLum, contrastAt,'
+    + ' FLAT_INK, ENGRAVE_ALPHA };'
   ];
+  return new Function('CONF', 'console', parts.join('\n'))(
+    { WHEEL_POOL: conf.WHEEL_POOL, PEOPLE: people }, { warn: warn || (() => {}) });
+}
+
+/* Seeds chosen to exercise different corners rather than to flatter the maths:
+   the light purple of the worked example, a pool colour, the darkest and the
+   most chromatic things the pool has, a purple that sits BELOW the envelope and
+   has to be slid, and a near-white that has to be lifted in chroma. */
+const SEEDS = ['#B79CE8', '#9B8CE0', '#F2C14E', '#17A05C', '#E8615A', '#54BFB6',
+  '#7E57C2', '#FFF8E0'];
+
+test('hue distance and perceptual distance cannot be the same rule on this pool', () => {
+  /* This is the whole justification for #97 keeping TWO separation rules rather
+     than re-expressing #12 as one perceptual floor, and it is a measurement
+     rather than an opinion -- so it is asserted, and it fails the day the pool
+     changes enough for the argument to stop holding. Which would be good news,
+     and would want the code simplified rather than left claiming something that
+     is no longer true. */
+  const mod = palette([]);
+  const pool = mod.WHEEL_POOL;
+  let allowed = Infinity, rejected = 0;
+  for (let i = 0; i < pool.length; i++) {
+    for (let j = i + 1; j < pool.length; j++) {
+      const d = mod.deltaE(pool[i].c, pool[j].c);
+      if (mod.hueGap(pool[i].h, pool[j].h) >= mod.MIN_HUE_SEP) allowed = Math.min(allowed, d);
+      else rejected = Math.max(rejected, d);
+    }
+  }
+  ok(rejected > allowed, 'a single OKLab floor between ' + allowed.toFixed(4)
+    + ' and ' + rejected.toFixed(4) + ' would now reproduce the 40-degree rule '
+    + 'on this pool — #97 keeps two rules on the grounds that no such number '
+    + 'exists, and that is no longer true. Collapse them into one.');
+  /* And the specific pair #12 was written for is on the wrong side of it. */
+  const blues = mod.deltaE('#4A90E2', '#8CB8F2');
+  ok(blues > allowed, 'the two blues (' + blues.toFixed(4) + ') are no longer '
+    + 'closer in hue but further in OKLab than a pair the rule allows ('
+    + allowed.toFixed(4) + ')');
+});
+
+test('a seeded chain is one colour, and no two of its wheels are a step nobody could see', () => {
+  /* The floor is the distance between a wheel's body and its own raised face --
+     the smallest tonal step this drawing already asks every viewer to see. Above
+     it two neighbours are at least as distinguishable as something the artwork
+     already depends on. Checked over EVERY pair, not just neighbours on the
+     ramp, because the wheels are handed out shuffled. */
+  const mod = palette([]);
   const bad = [];
-  cases.forEach(([what, spec]) => {
-    const people = [
-      Object.assign({ slug: 'long', links: [1, 2, 3, 4, 5, 6, 7] }, spec ? { palette: spec } : {}),
-      { slug: 'short', links: [1] }
-    ];
-    const mod = palette(people);
-    const d = chainDeal({ people, mod });
-    let worst = 360, broke = 0;
-    for (let trial = 0; trial < 600; trial++) {
-      const deal = mod.dealColours(d.n, d.parentOf, d.biasOf);
-      for (let k = 0; k < d.n; k++) {
-        const par = d.parentOf(k);
-        if (par == null) continue;
-        const gap = mod.hueGap(mod.hueOf(deal[k]), mod.hueOf(deal[par]));
-        worst = Math.min(worst, gap);
-        if (gap < mod.MIN_HUE_SEP) broke++;
+  SEEDS.forEach(seed => {
+    const cap = mod.capacityOf(seed);
+    ok(cap >= 4, seed + ' can only hold ' + cap + ' wheels, which is fewer than '
+      + 'any chain this page is likely to draw');
+    for (let n = 1; n <= cap; n++) {
+      const f = mod.familyFor(seed, n);
+      if (!f.colours) { bad.push(seed + ' produced no family at all at n=' + n); continue; }
+      if (f.colours.length !== n) bad.push(seed + ' n=' + n + ' returned ' + f.colours.length);
+      if (n > 1 && f.worst < f.floor) {
+        bad.push(seed + ' n=' + n + ': closest pair ' + f.worst.toFixed(4)
+          + ' is under its own floor ' + f.floor.toFixed(4) + ', inside the '
+          + 'capacity it claims (' + cap + ')');
+      }
+      /* One wheel gets the colour that was asked for, exactly. */
+      if (n === 1 && !f.moved && f.colours[0].toLowerCase() !== seed.toLowerCase()) {
+        bad.push(seed + ' n=1 was dealt ' + f.colours[0] + ' rather than the seed');
       }
     }
-    if (broke) bad.push(what + ': ' + broke + ' meshing pairs under '
-      + mod.MIN_HUE_SEP + ' degrees over 600 deals (tightest ' + worst.toFixed(1) + ')');
+    /* And past capacity it must NOT quietly claim to have separated them. */
+    const over = mod.familyFor(seed, cap + 2);
+    if (over.colours && over.worst >= over.floor) {
+      bad.push(seed + ' claims ' + (cap + 2) + ' wheels are still ' + over.worst.toFixed(4)
+        + ' apart, past a capacity of ' + cap + ' — the capacity is not honest');
+    }
   });
   ok(bad.length === 0, bad.join('\n      '));
 });
 
-test('a palette arc reserves nothing — the pool stays whole for everyone', () => {
-  /* Charles's rule on #68, and the reason colour cannot carry identity: choosing
-     a hue must not take it out of anybody else's deal. Two things have to hold,
-     and each rules out a different wrong implementation. The arc's colours must
-     still reach a chain that asked for nothing -- otherwise the arc has
-     partitioned the pool, which is the design that starves as people are added.
-     And the hex NAMED must be no likelier inside the arc than the arc's other
-     colours -- otherwise the bias has quietly become "that exact colour, yours",
-     which is the same reservation wearing a preference's clothes. */
-  const people = [
-    { slug: 'long', links: [1, 2, 3, 4, 5, 6, 7] },
-    { slug: 'short', links: [1], palette: { around: '#F2C14E', spread: 60 } }
-  ];
-  const mod = palette(people);
-  const d = chainDeal({ people, mod });
-  const arc = mod.PALETTE_BIAS['short'];
-  ok(arc && arc.pool.length >= 2, 'the fixture arc must hold at least two pool '
-    + 'colours or neither half of this test means anything');
-  const inside = {};
-  arc.pool.forEach(i => { inside[mod.WHEEL_POOL[i].c] = 0; });
-  let poached = 0, trials = 900;
-  for (let trial = 0; trial < trials; trial++) {
-    const deal = mod.dealColours(d.n, d.parentOf, d.biasOf);
-    for (let k = 0; k < d.n; k++) {
-      if (d.slots[k].person === 'short') {
-        if (inside[deal[k]] !== undefined) inside[deal[k]]++;
-      } else if (arc.holds(mod.hueOf(deal[k]))) poached++;
-    }
-  }
-  ok(poached > 0, 'over ' + trials + ' deals not one wheel of the chain that '
-    + 'asked for nothing landed inside the other chain\'s arc — the arc is '
-    + 'behaving as a partition, not a preference');
-  const total = Object.keys(inside).reduce((a, c) => a + inside[c], 0);
-  ok(total > 0, 'the biased wheel never landed inside its own arc at all');
-  /* An even share of the arc is 1/N of it. Ranking the draw by NEARNESS to the
-     hex named instead of by membership was measured handing that hex 1.8 times
-     an even share, against 1.0 for membership, so the line is drawn at 1.4 --
-     nowhere near either, and many times the sampling spread on this many deals.
-     It is a threshold between two measured distributions rather than a tuned
-     figure, and the mutation it is here to catch misses it by a mile. */
-  const even = total / arc.pool.length;
-  const hogging = Object.keys(inside).filter(c => inside[c] > 1.4 * even);
-  ok(hogging.length === 0, 'inside the arc ' + hogging.join(', ') + ' is dealt far '
-    + 'more often than the rest of it — the draw is ranking by nearness to '
-    + arc.around + ' rather than by membership, which reserves that hex in all '
-    + 'but name (' + Object.keys(inside).map(c => c + ' ' + inside[c]).join(', ')
-    + ' over ' + total + ')');
+test('every derived colour stays inside the tonal envelope the pool already occupies, in both themes', () => {
+  /* A pale family is exactly where the engraving and the page both get thin, and
+     a palette that reads on dark and muddies on light is half a feature. The
+     bound is not a number somebody chose: it is what the shipped pool already
+     reaches, measured through the same flatTones() the page draws with. */
+  const mod = palette([]);
+  const bad = [];
+  SEEDS.forEach(seed => {
+    [1, 2, 3, 5, 7, mod.capacityOf(seed)].forEach(n => {
+      const f = mod.familyFor(seed, n);
+      if (!f.colours) return;
+      f.colours.forEach(c => {
+        ['light', 'dark'].forEach(theme => {
+          const env = mod.POOL_ENVELOPE[theme];
+          const body = mod.rgbOf(mod.flatTones(c, theme === 'light').body);
+          const y = mod.relLum(body);
+          if (y < env.lo - 1e-9 || y > env.hi + 1e-9) {
+            bad.push(seed + ' n=' + n + ' -> ' + c + ' sits at ' + y.toFixed(3)
+              + ' luminance in ' + theme + ', outside the pool\'s ' + env.lo.toFixed(3)
+              + '..' + env.hi.toFixed(3));
+          }
+          const ink = mod.contrastAt(mod.rgbOf(mod.FLAT_INK), body, mod.ENGRAVE_ALPHA);
+          if (ink < env.ink - 1e-9) {
+            bad.push(seed + ' n=' + n + ' -> ' + c + ': the engraving reaches only '
+              + ink.toFixed(2) + ':1 over it in ' + theme + ', against ' + env.ink.toFixed(2)
+              + ':1 over the worst wheel that ships');
+          }
+        });
+      });
+    });
+  });
+  ok(bad.length === 0, [...new Set(bad)].slice(0, 6).join('\n      '));
 });
 
-test('an arc the pool cannot serve is capped and said out loud, never quietly', () => {
-  /* THE ARITHMETIC, since it is what makes a spread choosable: an arc is 2 x
-     spread degrees wide and MIN_HUE_SEP apart is the rule, so at most
-     floor(2 x spread / MIN_HUE_SEP) + 1 of its colours can mesh in a row -- and
-     that is a ceiling ON TOP of however few colours the authored pool happens to
-     have in there. Neither is a reason to fail; both are a reason to SAY so, the
-     way this composition already reports an overlap or a refused bridge. */
+test('a seed the machine cannot use is moved or refused, and never quietly accepted', () => {
   const said = [];
-  const withPalette = (spec, links) => {
-    const people = [Object.assign({ slug: 'p', links: links || [1, 2, 3, 4, 5, 6, 7] },
-      spec ? { palette: spec } : {})];
-    return { mod: palette(people, m => said.push(m)), people };
-  };
-  said.length = 0;
-  let p = withPalette({ around: 'not-a-colour', spread: 60 });
-  ok(!p.mod.PALETTE_BIAS['p'], 'a malformed `around` was accepted as an arc');
-  ok(said.some(m => /not usable/.test(m)), 'a malformed palette said nothing');
+  const mod = palette([
+    { slug: 'named', palette: 'rebeccapurple', links: [1] },
+    { slug: 'ghost', palette: '#9AA6AD', links: [1] },
+    { slug: 'ok', palette: '#B79CE8', links: [1] }
+  ], m => said.push(m));
+  ok(!mod.PALETTE_SEED['named'], 'a named CSS colour was accepted as a seed');
+  ok(said.some(m => /not a colour this page can read/.test(m)),
+    'a seed this page cannot parse said nothing');
+  ok(!mod.PALETTE_SEED['ghost'], 'a seed as grey as the background machinery was accepted');
+  ok(said.some(m => /background machinery is drawn at/.test(m)),
+    'a seed at ghost chroma said nothing');
+  eq(mod.PALETTE_SEED['ok'], '#b79ce8', 'a usable seed was not kept');
 
-  said.length = 0;
-  p = withPalette({ around: '#F2C14E', spread: 180 });
-  ok(!p.mod.PALETTE_BIAS['p'], 'a spread of 180 is the whole wheel and cannot bias');
-  ok(said.some(m => /entire colour wheel/.test(m)), 'a spread of 180 said nothing');
+  /* Outside the envelope is SLID, not refused: "pick another colour" is a poor
+     answer to a child who picked this one. But the family must then really be
+     inside, and must say it moved. */
+  const bad = [];
+  ['#7E57C2', '#301860', '#FFF8E0'].forEach(seed => {
+    const f = mod.familyFor(seed, 5);
+    if (!f.colours) { bad.push(seed + ' produced no family'); return; }
+    if (!f.moved) bad.push(seed + ' is outside the envelope but does not report moving');
+    f.colours.forEach(c => { if (!mod.bodyLegible(c)) bad.push(seed + ' -> ' + c + ' is still outside'); });
+    /* Hue is what the person actually chose, and moving lightness must not
+       throw it away. */
+    const a = mod.oklabOf(mod.rgbOf(seed)), b = mod.oklabOf(mod.rgbOf(f.anchor));
+    const ah = (Math.atan2(a[2], a[1]) * 180 / Math.PI + 360) % 360;
+    const bh = (Math.atan2(b[2], b[1]) * 180 / Math.PI + 360) % 360;
+    const drift = Math.min(Math.abs(ah - bh), 360 - Math.abs(ah - bh));
+    if (drift > 1) bad.push(seed + ' slid to ' + f.anchor + ', ' + drift.toFixed(1)
+      + ' degrees off the hue that was asked for');
+  });
+  ok(bad.length === 0, bad.join('\n      '));
+});
 
-  /* Supply: the pool's colours are authored and lumpy, so an arc can be perfectly
-     well formed and still have nothing in it. */
-  p = withPalette({ around: '#00FF00', spread: 20 });
-  const empty = p.mod.PALETTE_BIAS['p'];
-  ok(empty && empty.pool.length === 0, 'the fixture arc was meant to be empty');
-  const d0 = chainDeal({ people: p.people, mod: p.mod });
-  eq(p.mod.biasCeiling(d0.n, d0.biasOf), 0,
-    'an arc with no pool colour in it still claims it can seat wheels');
-
-  /* Two people asking for the SAME arc are competing for the same colours, not
-     each getting their own -- so the ceiling is what the arcs cover BETWEEN
-     them. Without that cap the ceiling is unreachable and the shortfall warning
-     fires on a load that did nothing wrong. */
-  const shared = { around: '#F2C14E', spread: 60 };
-  const two = [{ slug: 'a', links: [1, 2, 3, 4, 5, 6, 7], palette: shared },
-    { slug: 'b', links: [1], palette: shared }];
-  const mod2 = palette(two);
-  const d2 = chainDeal({ people: two, mod: mod2 });
-  const supply = mod2.PALETTE_BIAS['a'].pool.length;
-  eq(mod2.biasCeiling(d2.n, d2.biasOf), supply,
-    'two chains asking for one arc claim more wheels between them than the arc '
-    + 'has colours (' + supply + ')');
-
-  /* And the ceiling is honoured: a wide arc gets more wheels than a narrow one,
-     which is the whole reason to state a spread at all. */
-  const measure = (spec) => {
-    const people = [{ slug: 'p', links: [1, 2, 3, 4, 5, 6, 7], palette: spec }];
-    const mod = palette(people);
-    const d = chainDeal({ people, mod });
-    const arc = mod.PALETTE_BIAS['p'];
-    let hits = 0;
-    for (let trial = 0; trial < 400; trial++) {
-      const deal = mod.dealColours(d.n, d.parentOf, d.biasOf);
-      for (let k = 0; k < d.n; k++) if (arc.holds(mod.hueOf(deal[k]))) hits++;
+test('a seeded chain leaves the pool deal exactly as it was', () => {
+  /* The two rules are never both applied because they are never both
+     applicable: a chain with a seed is taken out of dealColours() altogether, so
+     its wheels can neither be scored by a hue rule that means nothing to them
+     nor consume pool colours the other chains are being dealt from. */
+  const src = SRC.slice(SRC.indexOf('const POOL_SLOTS = ['), SRC.indexOf('TRAIN.forEach((t, i) => {', SRC.indexOf('const POOL_SLOTS = [')));
+  ok(/PALETTE_SEED\[TRAIN\[i\]\.person\]/.test(src),
+    'the pool deal no longer excludes chains that carry a seed');
+  const mod = palette([]);
+  /* And dealColours itself is untouched: still the hue rule, still 80 tries. */
+  const bad = [];
+  for (let trial = 0; trial < 400; trial++) {
+    const deal = mod.dealColours(7, (k) => k === 0 ? null : k - 1);
+    for (let k = 1; k < 7; k++) {
+      const a = mod.WHEEL_POOL.find(p => p.c === deal[k]);
+      const b = mod.WHEEL_POOL.find(p => p.c === deal[k - 1]);
+      const g = mod.hueGap(a.h, b.h);
+      if (g < mod.MIN_HUE_SEP) bad.push('meshing pair at ' + g.toFixed(1) + ' degrees');
     }
-    return hits / 400;
-  };
-  const narrow = measure({ around: '#F2C14E', spread: 25 });
-  const wide = measure({ around: '#4A90E2', spread: 100 });
-  ok(wide > narrow, 'a 100-degree spread seats no more wheels than a 25-degree '
-    + 'one (' + wide.toFixed(2) + ' vs ' + narrow.toFixed(2) + ') — the spread '
-    + 'is being ignored');
+  }
+  ok(bad.length === 0, bad.length + ' pool-dealt meshing pairs broke the '
+    + mod.MIN_HUE_SEP + '-degree rule over 400 deals: ' + bad.slice(0, 3).join(', '));
 });
 
 /* ---- report -------------------------------------------------------------- */

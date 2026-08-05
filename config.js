@@ -104,38 +104,53 @@ window.WOZI_CONFIG = {
                nothing to tell apart. Identity deliberately does NOT live in
                colour: a person's hue preference must not reserve that hue, so
                two chains may legitimately come out looking alike.
-       palette optional. `{ around: '#F2C14E', spread: 60 }` asks for this
-               person's wheels to be dealt hues within `spread` degrees EITHER
-               SIDE of that colour. Absent the key, the chain is dealt from the
-               whole pool exactly as before, and that is the default.
+       palette optional. ONE COLOUR, AND THE WHOLE CHAIN IS MADE OF IT.
+               `palette: '#B79CE8'` says "make this person's machine light
+               purple": every wheel on that chain is dealt that colour or a near
+               variation of it, derived from it rather than dealt from
+               WHEEL_POOL. Absent the key the chain is dealt from the pool
+               exactly as before, and that is still the default for everyone.
 
-               ASKING RESERVES NOTHING. The arc is a preference, not a
-               partition: no colour is withdrawn from the pool for anybody, an
-               unbiased wheel can and does take a hue somebody else asked for,
-               and the arc is matched by MEMBERSHIP rather than by nearness to
-               the hex named -- so the named colour is no likelier than any
-               other inside the arc and stays as available to everyone else as
-               it ever was. Two chains may therefore legitimately come out
-               looking alike, which is why identity lives on the datum plate and
-               not in the palette.
+               Takes any colour form this page can already read -- #rgb,
+               #rrggbb, rgb() -- because a format it cannot read is a format
+               that cannot be taken into OKLab, which is where the family is
+               built. Named CSS colours are not accepted, and say so.
 
-               THE 40-DEGREE MESHING RULE (#12) OUTRANKS IT, always. A narrow
-               arc fights that rule directly: a window 2 x spread degrees wide
-               holds at most floor(2 x spread / 40) + 1 hues that can mesh in a
-               row -- 4 across the 120 degrees a spread of 60 gives, 1 across
-               60. More than that can only be dealt interleaved with wheels from
-               outside the arc. The deal never breaks the rule to satisfy an
-               arc; when it cannot do both it says so in the console, naming how
-               many wheels it seated of how many it could have, so a bias that
-               is quietly doing less than it looks like it is doing is not a
-               state this can be in. A spread of 180 or more is the whole colour
-               wheel and is refused with a warning, as is a malformed entry.
+               WHAT VARIES. Lightness does most of the work and chroma follows
+               it, held at the seed's own fraction of what the gamut allows at
+               each lightness, which is how a tint behaves. Hue moves a little
+               and deliberately: MIN_HUE_SEP/2 across the whole ramp -- half the
+               angle at which this page already calls two hues different
+               colours -- because a family with no hue movement at all reads as
+               machine-generated tints of one swatch. A chain of ONE wheel gets
+               the seed exactly; the ramp only opens as far as the wheel count
+               makes it.
 
-               Worth knowing before choosing one: WHEEL_POOL is authored and
-               lumpy on purpose, so arcs are not equally well served. Around
-               #F2C14E at spread 60 there are three pool colours and all three
-               sit within 40 degrees of each other, so no two of them may mesh
-               -- that arc can only ever dress alternate wheels of a chain.
+               HOW FAR IT MAY GO is not a taste setting. Every derived colour
+               has to stay inside the tonal envelope WHEEL_POOL already
+               occupies, in BOTH themes, measured through the same flatTones()
+               the page draws with: no lighter than the lightest wheel that
+               ships, no darker than the darkest, and never leaving the
+               engraving less legible over it than over the worst of them. A
+               seed outside that envelope is not refused -- it is slid to the
+               nearest lightness that works, and the console names both hexes.
+               A seed paler than the palest wheel that ships is lifted to it.
+
+               WHAT IT CANNOT DO. #12's 40-degree hue rule does not apply to a
+               chain like this -- there is no hue difference to measure -- so
+               the separation is measured in OKLab instead, and the floor is the
+               distance between a wheel's body and its own raised face, the
+               smallest tonal step this artwork already asks every viewer to
+               see. A seed holds roughly six to ten wheels at that floor;
+               beyond that the ramp cannot separate them and the console says
+               so, naming the seed's real capacity. The chain is still drawn.
+               The pool deal has no such limit, which is the cost of asking for
+               one colour.
+
+               A seed at or below the chroma the background machinery is drawn
+               at is refused outright, with a warning: the bridge idlers are
+               grey, and a chain that grey would read as structure rather than
+               as somebody's.
        bridge  optional, default true. On a combined stage every chain but the
                longest is driven off it through a short run of plain idler
                wheels, which is also what sets the gap between the two. Set
@@ -189,14 +204,13 @@ window.WOZI_CONFIG = {
          domain name on the distribution and a Route53 alias -- no deploy change,
          per the note above. */
       hosts: ['harper.wozi.com'],
-      /* THE DEFAULT IS RANDOM AND NOBODY HAS OPTED IN YET, so this is written
-         out rather than left to be looked up -- uncomment it and her wheel is
-         dealt a warm hue. One wheel is the case an arc always satisfies: there
-         is nothing for it to mesh, so the 40-degree rule has no pair to judge
-         and the only ceiling is whether the pool has a colour in the arc at all
-         (around #F2C14E at 60 it has three). Charles's seven wheels are the
-         other case -- see the note above the PEOPLE list. */
-      /* palette: { around: '#F2C14E', spread: 60 }, */
+      /* HARPER'S CHAIN IS PURPLE, at Charles's request (#68). The seed is the
+         pool's own purple rather than a new hex: it is an authored colour that
+         has already been judged good on these wheels, and it sits inside the
+         tonal envelope with no sliding needed. Her chain is one wheel today, so
+         that wheel is EXACTLY this colour; the moment she has two the family
+         opens either side of it and she still has a purple machine. */
+      palette: '#9B8CE0',
       links: [
         /* HER ADDRESS IS DELIBERATELY NOT PUBLISHED YET. config.js is served to
            the web, so an href here is public in plain text no matter what the
@@ -263,12 +277,13 @@ window.WOZI_CONFIG = {
      index.html scores candidate sets by minimum pairwise hue distance and
      refuses neighbours closer than 40 degrees.
 
-     A person's optional `palette` arc biases which of these their wheels are
-     dealt, and it takes nothing out of this list to do it -- the pool is whole
-     for every wheel on every load. Because the pool is authored rather than
-     evenly spaced, adding a colour changes what arcs are reachable: the run
-     from 42 to 150 degrees is empty, so an arc centred in it has nothing to
-     find until something is authored there.
+     A person's optional `palette` seed takes their chain OUT of this deal
+     entirely and derives its own family instead (#97). That does not change
+     this list or how it is dealt to everyone else -- but it does mean this pool
+     is what a derived family is measured against: its tonal envelope is the
+     bound a derived colour may not leave, and the closest two colours it ever
+     puts in mesh is the spacing a derived family aims for. Adding a colour here
+     therefore moves both.
 
      Hue is DERIVED from the hex, not stored beside it. It used to be written by
      hand as an `h` field, which was a duplicate that could silently drift —
