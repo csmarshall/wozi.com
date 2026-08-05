@@ -7,6 +7,57 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Changed
 
+- **CL#105 — the street address is off the site, in all three places it was
+  published.** (GitHub #84, and GitHub #90 item 3.)
+
+  **First entry under the new citation style.** Changelog entry numbers and
+  GitHub issue numbers had grown into almost exactly the same range — splitting
+  GitHub #64 filed tickets at #93-#103 while this file already had entries 93-101
+  — so a bare `#97` meant the derived palette *or* the sunburst window count
+  depending on which file you were reading. From here new entries are cited
+  `CL#NNN` in commit subjects and code comments; the ~100 existing bare `#N`
+  references stay as they are, and the break in style is itself a signal about
+  which era a reference comes from. GitHub refs keep the `(GitHub #NN)` form.
+
+  The decision that drove the change: **old QR codes must keep working**, so the
+  path cannot move. That strikes the unguessable-path and CloudFront-token
+  options for as long as printed cards are in circulation, and leaves exactly one
+  mitigation that *reduces* exposure rather than relocating it — don't publish the
+  address.
+
+  **It was in three places, not one.** The question was posed about the vCard;
+  the vCard was the smallest of the three:
+
+  | where | what it was |
+  | --- | --- |
+  | `cards/charles/contact.vcf` | the `ADR:` line |
+  | `cards/index.html` | a visible block printing street, apt, city, state, country |
+  | `cards/charles/index.html` | byte-identical copy of the same |
+
+  Removing it from the vCard alone would have left it fully readable on the page
+  and exactly as harvestable — the relocate-rather-than-reduce failure the
+  decision existed to avoid.
+
+  **The click-to-map handler went with it, and had to.** Both pages carried a
+  `<script>` whose only job was `getElementById('address')` plus a listener
+  opening Google Maps. Left behind with the block gone it returns `null` and
+  throws on `addEventListener` on every card page load — a change that removes
+  markup has to remove the script that reaches for it.
+
+  The card still carries name, mobile, email and `wozi.com`.
+
+  Verified after: no occurrence of the street, apt, city or postcode anywhere
+  under `cards/`; both card pages still **byte-identical to each other**; both
+  still carry `<meta name="robots" content="noindex">`, which matters because the
+  deploy's `exact https://wozi.com/cards/ cards/index.html` whole-file hash check
+  is the only thing gating those tags. `npm test` green.
+
+  **Unchanged, and stated because it will be asked again:** `robots.txt` is not a
+  privacy control and is not being used as one. `cards/` is still not named there
+  — naming a path in the one file every scraper fetches first is a signpost, not
+  a fence. The live `mailto:` links on the combined stage remain exactly as
+  harvestable as before; that was considered and declined on its own merits.
+
 - **#104 — the deploy-whitelist guard read the workflow's prose, so it could not
   fail for the reason it was written.** (GitHub #89, closing the one `survives`
   entry left by #100.) `tools/test.js` asserted `/\bconfig\.js\b/` over the
