@@ -868,29 +868,46 @@ function grabDecl(decl) {
    together, and a test that only saw the array could not tell an idler apart
    from the chain it feeds. Every value the builder closes over is handed in
    from the page rather than re-typed -- MAX_IDLERS is read out of index.html,
-   and CHAIN_ORDER, HAS_WHEELS, SPINE and SPINE_LEN are the page's OWN LINES,
-   executed against the fixture. SPINE_LEN used to be re-derived here, which is
-   the one thing this file forbids: a suite holding its own copy of a derivation
-   passes happily while the page computes something else.
+   and HAS_WHEELS, CHAIN_STACK, SPINE, CHAIN_ORDER and SPINE_LEN are the page's
+   OWN LINES, executed against the fixture, in the page's own declaration order.
+   SPINE_LEN used to be re-derived here, which is the one thing this file forbids:
+   a suite holding its own copy of a derivation passes happily while the page
+   computes something else.
 
-   `order` is normally omitted and the layout order is the page's own sort. A
-   test may hand in an order the sort would never produce -- #85 proposes
-   DECLARING the order rather than inferring it from link count -- to run the
-   real builder against a spine that is not the longest chain. Only CHAIN_ORDER
-   is substituted; everything downstream of it, SPINE and SPINE_LEN included, is
-   still the page deriving its own answer from that order. */
-function buildTrain(people, order) {
+   THE FIXTURE GOES IN THROUGH THE PAGE'S OWN TWO DECLARATIONS -- `order` and
+   `spine` per person (#85) -- exactly as config.js does, and there is no longer
+   any way past them. There used to be: a `stack` argument substituted CHAIN_STACK
+   outright, so a test could reach a layout order no config could ask for. The
+   split is what retired it. Any head and any sequence behind it are now
+   expressible as declarations, so the only orders the override still bought were
+   the ILLEGAL ones -- a spine that is not at the head, or a headless chain with
+   no wheels -- and a harness that can build a train the page cannot is a harness
+   that can pass a test the page would fail. */
+function buildTrain(people) {
   const expr = grabBlock('const TRAIN = (function', '(', ')');
   const bridges = [];
-  const built = new Function('STAGE', 'MAX_IDLERS', 'BRIDGES', 'ORDER',
-    (order ? 'const CHAIN_ORDER = ORDER;' : grabDecl('const CHAIN_ORDER =')) + '\n'
-    + grabDecl('const HAS_WHEELS =') + '\n'
-    + grabDecl('const SPINE =') + '\n'
+  const built = new Function('STAGE', 'MAX_IDLERS', 'BRIDGES', 'console',
+    grabDecl('const HAS_WHEELS =') + '\n'
+    + grabDecl('const STACK_AT =') + '\n'
+    + grabDecl('const NAME_KEY =') + '\n'
+    + grabDecl('const CHAIN_STACK =') + '\n'
+    + grabBlock('const SPINE = (function', '(', ')') + '();\n'
+    + grabDecl('const CHAIN_ORDER =') + '\n'
     + grabDecl('const SPINE_LEN =') + '\n'
-    + 'return { train: ' + expr.replace(/^const TRAIN = /, '') + '(), order: CHAIN_ORDER };')(
-    { people: people }, grabNumber('MAX_IDLERS'), bridges, order);
-  return { train: built.train, bridges, order: built.order };
+    + 'return { train: ' + expr.replace(/^const TRAIN = /, '') + '(), '
+    + 'order: CHAIN_ORDER, spine: SPINE };')(
+    { people: people }, grabNumber('MAX_IDLERS'), bridges, spineConsole);
+  return { train: built.train, bridges, order: built.order, spine: built.spine,
+    spineWarns: spineConsole.taken() };
 }
+/* SPINE's declaration announces a spine it cannot honour rather than obeying it
+   in silence, so the suite has to be able to READ that -- and must not print it
+   over the test output on the fixtures that provoke it deliberately. */
+const spineConsole = (function () {
+  const said = [];
+  return { warn: (m) => said.push(m), error: (m) => said.push(m),
+    taken: () => said.splice(0, said.length) };
+})();
 
 test('every TRAIN entry names its parent, and the parents form one tree', () => {
   const { train } = buildTrain([{ slug: 'p', links: [{ slug: 'a' }, { slug: 'b' }, { slug: 'c' }] }]);
@@ -953,7 +970,7 @@ test('the ends-apart rule means the spine\'s extremities, not any two leaves', (
      distance by 12% over and over until something lands. */
   const i = SRC.indexOf('const isEnd =');
   ok(i > 0, 'solve() no longer names the machine\'s extremities');
-  ok(/WHO\.slug/.test(SRC.slice(i, i + 200)),
+  ok(/SPINE_SLUG/.test(SRC.slice(i, i + 200)),
     'the extremities are not restricted to the spine, so every pair of leaves on '
     + 'a branched stage is pushed ENDS_APART');
 });
@@ -1008,23 +1025,24 @@ test("the static tree's default bridge anchor is a spine wheel, whatever the lay
      `Math.max(1, ...people.map(p => p.links.length))` -- the longest chain
      ANYWHERE on stage -- and the TRAIN builder used it as a WHEEL INDEX INTO
      THE SPINE. Those two quantities agree only while the spine IS the longest
-     chain, which the current CHAIN_ORDER sort guarantees and a DECLARED order
-     would not. The guarantee lived in a different declaration from the index it
-     was propping up, which is the whole defect.
+     chain, which the old CHAIN_ORDER sort guaranteed and a DECLARED spine does
+     not. The guarantee lived in a different declaration from the index it was
+     propping up, which is the whole defect.
 
-     So the fixture declares a layout order the page's own sort would never
-     produce: a two-wheel spine with a seven-wheel chain behind it. Under the
-     old derivation the default anchor is floor((7-1)/2) = 3 -- past the spine's
-     last wheel at index 1, landing on one of the bridged chain's OWN idlers,
-     and a forward reference into the bargain. solve() overwrites this parent
-     before anything is drawn, so no pixel ever moved; #65 was a malformed
-     static tree all the same, and being unable to build one is worth having. */
+     So the fixture DECLARES the short chain the axis: a two-wheel spine with a
+     seven-wheel chain behind it, the arrangement #85 exists to make askable and
+     one no sort by link count could ever produce. Under the old derivation the
+     default anchor is floor((7-1)/2) = 3 -- past the spine's last wheel at index
+     1, landing on one of the bridged chain's OWN idlers, and a forward reference
+     into the bargain. solve() overwrites this parent before anything is drawn,
+     so no pixel ever moved; #65 was a malformed static tree all the same, and
+     being unable to build one is worth having. */
   const people = [
-    { slug: 'spine', links: [{ slug: 'a' }, { slug: 'b' }] },
+    { slug: 'spine', spine: true, links: [{ slug: 'a' }, { slug: 'b' }] },
     { slug: 'long', links: [1, 2, 3, 4, 5, 6, 7].map(n => ({ slug: 'l' + n })) }
   ];
-  const { train, bridges } = buildTrain(people, people);
-  eq(train[0].person, 'spine', 'the declared layout order was not honoured');
+  const { train, bridges } = buildTrain(people);
+  eq(train[0].person, 'spine', 'the declared spine was not laid out first');
   const spineWheels = train.filter(t => t.role === 'link' && t.person === 'spine').length;
 
   /* The fixture is only evidence if it would have caught the old shape. This is
@@ -1075,11 +1093,26 @@ test('an idler never carries a service, a badge or an engraving', () => {
 test('the bridge bearing is relative to the stage axis, never absolute', () => {
   /* The page rotates the whole train by _axisRot in portrait. A bridge expressed
      in screen degrees would stay horizontal and cross the SHORT axis -- the same
-     failure as #67. */
-  const i = SRC.indexOf('BRIDGE_BEARING');
-  ok(i > 0, 'no BRIDGE_BEARING is defined');
-  const near = SRC.slice(i, i + 600);
-  ok(/_axisRot/.test(near), 'BRIDGE_BEARING is not expressed relative to _axisRot');
+     failure as #67.
+
+     IT READS THE DECLARATION, NOT A WINDOW OF BYTES EITHER SIDE OF IT. This used
+     to slice 600 characters after the first mention of BRIDGE_BEARING and look
+     for _axisRot anywhere inside, which passes on any file where the two happen
+     to be written near each other -- including, as it turned out, on a comment
+     that grew long enough to push the code out of the window. The statement that
+     has to be relative is `const bridgeBase =`, so that is what is read.
+
+     THIS IS THE ANGLE HALF ONLY. Which way round the perpendicular runs is the
+     other half, and it is asserted where it can actually be seen -- in screen
+     coordinates, by "the spine is topmost in landscape and LEFTMOST in
+     portrait". A source-shape test cannot tell a bearing from its mirror. */
+  const i = SRC.indexOf('const bridgeBase =');
+  ok(i > 0, 'solve() no longer names a bridgeBase');
+  const decl = SRC.slice(i, SRC.indexOf(';', i) + 1);
+  ok(/_axisRot/.test(decl),
+    'the bridge bearing is not measured from _axisRot: ' + decl);
+  ok(/BRIDGE_BEARING/.test(decl),
+    'the bridge bearing is not expressed as BRIDGE_BEARING from the axis: ' + decl);
 });
 
 test('a chain that opts out of bridging is a root, and keeps no idlers', () => {
@@ -1120,7 +1153,7 @@ test('a chain that opts out of bridging is a root, and keeps no idlers', () => {
    _idlerN, and both are supplied, which is the same thing fitStage() does. */
 function runSolve(people, opts) {
   opts = opts || {};
-  const { train, bridges, order } = buildTrain(people);
+  const { train, bridges, order, spine } = buildTrain(people);
   const MODULE = page.MODULE, TEETH_MEAN = grabNumber('TEETH_MEAN');
   /* Real deals, so the geometry under test is geometry the page can produce. */
   new Function('TRAIN', 'TEETH_MIN', 'TEETH_MAX', 'TEETH_SLACK', 'TEETH_HOST',
@@ -1147,7 +1180,7 @@ function runSolve(people, opts) {
   }));
   const solve = new Function('TRAIN', 'BRIDGES', 'MODULE', 'TOOTH_ADD',
     'TEETH_MEAN', 'MIN_IDLERS', 'MAX_IDLERS', 'CLEARANCE', 'ENDS_APART',
-    'ANG_MIN', 'ANG_MAX', 'CHAIN_RANK', 'WHO', 'PAIR_SLOTS', 'PAIRS', 'SINGLES',
+    'ANG_MIN', 'ANG_MAX', 'CHAIN_RANK', 'SPINE_SLUG', 'PAIR_SLOTS', 'PAIRS', 'SINGLES',
     'SITES', 'console', `
     ${grabBlock('function segCross(', '{', '}')}
     ${grabBlock('function segDist(', '{', '}')}
@@ -1165,9 +1198,9 @@ function runSolve(people, opts) {
   const solved = solve(train, bridges, MODULE, page.TOOTH_ADD, TEETH_MEAN,
     grabNumber('MIN_IDLERS'), grabNumber('MAX_IDLERS'), grabNumber('CLEARANCE'),
     grabNumber('ENDS_APART'), page.ANG_MIN, page.ANG_MAX, CHAIN_RANK,
-    order[0] || { slug: '' }, [], [], [], sites,
+    spine ? spine.slug : '', [], [], [], sites,
     { warn: (m) => warns.push(m), error: (m) => warns.push(m) }).call(ctx);
-  return { solved, train, bridges, warns, ctx, order };
+  return { solved, train, bridges, warns, ctx, order, spine };
 }
 
 /* Which chain a placed wheel belongs to: an idler belongs to the chain it
@@ -1207,38 +1240,419 @@ const THREE = [
   { slug: 'spine', links: [1, 2, 3, 4, 5, 6, 7].map(n => ({ slug: 's' + n })) }
 ];
 
-test('chains are laid out longest first, in order, across the cross axis', () => {
-  /* Charles, 2026-08-02: "lay them out in order of how many entries they have,
-     longest first, then descending, top to bottom in landscape, and the
-     equivalent along the cross axis in portrait". PEOPLE order is arbitrary the
-     moment there are three chains, and until this rule the second and third
-     both hung off the spine and arrived in the SAME row, ordered by nothing.
-     Measured along the bridge direction, which is what "top to bottom" means
-     once the stage rotates: the bridges all run one way, perpendicular to the
-     spine and relative to it. */
+/* THE SAME THREE CHAINS WITH BOTH DECLARATIONS MADE (#85), and made so that
+   neither agrees with link count nor with the other: the spine is the MIDDLE
+   chain, and the stack behind it runs shortest to longest. PEOPLE order is a
+   third sequence again, so nothing here can pass by accident of the file.
+
+   THIS ARRANGEMENT WAS UNREACHABLE under the single sort. Longest-first answered
+   both questions at once -- which chain is the axis, and what order the rest sit
+   in -- so no config could ask for a short spine or for a stack that is not
+   length order. That is the whole of what the split buys, and it is only proved
+   by a fixture that uses it. */
+const DECLARED = [
+  { slug: 'mid', order: 20, spine: true,
+    links: [{ slug: 'a' }, { slug: 'b' }, { slug: 'c' }, { slug: 'e' }] },
+  { slug: 'tiny', order: 10, links: [{ slug: 'd' }] },
+  { slug: 'big', order: 30, links: [1, 2, 3, 4, 5, 6, 7].map(n => ({ slug: 's' + n })) }
+];
+
+/* Each chain's mean position along the CROSS AXIS, in the increasing screen
+   direction: down at _axisRot 0, right at 90. Idlers are excluded -- they span
+   two rows and belong to neither.
+
+   IT IS DELIBERATELY NOT THE BRIDGE DIRECTION. This measured `rot + 90`, which
+   is the bearing solve() used to take, so it agreed with the code by
+   construction and would have gone on agreeing with it whichever way round the
+   bridges ran. A test that reads the implementation's own heading can see the
+   chains arrive in order and still not see them arrive on the WRONG SIDE, which
+   is exactly what happened: at rot 90 the stack ran leftward off a rightmost
+   spine, the assertion passed, and the only thing that could tell was a
+   photograph. (sin rot, cos rot) is the rule in screen terms instead -- the
+   cross axis pointing away from the origin corner -- so it stays true if the
+   bearing is ever taken the other way round again, and fails if it is. */
+function alongCross(solved, rot) {
+  const dir = (90 - rot) * Math.PI / 180;
+  const at = {};
+  solved.gears.forEach(w => {
+    if (w.person == null) return;
+    (at[w.person] = at[w.person] || []).push(w.x * Math.cos(dir) + w.y * Math.sin(dir));
+  });
+  const mean = {};
+  Object.keys(at).forEach(p => {
+    mean[p] = at[p].reduce((a, b) => a + b, 0) / at[p].length;
+  });
+  return mean;
+}
+
+test('chains stack in the order CHAIN_ORDER declares, across the cross axis', () => {
+  /* Charles, 2026-08-02: "lay them out in order ... top to bottom in landscape,
+     and the equivalent along the cross axis in portrait". PEOPLE order is
+     arbitrary the moment there are three chains, and until this rule the second
+     and third both hung off the spine and arrived in the SAME row, ordered by
+     nothing.
+
+     WHAT THE ORDER IS was link count until #85 and is now DECLARED -- so the
+     assertion is no longer "longest first", which would forbid the very thing
+     the keys exist to express. It is the stronger statement underneath it: the
+     chains arrive along the cross axis in CHAIN_ORDER, whatever CHAIN_ORDER
+     says, and the same run proves the two ways of arriving at one. THREE
+     declares nothing and must still come out by link count, because that is what
+     the fallback still leads with; DECLARED asks for an order no fallback could
+     produce and must get it. Delete either half and the test stops having teeth:
+     the first alone cannot see a declaration being ignored, the second alone
+     cannot see the default having drifted. */
   const bad = [];
-  [0, 90].forEach(rot => {
-    const { solved, train, order } = runSolve(THREE, { axisRot: rot });
-    eq(order.map(p => p.slug).join(','), 'spine,mid,tiny',
-      'CHAIN_ORDER is not longest-first');
-    const dir = (rot + 90) * Math.PI / 180;
-    const along = {};
-    solved.gears.forEach(w => {
-      if (w.person == null) return;                 /* idlers span two rows */
-      (along[w.person] = along[w.person] || []).push(w.x * Math.cos(dir) + w.y * Math.sin(dir));
-    });
-    let last = -Infinity, lastSlug = 'the top edge';
-    order.forEach(p => {
-      const v = along[p.slug].reduce((a, b) => a + b, 0) / along[p.slug].length;
-      if (!(v > last)) {
-        bad.push(`at axisRot ${rot}: ${p.slug} (${(p.links || []).length} wheels) `
-          + `sits at ${v.toFixed(0)} along the bridge axis, not past ${lastSlug} `
-          + `at ${last.toFixed(0)}`);
-      }
-      last = v; lastSlug = p.slug;
+  [[THREE, 'spine,mid,tiny', 'the default stack no longer leads with link count'],
+   [DECLARED, 'mid,tiny,big', 'the declared spine and order were not honoured']
+  ].forEach(([people, want, why]) => {
+    [0, 90].forEach(rot => {
+      const { solved, order } = runSolve(people, { axisRot: rot });
+      eq(order.map(p => p.slug).join(','), want, why);
+      const mean = alongCross(solved, rot);
+      let last = -Infinity, lastSlug = 'the top edge';
+      order.forEach(p => {
+        const v = mean[p.slug];
+        if (!(v > last)) {
+          bad.push(`at axisRot ${rot}: ${p.slug} (${(p.links || []).length} wheels) `
+            + `sits at ${v.toFixed(0)} along the cross axis, not past ${lastSlug} `
+            + `at ${last.toFixed(0)}`);
+        }
+        last = v; lastSlug = p.slug;
+      });
     });
   });
   ok(bad.length === 0, bad.join('\n      '));
+});
+
+test('the spine is topmost in landscape and LEFTMOST in portrait', () => {
+  /* Charles, 2026-08-05: "why is the longest chain not the leftmost chain in
+     portrait, when in landscape it is at the top?" It was not: the spine came out
+     RIGHTMOST and the stack ran leftward from it, which a screenshot showed and
+     nothing in tools/ could.
+
+     THE BEARING WAS THE #67 FAILURE HALF-FIXED. BRIDGE_BEARING is relative to
+     _axisRot, so the bridge stayed perpendicular to the spine when the stage
+     turned -- that much was already right. But WHICH WAY ROUND it went was still
+     a fixed +90: "down" at rot 0, and the identical +90 is "left" at rot 90. The
+     rotation was honoured and the handedness was not, and the mirror image is
+     equally legal geometry, so nothing local could object.
+
+     SO THE ASSERTION IS IN SCREEN COORDINATES, deliberately -- x and y as the
+     viewer sees them, not a heading the code also computes. Every other test
+     here measures along the bridge direction, which is what let this stand: any
+     test that asks "are they in order along the way the bridges point" gets yes
+     from both mirror images. Only naming the edge can tell them apart. */
+  const bad = [];
+  [['THREE', THREE], ['DECLARED', DECLARED]].forEach(([label, people]) => {
+    [[0, 'y', 'topmost', 'landscape'], [90, 'x', 'leftmost', 'portrait']]
+      .forEach(([rot, axis, end, view]) => {
+        const { solved, order } = runSolve(people, { axisRot: rot });
+        const at = {};
+        solved.gears.forEach(w => {
+          if (w.person == null) return;
+          (at[w.person] = at[w.person] || []).push(w[axis]);
+        });
+        const mean = (s) => at[s].reduce((a, b) => a + b, 0) / at[s].length;
+        const spine = order[0].slug;
+        order.slice(1).forEach(p => {
+          if (!(mean(spine) < mean(p.slug))) {
+            bad.push(`${label} in ${view}: the spine "${spine}" is at ${axis}=`
+              + `${mean(spine).toFixed(0)} and "${p.slug}" at ${mean(p.slug).toFixed(0)}, `
+              + `so the spine is not ${end}`);
+          }
+        });
+      });
+  });
+  ok(bad.length === 0, bad.join('\n      '));
+});
+
+test('the spine is a separate choice from the stack, and each moves alone', () => {
+  /* The two keys are only worth having if they are independent. Take the same
+     three chains and change ONE declaration at a time: dropping `spine` must move
+     the axis and leave the stack alone, and changing `order` must move the stack
+     and leave the axis alone. Under one sort key neither was possible -- there was
+     one lever and it moved both. */
+  const drop = (p) => { const q = Object.assign({}, p); delete q.spine; return q; };
+  const noSpine = buildTrain(DECLARED.map(drop));
+  eq(noSpine.spine.slug, 'tiny',
+    'with no chain declaring itself the axis, the spine is not the head of the stack');
+  eq(noSpine.order.map(p => p.slug).join(','), 'tiny,mid,big',
+    'dropping the spine declaration changed the stacking order too');
+
+  const reordered = DECLARED.map(p => p.slug === 'big'
+    ? Object.assign({}, p, { order: 1 }) : p);
+  const moved = buildTrain(reordered);
+  eq(moved.spine.slug, 'mid', 'reordering the stack moved the axis with it');
+  eq(moved.order.map(p => p.slug).join(','), 'mid,big,tiny',
+    'the reordered stack was not honoured behind the spine');
+
+  /* AND THE SPINE IS ALWAYS THE HEAD OF THE LAYOUT, however far down the stack it
+     was declared. That is structural, not cosmetic: a bridge may only hang off a
+     wheel already placed, so a spine emitted second would be driven by the chain
+     it is supposed to drive. */
+  [DECLARED, reordered, DECLARED.map(drop), THREE].forEach(people => {
+    const { order, spine } = buildTrain(people);
+    eq(order[0].slug, spine.slug,
+      'CHAIN_ORDER[0] is ' + order[0].slug + ', not the spine ' + spine.slug);
+  });
+});
+
+test('a spine declaration that cannot be honoured is announced, not obeyed', () => {
+  /* An empty chain is not laid out at all, so it cannot be the axis the others
+     hang off, and two chains cannot both be it. Silently picking something else
+     would leave config.js reading as though a choice had been made that the page
+     never made -- the same class of quiet default as the old PEOPLE[0] hostname
+     fallback. The composition still has to arrive, so it falls back and says so. */
+  const empty = buildTrain([
+    { slug: 'nothing', spine: true, links: [] },
+    { slug: 'mid', links: [{ slug: 'a' }, { slug: 'b' }] },
+    { slug: 'tiny', links: [{ slug: 'd' }] }
+  ]);
+  eq(empty.spine.slug, 'mid', 'a chain with no links was made the spine');
+  ok(empty.spineWarns.some(w => /nothing/.test(w) && /no links/.test(w)),
+    'nothing was said about the spine declaration that was dropped: '
+    + (empty.spineWarns.join(' | ') || '(silence)'));
+
+  const both = buildTrain([
+    { slug: 'first', spine: true, links: [{ slug: 'a' }] },
+    { slug: 'second', spine: true, links: [{ slug: 'b' }, { slug: 'c' }] }
+  ]);
+  eq(both.spine.slug, 'second',
+    'two spine declarations did not resolve to the one earlier in the stack');
+  ok(both.spineWarns.some(w => /only one chain can be the axis/.test(w)),
+    'two chains claimed the axis in silence: '
+    + (both.spineWarns.join(' | ') || '(silence)'));
+
+  /* BOTH FAULTS AT ONCE, because that is the case a message can get wrong on its
+     own. Two empty chains claiming the axis fires both warnings, and each has to
+     name the chain that ACTUALLY stood in -- neither may work out its own
+     replacement, or the console describes a composition the page did not draw. */
+  const worst = buildTrain([
+    { slug: 'ghost-a', spine: true, links: [] },
+    { slug: 'ghost-b', spine: true, links: [] },
+    { slug: 'real', links: [{ slug: 'a' }, { slug: 'b' }] }
+  ]);
+  eq(worst.spine.slug, 'real', 'two empty spine declarations did not fall back to the stack');
+  eq(worst.spineWarns.filter(w => /"real" is the axis/.test(w)).length, 2,
+    'a warning named something other than the chain that was actually used: '
+    + (worst.spineWarns.join(' | ') || '(silence)'));
+});
+
+test('the stack nobody declares is link count, then name, descending', () => {
+  /* THE FALLBACK, WHICH IS NOT NOTHING. `order` is the rule; this is what a chain
+     that has not been given one falls back to, and Charles set it on 2026-08-05:
+     by number of links, then by name, DESCENDING on both. It replaced "ties keep
+     PEOPLE order", which was not a rule so much as an artefact -- Array
+     .prototype.sort is stable, so the tie fell to the line a person happened to
+     be written on, and nothing in config.js said so.
+
+     THE EXPECTED ORDER IS WORKED OUT HERE, from the fixture, rather than read
+     back out of the page: this is the one assertion that must NOT share a
+     derivation with the thing it is checking. Fixtures cover what the sort is
+     actually asked to survive -- a tie on length, an all-equal set where the name
+     is the ONLY signal (and where PEOPLE order is deliberately the reverse of the
+     answer, so the old rule cannot pass), and an empty chain, which sorts last
+     and cannot be the spine. */
+  const bad = [];
+  const chain = (slug, n) => ({ slug, name: slug.toUpperCase(),
+    links: Array.from({ length: n }, (_, k) => ({ slug: slug + k })) });
+  [[chain('a', 3), chain('b', 5), chain('c', 3)],
+   [chain('a', 2), chain('b', 2), chain('c', 2)],
+   [chain('a', 1), chain('b', 0), chain('c', 4)],
+   [chain('only', 3)]
+  ].forEach(people => {
+    const want = people.slice()
+      .sort((x, y) => ((y.links || []).length - (x.links || []).length)
+        || (x.name < y.name ? 1 : x.name > y.name ? -1 : 0))
+      .map(p => p.slug);
+    const { order, spine } = buildTrain(people);
+    const got = order.map(p => p.slug);
+    if (got.join(',') !== want.join(',')) {
+      bad.push(`[${people.map(p => p.slug + ':' + p.links.length).join(' ')}] stacks `
+        + `${got.join(',')}, not links-then-name-descending ${want.join(',')}`);
+    }
+    /* And the undeclared spine is still the longest chain WITH WHEELS, which is
+       what the old single sort chose and the only reason it was ever right. */
+    const wantSpine = want.find(s => people.find(p => p.slug === s).links.length > 0);
+    if (spine.slug !== wantSpine) {
+      bad.push(`[${people.map(p => p.slug).join(' ')}] made ${spine.slug} the axis, `
+        + `not ${wantSpine}`);
+    }
+  });
+  ok(bad.length === 0, bad.join('\n      '));
+});
+
+test('a half-declared stack puts the declarations first, and the rest behind them', () => {
+  /* THE STATE EVERY CONFIG PASSES THROUGH -- one person given an `order` and the
+     others not yet -- and the one the fallback is easiest to get wrong in, since
+     it is the only case where the declared rule and the default rule are both
+     live at once. Infinity is what makes it need no branch of its own: an
+     undeclared chain is at the far end of the stack by arithmetic, so it falls in
+     behind every declaration however large the numbers are. */
+  const link = (n) => Array.from({ length: n }, (_, k) => ({ slug: 's' + k }));
+  const mixed = buildTrain([
+    { slug: 'late-number', order: 900, links: link(1) },
+    { slug: 'plain-long', links: link(4) },
+    { slug: 'plain-short', links: link(2) },
+    { slug: 'early-number', order: 3, links: link(1) }
+  ]);
+  eq(mixed.order.map(p => p.slug).join(','),
+    'early-number,late-number,plain-long,plain-short',
+    'a declared order did not outrank an undeclared chain, or the undeclared '
+    + 'chains stopped falling in longest-first behind them');
+  eq(mixed.spine.slug, 'early-number',
+    'the head of the stack is not the axis when the stack is only half declared');
+
+  /* TWO CHAINS ASKING FOR THE SAME PLACE ARE NOT A COIN TOSS. `a - b` is 0 for
+     equal numbers, so the comparator falls through to the documented default --
+     links descending, then name descending -- rather than to whichever pair the
+     sort happened to compare. Both keys are asserted, because only the second can
+     tell a decided fall-through from a lucky one: the name pair is written in the
+     REVERSE of the answer, so the old PEOPLE-order rule would fail it. */
+  eq(buildTrain([
+    { slug: 'short', name: 'Short', order: 1, links: link(2) },
+    { slug: 'long', name: 'Long', order: 1, links: link(5) }
+  ]).order.map(p => p.slug).join(','), 'long,short',
+    'two chains claiming one place did not fall through to longest-first');
+  eq(buildTrain([
+    { slug: 'anna', name: 'Anna', order: 1, links: link(2) },
+    { slug: 'zoe', name: 'Zoe', order: 1, links: link(2) }
+  ]).order.map(p => p.slug).join(','), 'zoe,anna',
+    'two chains claiming one place at the same length did not break to name, '
+    + 'descending');
+
+  /* THE NAME KEY IS THE NAME, AND FALLS BACK TO THE SLUG. Case must not decide
+     it either -- "alice" and "Alice" are one name spelt two ways, and a
+     code-unit compare puts every capital before every lowercase, which would
+     sort by shift key rather than by name. */
+  eq(buildTrain([
+    { slug: 'zeta', name: 'alpha', links: link(1) },
+    { slug: 'alpha', name: 'Zeta', links: link(1) }
+  ]).order.map(p => p.slug).join(','), 'alpha,zeta',
+    'the tie broke on the slug or on letter case, not on the name');
+
+  /* AND A NUMBER THAT IS NOT A POSITION IS NOT A DECLARATION. NaN compares false
+     with everything including itself, so without the isFinite guard the
+     comparator disagrees with itself and the order a sort returns from one is
+     defined by nothing. It has to land on the documented default instead.
+
+     THE NONSENSE CHAIN IS THE LONGER ONE ON PURPOSE. Without the guard the
+     comparison yields NaN, the sort falls through to link count and the longest
+     chain leads -- which is the answer the fixture would have got anyway if it
+     were the shorter one, so a fixture that way round proves nothing. */
+  eq(buildTrain([
+    { slug: 'nonsense', order: NaN, links: link(5) },
+    { slug: 'real', order: 2, links: link(1) }
+  ]).order.map(p => p.slug).join(','), 'real,nonsense',
+    'an unusable `order` was treated as a position rather than as no declaration');
+});
+
+test('the shipped config declares its spine and its stack, and gets what it declares', () => {
+  /* #85 is only finished if the FILE says where each chain goes. Everything above
+     proves the keys work on fixtures; this is the one that reads config.js, and
+     it is what stops the next person added to the household from arriving with
+     their position decided by how many links they happen to have -- which is the
+     inference the whole issue exists to remove, and which would come back
+     silently, because the default is deliberately the old rule.
+
+     It is a gate on the config rather than on the code, so it says what to do:
+     give the new chain an `order`. */
+  const people = loadConfig().PEOPLE || [];
+  const bad = [];
+  const seen = {};
+  people.forEach(p => {
+    if (!('order' in p)) {
+      bad.push(`"${p.slug}" declares no order -- give it one (they need not be `
+        + 'contiguous; 10, 20, 30 leaves room to insert people between them)');
+      return;
+    }
+    if (!(typeof p.order === 'number' && isFinite(p.order))) {
+      bad.push(`"${p.slug}" declares order: ${JSON.stringify(p.order)}, which is `
+        + 'not a position -- it is ignored, and the chain silently falls back');
+      return;
+    }
+    if (seen[p.order]) bad.push(`"${p.slug}" and "${seen[p.order]}" both claim `
+      + `order ${p.order}, so the file does not decide which comes first`);
+    seen[p.order] = p.slug;
+  });
+
+  const claimed = people.filter(p => p.spine === true);
+  if (claimed.length !== 1) {
+    bad.push(`${claimed.length} chains declare spine: true (`
+      + (claimed.map(p => p.slug).join(', ') || 'none') + ') -- exactly one chain '
+      + 'is the axis the composition is built around, and it should say so');
+  }
+  claimed.forEach(p => {
+    if (!(p.links || []).length) bad.push(`"${p.slug}" declares spine: true but `
+      + 'has no links, so it is not laid out at all and cannot be the axis');
+  });
+  ok(bad.length === 0, bad.join('\n      '));
+
+  /* AND THE PAGE USES WHAT THE FILE SAYS. Read back through index.html's own
+     declarations against the real PEOPLE, so the assertion is about the shipped
+     config going through the shipped derivation, not about either alone. */
+  const { order, spine, spineWarns } = buildTrain(people);
+  eq(spine.slug, claimed[0].slug, 'the chain config.js declares the axis is not '
+    + 'the one the page laid out first');
+  eq(spineWarns.join(' | '), '', 'the shipped config provoked a spine warning');
+  eq(order.map(p => p.slug).join(','),
+    [claimed[0].slug].concat(people.filter(p => p !== claimed[0])
+      .slice().sort((a, b) => a.order - b.order).map(p => p.slug)).join(','),
+    'the shipped chains do not lay out as the spine followed by ascending order');
+});
+
+test('a declared spine and stack still compose into a well-formed machine', () => {
+  /* The keys are not worth having if the arrangement they unlock does not solve.
+     DECLARED is the hard case on purpose -- a FOUR-wheel spine with a SEVEN-wheel
+     chain in the stack, which the old sort could never present to the solver -- so
+     everything the composition is required to be is asked of it at once, at both
+     stage rotations and at both idler counts:
+
+       every bridge hangs off a chain EARLIER in the layout order, which is what
+       "a wheel already placed" means once solve() has chosen the anchor;
+       no chain head fell back to the origin, the failure the bridge exists to
+       remove;
+       every wheel of every chain is placed at a finite point -- coverage;
+       and no wheel of one chain overlaps a wheel of another. */
+  const bad = [];
+  for (let trial = 0; trial < 40 && bad.length === 0; trial++) {
+    const rot = trial % 2 ? 90 : 0, n = trial % 4 < 2 ? 1 : 2;
+    const ctx = {};
+    const { solved, train, bridges, warns, spine, order } =
+      runSolve(DECLARED, { axisRot: rot, idlerN: n, ctx });
+    const where = `axisRot ${rot}, ${n} idler(s): `;
+    eq(spine.slug, 'mid', 'the declared spine is not the axis the solver used');
+    warns.forEach(w => bad.push(where + `warned "${w}"`));
+    const rank = {};
+    order.forEach((p, k) => { rank[p.slug] = k; });
+    const at = {};
+    solved.gears.forEach(w => { at[w.i] = w; });
+    bridges.forEach(b => {
+      const anchor = (ctx._bridgeAt || {})[b.person];
+      if (!anchor || anchor.at == null) return;   /* a refused bridge is warned above */
+      const host = chainOfWheel(train, { i: anchor.at, person: train[anchor.at].person });
+      if (!(rank[host] < rank[b.person])) {
+        bad.push(where + `chain ${b.person} hangs off ${host}, which is not `
+          + 'earlier in the layout order');
+      }
+      const head = at[b.head];
+      if (!head) bad.push(where + `chain ${b.person}'s head is not placed at all`);
+      else if (Math.hypot(head.x, head.y) < 1e-9) {
+        bad.push(where + `chain ${b.person}'s head fell back to the origin`);
+      }
+    });
+    train.forEach((t, i) => {
+      if (t.role !== 'link') return;
+      const w = at[i];
+      if (!w) bad.push(where + `${t.person} wheel ${i} was not placed at all`);
+      else if (!isFinite(w.x) || !isFinite(w.y)) {
+        bad.push(where + `${t.person} wheel ${i} is at (${w.x}, ${w.y})`);
+      }
+    });
+    crossChainFouls(train, solved).forEach(f => bad.push(where + f));
+  }
+  ok(bad.length === 0, [...new Set(bad)].slice(0, 5).join('\n      '));
 });
 
 test('no wheel of one chain ever overlaps a wheel of another', () => {
@@ -1443,9 +1857,9 @@ test('a bridge idler is drawn at the same opacity as every other ghost', () => {
    choosing. `this` is the only thing it reads from the component -- _axisRot,
    which is what fitStage() hands solve() too -- so no DOM is needed. */
 function chainAxesOf(solved, axisRot, spineSlug) {
-  const fn = new Function('WHO',
+  const fn = new Function('SPINE_SLUG',
     'return function ' + grabBlock('  chainAxes(solved) {', '{', '}') + ';')(
-    { slug: spineSlug });
+    spineSlug);
   return fn.call({ _axisRot: axisRot }, solved);
 }
 /* Unsigned angle between two headings, folded to 0..90: an axis and its reverse
@@ -1488,9 +1902,9 @@ function fitEscapesOn(solved, axisRot, spineSlug, margin) {
     _stageRef: { current: { getBoundingClientRect: () => (
       { width: solved.w, height: solved.h, left: margin, top: margin }) } },
     solve: () => solved,
-    chainAxes: new Function('WHO',
+    chainAxes: new Function('SPINE_SLUG',
       'return function ' + grabBlock('  chainAxes(solved) {', '{', '}') + ';')(
-      { slug: spineSlug }),
+      spineSlug),
     rnd: new Function('return function ' + grabBlock('  rnd() {', '{', '}') + ';')(),
     setState: function (s) { this.ghosts = s.ghosts; }
   };
@@ -1754,9 +2168,9 @@ function datumRunsOn(solved, axisRot, spineSlug, ghosts, sites, plates, S) {
     datumClear: new Function('MODULE', 'PLATE_TOP_CLEAR',
       'return function ' + grabBlock('  datumClear(S) {', '{', '}') + ';')(
       page.MODULE, page.PLATE_TOP_CLEAR),
-    chainAxes: new Function('WHO',
+    chainAxes: new Function('SPINE_SLUG',
       'return function ' + grabBlock('  chainAxes(solved) {', '{', '}') + ';')(
-      { slug: spineSlug })
+      spineSlug)
   };
   return fn.call(ctx, solved, ghosts || [], S === undefined ? 1 : S);
 }

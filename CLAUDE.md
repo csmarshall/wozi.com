@@ -98,6 +98,14 @@ SAN in us-east-1, an alternate domain name on the distribution and a Route53
 alias — no deploy change, and no edit to `config.js` unless the new name is
 meant to be somebody's personal address.
 
+**A scope is not a person, and the code now says so in two names.** `SELECTED` is
+the person the page is about and is `null` on the combined stage, where the
+honest answer is "everybody"; `SPINE` is which chain the composition is built
+around, which is a geometry question the hostname does not ask. They were one
+constant (`WHO`), so every reader had to know which of the two it meant — the
+analytics beacon wanted the selection and got the spine. See *Invariants* for the
+rest; what belongs here is that **nothing about a hostname chooses a spine.**
+
 **The picker is drawn only on the combined stage.** A personal link must not
 advertise everyone else living on the domain, so the old rule — hidden while
 there is one person — now also hides it while the view is deliberately one
@@ -209,14 +217,54 @@ absolute screen degrees and the bridge stays horizontal while the train turns
 upright, sending it across the **short** axis. That is the #67 class of failure,
 and it has now been made twice by two different pieces of geometry.
 
-**Chains are laid out longest first, and overlap is a reported failure — not an
-impossible one.** `CHAIN_ORDER` sorts by link count, ties breaking to `PEOPLE`
-order, and that is the *layout* order, not merely the emission order: `solve()`
-places wheels in `TRAIN` order and a bridge may only hang off a wheel already
-placed, so a chain can only ever be driven from one earlier in the list. The
-spine is `CHAIN_ORDER[0]` and growth goes one way.
+**And so is which way round it runs.** That is the same lesson's second half, and
+it was missing until 2026-08-05: the bearing was relative to the axis but its
+*sign* was fixed at `+90`, which means "down" at `_axisRot` 0 and "left" at 90.
+The rotation was honoured and the handedness was not, so in portrait the spine
+came out **rightmost** with the stack running toward the left edge — geometry
+that is a legal mirror image, which is exactly why nothing local objected and
+only a screenshot could tell. The rule now, stated once: **the bridge runs along
+the cross axis away from the stage origin**, so rank 0 is topmost in landscape and
+leftmost in portrait, and both candidate bearings are compared rather than one
+being written down. Note what caught it and what did not — every harness here
+measured *along the bridge direction*, and both mirror images pass that. The
+regression test is in screen `x`/`y` for that reason.
 
-The attachment search ranks every anchor and takes the first that clears three
+**Which chain is the spine and what order the rest stack in are two declarations,
+not one sort** (#85). `spine: true` names the axis — a geometry choice, since it
+sets the scale and every other chain is laid parallel to it. `order: <n>` names
+the stack — a presentation choice, ascending, **topmost in landscape and leftmost
+in portrait**. Both are per-person keys in `config.js` and both are documented
+there.
+
+**What an undeclared chain falls back to is link count, then name, both
+descending**, and it falls in behind every chain that does declare an `order`.
+The name is where `PEOPLE` order used to be: the tie broke on the line a person
+was written on, which held only because `Array.prototype.sort` is stable and
+which nothing in `config.js` said out loud. Naming the key makes the sort total,
+so nothing leans on sort stability any more, and `PEOPLE` order now decides only
+the person picker. The compare is case-folded and deliberately **not**
+locale-aware — a tie-break that changes with the runtime's ICU data is a drifting
+constant wearing a method call.
+
+The spine's fallback does not restate any of that: it is *whichever chain the
+stack puts first*, skipping any with no wheels. One home for "which chain leads".
+
+`CHAIN_ORDER` is derived from the two and is not a third thing to keep in step:
+it is the spine followed by the stack. **The spine is always at its head**, which
+is structural rather than a preference — `solve()` places wheels in `TRAIN` order
+and a bridge may only hang off a wheel already placed, so growth goes one way and
+it starts at the axis. `CHAIN_ORDER[0] === SPINE` is therefore true by
+construction rather than by the sort happening to make it true.
+
+**`SPINE` and `SELECTED` are different questions and no longer share a name.**
+`SPINE` is which chain is the axis; `SELECTED` is which person the page is about,
+and it is `null` on the combined stage, where the answer is "everybody". They
+were one constant (`WHO`) and every consumer had to know which of the two it was
+really asking for — the beacon wanted the selection and got the spine.
+
+**Overlap is a reported failure — not an impossible one.** The attachment search
+ranks every anchor and takes the first that clears three
 tests: the bridge and the whole chain behind it must foul no wheel, the bridge
 run must pass over none, and it must cross no other bridge. There is no
 cross-axis band test — the cross axis is bounded elsewhere, by `idlerCount()`.
