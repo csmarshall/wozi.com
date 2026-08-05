@@ -7,6 +7,38 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Changed
 
+- **CL#113 — two assertion messages that named the pass instead of the fail, and
+  a sweep for a third.** (GitHub #105.)
+
+  `eq(bridges[0].idlers.length, 0, 'an unbridged chain claims idlers')` and
+  `eq(train[bridges[0].head].parent, null, 'an unbridged chain is not a root')`
+  each read, cold, as a flat statement about a healthy tree rather than as a
+  report of what broke — a message an assertion function only ever prints on
+  failure has to say what *is* true then, and "claims idlers" / "is not a root"
+  are exactly as true of the passing case as of the failing one, so a reader
+  meeting either for the first time on a red run has nothing in the sentence to
+  tell them which. Both were rewritten to say the deviation: *"kept idlers on
+  its bridge record, and it has no drive to hang them off"* and *"was given a
+  parent, so it is being driven by the chain it opted out of"*.
+
+  Both corrections had already landed, uncredited, inside CL#104's commit —
+  found there while chasing the same family of fault (an assertion that cannot
+  say what went wrong is one more step from an assertion that cannot fail at
+  all, GitHub #89). This entry is the credit that commit didn't leave, plus the
+  sweep the ticket actually asked for: every `ok(...)` and `eq(...)` message in
+  `tools/test.js` — 282 call sites across 89 `test()` cases — read against the
+  same question, which state does this sentence describe. None of the rest
+  share the fault; the file's prevailing convention already names the
+  deviation directly ("a plate that seats cleanly warns about it", "the bridge
+  bearing is not measured from `_axisRot`") or states the requirement as a
+  requirement ("a train must have exactly one root", "a two-row entry needs
+  `[Zs,Zp1,Zp2,Zr,N]`"), and either reads the same on a red run as off one.
+
+  Verified by forcing `bridges[0].idlers.length` to want `99` instead of `0`:
+  the suite failed with *"an unbridged chain kept idlers on its bridge record,
+  and it has no drive to hang them off (got 0, want 99)"*, then restored.
+  `npm test`: **89 passed, 0 failed.**
+
 - **CL#110 — `?hud`, an animation HUD for how the browser is really rendering
   the gears.** (GitHub #92.)
 
