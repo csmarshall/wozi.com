@@ -100,12 +100,18 @@ window.WOZI_CONFIG = {
   STAGE_HOSTS: ['wozi.com', 'www.wozi.com', 'localhost', '127.0.0.1'],
 
   /* ---------------------------------------------------------------------------
-     PEOPLE — one entry per chain. THE ORDER MATTERS: it breaks ties when the
-     chains are ordered by length, and the longest chain is the spine the rest of
-     the composition is built around.
+     PEOPLE — one entry per chain. THE ORDER HERE IS THE ORDER OF THE PERSON
+     PICKER, and that is now ALL it is. It used to break ties in the stacking
+     order as well, silently — Array.prototype.sort is stable, so two chains of
+     the same length came out in the order they were written, and nothing beside
+     a person said their position on the page depended on the line they were on.
+     Where a chain sits is `order` below, and what an undeclared chain falls back
+     to is link count then NAME, both descending. Move an entry in this list and
+     only the picker changes.
 
        slug    stable id, used by the ?who= override
-       name    shown in the person picker
+       name    shown in the person picker, and the last tie-break in the default
+               stacking order — see `order`
        hosts   hostnames that land on this person ALONE. One CloudFront
                distribution can carry many alternate domain names, all serving
                this same object out of s3://wozi.com — selection happens here, in
@@ -197,8 +203,54 @@ window.WOZI_CONFIG = {
                at is refused outright, with a warning: the bridge idlers are
                grey, and a chain that grey would read as structure rather than
                as somebody's.
+       order   optional, a number. WHERE THIS CHAIN SITS IN THE STACK — TOPMOST
+               in landscape, LEFTMOST in portrait. Ascending: the lowest number
+               is nearest the top, and nearest the left when the stage turns.
+               This is a PRESENTATION choice and it is the answer to "put Charles
+               first".
+
+               Absent, a chain falls in BEHIND everyone who declares one, and
+               those are ordered by LINK COUNT, then by NAME, both DESCENDING
+               (Charles, 2026-08-05). Declared numbers always win, so a half
+               declared file is well defined rather than half sorted.
+
+               The name compare is case-folded and deliberately NOT locale-aware:
+               a tie-break that comes out differently under a different ICU build
+               is a layout that depends on the browser, which is not a rule at
+               all. Two people with the same name are the only remaining tie.
+
+               It does NOT decide the spine — see `spine` below. The two were one
+               key until #85, and they agreed only because sorting by link count
+               named the longest chain the axis as a side effect. Numbers need
+               not be contiguous and mean nothing but their sequence; use 10, 20,
+               30 if you expect to insert people between them.
+
+       spine   optional, default false. THIS CHAIN IS THE AXIS the composition is
+               built around: it sets the scale, every other chain is laid out
+               parallel to it, and every bridge ultimately hangs off it. A
+               GEOMETRY choice, and at most one chain may claim it.
+
+               Absent from every person, the spine is whichever chain the stack
+               puts first, skipping any with no links. It reads the stack rather
+               than repeating a rule of its own, so the fallback spine inherits
+               whatever the stack's own fallback is — today link count then name,
+               which on a stage where the lengths differ is the longest chain, the
+               rule this has always followed. There is one home for "which chain
+               leads", and this is not a second copy of it.
+
+               THE SPINE IS ALWAYS LAID OUT FIRST whatever its `order` says, and
+               that is structural: a bridge may only hang off a wheel already
+               placed, so growth goes one way and it starts at the axis. Declaring
+               a spine that is not first in the stack is legal and honoured — the
+               chain simply leads the layout, and the rest keep their declared
+               sequence behind it.
+
+               A chain with no links cannot be the spine (it is not laid out at
+               all), and two chains cannot both be it. Either way the console
+               names the declaration that was dropped and what stood in for it.
+
        bridge  optional, default true. On a combined stage every chain but the
-               longest is driven off it through a short run of plain idler
+               spine is driven off it through a short run of plain idler
                wheels, which is also what sets the gap between the two. Set
                `bridge: false` and this chain is placed in the same spot with no
                drive reaching it — it becomes a machine of its own standing
@@ -224,6 +276,14 @@ window.WOZI_CONFIG = {
       slug: 'charles',
       name: 'Charles',
       hosts: ['charles.wozi.com'],
+      /* CHARLES FIRST, AND HIS CHAIN IS THE AXIS -- stated rather than inferred
+         (#85). Both were already true, as a consequence of his being the longest
+         chain, and neither said so: eight links on Harper's chain and the whole
+         composition would have rebuilt around her with nothing in this file to
+         say that had ever been chosen. Declaring them changes no pixel today,
+         which is the point. */
+      order: 1,
+      spine: true,
       links: [
         { slug: 'linkedin',  handle: 'csmarshall' },
         { slug: 'github',    handle: 'csmarshall' },
@@ -255,6 +315,7 @@ window.WOZI_CONFIG = {
          domain name on the distribution and a Route53 alias -- no deploy change,
          per the note above. */
       hosts: ['harper.wozi.com'],
+      order: 2,
       /* HARPER'S CHAIN IS PURPLE, at Charles's request (#68). The seed is the
          pool's own purple rather than a new hex: it is an authored colour that
          has already been judged good on these wheels, and it sits inside the

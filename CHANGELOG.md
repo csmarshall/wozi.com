@@ -7,6 +7,81 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Changed
 
+- **CL#106 — which chain is the spine and what order the rest stack in are two
+  questions, and the bridges were running the wrong way in portrait.** (GitHub
+  #85, GitHub #90 item 4, and a bug Charles found by looking at the page.)
+
+  **The split.** One key did both jobs, and the two agreed only because the sort
+  made them agree: sorting by link count named the longest chain the spine as a
+  *side effect* of deciding where the others sat. Give Harper eight links and the
+  whole composition rebuilds around her, with nothing in `config.js` to say that
+  had ever been a choice — the same defect as the old `PEOPLE[0]` hostname
+  fallback, a default that works by accident and says nothing about itself.
+
+  Now two independent per-person keys: `spine: true` is **geometry** (it sets the
+  scale, and it is the axis every other chain runs parallel to), `order: <n>` is
+  **presentation**. `CHAIN_STACK` sorts, `SPINE` is declared, and
+  `CHAIN_ORDER = [SPINE, ...stack minus spine]` — so `CHAIN_ORDER[0] === SPINE`
+  holds **by construction**, which is what keeps `solve()`'s one-way growth
+  invariant true rather than merely likely.
+
+  `WHO` split with it, into `SPINE` (the axis) and `SELECTED` (which person the
+  page is *about*, `null` on the combined stage). The analytics beacon had been
+  reading the spine and calling it the selection.
+
+  **The fallback sort, Charles's spec:** `order`, then link count descending,
+  then **name descending**. Undeclared chains sort to `Infinity`, which is why the
+  fallback needs no branch of its own. The name key is where PEOPLE order used to
+  be — a tie that held only because `Array.prototype.sort` is stable, which reads
+  as no rule at all in the file it governs. The sort is now **total**; nothing
+  leans on stability any more, and `PEOPLE` order decides only the picker.
+
+  Deliberately **not** locale-aware: `localeCompare` folds case and accents
+  better and would also make the layout depend on the runtime's ICU data. A
+  tie-break that comes out differently in two browsers is a drifting constant.
+
+  On the shipped config this is a **zero-pixel change** — Charles has seven links
+  to Harper's one, so link count decides before the name key is ever consulted,
+  and both declare `order` explicitly anyway.
+
+  **The bug underneath it, which is the part that moved the page.**
+  `BRIDGE_BEARING` was made relative to `_axisRot` by CL#67, but its **sign was
+  still hardcoded at `+90`** — "down" at rot 0 and **"left"** at rot 90. So in
+  portrait the chains stacked leftward off the spine and the spine came out
+  **rightmost**. Measured at 390×844 before: Charles x≈290, Harper x≈173.
+
+  The handedness is now derived rather than picked: both candidate bearings are
+  evaluated and the one pointing **away from the stage origin** wins, so rank 0 is
+  topmost in landscape and leftmost in portrait at any `_axisRot`. After: Charles
+  x≈69, Harper x≈321.
+
+  **This is the third failure of the same kind and the second in this one
+  constant**, which is why CLAUDE.md now carries a bridge-handedness invariant
+  beside the bearing one. Making a value axis-relative is only half the job —
+  a *sign* is as screen-absolute as a number of degrees is.
+
+  **Why nothing caught it:** every existing test measured *along* the bridge
+  direction, and both mirror images satisfy that. `alongBridge` is now
+  `alongCross` and asserts in screen x/y, plus a test named for the requirement.
+  Reverting the fix fails two.
+
+  **Two real defects fixed in the inherited implementation**, both found by
+  review rather than by the suite:
+
+  - `STACK_AT` accepted `NaN` as a position. `NaN` compares false against
+    everything including itself, so the comparator became **non-transitive** and
+    the sort's output was undefined — not wrong, *undefined*. Now `isFinite`.
+  - The `SPINE` warnings each re-derived their own replacement, so two bad
+    declarations at once could print a chain that was not the one used. The
+    answer is settled first and both messages read it.
+
+  **Harness narrowed on purpose:** `buildTrain`'s `stack` override is gone. After
+  the split every legal layout is expressible as declarations, so the override
+  bought only *illegal* trains — a harness able to build what the page cannot is
+  a harness that can go green on a page that would not run.
+
+  Suite 79 → 86, every new assertion mutation-verified.
+
 - **CL#105 — the street address is off the site, in all three places it was
   published.** (GitHub #84, and GitHub #90 item 3.)
 

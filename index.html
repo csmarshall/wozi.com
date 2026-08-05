@@ -529,29 +529,157 @@ const STAGE = (function () {
   const mine = people.find(p => (p.hosts || []).indexOf(host) >= 0);
   return mine ? { mode: 'solo', people: [mine] } : all();
 })();
-/* THE ORDER THE CHAINS ARE LAID OUT IN: longest first, then descending. Ties
-   break by PEOPLE order -- Array.prototype.sort is stable, so a tie keeps the
-   order config.js wrote, which is the rule the spine was already chosen by.
+/* WHICH PERSON THE PAGE IS ABOUT -- null on the combined stage, where the honest
+   answer is "everybody" and there is no such person.
 
-   IT IS THE LAYOUT ORDER, NOT MERELY THE EMISSION ORDER (Charles, 2026-08-02).
-   solve() places wheels in TRAIN order and a bridge may only hang off a wheel
-   ALREADY placed, so a chain can only ever be driven from one earlier in this
-   list -- and every bridge runs the same way off the spine, so "earlier" is
-   also "nearer the top" in landscape and "nearer the leading edge of the cross
-   axis" in portrait. Sorting once, here, is what makes that ordering a property
-   of the composition rather than of the order people happen to appear in
-   config.js, which is arbitrary the moment there are three chains. */
-const CHAIN_ORDER = STAGE.people.slice().sort((a, b) =>
-  (b.links || []).length - (a.links || []).length);
-/* Kept so everything reading a single active person still works: on a combined
-   stage it is the spine, which is the chain the composition is built around. */
-const WHO = CHAIN_ORDER[0] || { slug: '', name: '', links: [] };
+   IT IS THE SELECTION, AND NOTHING ELSE READS IT. This used to be WHO, which was
+   CHAIN_ORDER[0] and therefore the SPINE, and every consumer had to know which of
+   the two it was actually asking for: the beacon wanted the selection and got the
+   spine (`view/charles` on every apex visit), while solve() and chainAxes() wanted
+   the spine and would have got the selection the moment the two diverged. The
+   names are separate now -- SELECTED here, SPINE below -- so neither question can
+   be answered with the other one's value (GitHub #85). */
+const SELECTED = STAGE.mode === 'solo' && STAGE.people.length === 1
+  ? STAGE.people[0] : null;
+
+/* A CHAIN WITH NO LINKS IS NOT LAID OUT AT ALL -- the TRAIN builder below skips
+   it, so it takes no wheels, gets no bridge and is not part of the composition.
+   One home for that rule, because the spine is defined by it. */
+const HAS_WHEELS = (p) => (p.links || []).length > 0;
+
+/* THE STACK: WHAT ORDER THE CHAINS SIT IN ACROSS THE CROSS AXIS -- TOPMOST in
+   landscape and LEFTMOST in portrait, which are the same statement once you
+   know the bridges run away from the stage origin (see BRIDGE_BEARING; the
+   handedness half of that was wrong until 2026-08-05). A PRESENTATION choice,
+   declared per person as `order: <number>`, ascending.
+
+   IT IS NOT THE SAME QUESTION AS WHICH CHAIN IS THE SPINE. The spine is a
+   GEOMETRY choice: it sets the scale, it is the axis every other chain runs
+   parallel to, and every bridge ultimately hangs off it. One key used to do both
+   jobs, and the two agreed only because the sort made them agree -- sorting by
+   link count named the longest chain the spine as a SIDE EFFECT of deciding
+   where the others sat. Give Harper eight links and the whole composition
+   rebuilt around her, with nothing in config.js to say that had ever been a
+   choice. That is the same defect as the old PEOPLE[0] hostname fallback: a
+   default that works by accident and says nothing about itself.
+
+   WHAT AN UNDECLARED CHAIN FALLS BACK TO: link count descending, then NAME
+   descending (Charles, 2026-08-05). It sits at the far end of the stack -- which
+   is what Infinity says, and why the fallback needs no branch of its own -- so it
+   falls in behind everyone who declares an `order`, and two chains declaring the
+   SAME number fall through to the same two keys rather than to whichever the
+   engine happened to compare first.
+
+   THE NAME IS WHERE PEOPLE ORDER USED TO BE. The tie used to break on the order
+   config.js wrote, which held only because Array.prototype.sort is stable -- a
+   rule that reads as no rule at all in the file it governs, since nothing beside
+   a person says their position depends on the line they are on. Naming the key
+   makes the sort TOTAL: `order`, then links, then name, and only two people with
+   the same name can still tie. Nothing here leans on sort stability any more.
+
+   AND IT IS DELIBERATELY NOT LOCALE-AWARE. localeCompare would fold case and
+   accents better, and would also make the layout depend on the runtime's ICU
+   data -- a tie-break that can come out differently in two browsers is a drifting
+   constant wearing a method call. Case-folded code-unit order is the same
+   everywhere, which is what a layout rule needs to be. The slug stands in when a
+   person has no name, so the key always exists.
+
+   AND A NUMBER THAT IS NOT A POSITION IS NOT ONE EITHER. `isFinite` is doing
+   real work: `order: NaN` is a number by typeof, and every comparison involving
+   it -- including with itself -- yields NaN, so the comparator would fall
+   through to link count against SOME pairs and not others. That is a
+   comparator that contradicts itself, and the order a sort produces from one is
+   not defined by anything. Sending it to the same Infinity as an absent key
+   makes the mistyped case land on the documented default instead of on
+   whichever pairs the engine happened to compare. */
+const STACK_AT = (p) => typeof p.order === 'number' && isFinite(p.order) ? p.order : Infinity;
+const NAME_KEY = (p) => String(p.name == null ? p.slug : p.name).toLowerCase();
+const CHAIN_STACK = STAGE.people.slice().sort((a, b) =>
+  (STACK_AT(a) === STACK_AT(b) ? 0 : STACK_AT(a) - STACK_AT(b))
+  || (b.links || []).length - (a.links || []).length
+  || (NAME_KEY(a) < NAME_KEY(b) ? 1 : NAME_KEY(a) > NAME_KEY(b) ? -1 : 0));
+
+/* THE SPINE is the chain the composition is built around: the axis every other
+   chain runs parallel to, and the one every bridge ultimately hangs off. A
+   GEOMETRY choice, declared per person as `spine: true` (GitHub #85).
+
+   THE DEFAULT IS WHICHEVER CHAIN THE STACK PUTS FIRST, skipping any that have no
+   wheels exactly as the TRAIN builder does -- which under the default stack is
+   the longest chain on stage, the rule this has always followed.
+
+   A DECLARATION THAT CANNOT BE HONOURED IS ANNOUNCED, NOT OBEYED IN SILENCE. A
+   chain with no links is not laid out at all, so it cannot be the axis the others
+   hang off; and two chains cannot both be the axis. Either way the console names
+   the declaration that was dropped and what stood in for it, because a
+   composition still has to arrive -- the same bargain the bridge search strikes
+   when no anchor clears.
+
+   THE ANSWER IS SETTLED BEFORE ANYTHING IS SAID ABOUT IT. Both warnings read the
+   chain that was actually used rather than re-guessing it, because two bad
+   declarations can arrive together -- two chains claiming the axis and neither
+   with any links -- and a message that works out its own replacement is one more
+   copy of this derivation, free to disagree with the one that ships. */
+const SPINE = (function () {
+  const asked = CHAIN_STACK.filter(p => p.spine === true);
+  const usable = asked.filter(HAS_WHEELS);
+  const chosen = usable[0] || CHAIN_STACK.find(HAS_WHEELS) || null;
+  const stoodIn = chosen ? '"' + chosen.slug + '" is the axis instead'
+    : 'no chain on stage has any links, so there is no axis at all';
+  if (asked.length > 1) {
+    console.warn('wozi: ' + asked.length + ' chains declare spine: true ('
+      + asked.map(p => p.slug).join(', ') + ') -- only one chain can be the axis, '
+      + 'so ' + stoodIn);
+  }
+  if (asked.length && !usable.length) {
+    console.warn('wozi: chain "' + asked[0].slug + '" declares spine: true but has '
+      + 'no links, so it is not laid out at all -- ' + stoodIn);
+  }
+  return chosen;
+})();
+
+/* THE LAYOUT ORDER: the spine, then the stack. TRAIN is emitted in it and
+   CHAIN_RANK ranks by it, and it is DERIVED from the two declarations above
+   rather than being a third thing that has to be kept in step with them.
+
+   THE SPINE IS ALWAYS AT THE HEAD, whatever the stack says, and that is
+   STRUCTURAL rather than a preference: solve() places wheels in TRAIN order and a
+   bridge may only hang off a wheel ALREADY placed, so a chain can only ever be
+   driven from one earlier in this list. Growth goes one way and it starts at the
+   axis. The stack is still honoured in full for every chain that is not the
+   spine -- which is every chain the stacking choice is about.
+
+   SO CHAIN_ORDER[0] IS THE SPINE BY CONSTRUCTION whenever any chain has wheels,
+   which is what lets the attachment search rank by CHAIN_RANK and get "the chain
+   immediately above this one" for free. It used to be true only because the sort
+   happened to make it true. */
+const CHAIN_ORDER = SPINE
+  ? [SPINE].concat(CHAIN_STACK.filter(p => p !== SPINE))
+  : CHAIN_STACK.slice();
 /* Where each chain sits in that order, by slug: 0 is the spine. The bridge
-   attachment search ranks its candidates by it, so a chain hangs off the
-   LONGEST chain with room for it and the shorter ones stack away from the
-   spine, rather than reaching back past a chain that should be below them. */
+   attachment search ranks its candidates by it, so a chain hangs off the one
+   immediately above it in the stack and the rest stack away from the spine,
+   rather than reaching back past a chain that should be below them. */
 const CHAIN_RANK = {};
 CHAIN_ORDER.forEach((p, k) => { CHAIN_RANK[p.slug] = k; });
+/* HOW MANY WHEELS THE SPINE HAS, and nothing else. It is used as an INDEX BOUND
+   -- the middle of the spine is the static tree's default bridge anchor -- so it
+   must count the spine's own wheels.
+
+   IT USED TO BE A MAXIMUM: `Math.max(1, ...people.map(links.length))`, the
+   longest chain anywhere on stage. That is a different quantity wearing this
+   name, and the two agree only while the spine IS the longest chain, which the
+   old CHAIN_ORDER sort happened to guarantee and a DECLARED spine does not. An
+   index whose validity rests on a sort in another declaration is one edit away
+   from pointing past the array it indexes (#98) -- and a malformed static tree is
+   exactly what #65 was. The maximum-shaped quantity that genuinely sets the SCALE
+   is NOMINAL_CHAIN, further down; it is a maximum over every CONFIGURED person,
+   not the stage, and it is not an index into anything. */
+const SPINE_LEN = SPINE ? SPINE.links.length : 0;
+/* The spine's slug, or '' when nothing on stage has wheels. The one place the
+   null spine is dealt with, so neither consumer that wants only the name -- the
+   extremities rule in solve(), and which chain chainAxes() calls the spine -- has
+   to guard it a second time. */
+const SPINE_SLUG = SPINE ? SPINE.slug : '';
 
 /* WHAT EACH CHAIN'S DATUM PLATE IS STAMPED WITH. The name config.js already
    carries, verbatim -- its casing is the casing on the plate. An optional
@@ -597,31 +725,6 @@ const PLATE_TOP_CLEAR = 20;
    too narrow to hold the plate that far in, the seat wins and the figure is not
    honoured. See plateSeat(). */
 const PLATE_START_ALONG = 25;
-
-/* A CHAIN WITH NO LINKS IS NOT LAID OUT AT ALL -- the TRAIN builder below skips
-   it, so it takes no wheels, gets no bridge and is not part of the composition.
-   One home for that rule, because the spine is defined by it. */
-const HAS_WHEELS = (p) => (p.links || []).length > 0;
-/* THE SPINE is the chain the composition is built around: the axis every other
-   chain runs parallel to, and the one every bridge ultimately hangs off. It is
-   whichever chain the layout order puts first -- skipping any that have no
-   wheels, exactly as the TRAIN builder does -- so it follows the ordering rule
-   rather than restating it. */
-const SPINE = CHAIN_ORDER.find(HAS_WHEELS) || null;
-/* HOW MANY WHEELS THE SPINE HAS, and nothing else. It is used as an INDEX BOUND
-   -- the middle of the spine is the static tree's default bridge anchor -- so it
-   must count the spine's own wheels.
-
-   IT USED TO BE A MAXIMUM: `Math.max(1, ...people.map(links.length))`, the
-   longest chain anywhere on stage. That is a different quantity wearing this
-   name, and the two agree only while the spine IS the longest chain, which
-   today's CHAIN_ORDER sort happens to guarantee. An index whose validity rests
-   on a sort in another declaration is one edit away from pointing past the array
-   it indexes (#98) -- and a malformed static tree is exactly what #65 was.
-   The maximum-shaped quantity that genuinely sets the SCALE is NOMINAL_CHAIN,
-   further down; it is a maximum over every CONFIGURED person, not the stage, and
-   it is not an index into anything. */
-const SPINE_LEN = SPINE ? SPINE.links.length : 0;
 
 /* HOW MANY IDLERS BRIDGE A CHAIN TO THE ONE THAT DRIVES IT. Never zero -- two
    chains meshing directly would read as one machine, and the bridge is what
@@ -674,13 +777,13 @@ const BRIDGES = [];
    this is a default rather than a per-wheel choice. */
 const TRAIN = (function () {
   const out = [];
-  /* EMITTED IN CHAIN_ORDER -- longest first -- whatever the order in PEOPLE, so
-     every bridge hangs off a wheel already on the array. solve() derives a
-     wheel's position from g[t.parent] out of the wheels it has ALREADY placed,
-     so a parent that appears later than its child reads as undefined and the
-     whole branch lands wherever the last iteration happened to leave it. Reading
-     the one shared order keeps this, WHO and the attachment search in agreement
-     by construction rather than by three sorts that have to match. */
+  /* EMITTED IN CHAIN_ORDER -- the spine, then the stack -- whatever the order in
+     PEOPLE, so every bridge hangs off a wheel already on the array. solve()
+     derives a wheel's position from g[t.parent] out of the wheels it has ALREADY
+     placed, so a parent that appears later than its child reads as undefined and
+     the whole branch lands wherever the last iteration happened to leave it.
+     Reading the one shared order keeps this, SPINE and the attachment search in
+     agreement by construction rather than by three sorts that have to match. */
   CHAIN_ORDER.forEach(p => {
     const links = p.links || [];
     if (!HAS_WHEELS(p)) return;
@@ -697,12 +800,12 @@ const TRAIN = (function () {
            solve() overrides it with whatever it finds room for.
 
            IT IS IN RANGE BY CONSTRUCTION, not by luck: this loop skips chains
-           with no wheels and emits SPINE first -- SPINE is the first chain in
-           this very order that HAS_WHEELS -- and the spine is unbridged, so it
-           takes no idlers and its wheels ARE out[0 .. SPINE_LEN-1]. Half of
-           SPINE_LEN-1 therefore lands on a spine wheel whatever CHAIN_ORDER is
-           sorted by, and nothing here needs the spine to be the longest chain
-           on stage. It did before (#98). */
+           with no wheels and emits SPINE first -- CHAIN_ORDER puts the spine at
+           its head, and the spine HAS_WHEELS by definition -- and the spine is
+           unbridged, so it takes no idlers and its wheels ARE out[0 ..
+           SPINE_LEN-1]. Half of SPINE_LEN-1 therefore lands on a spine wheel
+           however the stack is declared, and nothing here needs the spine to be
+           the longest chain on stage. It did before (#98). */
         idlers.push(out.length);
         out.push({ slug: null, prof: { rim: 1.7 },
           parent: k === 0 ? Math.floor((SPINE_LEN - 1) / 2) : out.length - 1,
@@ -1503,7 +1606,7 @@ const TARGET_GEAR_PX = 222;
 
    IT USED TO ASSUME EVERY BRIDGE HUNG OFF THE SPINE, and said so in as many
    words: it "understates the case where one cascades onto a chain that is itself
-   bridged". Since the chains are laid out longest-first down the cross axis,
+   bridged". Since the chains are laid out in CHAIN_ORDER down the cross axis,
    each hanging off the one above it, that case is now the normal one -- and the
    understatement is a whole bridge per chain. A third chain was pushed off the
    bottom of a laptop by it: the fit's own CROSS_BLEED allows the linked train
@@ -2711,7 +2814,7 @@ class Component extends DCLogic {
       c.wheels.push(g);
     });
     if (!order.length) return order;
-    const spine = byPerson[WHO.slug] || order[0];
+    const spine = byPerson[SPINE_SLUG] || order[0];
     order.forEach(c => {
       c.spine = c === spine;
       const a = c.wheels[0], b = c.wheels[c.wheels.length - 1];
@@ -3666,15 +3769,19 @@ class Component extends DCLogic {
        never a referrer. Fires from mount rather than from the top of the file so
        it counts a page that actually rendered.
 
-       IT REPORTS THE SELECTION, NOT THE SPINE. WHO is CHAIN_ORDER[0], which on
-       the combined stage is whichever chain happens to be longest -- so sending
-       WHO.slug made every apex visit report `view/charles` and left it
-       indistinguishable from charles.wozi.com. The analytics would have been
-       silently wrong in the one way nobody reads out of the data: a number that
-       looks plausible. This is the same spine-versus-selection confusion the
-       person picker's aria-current already had to settle. */
+       IT REPORTS THE SELECTION, NOT THE SPINE, and it now says so in the name it
+       reads. This used to reach for WHO, which was CHAIN_ORDER[0] and therefore
+       the spine -- whichever chain happened to be longest -- so every apex visit
+       reported `view/charles` and was indistinguishable from charles.wozi.com.
+       The analytics would have been silently wrong in the one way nobody reads
+       out of the data: a number that looks plausible. It was guarded by a
+       STAGE.mode test standing in front of the wrong value; SELECTED is the right
+       value, and is null on the combined stage by construction (GitHub #85). This
+       is the same spine-versus-selection confusion the person picker's
+       aria-current already had to settle. */
     if (AN.pageview !== false) {
-      track('view/' + (STAGE.mode === 'all' ? 'all' : (WHO.slug || 'unknown')));
+      track('view/' + (STAGE.mode === 'all' ? 'all'
+        : (SELECTED ? SELECTED.slug : 'unknown')));
     }
     this.loadIcons();
     this.startPhysics();
@@ -3860,9 +3967,34 @@ class Component extends DCLogic {
        exactly the #67 failure. It is only ever used added to this._axisRot, never
        on its own. All bridges take the same side, which is the ordering Charles
        chose over balancing the cross axis: growth goes one way and the spine sits
-       at the top. */
+       at the top.
+
+       AND WHICH WAY ROUND THE PERPENDICULAR RUNS IS ALSO DERIVED FROM THE
+       ROTATION -- the second half of the same lesson, and the half that was
+       missing. A bearing 90 degrees from the spine can be taken either way
+       round; the two are mirror images and the geometry is equally legal, so
+       nothing local objected. What it decides is which screen edge the FIRST
+       chain ends up against, and a fixed +90 answers that only for the rotation
+       it was written at. At _axisRot 0 it means "down", so the spine is topmost.
+       At 90 the same +90 means "LEFT", so the spine came out RIGHTMOST and every
+       shorter chain stacked toward the left edge -- the picture Charles queried,
+       and the reason the old comment could only describe it as "the leading edge
+       of the cross axis" rather than naming a side.
+
+       THE RULE, STATED ONCE: the bridge runs along the cross axis AWAY FROM THE
+       STAGE ORIGIN, so rank 0 sits at the low end of it -- topmost in landscape,
+       leftmost in portrait, and the same sentence covers both. Both candidate
+       bearings are written out and the one pointing further from the origin
+       corner wins, so this holds at any _axisRot rather than at the two the page
+       happens to use today. Nothing here is a screen-absolute constant: turn the
+       stage and the answer turns with it. */
     const BRIDGE_BEARING = 90;
-    const bridgeBase = (this._axisRot || 0) + BRIDGE_BEARING;
+    const fromOrigin = (s) => {
+      const a = ((this._axisRot || 0) + BRIDGE_BEARING * s) * Math.PI / 180;
+      return Math.cos(a) + Math.sin(a);
+    };
+    const bridgeBase = (this._axisRot || 0)
+      + BRIDGE_BEARING * (fromOrigin(1) >= fromOrigin(-1) ? 1 : -1);
     /* HOW FAR OFF PERPENDICULAR A BRIDGE MAY BE NUDGED before it stops reading as
        a bridge and starts reading as a wandering chain. Not a new tuned number:
        it is the width of the bearing range the serpentine itself is dealt from,
@@ -3885,7 +4017,7 @@ class Component extends DCLogic {
     const hasChild = new Array(TRAIN.length).fill(false);
     TRAIN.forEach(t => { if (t.parent != null) hasChild[t.parent] = true; });
     const isLeaf = (i) => !hasChild[i];
-    const isEnd = (i) => TRAIN[i].person === WHO.slug
+    const isEnd = (i) => TRAIN[i].person === SPINE_SLUG
       && (isLeaf(i) || TRAIN[i].parent == null);
     /* WHERE A BRIDGE HANGS FROM IS SOLVED, NOT PLACED. Candidates are tried from
        the middle of the chain immediately above this one outward, so a branch
@@ -3914,8 +4046,8 @@ class Component extends DCLogic {
            1. THE CHAIN IMMEDIATELY ABOVE THIS ONE, which is the LAST chain
               placed -- CHAIN_ORDER descending. Every bridge runs the same way,
               so hanging each chain off the one before it is what lays them out
-              longest-first from the top in landscape, and from the leading edge
-              of the cross axis in portrait (Charles, 2026-08-02). Ranked the
+              in CHAIN_ORDER from the TOP in landscape and from the LEFT in
+              portrait (Charles, 2026-08-02, 2026-08-05). Ranked the
               other way round, every chain hangs off the spine and they all
               arrive in the SAME row, ordered by nothing. If the chain above has
               no clear bearing the search falls back through the ones above it,
@@ -6566,8 +6698,9 @@ class Component extends DCLogic {
          and on a combined stage every one of these is a link AWAY from what
          is being looked at -- so marking the spine would say "you are
          viewing Charles" to a screen reader while the page shows everyone.
-         WHO is the spine, not the selection, and the two stopped being the
-         same thing when the apex became the whole household. */
+         SPINE is the axis, not the selection, and the two stopped being the
+         same thing when the apex became the whole household -- SELECTED is the
+         name for the other question, and it is null here (GitHub #85). */
       return people.map(p => ({
         href: '?who=' + p.slug, label: p.name, current: 'false',
         style: { display: 'block', padding: '7px 12px', borderRadius: '9px',
