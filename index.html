@@ -75,7 +75,7 @@
      directly any more: both go through the --off* tokens below, which add the
      safe-area inset for the edge each one is pinned to. */
   --icon:20px; --btn:44px;
-  /* Gap between the three corner buttons. The 44px button is a TOUCH TARGET,
+  /* Gap between the four corner buttons. The 44px button is a TOUCH TARGET,
      deliberately larger than the 20px glyph it holds, so the visible spacing
      is already the button's own padding plus this -- which is why a flat 6px
      read as a wide, loose row. Clamped and viewport-relative so a phone packs
@@ -87,9 +87,10 @@
   /* THE STAGE BLEEDS, THE CONTROLS DO NOT. `viewport-fit=cover` hands the page
      the whole display on iOS/iPadOS — under the notch, under the home
      indicator, behind Safari's translucent toolbars — so the machine reads as a
-     window onto a running train rather than a picture inside a box. The four
-     fixed controls are the one thing that must stay out of those regions: a
-     button under the home indicator is hard to tap and can be impossible.
+     window onto a running train rather than a picture inside a box. The fixed
+     controls — four corner buttons and the wordmark — are the one thing that
+     must stay out of those regions: a button under the home indicator is hard
+     to tap and can be impossible.
 
      So each fixed corner offset is --btnoff PLUS that edge's inset, and the
      insets are held in their own tokens rather than written into the offsets.
@@ -163,8 +164,46 @@ a:focus-visible,button:focus-visible,[tabindex]:focus-visible{outline:3px solid 
 
 <main style="min-height:100vh;min-height:100svh;box-sizing:border-box;display:flex;flex-direction:var(--dir);align-items:center;justify-content:center;gap:var(--gap);padding:var(--pad);background:var(--bg);overflow:hidden;">
 
-  <button onClick="{{ toggleTog }}" title="{{ togLabel }}" aria-label="{{ togLabel }}" aria-expanded="{{ togExpanded }}" style="position:fixed;top:var(--offtop);right:calc(var(--offright) + (var(--btn) + var(--btngap)) * 2);z-index:20;display:flex;align-items:center;justify-content:center;width:var(--btn);height:var(--btn);padding:0;border:0;border-radius:999px;background:transparent;color:var(--muted);cursor:pointer;transition:color .18s ease;" style-hover="color:var(--ink);">
+  <!-- THE CORNER ROW, RIGHT TO LEFT: theme, pause, speed, table of gears. Source
+       order is left to right, so the tab order matches the row on screen.
+
+       Each button's `right` is its index in that row, in whole button pitches —
+       (--btn + --btngap) — off --offright, which already carries the safe-area
+       inset. A fourth button therefore costs one term and no new constant, and
+       the row still ends exactly one --btnoff from the edge on any device.
+
+       The inline style is repeated verbatim on all four. That duplication is
+       DELIBERATE and has been decided against twice: a class or a stylesheet is
+       forbidden here (styling is inline by design), and hoisting it into a
+       render value would move the buttons' appearance out of the markup and
+       into the logic, which is worse than the repetition it removes. Only the
+       `right` term and the speed button's typography differ. -->
+  <button onClick="{{ toggleTog }}" title="{{ togLabel }}" aria-label="{{ togLabel }}" aria-expanded="{{ togExpanded }}" style="position:fixed;top:var(--offtop);right:calc(var(--offright) + (var(--btn) + var(--btngap)) * 3);z-index:20;display:flex;align-items:center;justify-content:center;width:var(--btn);height:var(--btn);padding:0;border:0;border-radius:999px;background:transparent;color:var(--muted);cursor:pointer;transition:color .18s ease;" style-hover="color:var(--ink);">
     {{ togIcon }}
+  </button>
+  <!-- The speed control wears its own value instead of an icon: a gearbox
+       position is a number, and there is no glyph that says "five times" without
+       a legend. tabular-nums so the label does not shuffle sideways as the stops
+       change width. It sits next to pause because the two are the same subject —
+       how the machine is running — and pause keeps the place it has always had.
+
+       THE LABEL IS SET AT --icon, THE SAME SIZE AS THE GLYPHS BESIDE IT, and
+       that is a contrast requirement as much as a visual one. The three icons
+       are graphics, which WCAG asks 3:1 of; this button is TEXT, which is asked
+       4.5:1 — and --muted on --bg is 3.54:1, so at 13px it FAILED the audit in
+       light theme while its neighbours passed at the same colour. Bold text at
+       18.66px or more is "large scale" and back to a 3:1 threshold, and --icon
+       is 20px, so taking the size from the token the icons already use clears
+       the bar by construction instead of by a number somebody has to remember.
+       Shrink --icon below 18.66px and this needs revisiting — it is the one
+       coupling here that is a threshold rather than a ratio.
+
+       Its `style` is a render value (speedStyle) and not written here, because
+       the colour depends on whether the current stop strobes. That is the only
+       difference from the row's declaration, and state-dependence is precisely
+       what the other three do not have. -->
+  <button onClick="{{ cycleSpeed }}" title="{{ speedLabel }}" aria-label="{{ speedLabel }}" style="{{ speedStyle }}" style-hover="color:var(--ink);">
+    {{ speedMark }}
   </button>
   <button onClick="{{ toggleMotion }}" title="{{ motionLabel }}" aria-label="{{ motionLabel }}" aria-pressed="{{ motionPressed }}" style="position:fixed;top:var(--offtop);right:calc(var(--offright) + var(--btn) + var(--btngap));z-index:20;display:flex;align-items:center;justify-content:center;width:var(--btn);height:var(--btn);padding:0;border:0;border-radius:999px;background:transparent;color:var(--muted);cursor:pointer;transition:color .18s ease;" style-hover="color:var(--ink);">
     {{ motionIcon }}
@@ -218,6 +257,19 @@ a:focus-visible,button:focus-visible,[tabindex]:focus-visible{outline:3px solid 
        character:false    chip + machinist stamp, turned off in commit 2e5a721
                           ("fix: #16 ... chips off")
        hoverDrag:true     hover loads the machine to ~40% speed
+       speed:1            the master angle's multiplier, and the corner control's
+                          setting. `min` and `max` are the two ends of the stop
+                          ladder and the only levers here (#96): 1x because the
+                          control never slows the machine down -- pause is its own
+                          button -- and 200x because Charles asked for a ceiling
+                          absurd enough to benchmark against. SPEED_STOPS lays a
+                          1-2-5 ladder between them, so this is where to widen or
+                          narrow it and there is no stop list written anywhere.
+                          The STROBE limit is not here and must not be: 15.75x at
+                          30fps is a property of BASE_MS and the frame rate,
+                          derived by strobeSpeed(), and stops at or above it are
+                          announced rather than removed. `step` is the editor's
+                          granularity and the button does not read it
        accent:"#5F686E"   the steel tone taken from the machine's own metal (--m4
                           light / --m1 dark), Charles's explicit choice, also from
                           e6936a7 -- supersedes both the shipped-in-error red
@@ -229,7 +281,7 @@ a:focus-visible,button:focus-visible,[tabindex]:focus-visible{outline:3px solid 
      is a historical record of that one session, not a running description of
      HEAD, and was never updated (nor should it be) as later real commits moved
      these values on. Read this comment block, not that file, for what is live. -->
-<script type="text/x-dc" data-dc-script data-props="{&quot;domain&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Wordmark&quot;},&quot;frameRate&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[60,30,24,20],&quot;default&quot;:30,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;spinUp&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;engravedRims&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;parallax&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;character&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;hoverDrag&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;speed&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;min&quot;:0.25,&quot;max&quot;:2,&quot;step&quot;:0.25,&quot;default&quot;:1,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;gearScale&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;min&quot;:0.5,&quot;max&quot;:1.3,&quot;step&quot;:0.05,&quot;default&quot;:1,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;options&quot;:[&quot;#5F686E&quot;,&quot;#E8483A&quot;,&quot;#3B7DE8&quot;,&quot;#F4B32B&quot;,&quot;#1FA463&quot;],&quot;default&quot;:&quot;#5F686E&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;shuffle&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Gears&quot;}}">
+<script type="text/x-dc" data-dc-script data-props="{&quot;domain&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Wordmark&quot;},&quot;frameRate&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[60,30,24,20],&quot;default&quot;:30,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;spinUp&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;engravedRims&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;parallax&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;character&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;hoverDrag&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;speed&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;min&quot;:1,&quot;max&quot;:200,&quot;step&quot;:1,&quot;default&quot;:1,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;gearScale&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;min&quot;:0.5,&quot;max&quot;:1.3,&quot;step&quot;:0.05,&quot;default&quot;:1,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;options&quot;:[&quot;#5F686E&quot;,&quot;#E8483A&quot;,&quot;#3B7DE8&quot;,&quot;#F4B32B&quot;,&quot;#1FA463&quot;],&quot;default&quot;:&quot;#5F686E&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;shuffle&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Gears&quot;}}">
 const MODULE = 7;
 
 /* Tooth form. Uniform across the train and derived from the module — never set
@@ -308,6 +360,83 @@ const TOOTH_FILLET = 0.38; /* root fillet radius, in modules — the standard va
 const RING_STUB = 0.70;
 
 const BASE_MS = 21000;
+/* THE SPEED THAT STROBES IS DERIVED; THE SPEED THE CONTROL STOPS AT IS CHOSEN.
+   Those are two different numbers on purpose (#96), and conflating them was the
+   first design of this control.
+
+   A gear turning fast enough strobes: past half a tooth pitch of travel per tick
+   the sampling is under Nyquist and the train visibly stands still or runs
+   backwards. That limit is exactly computable here, and — the part worth knowing
+   — it does not depend on the tooth count at all. A wheel's angle is
+   `phase + dir * _M / teeth` and its pitch is `360 / teeth` degrees, so ONE
+   TOOTH OF TRAVEL IS 360 MASTER-DEGREES on every wheel in the train. A 13-tooth
+   blank and a 19-tooth one cover the same fraction of a tooth per tick, and
+   there is one strobe speed for the whole machine:
+
+     master-deg per tick at 1x = (7200 / BASE_MS) * (1000 / frameRate)
+                               = 0.342857 * 33.33 = 11.43   (BASE_MS 21000, 30fps)
+     tooth fraction per tick   = 11.43 / 360 = 0.0317
+     strobe at half a pitch    = 180 / 11.43 = 15.75x
+
+   THE LADDER RUNS PAST THAT, DELIBERATELY, TO A BENCHMARK CEILING. Charles asked
+   for a top stop that is "ludicrous", usable "almost ... to do benchmarking" —
+   and a stop that exists to make the renderer sweat is allowed to look wrong,
+   because looking wrong is the reading. So strobeSpeed() no longer truncates the
+   ladder; it CLASSIFIES it. Every stop at or above it is announced as strobing,
+   in the accessible name and in the colour of the numeral, because a control
+   that silently offers a setting which breaks the illusion is worse than one
+   that says where the illusion ends.
+
+   THE RUNGS ARE A 1-2-5 PREFERRED-NUMBER LADDER. Equal ratios rather than equal
+   increments, because the effect is perceptually multiplicative — 1x to 2x and
+   50x to 100x are the same size of change to look at — and 1-2-5 is the standard
+   logarithmic ladder for exactly that (oscilloscope timebases, chart axes,
+   preferred component values). From 1 to 200 that is eight positions:
+
+     1  2  5  10  20  50  100  200
+              |
+              +-- 15.75x strobe limit falls here: 1..10 are clean, 20..200 strobe
+
+   200 is a rung of that ladder exactly, so the ceiling is Charles's number
+   landing on the ladder rather than the ladder being bent to reach it. The
+   floor is 1x — the control only ever speeds the machine UP; slowing it down was
+   not wanted and stopping it is already the pause button's job (#69).
+
+   Both ends come from the schema's own `min` and `max`, which are levers again
+   rather than readouts. The strobe limit is not in the schema at all: it is a
+   property of BASE_MS and the frame rate, and writing it down anywhere else
+   would be a second home for a derived fact.
+
+   The rim engraving smears long before the teeth alias — it is the first thing a
+   person notices — but smear is a soft, monotonic loss with no threshold the
+   geometry can name, whereas aliasing is a hard sign inversion with an exact
+   one. Rim travel per tick is measured at every stop and reported in
+   CHANGELOG #96 rather than used as a bound. */
+const PROP_SCHEMA = (() => {
+  try {
+    return JSON.parse(document.querySelector('script[data-dc-script]').getAttribute('data-props'));
+  } catch (e) {
+    console.warn('wozi: the prop schema is unreadable — the speed control has one position');
+    return null;
+  }
+})();
+const SPEED_META = (PROP_SCHEMA && PROP_SCHEMA.speed) || {};
+/* The two ends of the ladder. One home each: the schema's own min and max. */
+const SPEED_FLOOR = SPEED_META.min || 1;
+const SPEED_CEIL = SPEED_META.max || SPEED_FLOOR;
+/* Where half a tooth pitch passes in one tick. At and above this the train is
+   sampled below Nyquist and reverses on screen. */
+const strobeSpeed = (frameRate) => 180 / ((7200 / BASE_MS) * (1000 / frameRate));
+const SPEED_STOPS = (() => {
+  const out = [];
+  for (let decade = 1; decade <= SPEED_CEIL; decade *= 10) {
+    for (const rung of [1, 2, 5]) {
+      const v = decade * rung;
+      if (v >= SPEED_FLOOR && v <= SPEED_CEIL) out.push(v);
+    }
+  }
+  return out.length ? out : [SPEED_FLOOR];
+})();
 const GHOST_COLORS = ['#9AA6AD', '#A9B4BA', '#8F9BA3', '#B3BCC2'];
 
 /* ONE WAY TO WRITE A POLAR POINT. There were seven copies of this formula --
@@ -1896,7 +2025,9 @@ const badgeKey = (person, slug) => person + '/' + slug;
 
 class Component extends DCLogic {
   /* `hover` holds a badgeKey(), not a slug -- see the note above badgeKey. */
-  state = { theme: 'light', hover: null, icons: {}, ghosts: [], motion: null, tog: false };
+  /* `speed` is null until the corner control or localStorage says otherwise, so
+     the shipped prop default stays the answer while nobody has chosen one. */
+  state = { theme: 'light', hover: null, icons: {}, ghosts: [], motion: null, tog: false, speed: null };
   _badgeOff = {};   /* badgeKey -> {x,y,vx,vy} spring state for the magnetic hub caps */
   _badgeEl = {};    /* badgeKey -> the cap element that key's spring writes to */
   _spinEls = [];
@@ -1952,7 +2083,8 @@ class Component extends DCLogic {
       stage.style.cursor = 'grab';
       /* A flick sets the flywheel spinning; friction pulls it back to idle speed.
          Push against the train and it keeps running the new way. */
-      const flick = Math.max(-8, Math.min(8, this._v));
+      const cap = this.driveCap();
+      const flick = Math.max(-cap, Math.min(cap, this._v));
       if (Math.abs(moved) > 30) this._dirSign = moved < 0 ? -1 : 1;
       else if (Math.abs(flick) > 0.5) this._dirSign = flick < 0 ? -1 : 1;
       this._v = Math.abs(flick) > 0.15 ? flick : this._dirSign * this.idleRate();
@@ -1961,7 +2093,54 @@ class Component extends DCLogic {
     window.addEventListener('pointerup', up);
   }
 
-  idleRate() { return (7200 / BASE_MS) * (this.props.speed ?? 1); }
+  /* HOW OFTEN THE MASTER ANGLE IS INTEGRATED, in ticks per second. One home,
+     because two things now depend on it and they must not disagree: step()'s
+     frame budget, and the speed ladder's aliasing ceiling — a control offering a
+     stop the tick rate cannot show would be the two drifting apart. Divisors of
+     the display refresh judder least, which is why 30 beats 24 on a 60Hz panel:
+     60/30 = 2 whole frames, 60/24 = 2.5. */
+  tickRate() { return this.props.frameRate ?? 30; }
+
+  /* HOW HARD A HAND MAY DRIVE THE FLYWHEEL, in master-degrees per millisecond.
+     8 is the historic bound on a flick or an arrow key, and it stood while the
+     idle rate was 0.343 — twenty-three times slower than the bound, so the bound
+     only ever caught a genuinely violent flick. The speed control now reaches
+     68.6 at its top stop, and a fixed 8 would stop being a ceiling on user input
+     and start being a BRAKE: one arrow key at 200x slams the train from 68.6 to
+     8, then it climbs back over ~900ms. The greater of the two is a ceiling
+     again at every stop, and identical to the old one at 1x. */
+  driveCap() { return Math.max(8, Math.abs(this.idleRate())); }
+
+  /* Does a stop sample the teeth below Nyquist? The ladder is allowed to run
+     past this — the top stops exist to be ludicrous — but the control has to say
+     so rather than hand over a setting that quietly breaks the illusion. */
+  speedStrobes(v) { return v >= strobeSpeed(this.tickRate()); }
+
+  /* THE MULTIPLIER IN FORCE, and the ONLY place the speed control reaches. One
+     clock: every wheel transform comes off `this._M`, and `_M` is integrated in
+     exactly one place, so scaling the rate the flywheel bleeds toward is the
+     whole of a speed control. Nothing per wheel, nothing in CSS — a second
+     animator drifts out of mesh within seconds (#3), and a control that made one
+     would be that mistake for the third time.
+     The corner control's choice when it has made one, the shipped prop default
+     otherwise. Not snapped to a stop: a prop override is entitled to any value
+     its schema allows, and only the BUTTON needs to sit on a declared stop. */
+  speedFactor() { return this.state.speed ?? this.props.speed ?? SPEED_FLOOR; }
+
+  /* Which stop the button is standing on — the nearest declared one, so a value
+     the stops no longer contain (a stale localStorage entry, a prop set between
+     stops) still has a well-defined next position instead of stranding the
+     control at a setting it can never leave. */
+  speedIndex() {
+    const want = this.speedFactor();
+    let best = 0;
+    for (let i = 1; i < SPEED_STOPS.length; i++) {
+      if (Math.abs(SPEED_STOPS[i] - want) < Math.abs(SPEED_STOPS[best] - want)) best = i;
+    }
+    return best;
+  }
+
+  idleRate() { return (7200 / BASE_MS) * this.speedFactor(); }
 
   /* The hub cap is a magnet on the axle: click-hold-drag pulls it off against a
      rubber-band tether (tanh, so it strains harder the further out it gets) to
@@ -2624,14 +2803,26 @@ class Component extends DCLogic {
        further down and that re-renders. Swap those two lines and the pause
        button ships with the wrong label (#59). */
     if (savedMotion === 'run' || savedMotion === 'rest') this.setState({ motion: savedMotion });
+    /* The speed choice rides along in localStorage beside the theme and motion
+       ones. Restored BEFORE the flywheel is seeded below, so a spinUp:false page
+       starts at the chosen rate rather than easing up to it from the default.
+       Bounded by the declared stops rather than by numbers written here: a
+       tampered or stale entry outside the schema's range is discarded, and a
+       value merely BETWEEN stops is kept, because speedIndex() can always say
+       which stop it is nearest. */
+    let savedSpeed = NaN;
+    try { savedSpeed = parseFloat(localStorage.getItem('wozi-speed')); } catch (e) {}
+    if (savedSpeed >= SPEED_STOPS[0] && savedSpeed <= SPEED_STOPS[SPEED_STOPS.length - 1]) {
+      this.setState({ speed: savedSpeed });
+    }
     const startRunning = savedMotion === 'run' ? true
       : savedMotion === 'rest' ? false : !(this._rmq && this._rmq.matches);
     this._v = (this.props.spinUp === false && startRunning) ? this.idleRate() : 0;
     let last = performance.now();
     const step = (now) => {
-      /* Cap the update rate. Divisors of the display refresh judder least, which is why
-         30 beats 24 on a 60Hz panel: 60/30 = 2 whole frames, 60/24 = 2.5. */
-      const budget = 1000 / (this.props.frameRate ?? 30) - 1.5;
+      /* Cap the update rate — see tickRate(), which is also what the speed
+         ladder's aliasing ceiling is computed against. */
+      const budget = 1000 / this.tickRate() - 1.5;
       if (now - last < budget) { this._raf = requestAnimationFrame(step); return; }
       const dt = Math.min(60, now - last);
       last = now;
@@ -3109,10 +3300,13 @@ class Component extends DCLogic {
 
   syncVars() {
     const r = document.documentElement.style;
-    const speed = this.props.speed ?? 1;
-    /* gearScale is no longer a CSS variable: it multiplies into gsRender() and
-       reaches the page as real pixel geometry, so nothing has to resolve it at
-       used-value time (#37). */
+    /* The `speed` read that used to sit here went with the --s variable it fed
+       (#57): it was left behind when that declaration was deleted, so every
+       render resolved the multiplier and threw it away. Speed reaches the page
+       through idleRate(), never through CSS.
+       gearScale is no longer a CSS variable either: it multiplies into gsRender()
+       and reaches the page as real pixel geometry, so nothing has to resolve it
+       at used-value time (#37). */
     /* Dark mode gets the lighter counterpart; an accent dark enough to read on
        the light background disappears against the dark one. */
     if (this.props.accent) {
@@ -5959,6 +6153,12 @@ class Component extends DCLogic {
       }));
     })();
 
+    /* Both are plain numbers stringified by the template, so 200 reads "200" and
+       1 reads "1" -- no trailing zeros padding a one-character label out to four. */
+    const speedNow = this.speedFactor();
+    const speedNext = SPEED_STOPS[(this.speedIndex() + 1) % SPEED_STOPS.length];
+    const speedStrobes = this.speedStrobes(speedNow);
+
     return {
       gearArt: gearArt,
       links: links,
@@ -5975,7 +6175,8 @@ class Component extends DCLogic {
         e.preventDefault();
         const dir = e.key === 'ArrowRight' ? 1 : -1;
         this._dirSign = dir;
-        this._v = Math.max(-8, Math.min(8, this._v + dir * 1.6));
+        const cap = this.driveCap();
+        this._v = Math.max(-cap, Math.min(cap, this._v + dir * 1.6));
       },
       onStageEnter: () => { if (this.props.hoverDrag) this.setState({ overStage: true }); },
       onStageLeave: () => { if (this.state.overStage) this.setState({ overStage: false }); },
@@ -6054,6 +6255,48 @@ class Component extends DCLogic {
         CANDIDATE_FAMILIES.forEach(f => out.push(item(f.type, (names[f.type] || f.type) + '  · candidate')));
         return out;
       })(),
+      /* One click, one stop, wrapping at the top. The whole effect is on the
+         master angle's integrator: the flywheel's target moves and the same
+         ~900ms bleed that settles a flick carries the train to the new pace, so
+         a speed change is a machine changing gear rather than a jump cut. Every
+         wheel stays in mesh because not one of them is animated on its own. */
+      cycleSpeed: () => {
+        try { localStorage.setItem('wozi-speed', String(speedNext)); } catch (e) {}
+        this.setState({ speed: speedNext });
+      },
+      /* The label names where the machine is AND where the next press puts it,
+         because a cycling control that only reports its current value gives a
+         screen-reader user no way to know what activating it will do. It is also
+         what keeps this button's accessible name unique -- the audit fails two
+         focusables that sound alike (#74).
+
+         AND IT SAYS WHERE THE ILLUSION ENDS. Past strobeSpeed() the teeth are
+         sampled below Nyquist and the train reads as standing still or running
+         backwards; those stops are kept because a benchmark stop is allowed to
+         look wrong, but a control that hands one over without saying so is worse
+         than one that admits it. Screen readers get it in words here; everyone
+         else gets it in the colour of the numeral, below. */
+      speedLabel: 'Gear speed ' + speedNow + '×'
+        + (speedStrobes ? ', strobing — benchmark only' : '')
+        + ', next ' + speedNext + '×',
+      speedMark: speedNow + '×',
+      /* THE ONE FIXED CONTROL WHOSE STYLE IS A RENDER VALUE RATHER THAN INLINE,
+         and the reason is exactly the reason the other three are not: this one
+         depends on state. The rest of the declaration is the row's, verbatim;
+         only `color` moves, to --accent once the stop strobes. --accent is the
+         darker of the two on both themes, so the warning state is also the more
+         legible one rather than the less. */
+      speedStyle: {
+        position: 'fixed', top: 'var(--offtop)',
+        right: 'calc(var(--offright) + (var(--btn) + var(--btngap)) * 2)',
+        zIndex: 20, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        width: 'var(--btn)', height: 'var(--btn)', padding: 0, border: 0,
+        borderRadius: '999px', background: 'transparent',
+        color: speedStrobes ? 'var(--accent)' : 'var(--muted)',
+        cursor: 'pointer', transition: 'color .18s ease',
+        font: "700 var(--icon)/1 'Manrope',system-ui,sans-serif",
+        fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.02em'
+      },
       toggleMotion: () => {
         const next = this.motionActive() ? 'rest' : 'run';
         try { localStorage.setItem('wozi-motion', next); } catch (e) {}

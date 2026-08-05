@@ -142,7 +142,7 @@ DEVICES = [
 #
 # THE SECOND PASS, and why it has to fake its own numbers. `viewport-fit=cover`
 # hands the page the whole display, notch and home indicator included, and the
-# page is supposed to WANT that -- the gears run under the chrome. The four fixed
+# page is supposed to WANT that -- the gears run under the chrome. The fixed
 # controls are the exception: they add env(safe-area-inset-*) so they stay
 # reachable. Chrome device emulation cannot help here. It implements env() and
 # resolves every inset to 0 on every emulated device, because the insets come
@@ -174,9 +174,11 @@ SAFE_MEASURE = r"""
   const s = document.documentElement.style;
   s.setProperty('--safe-t', '%(t)dpx'); s.setProperty('--safe-r', '%(r)dpx');
   s.setProperty('--safe-b', '%(b)dpx'); s.setProperty('--safe-l', '%(l)dpx');
-  /* The controls that must NOT bleed: the three corner buttons and the wordmark
-     (its <h1>'s fixed parent). Everything else on the page is allowed under the
-     chrome and is supposed to be. */
+  /* The controls that must NOT bleed: every corner button -- four of them since
+     the speed control (#96), and enumerated rather than counted so a fifth is
+     measured the day it exists -- plus the wordmark (its <h1>'s fixed parent).
+     Everything else on the page is allowed under the chrome and is supposed to
+     be. */
   const ctrls = [...document.querySelectorAll('button')].map(
     b => [b.getAttribute('aria-label') || 'button', b]);
   const h1 = document.querySelector('h1');
