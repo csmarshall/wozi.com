@@ -1345,10 +1345,21 @@ const THREE = [
    both questions at once -- which chain is the axis, and what order the rest sit
    in -- so no config could ask for a short spine or for a stack that is not
    length order. That is the whole of what the split buys, and it is only proved
-   by a fixture that uses it. */
+   by a fixture that uses it.
+
+   MID IS A THREE-WHEEL SPINE ON PURPOSE (Charles, 2026-08-05 / GitHub #104): it
+   used to be four, specifically so this fixture would not exercise the ENDS_APART
+   defect a three-wheel spine cannot pay -- #85's own composition test would have
+   inherited a console.warn nobody wrote it to expect, and a well-formedness
+   assertion that treats a coin-flip warning as sometimes-fine is not an
+   assertion. Now that a three-wheel spine is fixed (CL#111), this is the more
+   honest fixture: the general "declared spine + stack compose cleanly" test
+   and the specific "three-wheel spine pays ENDS_APART" regression are the same
+   shape of claim, so one fixture proves both rather than the second needing a
+   twin of the first. */
 const DECLARED = [
   { slug: 'mid', order: 20, spine: true,
-    links: [{ slug: 'a' }, { slug: 'b' }, { slug: 'c' }, { slug: 'e' }] },
+    links: [{ slug: 'a' }, { slug: 'b' }, { slug: 'c' }] },
   { slug: 'tiny', order: 10, links: [{ slug: 'd' }] },
   { slug: 'big', order: 30, links: [1, 2, 3, 4, 5, 6, 7].map(n => ({ slug: 's' + n })) }
 ];
@@ -1700,7 +1711,7 @@ test('the shipped config declares its spine and its stack, and gets what it decl
 
 test('a declared spine and stack still compose into a well-formed machine', () => {
   /* The keys are not worth having if the arrangement they unlock does not solve.
-     DECLARED is the hard case on purpose -- a FOUR-wheel spine with a SEVEN-wheel
+     DECLARED is the hard case on purpose -- a THREE-wheel spine with a SEVEN-wheel
      chain in the stack, which the old sort could never present to the solver -- so
      everything the composition is required to be is asked of it at once, at both
      stage rotations and at both idler counts:
@@ -1710,7 +1721,9 @@ test('a declared spine and stack still compose into a well-formed machine', () =
        no chain head fell back to the origin, the failure the bridge exists to
        remove;
        every wheel of every chain is placed at a finite point -- coverage;
-       and no wheel of one chain overlaps a wheel of another. */
+       no wheel of one chain overlaps a wheel of another; and the spine itself
+       -- three wheels, the shortest length that ever needs to pay ENDS_APART at
+       all (GitHub #104) -- never falls back to planting a wheel with a warning. */
   const bad = [];
   for (let trial = 0; trial < 40 && bad.length === 0; trial++) {
     const rot = trial % 2 ? 90 : 0, n = trial % 4 < 2 ? 1 : 2;
@@ -1749,6 +1762,39 @@ test('a declared spine and stack still compose into a well-formed machine', () =
     crossChainFouls(train, solved).forEach(f => bad.push(where + f));
   }
   ok(bad.length === 0, [...new Set(bad)].slice(0, 5).join('\n      '));
+});
+
+test('a three-wheel spine pays ENDS_APART instead of planting a wheel (GitHub #104)', () => {
+  /* The narrowest case ENDS_APART ever has to settle: a spine of exactly three
+     wheels, alone on stage, no bridges to complicate it. Wheel 2 is the leaf,
+     wheel 0 is the root, and wheel 1 -- the only host between them -- is one
+     mesh step from each, so the CLEARANCE and ENDS_APART the leaf owes the root
+     have to fit inside ONE wheel's own +/-60 degree nudge. Before CL#111 the
+     flat push (90) asked for more separation than a lot of dealt hosts could
+     ever produce, in EITHER direction, and 'wozi: wheel 2 ... found no clear
+     bearing' planted the leaf anyway on a measured 483 of 1,000 deals against
+     the pre-fix file (48.3%, GitHub #104's own count was ~41%). Run against
+     many real deals here too, because it is the teeth and bearings drawn that
+     decide whether the push is payable, not any single lucky one.
+
+     THIS TEST CAN FAIL: comment out the `Math.min(ENDS_APART * tight,
+     endsApartCapFor(o))` cap in solve() (restore a flat `ENDS_APART * tight`)
+     and this assertion trips within the first few of these 200 trials --
+     verified by hand while writing it, then restored. A trial count small
+     enough to pass by luck on the broken code would not be evidence of
+     anything. */
+  const bad = [];
+  const THREE_WHEEL_SPINE = [{ slug: 'solo', links: [{ slug: 'a' }, { slug: 'b' }, { slug: 'c' }] }];
+  let trials = 0;
+  for (let trial = 0; trial < 200; trial++) {
+    [0, 90].forEach(rot => {
+      trials++;
+      const { warns } = runSolve(THREE_WHEEL_SPINE, { axisRot: rot });
+      warns.filter(w => /found no clear bearing/.test(w)).forEach(w => bad.push(`axisRot ${rot}: ${w}`));
+    });
+  }
+  ok(bad.length === 0, bad.length + ' of ' + trials + ' deals planted the leaf without a '
+    + 'clear bearing: ' + bad.slice(0, 3).join('; '));
 });
 
 test('no wheel of one chain ever overlaps a wheel of another', () => {
