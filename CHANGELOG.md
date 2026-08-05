@@ -7,6 +7,29 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Changed
 
+- **CL#122 — Harper's chain stands on its own.** (Charles, 2026-08-05. Related:
+  GitHub #107.)
+
+  One key: `bridge: false`. Without it she is a power take-off — the spine
+  reaches her through a run of plain idlers and turns her, and that same run is
+  what sets the gap between the two chains. Unbridged, she is placed at the same
+  distance with no drive reaching her: a machine beside the machine rather than
+  one hanging off it. The wheel census drops **26 → 22** on the combined stage,
+  which is those four idlers going away, and no chain-overlap warning appears —
+  the spacing survives losing the thing that set it.
+
+  **This is independence by disconnection, and it is not quite what was asked
+  for.** GitHub #107 describes a third state that does not exist yet: her own
+  idler train, *driven, but not by him*. Today the config can only say "driven by
+  the spine" or "driven by nothing", so this is the closest it can get, and the
+  difference is visible — an unbridged chain shows no drive reaching it rather
+  than showing its own.
+
+  **Both chains still turn on the one master angle, and that must never change.**
+  Independence here means an independent *drive path*, never an independent
+  timebase. A second integrator drifts out of mesh within seconds and has broken
+  this page twice (CL#3).
+
 - **CL#120 — the datum showed through the bridge idlers, because a translucent
   group of one cannot occlude anything.** (GitHub #86.)
 

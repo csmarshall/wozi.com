@@ -308,14 +308,34 @@ window.WOZI_CONFIG = {
     {
       slug: 'harper',
       name: 'Harper',
-      /* harper.wozi.com is listed before it resolves, which costs nothing: a
-         host that matches nothing simply never selects this chain, and ?who=
-         reaches her either way -- and the combined stage she shares is on the
-         apex regardless. Making it live is an ACM SAN in us-east-1, an alternate
-         domain name on the distribution and a Route53 alias -- no deploy change,
-         per the note above. */
+      /* harper.wozi.com is LIVE as of 2026-08-05 (GitHub #111). It took exactly
+         what the note above says -- a SAN on a new us-east-1 certificate, an
+         alternate domain name on the distribution, and A + AAAA aliases in
+         Route53 -- and no deploy change, because one object is served to every
+         domain and the browser decides what to draw from it.
+
+         Note the certificate carries charles, chloe, veronica, miles and julia
+         as well. A SAN only PERMITS a name; it routes nothing. The unused four
+         are not in PEOPLE, so if one were wired up today it would land on the
+         combined stage, which is the documented fallback for an unrecognised
+         hostname and the correct behaviour rather than a gap. */
       hosts: ['harper.wozi.com'],
       order: 2,
+      /* HER CHAIN STANDS ON ITS OWN, at Charles's request (2026-08-05). Without
+         this she is a power take-off: the spine reaches her through a run of
+         idlers and turns her, and that run is also what sets the gap between the
+         two chains. Unbridged, she is placed at the same distance with no drive
+         reaching her at all -- a machine beside the machine rather than one
+         hanging off it.
+
+         THIS IS INDEPENDENCE BY DISCONNECTION, WHICH IS NOT QUITE WHAT WAS
+         ASKED FOR. What GitHub #107 describes is a third state that does not
+         exist yet: her own idler train, driven but not by him. Until that
+         lands this is the closest the config can say, and the difference is
+         visible -- an unbridged chain shows no drive reaching it, rather than
+         showing its own. Both wheels still turn on the one master angle; that
+         is not what "independent" means here and must never become it. */
+      bridge: false,
       /* HARPER'S CHAIN IS PURPLE, at Charles's request (#68). The seed is the
          pool's own purple rather than a new hex: it is an authored colour that
          has already been judged good on these wheels, and it sits inside the
