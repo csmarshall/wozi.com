@@ -165,6 +165,31 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
   never exercised the one length this defect actually lived at. A dedicated
   test drives 400 solo three-wheel deals on its own and asserts zero
   no-clear-bearing warnings.
+- **CL#115 — a kidney slot's arm is set by width, not by angle, so it keeps
+  its shape as the wheel grows.** (GitHub #93.)
+
+  `slots()` — the shared kidney-slot cutter behind the `spokes` and `pockets`
+  centre families — sized the slot's width as a fraction of the annulus span
+  (`rOut - rIn`), the way every other module-derived measurement on the page
+  is, but sized the arm left between two slots as a fixed number of *degrees*.
+  A fixed angle converts to a physical length through the wheel's mid radius,
+  which tracks the wheel's circumference; the width tracks the much smaller
+  span instead — two quantities that grow at different rates across the dealt
+  tooth range, so the straight run went flat while the width nearly tripled
+  and the kidney read as a round hole at the big end of the deal.
+
+  The fix replaces the fixed angle with `aspect`, a designed straight-run/width
+  ratio — a proportion, exactly like the existing `widthScale` — and derives
+  the one arm length that delivers exactly that ratio out of the gap this arm
+  count leaves at this wheel's own mid radius, converted to degrees by the
+  same mid-radius division `capDeg` already used. Where a gap is too tight to
+  afford it, the arm floors at zero rather than going negative, so the slot
+  widens toward the whole gap instead of demanding an impossible shape.
+
+  `npm test` gained an assertion that reads `slots()` and its two call sites
+  back out of `index.html`, executes the real closure, and measures the
+  achieved aspect ratio across the whole `TEETH_MIN..TEETH_MAX` range — not
+  one sampled size, which is what the bug was about.
 
 - **CL#110 — `?hud`, an animation HUD for how the browser is really rendering
   the gears.** (GitHub #92.)
