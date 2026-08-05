@@ -7,6 +7,54 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Changed
 
+- **CL#110 — `?hud`, an animation HUD for how the browser is really rendering
+  the gears.** (GitHub #92.)
+
+  Every gate in this repo runs one engine, headless, at fixed pixel sizes, with
+  no battery and no finger. So the page's behaviour on a real phone — the one
+  place several of its bugs have actually lived — has never been readable by
+  anything except a human describing what they saw. `?hud` makes the page report
+  on itself.
+
+  **Off by default and unreachable by accident.** The gate is
+  `/[?&]hud(=|&|$)/`, so `?hudson=1` does not trip it, and there is no button and
+  no key binding — the parameter is the whole interface. A visitor who does not
+  type it sees a byte-identical page.
+
+  What it reports, grouped by the question it answers: the scope being drawn;
+  tick/s against nominal, rAF/s, writes/s, dropped ticks, tick ms at p50 and p95,
+  and the sleep gate's own verdict; the speed multiplier with measured master
+  rate, teeth per tick and percent of Nyquist, marked when strobing; the wheel
+  census split linked/idler/ghost, `--gsfit` raw and quantised, **which of the
+  four fit terms is binding**, gear size in CSS and device px, viewport; and the
+  panel's own cost in ms and as a share of a frame.
+
+  **It measures without perturbing what it measures**, which is the whole risk of
+  a HUD like this. Inside the rAF loop it does integer arithmetic and one array
+  write — no DOM, no allocation, no layout read. All rendering happens on a 500ms
+  timer outside the loop. It reads the raw inline `--gsfit` string rather than
+  calling `getComputedStyle`, which would force a style recalc, and it reads the
+  `_solved` cache rather than calling `solve()`, which could pay for a whole
+  re-solve on a timer. It reports its own cost so that claim is checkable rather
+  than asserted.
+
+  **It reports the sleep gate, it does not participate in it.** `_hudAsleep`
+  mirrors the loop's own expression rather than re-deriving it — the one-expression
+  rule from #7 is exactly the kind of thing a second opinion breaks.
+
+  **One unsourced claim removed.** A comment stated ticks/s had been "measured at
+  28.5–29.7 against a nominal 30". Nothing in the tree supported it, and measuring
+  it properly contradicted it: **30.03 ticks/s**, median 33.3ms, p95 34.3ms, and
+  **zero** ticks needing a third raw frame across ~1,700 samples — combined stage,
+  one chain and a 223-wheel viewport, at 1× and 200×, including a run with every
+  core deliberately oversubscribed. The comment now carries that figure and its
+  limits, since a number in a comment is read as fact by whoever finds it next.
+
+  Landing note: the branch cited changelog `#103` in six places, which is now a
+  GitHub issue number and not this entry. Renumbered to CL#110. **CL#108 is
+  deliberately skipped** — it is in history on the reverted plate-clearance commit
+  and is reserved for that work re-landing.
+
 - **CL#109 — `?seed=8231`, so that a machine drawn once can be drawn again.**
   (GitHub #48, part 1 of three; parts 2 and 3 shipped as #100 and #93.) Every
   wheel on this page is dealt. Twelve bare `Math.random()` calls pick the tooth
