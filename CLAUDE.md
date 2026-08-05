@@ -337,6 +337,21 @@ because a change to the bridge, the datum or the chain ordering moves the
 combined shot enormously while leaving the single-chain path untouched, and only
 the second run can tell you so.
 
+**`?seed=8231` fixes the deal, and no gate may use it.** The shipped page accepts
+a seed in the URL, and when it gets one it deals every wheel from a generator of
+its own — tooth counts, families, bearings, colours, which wheel wears which
+service. It exists so that a bug report from a real phone describes a machine
+that can be drawn again on a desk, and it is the only determinism affordance in
+shipped code (CL#109). **The harnesses keep injecting their own LCG through
+`Page.addScriptToEvaluateOnNewDocument` and must go on doing so**: a gate that
+deals through the same mechanism the page deals through cannot see a fault in
+that mechanism, because it would agree with the page about a machine they had
+both got wrong. Absent the parameter the page does not touch `Math.random` at
+all, which is what keeps `pixel_regress` at 0px; a malformed or out-of-range seed
+deals at random and says so in the console. And it fixes the **deal**, not the
+fit — the placement is measured off the viewport, so reproducing a machine takes
+the same seed *and* the same window size.
+
 **Six things no harness here can answer, and `docs/MANUAL-CHECKS.md` names
 them.** Everything in `tools/` is headless Chrome over CDP plus one windowless
 WKWebView, so none of it has browser chrome, a window manager, a battery or a
