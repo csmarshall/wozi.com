@@ -1442,6 +1442,47 @@ const ALL_FAMILIES = CENTRE_FAMILIES.concat(CANDIDATE_FAMILIES);
 const FORCE_KIND = (function () {
   try { return (location.search.match(/[?&]kind=([a-z]+)/) || [])[1] || null; } catch (e) { return null; }
 })();
+/* THE ANIMATION HUD, AND WHY IT IS A QUERY PARAMETER (CL#110). `?hud` draws a
+   diagnostic overlay reporting how the browser is really rendering the train:
+   the tick rate against tickRate(), dropped ticks, rAF/s, the fit and which of
+   its terms is binding, the wheel census, and the master angle's measured rate.
+
+   THE STANDING RULE IS THAT TEST HOOKS LIVE IN THE HARNESS AND NEVER IN THE
+   SHIPPED PAGE, and this is a deliberate exception to it, argued rather than
+   assumed. The rule exists so that a verdict is never a property of something
+   the page did for the harness's benefit -- determinism, seeding, a hook a real
+   visitor could trip. None of that applies here: the HUD *reads* and never
+   writes, it cannot reach the integrator, and it changes no number the page
+   draws with. What it buys is the one thing a harness structurally cannot --
+   the numbers in front of a HUMAN standing at the machine, on their own
+   hardware, at their own refresh rate, with their own GPU, in a state a
+   headless run does not reproduce.
+
+   A query parameter rather than a corner button, and the trade is chrome
+   against discoverability. A fifth button costs permanent furniture on a page
+   whose entire subject is the machine; `?hud` costs nothing at all when it is
+   absent, is self-documenting in a bug report (Charles pastes a URL and the
+   numbers come with it), joins a vocabulary the page already has in `?who=` and
+   `?kind=`, and cannot be reached by a visitor who is not looking for it.
+
+   Read ONCE here, at module scope, so every instrumentation site downstream is
+   a comparison against a constant rather than a query-string parse -- and so
+   that with the HUD off the animation loop's entire cost is one boolean test
+   per frame. */
+const HUD = (function () {
+  try { return /[?&]hud(=|&|$)/.test(location.search); } catch (e) { return false; }
+})();
+/* HOW OFTEN THE OVERLAY IS SAMPLED, in milliseconds. On a timer and never in
+   the rAF loop: an overlay that redrew per tick would be reporting its own
+   overhead as the page's. 500ms is two readings a second -- fast enough that a
+   stall is visible while you are causing it, slow enough that the whole panel's
+   update is a rounding error beside the ~1200 transform writes a second the
+   train itself does.
+   HUD_WINDOW is the rolling window for the frame-time percentiles, in ticks:
+   128 at a nominal 30/s is a little over four seconds, which is long enough to
+   have percentiles at all and short enough that they still describe NOW. */
+const HUD_MS = 500;
+const HUD_WINDOW = 128;
 /* Both epicyclics are families in their own right now, so a forced view names
    one directly and needs no special case. */
 const FORCE_TWO = FORCE_KIND === 'ravigneaux';
@@ -2667,6 +2708,25 @@ class Component extends DCLogic {
   _spinEls = [];
   _chainEls = [];
   _ghostEls = [];
+  /* ANIMATION HUD counters (CL#110). Every one of them is written from inside the
+     rAF loop and read from outside it, on a timer -- that split is the whole
+     reason the overlay can be honest about the loop it is measuring. They are
+     declared unconditionally because a field declaration costs nothing at load;
+     what is conditional is whether anything ever increments them.
+     `_hudAsleep` is the sleep gate's verdict as the LOOP evaluated it, stored
+     rather than re-derived: step() owns that expression and the readout must
+     never be able to disagree with it. It starts TRUE so the first tick after
+     boot is not charged as a dropped one -- the gap between `last` being seeded
+     and the first rAF that clears the budget is a page loading, not a renderer
+     falling behind. */
+  _rafN = 0;
+  _tickN = 0;
+  _paintN = 0;
+  _tickDrop = 0;
+  _tickI = 0;
+  _tickFill = 0;
+  _hudAsleep = true;
+  _tickDt = HUD ? new Array(HUD_WINDOW).fill(0) : null;
   _colRef = React.createRef();
   _stageRef = React.createRef();
 
@@ -3479,6 +3539,15 @@ class Component extends DCLogic {
     /* Skip frames where nothing moved enough to see. */
     if (this._lastM !== undefined && Math.abs(this._M - this._lastM) < 0.05) return;
     this._lastM = this._M;
+    /* THE COUNT OF PASSES THAT ACTUALLY WROTE TRANSFORMS (CL#110), which is not
+       the same number as the tick count and is the reason it is counted HERE
+       rather than inferred from outside. A tick that arrives with the train
+       standing still returns on the line above and writes nothing, so ticks/s
+       and writes/s diverge exactly when the guard above is doing its job --
+       and an observer watching mutation batches from outside cannot tell a
+       skipped write from a coalesced one, which is what made the earlier
+       estimate of this number ~1% noisy. One increment, past the guard. */
+    if (HUD) this._paintN++;
     const gears = this.solve().gears;
     if (this._spinEls) {
       /* ADDRESSED BY TRAIN INDEX, which is what the render's ref writes them
@@ -3554,11 +3623,23 @@ class Component extends DCLogic {
       /* Cap the update rate — see tickRate(), which is also what the speed
          ladder's aliasing ceiling is computed against. */
       const budget = 1000 / this.tickRate() - 1.5;
+      /* HUD INSTRUMENTATION, AND ITS ENTIRE COST WHEN THE HUD IS OFF (CL#110):
+         one comparison against a module constant, here and three lines down.
+         `HUD` is resolved once at load, so nothing in this loop parses a query
+         string, reads the DOM or allocates. The counters are read on a timer
+         somewhere else entirely -- see hudSample() -- because an overlay that
+         re-renders inside the rAF loop is measuring its own overhead. */
+      if (HUD) this._rafN++;
       if (now - last < budget) { this._raf = requestAnimationFrame(step); return; }
-      const dt = Math.min(60, now - last);
+      /* The raw interval, before the 60ms clamp below: a dropped tick is
+         precisely the case the clamp exists to survive, so measuring drops off
+         the clamped value would hide every drop longer than two frames. */
+      const gap = now - last;
+      const dt = Math.min(60, gap);
       last = now;
       /* One expression decides whether to integrate — nothing can latch it asleep. */
       const asleep = document.hidden || this._offscreen === true;
+      if (HUD) this.hudTick(gap, asleep);
       if (!this._dragging && !asleep) {
         /* Flywheel: bleed back toward the train's natural pace. */
         /* LAYER: hover drag — attention loads the machine and it slows a little. */
@@ -3605,6 +3686,277 @@ class Component extends DCLogic {
       }, { rootMargin: '120px' });
       this._io.observe(this._stageRef.current);
     }
+  }
+
+  /* ===========================================================================
+     THE ANIMATION HUD (CL#110, GitHub #92). Three methods, and the division of
+     labour between them is the feature:
+
+       hudTick()    runs INSIDE the rAF loop. It does integer arithmetic on
+                    counters and one array store. It touches no DOM, allocates
+                    nothing, and reads nothing that can force layout.
+       hudSample()  runs on a setInterval, outside the loop entirely. It reads
+                    those counters, turns them into rates, and writes text.
+       hudMount()   builds the panel once.
+
+     ONE CLOCK IS NOT NEGOTIABLE and nothing here bends it. The HUD reads `_M`,
+     `_v`, the counters and the cached solve; it never writes any of them, never
+     calls solve() (it reads `_solved`, and returns "--" rather than causing a
+     re-solve), never calls setState, and never touches `_offscreen`. It cannot
+     start, stop, speed up or wake the loop. When the sleep gate sleeps, the
+     rates it reports fall to zero and the gate row says why -- which is the HUD
+     reporting the gate rather than defeating it (#7).
+     =========================================================================== */
+
+  /* Called once per tick that clears the frame budget, asleep or not. */
+  hudTick(gap, asleep) {
+    this._tickN++;
+    this._tickDt[this._tickI++ % HUD_WINDOW] = gap;
+    if (this._tickFill < HUD_WINDOW) this._tickFill++;
+    /* A DROPPED TICK IS A SLOT THAT WENT BY WITH NOTHING IN IT. The budget is
+       `1000/tickRate - 1.5`, so a tick is due every ~33.3ms at 30 and a gap of
+       two intervals means one slot was missed. Rounding the gap to whole
+       intervals and subtracting the one that did arrive counts them.
+
+       NOT COUNTED ACROSS A SLEEP, in either direction. A hidden tab gets no rAF
+       callbacks at all and an off-screen stage stops integrating, so the gap
+       that spans a sleep is seconds long and would be charged as hundreds of
+       drops -- which would be reading the sleep gate WORKING as the renderer
+       failing. Both the tick before and the tick after have to have been awake
+       for the interval between them to be a measurement of anything. */
+    if (!asleep && !this._hudAsleep) {
+      const miss = Math.round(gap / (1000 / this.tickRate())) - 1;
+      if (miss > 0) this._tickDrop += miss;
+    }
+    this._hudAsleep = asleep;
+  }
+
+  hudMount() {
+    if (!document.body) return;
+    /* TOP LEFT, because it is the one corner of this page with nothing in it:
+       the four controls are fixed top-right, the wordmark bottom-left, and the
+       table of gears opens on the left EDGE at 50%. Offsets are the same
+       --offtop/--offleft the rest of the furniture uses, so the safe-area inset
+       is already in them and tools/devices.py's safe-area pass measures this
+       panel on the same terms as the buttons.
+
+       pointer-events:none IS LOAD-BEARING. The whole stage is one grab target,
+       and a fixed panel sitting over its top-left corner would swallow the
+       pointerdown that starts a drag -- on a phone that is a large fraction of
+       the machine. Nothing in here is interactive, so nothing is lost, and the
+       HUD cannot be the reason a gesture did not take.
+
+       aria-hidden, deliberately. This is an instrument, not content: it is
+       reachable only by typing `?hud` into the address bar, every value in it
+       is a number mirrored from somewhere else on the page, and it changes
+       twice a second -- an accessibility tree that carried it would be reading
+       out a rolling telemetry feed over the top of a machine that is the actual
+       subject. Nothing here is focusable and nothing here is a control. */
+    const box = document.createElement('div');
+    box.setAttribute('aria-hidden', 'true');
+    box.style.cssText = 'position:fixed;top:var(--offtop);left:var(--offleft);z-index:40;'
+      + 'pointer-events:none;background:var(--chip);border:1px solid var(--hair);'
+      + 'border-radius:12px;padding:8px 11px;box-shadow:var(--shadow);color:var(--ink);'
+      + "font:400 10px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;"
+      + 'font-variant-numeric:tabular-nums;white-space:nowrap;';
+    const title = document.createElement('div');
+    title.textContent = 'wozi · hud';
+    title.style.cssText = "font:700 10px/1.6 'Manrope',system-ui,sans-serif;letter-spacing:.14em;"
+      + 'text-transform:uppercase;color:var(--muted);padding-bottom:4px;';
+    box.appendChild(title);
+    /* One value element per row, kept in a map so a sample is a handful of
+       textContent writes against a known target -- no querying, no rebuilding,
+       and no element created after mount. */
+    this._hudRow = {};
+    this._hudWas = {};
+    const rule = () => {
+      const d = document.createElement('div');
+      d.style.cssText = 'height:1px;margin:5px 0;background:var(--hair);';
+      box.appendChild(d);
+    };
+    const row = (key) => {
+      const line = document.createElement('div');
+      line.style.cssText = 'display:flex;gap:7px;';
+      const lab = document.createElement('span');
+      lab.textContent = key;
+      lab.style.cssText = 'flex:0 0 52px;color:var(--muted);';
+      const val = document.createElement('span');
+      val.textContent = '--';
+      line.appendChild(lab);
+      line.appendChild(val);
+      box.appendChild(line);
+      this._hudRow[key] = val;
+    };
+    /* Grouped by the question each group answers: what is being drawn, whether
+       the renderer is keeping up, how fast it is turning, how it was fitted,
+       and what the panel itself costs. */
+    row('scope');
+    rule();
+    row('tick/s'); row('raf/s'); row('write/s'); row('drop'); row('tick ms'); row('gate');
+    rule();
+    row('speed'); row('master'); row('teeth');
+    rule();
+    row('wheels'); row('gsfit'); row('binds'); row('gear px'); row('view');
+    rule();
+    row('hud');
+    document.body.appendChild(box);
+    this._hudBox = box;
+    this._hudT = performance.now();
+    this._hudM = this._M || 0;
+    this._hudN = { tick: 0, raf: 0, paint: 0 };
+    this._hudDrop = 0;
+    this._hudCost = 0;
+    this._hudTimer = setInterval(() => this.hudSample(), HUD_MS);
+    this.hudSample();
+  }
+
+  hudSample() {
+    const t0 = performance.now();
+    const box = this._hudBox;
+    if (!box) return;
+    /* Written only when the string actually changes. Most of these rows are
+       constant for the life of a viewport -- the census, the fit, the binding
+       term, the device pixel ratio -- so a sample is typically six or seven
+       text writes rather than sixteen. */
+    const put = (key, text, warn) => {
+      const el = this._hudRow[key];
+      if (!el) return;
+      const mark = warn ? 'var(--accent)' : 'var(--ink)';
+      if (this._hudWas[key] !== text) { el.textContent = text; this._hudWas[key] = text; }
+      if (el.style.color !== mark) el.style.color = mark;
+    };
+    const dtms = Math.max(1, t0 - this._hudT);
+    const rate = (now, was) => (now - was) * 1000 / dtms;
+    const ticks = rate(this._tickN, this._hudN.tick);
+    const rafs = rate(this._rafN, this._hudN.raf);
+    const paints = rate(this._paintN, this._hudN.paint);
+    const degs = (this._M - this._hudM) * 1000 / dtms;
+    this._hudT = t0;
+    this._hudM = this._M;
+    this._hudN = { tick: this._tickN, raf: this._rafN, paint: this._paintN };
+
+    const nominal = this.tickRate();
+    /* THE ONE READING THAT MEANS SOMETHING ON ITS OWN. Ticks per second is
+       invariant to the speed multiplier, because the work per tick is a fixed
+       number of transform writes whatever the multiplier is (#96).
+
+       MEASURED, and the figure here replaces an earlier unsourced one: 30.03
+       ticks/s, median interval 33.3ms and p95 34.3ms, with ZERO ticks needing a
+       third raw frame across ~1,700 samples -- combined stage, one chain, and a
+       223-wheel viewport, at 1x and at 200x, including a run with every core
+       deliberately oversubscribed. Harness kept as scratchpad/frame_timing.py.
+       That is one machine, headless, one engine, no battery and no thermal
+       throttling, so it says what a quiet desktop does and nothing about a weak
+       phone -- which is the case this HUD exists to report from.
+
+       So a tick rate below nominal is never "you set it too fast":
+       it is wheel count, viewport, compositing or another tab, and it is a real
+       bottleneck. Marked at 90% of nominal, which is below the 95% the healthy
+       page sits at and above anything that could be called noise. */
+    put('tick/s', ticks.toFixed(1) + ' of ' + nominal, ticks < nominal * 0.9);
+    put('raf/s', rafs.toFixed(1));
+    /* Writes per tick: what applyRotation() actually addresses. The count is
+       taken here, on the timer, rather than by counting inside the loop. */
+    const els = (this._spinEls ? this._spinEls.filter(Boolean).length : 0)
+      + (this._ghostEls ? this._ghostEls.length : 0)
+      + (this._epiEls ? this._epiEls.length : 0)
+      + (this._chainEls ? this._chainEls.length : 0);
+    /* write/s BELOW tick/s IS NOT A FAULT -- applyRotation() returns early on
+       any tick that moved less than 0.05 master-degrees, so a paused or resting
+       train ticks at nominal and writes nothing. The pair is what separates
+       "the loop stopped" from "the loop ran and had nothing to do". */
+    put('write/s', paints.toFixed(1) + ' × ' + els);
+    /* CUMULATIVE SINCE LOAD, which is what makes it worth having -- a stall
+       that happened while you were doing something else still has to be there
+       when you look. But the WARNING is on the recent ones only: a page that
+       dropped two ticks getting itself onto the screen and none since is not a
+       page with a problem, and a counter that stays lit forever over a boot
+       cost teaches you to ignore it. Total, then what it has done since the
+       last sample. */
+    const dropped = this._tickDrop - this._hudDrop;
+    this._hudDrop = this._tickDrop;
+    put('drop', this._tickDrop + (dropped ? ' · +' + dropped : ''), dropped > 0);
+    /* Percentiles over the rolling window, sorted here and never in the loop. */
+    const win = this._tickDt.slice(0, this._tickFill).sort((a, b) => a - b);
+    const at = (q) => win.length ? win[Math.min(win.length - 1, Math.floor(q * win.length))] : 0;
+    put('tick ms', at(0.5).toFixed(1) + ' p50 · ' + at(0.95).toFixed(1) + ' p95');
+    /* THE SLEEP GATE, REPORTED AND NEVER OVERRIDDEN, AND NEVER RE-DERIVED. The
+       one expression that decides whether to integrate lives in step() and
+       stays there; what arrives here is the verdict it reached, carried out on
+       the tick that reached it. Writing the same test a second time would give
+       the page two answers to a question #7 proves it must only have one of --
+       and it would also give tools/mutation_gate.py two lines to substitute
+       where its registry insists on exactly one.
+       `document.hidden` IS read live here, and only that half. A hidden tab
+       gets no rAF callbacks at all, so the loop's verdict is frozen at whatever
+       it was when the tab went away and could never report the hidden case at
+       all -- while the off-screen half, which is the one #7 was about and the
+       one that can be got wrong, still comes from the loop and is not
+       second-guessed. */
+    const asleep = document.hidden || this._hudAsleep === true;
+    put('gate', this._dragging ? 'dragging'
+      : !asleep ? (this.motionActive() ? 'running' : 'paused')
+      : document.hidden ? 'asleep · hidden' : 'asleep · offscreen', asleep);
+
+    const speed = this.speedFactor();
+    put('speed', speed + '×' + (this.speedStrobes(speed) ? ' · strobing' : ''),
+      this.speedStrobes(speed));
+    /* The master angle MEASURED, not the multiplier assumed: `degs` is the
+       difference in `_M` over wall-clock time between two samples, so a speed
+       setting can be confirmed against idleRate() rather than trusted. */
+    put('master', (((this._M % 360) + 360) % 360).toFixed(0) + '° · '
+      + degs.toFixed(1) + '°/s of ' + (this.idleRate() * 1000).toFixed(1));
+    /* One tooth of travel is 360 master-degrees on EVERY wheel -- the tooth
+       count cancels -- so there is one tooth-per-tick figure for the whole
+       train, and half a pitch per tick is the Nyquist limit at which it strobes
+       (#96). Derived from the two measurements above rather than from the stop,
+       so it says what the browser did and not what was asked for. */
+    const perTick = ticks > 0 ? degs / ticks : 0;
+    put('teeth', (perTick / 360).toFixed(3) + '/tick · '
+      + (perTick / 180 * 100).toFixed(0) + '% nyq', perTick / 180 >= 1);
+
+    /* READ, NEVER SOLVED. `_solved` is the cache applyRotation() fills every
+       tick; calling solve() here could pay for a whole re-solve on the HUD's
+       timer, which is exactly the kind of cost an instrument must not add. */
+    const s = this._solved;
+    if (s) {
+      let linked = 0, idlers = 0;
+      s.gears.forEach(g => { if (g.role === 'idler') idlers++; else linked++; });
+      const ghosts = (this.state.ghosts || []).length;
+      put('wheels', (linked + idlers + ghosts) + ' = ' + linked + 'L ' + idlers + 'I ' + ghosts + 'G');
+    }
+    /* --gsfit off the inline declaration fitStage() wrote, NOT off
+       getComputedStyle: resolving a computed style here would force a style
+       recalculation twice a second on behalf of a readout. `_gsr` beside it is
+       the quantised value the wheels are actually drawn at, and the pair is
+       what says whether quantisation is costing anything. */
+    const gsfit = document.documentElement.style.getPropertyValue('--gsfit');
+    put('gsfit', (gsfit || '--') + ' → ' + (this._gsr || '--'));
+    put('binds', this._fitBind || '--');
+    /* The gear in CSS px and in device px, which is the pair #79 needed: a
+       wheel can be the right size in layout and the wrong size on the glass. */
+    const css = WHEEL_SPAN * (this._gsr || 0);
+    const dpr = window.devicePixelRatio || 1;
+    put('gear px', css.toFixed(0) + ' css · ' + (css * dpr).toFixed(0) + ' dev × ' + dpr);
+    const vv = window.visualViewport;
+    put('view', Math.round((vv && vv.width) || window.innerWidth) + '×'
+      + Math.round((vv && vv.height) || window.innerHeight));
+    put('scope', (STAGE.mode === 'all' ? 'all' : (WHO.slug || '?'))
+      + ' · ' + (FORCE_KIND || 'mixed'));
+
+    /* THE PANEL'S OWN COST, MEASURED BY THE PANEL. Everything above this line
+       is what a sample costs, smoothed over samples so a single scheduling
+       hiccup does not read as the overlay being expensive. Reported as a share
+       of one frame budget so it is comparable with the thing it is measuring.
+       What it does NOT include is the style, layout and paint the browser does
+       afterwards with the text this wrote -- that is off this thread of
+       execution and cannot be timed from inside it. The external A/B in the
+       changelog is what covers that half. */
+    const cost = performance.now() - t0;
+    this._hudCost = this._hudCost ? this._hudCost * 0.7 + cost * 0.3 : cost;
+    const share = this._hudCost * (1000 / HUD_MS) / 10;
+    put('hud', this._hudCost.toFixed(2) + 'ms × ' + (1000 / HUD_MS) + '/s · '
+      + share.toFixed(2) + '% cpu');
   }
 
   /* Canvas text measurement, memoised. Cheap, synchronous, and exact for the
@@ -3939,11 +4291,38 @@ class Component extends DCLogic {
        scope beside TARGET_GEAR_PX because idlerCount() divides by it too -- see
        the note there. Matches what is drawn: gearSvg sizes each wheel
        (ro + 6) * 2. */
-    const fit = Math.max(0.28, Math.min(
-      WHEEL_SPAN ? TARGET_GEAR_PX / WHEEL_SPAN : Infinity,
-      LINK_SHARE * longAvail / longSolved,
-      crossAvail * CROSS_BLEED / crossSolved,
-      WHEEL_SPAN ? WHEEL_CROSS_MAX * crossAvail / WHEEL_SPAN : Infinity));
+    /* THE FOUR TERMS ARE NAMED, and that is the whole of the change here (CL#110).
+       The arithmetic is the one that shipped -- same four expressions, same
+       min(), same floor, NaN propagating exactly as it did (see dealAngles) --
+       but each limb now has a name, so the page can say which one is BINDING
+       instead of that having to be derived offline every time somebody asks.
+       #79 needed precisely this answer and had no way to get it from the page.
+
+       Naming them rather than recomputing them beside the min is the point: one
+       home per fact. A HUD that re-evaluated these four expressions to work out
+       which won would be a second copy of the fit, free to drift from the
+       first, and this file has already paid for that mistake in other
+       currencies (#15, #59). */
+    const tGear  = WHEEL_SPAN ? TARGET_GEAR_PX / WHEEL_SPAN : Infinity;
+    const tChain = LINK_SHARE * longAvail / longSolved;
+    const tCross = crossAvail * CROSS_BLEED / crossSolved;
+    const tWheel = WHEEL_SPAN ? WHEEL_CROSS_MAX * crossAvail / WHEEL_SPAN : Infinity;
+    /* A FLOOR, NOT A CEILING -- see the note four paragraphs up. Named only so
+       that the readout can say the floor is what is holding, which is a state
+       worth being able to see: it means every physical term wanted the wheels
+       smaller than the page is willing to draw them. */
+    const FIT_FLOOR = 0.28;
+    const want = Math.min(tGear, tChain, tCross, tWheel);
+    const fit = Math.max(FIT_FLOOR, want);
+    /* Derived from `want` by comparison, never by re-deciding: whichever term
+       IS the minimum is the one that produced it. The NaN limb is explicit
+       because NaN loses every comparison, so without it a NaN fit would be
+       reported under whichever name happened to be last. */
+    this._fitBind = !(want === want) ? 'NaN'
+      : fit > want ? 'floor ' + FIT_FLOOR
+      : want === tGear ? 'gear size'
+      : want === tChain ? 'chain share'
+      : want === tCross ? 'cross bleed' : 'wheel cross';
     const root = document.documentElement.style;
     root.setProperty('--gsfit', fit.toFixed(3));
     /* THE WHEELS ARE DRAWN AT FINAL SIZE (#37). Everything inside the stage used
@@ -3991,6 +4370,13 @@ class Component extends DCLogic {
     this.loadIcons();
     this.startPhysics();
     this.fitStage();
+    /* AFTER fitStage(), so the panel's first sample already has a fit, a
+       binding term and a solve to report rather than four dashes. It is
+       appended to document.body and not to the component's tree on purpose:
+       the render is what redraws the machine, and an instrument that rode
+       along with it would be repainted by every hover and every ghost
+       re-solve, on the render path it exists to measure. */
+    if (HUD) this.hudMount();
     this.onResize = () => this.fitStage();
     window.addEventListener('resize', this.onResize);
     /* iOS fires this and not `resize` when the toolbar collapses or the keyboard
@@ -4031,6 +4417,8 @@ class Component extends DCLogic {
     if (this._onPointer) window.removeEventListener('pointermove', this._onPointer);
     if (this._raf) cancelAnimationFrame(this._raf);
     if (this._io) this._io.disconnect();
+    if (this._hudTimer) clearInterval(this._hudTimer);
+    if (this._hudBox && this._hudBox.parentNode) this._hudBox.parentNode.removeChild(this._hudBox);
   }
 
   syncVars() {

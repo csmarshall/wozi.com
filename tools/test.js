@@ -3402,9 +3402,20 @@ test('the fit scale has no constant ceiling on the ratio', () => {
      constant, each fixing it and reintroducing it further out. The ceiling is
      gone; this asserts it stays gone, because re-adding one is the natural
      "fix" the next time the wheels look too big. */
-  const i = SRC.indexOf('const fit = Math.max(0.28');
-  ok(i > 0, 'could not find the fit computation');
-  const line = SRC.slice(i, SRC.indexOf(';', i));
+  /* THE WHOLE EXPRESSION, NOT ONE LINE OF IT (CL#110). This used to anchor on the
+     literal `const fit = Math.max(0.28`, which was the entire computation while
+     the four terms were arguments to a min() written inline. They are named
+     locals now, so the min's operands live on the four lines above the `fit`
+     line and a one-line slice would read as though the cross-axis guard had
+     been deleted -- a false FAIL, and worse, a test that could stop seeing a
+     ceiling re-added to a term instead of to the result. The same two ends the
+     fit builder at the top of this file uses: WHEEL_CROSS_MAX opens the block,
+     the --gsfit write closes it. */
+  const i = SRC.indexOf('const WHEEL_CROSS_MAX =');
+  const j = SRC.indexOf('const root = document.documentElement.style;', i);
+  ok(i > 0 && j > i, 'could not find the fit computation');
+  const line = SRC.slice(i, j);
+  ok(/const fit = Math\.max\(/.test(line), 'the fit is no longer a floored minimum');
   ok(!/GS_MAX/.test(line),
     'a constant ceiling is back in the fit — see #44: cap an absolute size, never a ratio');
   ok(/crossAvail/.test(line), 'the cross-axis guard is missing from the fit');

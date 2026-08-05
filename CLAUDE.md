@@ -352,6 +352,27 @@ deals at random and says so in the console. And it fixes the **deal**, not the
 fit — the placement is measured off the viewport, so reproducing a machine takes
 the same seed *and* the same window size.
 
+**`?hud` is the page reporting on itself, and it is the one test hook that
+ships.** Everything else in `tools/` observes the page from outside; this draws a
+panel *in* it, which is a deliberate exception to the rule that test scaffolding
+lives in the harness and never in the shipped file. It earns the exception by
+being the only way to read tick rate, dropped ticks, the wheel census and
+**which of the four fit terms is binding** on a device no harness can drive — a
+real phone, on battery, in Low Power Mode, with a collapsing URL bar.
+
+It is off by default and cannot be reached by accident: the gate is
+`/[?&]hud(=|&|$)/`, so `?hudson=1` does not trip it, and there is no button and
+no key binding. Absent the parameter the page is byte-identical.
+
+**It reports the loop; it must never join it.** Inside `step()` it does integer
+arithmetic and one array write — no DOM, no allocation, no layout read — and all
+drawing happens on a 500ms timer outside the loop. It reads the raw inline
+`--gsfit` string rather than calling `getComputedStyle`, and the `_solved` cache
+rather than `solve()`, because either would make the instrument change the
+reading. `_hudAsleep` mirrors the sleep gate's own expression rather than
+re-deriving it, since a second opinion about that flag is exactly what #7 was.
+It displays its own cost so those claims can be checked rather than believed.
+
 **Six things no harness here can answer, and `docs/MANUAL-CHECKS.md` names
 them.** Everything in `tools/` is headless Chrome over CDP plus one windowless
 WKWebView, so none of it has browser chrome, a window manager, a battery or a
