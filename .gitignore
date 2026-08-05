@@ -10,3 +10,8 @@ Wozi.com theme conversion.zip
 
 # Claude Code local state (agent worktrees, settings)
 .claude/
+
+# Measurement sheets, probes and one-off harnesses. Never published — the deploy
+# is a whitelist — but they accumulate fast enough to bury a real diff in
+# `git status`, which is where this repo checks whether a tree is clean.
+scratchpad/
