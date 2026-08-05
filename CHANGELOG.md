@@ -319,6 +319,82 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **#98 — one name was doing two jobs: a maximum was being used as an index.**
+  `SPINE_LEN` was `Math.max(1, ...STAGE.people.map(p => p.links.length))` — the
+  longest chain *anywhere on stage* — and the `TRAIN` builder then used it as a
+  **wheel index into the spine**, `Math.floor((SPINE_LEN - 1) / 2)`, to seat the
+  default bridge anchor. Those two quantities agree only while the spine *is* the
+  longest chain, which today's `CHAIN_ORDER` sort happens to guarantee. The
+  guarantee lived in a different declaration from the index it was propping up,
+  which is the whole of the defect: nothing at the point of use said what it
+  depended on, and the thing it depended on was free to change.
+
+  Found while reading #85, which proposes **declaring** the chain order instead
+  of inferring it from link count. **That design fork is not decided and nothing
+  here decides it** — the sort is untouched, no config key was added, and the
+  suite's deliberate `CHAIN_ORDER is not longest-first` assertion still runs
+  against its three-chain fixture at both stage rotations. Only the latent bug
+  is fixed, because a declared order is exactly what makes a short spine
+  reachable and the fix is a prerequisite either way.
+
+  The two quantities are now named apart and each derived from what it actually
+  means:
+
+  - **`SPINE_LEN` — how many wheels the spine has.** `SPINE.links.length`, where
+    `SPINE` is the first chain in `CHAIN_ORDER` that `HAS_WHEELS`. It is a count
+    of one chain, never a maximum, and it is only ever used to index that
+    chain's own wheels.
+  - **`NOMINAL_CHAIN` — the longest chain configured anywhere.** Unchanged, and
+    already sitting further down the file: it is the maximum-shaped quantity,
+    and the one that genuinely sets the SCALE (`NOMINAL_SPAN` derives from it,
+    `TARGET_GEAR_PX` from that). It ranges over every configured person rather
+    than the stage precisely *because* it indexes nothing — a solo page has to
+    draw its wheels at the size they have on a chain that is not on stage to be
+    measured.
+
+  The index is now in range **by construction rather than by a promise made
+  elsewhere**, and the argument is local to the line: the emitter skips chains
+  with no wheels and emits `SPINE` first, `SPINE` is the first chain in that very
+  order with wheels, and the spine is unbridged so it takes no idlers — its
+  wheels therefore *are* `out[0 .. SPINE_LEN-1]`. Half of `SPINE_LEN-1` lands on
+  one of them whatever the order is sorted by. The "a chain with no links is not
+  laid out" rule got one home, `HAS_WHEELS`, since the spine is defined by it and
+  two copies of that test is how the emitter and the spine would come to disagree.
+
+  **Proved by construction rather than asserted.** The new test hands the real
+  `TRAIN` builder a layout order the page's own sort would never produce — a
+  two-wheel spine with a seven-wheel chain behind it — which is the shape #85
+  would make legal. The suite's `buildTrain` grew an optional order for this, and
+  substitutes *only* `CHAIN_ORDER`; `SPINE` and `SPINE_LEN` are still the page's
+  own lines deriving their own answer from it. Against the old derivation the
+  test fails, with the anchor landing on the bridged chain's own idler and
+  forward-referencing a wheel that is not placed yet:
+
+  ```
+  FAIL  the static tree's default bridge anchor is a spine wheel, whatever the layout order
+        long's bridge defaults to wheel 3, which is a ghost idler -- the spine is wheels 0..1
+        long's bridge defaults to wheel 3, which is not placed when idler 2 asks for it
+  ```
+
+  Against the new one it passes, with the anchor at wheel 0. The fixture also
+  checks *itself*: it asserts the discarded `max`-over-stage index would have
+  been out of range, so the test cannot quietly stop exercising the bug.
+
+  **Nothing on screen moved, and nothing was ever going to.** `solve()`
+  overwrites this parent with whatever it finds room for before a wheel is drawn,
+  so this is the *static* tree only — but a malformed static tree is exactly what
+  #65 was, and the failure mode is silent: `solve()` reads `g[t.parent]` out of
+  the wheels it has already placed, so a forward reference reads `undefined` and
+  the branch lands wherever the last iteration left it.
+
+  Gates: **70/70** suite (69 baseline plus the new test), devices **24/24** and
+  **4/4**, motion PASS (39 of 39 elements advanced, no strands, which is correct
+  for the direct-mesh train). The pixel gate is the one that matters for a
+  renaming: **0 px** against HEAD at 1440×900 and 390×844, on `?who=charles`
+  *and* on the combined stage. On today's config the new derivation and the old
+  one compute the same number, so identical output is the expected result and not
+  a lucky one.
+
 - **#92 — flicking a hub cap off its axle ate the next click on that cap.**
   (GitHub #56.) Pull a cap off, let go while the hand is still moving, then come
   back and click the link underneath: nothing happened. Once, silently, and only

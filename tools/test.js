@@ -560,18 +560,27 @@ function grabDecl(decl) {
    together, and a test that only saw the array could not tell an idler apart
    from the chain it feeds. Every value the builder closes over is handed in
    from the page rather than re-typed -- MAX_IDLERS is read out of index.html,
-   and CHAIN_ORDER and SPINE_LEN are the page's OWN LINES, executed against the
-   fixture. SPINE_LEN used to be re-derived here, which is the one thing this
-   file forbids: a suite holding its own copy of a derivation passes happily
-   while the page computes something else. */
-function buildTrain(people) {
+   and CHAIN_ORDER, HAS_WHEELS, SPINE and SPINE_LEN are the page's OWN LINES,
+   executed against the fixture. SPINE_LEN used to be re-derived here, which is
+   the one thing this file forbids: a suite holding its own copy of a derivation
+   passes happily while the page computes something else.
+
+   `order` is normally omitted and the layout order is the page's own sort. A
+   test may hand in an order the sort would never produce -- #85 proposes
+   DECLARING the order rather than inferring it from link count -- to run the
+   real builder against a spine that is not the longest chain. Only CHAIN_ORDER
+   is substituted; everything downstream of it, SPINE and SPINE_LEN included, is
+   still the page deriving its own answer from that order. */
+function buildTrain(people, order) {
   const expr = grabBlock('const TRAIN = (function', '(', ')');
   const bridges = [];
-  const built = new Function('STAGE', 'MAX_IDLERS', 'BRIDGES',
-    grabDecl('const CHAIN_ORDER =') + '\n'
+  const built = new Function('STAGE', 'MAX_IDLERS', 'BRIDGES', 'ORDER',
+    (order ? 'const CHAIN_ORDER = ORDER;' : grabDecl('const CHAIN_ORDER =')) + '\n'
+    + grabDecl('const HAS_WHEELS =') + '\n'
+    + grabDecl('const SPINE =') + '\n'
     + grabDecl('const SPINE_LEN =') + '\n'
     + 'return { train: ' + expr.replace(/^const TRAIN = /, '') + '(), order: CHAIN_ORDER };')(
-    { people: people }, grabNumber('MAX_IDLERS'), bridges);
+    { people: people }, grabNumber('MAX_IDLERS'), bridges, order);
   return { train: built.train, bridges, order: built.order };
 }
 
@@ -683,6 +692,55 @@ test('a parent always appears earlier in TRAIN than its children', () => {
   });
   eq(train.filter(t => t.parent === null).length, 1, 'a bridged stage must have exactly one root');
   eq(train[0].person, 'long', 'the spine is not emitted first');
+  ok(bad.length === 0, bad.join('\n      '));
+});
+
+test("the static tree's default bridge anchor is a spine wheel, whatever the layout order", () => {
+  /* #98, found latent under #85. SPINE_LEN was
+     `Math.max(1, ...people.map(p => p.links.length))` -- the longest chain
+     ANYWHERE on stage -- and the TRAIN builder used it as a WHEEL INDEX INTO
+     THE SPINE. Those two quantities agree only while the spine IS the longest
+     chain, which the current CHAIN_ORDER sort guarantees and a DECLARED order
+     would not. The guarantee lived in a different declaration from the index it
+     was propping up, which is the whole defect.
+
+     So the fixture declares a layout order the page's own sort would never
+     produce: a two-wheel spine with a seven-wheel chain behind it. Under the
+     old derivation the default anchor is floor((7-1)/2) = 3 -- past the spine's
+     last wheel at index 1, landing on one of the bridged chain's OWN idlers,
+     and a forward reference into the bargain. solve() overwrites this parent
+     before anything is drawn, so no pixel ever moved; #65 was a malformed
+     static tree all the same, and being unable to build one is worth having. */
+  const people = [
+    { slug: 'spine', links: [{ slug: 'a' }, { slug: 'b' }] },
+    { slug: 'long', links: [1, 2, 3, 4, 5, 6, 7].map(n => ({ slug: 'l' + n })) }
+  ];
+  const { train, bridges } = buildTrain(people, people);
+  eq(train[0].person, 'spine', 'the declared layout order was not honoured');
+  const spineWheels = train.filter(t => t.role === 'link' && t.person === 'spine').length;
+
+  /* The fixture is only evidence if it would have caught the old shape. This is
+     the discarded derivation, written out ONCE, here, precisely because it is no
+     longer in index.html to be read out of. */
+  const wasIndex = Math.floor((Math.max(1, ...people.map(p => (p.links || []).length)) - 1) / 2);
+  ok(wasIndex > spineWheels - 1,
+    `fixture does not exercise the bug: the old max-over-stage index ${wasIndex} `
+    + `still lands inside a spine of ${spineWheels} wheels`);
+
+  const bad = [];
+  bridges.forEach(b => {
+    if (!b.idlers.length) return;
+    const first = b.idlers[0], anchor = train[first].parent, t = train[anchor];
+    if (!t || t.role !== 'link' || t.person !== 'spine') {
+      bad.push(`${b.person}'s bridge defaults to wheel ${anchor}, which is `
+        + (t ? (t.person ? `a link of ${t.person}` : 'a ghost idler') : 'past the end of TRAIN')
+        + ` -- the spine is wheels 0..${spineWheels - 1}`);
+    }
+    if (!(anchor < first)) {
+      bad.push(`${b.person}'s bridge defaults to wheel ${anchor}, which is not `
+        + `placed when idler ${first} asks for it`);
+    }
+  });
   ok(bad.length === 0, bad.join('\n      '));
 });
 
