@@ -233,6 +233,49 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
   test sweeps every dealable tooth count and fails if the epicyclic badge ever
   stops growing — mutation-tested against the original dead-floor code, where
   it fails naming the exact plateau (`16->17 teeth: 39.0px -> 39.0px`, etc.).
+- **CL#118 — `engraving()`'s sweep cap is a clear-metal length, and its width
+  is measured, not guessed.** (GitHub #98.)
+
+  Two faults in one six-line closure. The cap on how far the handle or the
+  stamp may sweep round the band was a fixed 168 degrees, so the clear metal
+  it left between them — the thing that actually has to stay constant — held
+  at exactly one radius and drifted everywhere else: #64 measured 6.46 to
+  10.86 units, a 1.68x spread, across the shipped 13-19 tooth range. It is now
+  solved the other way round: `ENGRAVE_GAP` (1.24 modules, chosen to land
+  close to where 168 degrees did at the middle of the tooth range) states the
+  clear metal, and the permitted angle is derived from it per wheel —
+  "geometry derives in one direction" applied to the band's circumference
+  instead of its depth. And the text width feeding that computation was a
+  per-character guess (`per`/`track`) sitting a thousand lines under
+  `textWidth()`, the memoised canvas measurement built for exactly this
+  problem — one home for the fact, not two answers that could disagree.
+  `emWidth()` now asks `textWidth()` at a large fixed reference size and scales
+  the ratio down, so every candidate font size `fit()` tries for the same
+  string is one memoised canvas call rather than several.
+
+  **Replacing the guess uncovered a second, sharper bug on the way in.**
+  `emWidth()`'s first measurement runs during the very first render, which is
+  before the Google Fonts stylesheet has registered Manrope in
+  `document.fonts` — measured then, `bold Manrope` silently falls back to the
+  fallback stack and *underestimates* the real glyph run, and because
+  `textWidth()` memoises forever, that wrong number stuck: the guide arc built
+  from it was shorter than the text painted on it once the real face arrived,
+  which is a worse failure than the guess it replaced. `componentDidMount` now
+  clears the memo and forces one more render once `document.fonts.ready`
+  settles. A second, smaller gap came from the tracking convention: Blink adds
+  the 0.1em letter-spacing after every glyph, including the last, not once per
+  gap between glyphs, so `emWidth()` now counts `str.length` tracking units,
+  not `str.length - 1`. Both were found by comparing every engraved wheel's
+  guide-path length against its own `getComputedTextLength()` on the live DOM,
+  not by eyeballing a render.
+
+  Verified with two mutation tests (a reintroduced fixed angle, a
+  reintroduced per-character guess) that fail with a message naming the real
+  regression, a new `npm test` assertion that the clear metal stays within
+  1e-6 of `ENGRAVE_GAP * MODULE` across the full 13-19 tooth range at a label
+  length long enough to engage the cap, and a contact sheet of the longest and
+  shortest configured labels on the smallest and largest dealt wheels, both
+  themes, before and after.
 
 - **CL#110 — `?hud`, an animation HUD for how the browser is really rendering
   the gears.** (GitHub #92.)
