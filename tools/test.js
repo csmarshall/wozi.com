@@ -3709,6 +3709,45 @@ test('the configured chains still clear the legibility floors', () => {
   ok(bad.length === 0, bad.join('\n      '));
 });
 
+test('the epicyclic hub badge scales across the whole tooth range, and never plateaus', () => {
+  /* CL#116 / GitHub #94. `discF` used to fork on `epicyclic` too (0.38 vs 0.72),
+     on top of the shrink `capF` already does -- and 0.38 * g.r landed under
+     `disc`'s own solve-unit floor of 30 for every wheel this page has ever
+     dealt (g.r runs MODULE * TEETH_MIN/2 .. MODULE * TEETH_MAX/2, i.e.
+     45.5..66.5, so g.r * 0.38 was 17.3..25.3 -- always short, at every scale,
+     because the floor bound BEFORE `S` scaled the value in). `disc` therefore
+     came out exactly 30 regardless of teeth, and the rendered badge tracked
+     `cap` alone -- until `cap` itself passed 30 at 16 teeth, at which point
+     the pinned `disc * S` became the smaller, size-deciding term and the
+     badge stopped moving for the rest of the range (16-19 teeth all drew at
+     the same size). A single tooth count cannot see a threshold in the
+     middle of a range; this sweeps every tooth count the page can deal. */
+  const badgeSize = new Function('g', 'S',
+    SRC.slice(SRC.indexOf('const epicyclic = g.kind ==='),
+      SRC.indexOf(';', SRC.indexOf('const size = Math.min(cap * S')) + 1)
+    + ' return size;');
+
+  /* S = 1.3 is the scale #64's own measured table (reproduced in the issue)
+     used to catch the plateau -- reused here rather than re-derived, since
+     the point is to see what a real render scale exposes, not to invent one. */
+  const S = 1.3;
+  const sizes = [];
+  for (let t = page.TEETH_MIN; t <= page.TEETH_MAX; t++) {
+    sizes.push(badgeSize({ kind: 'planetary', r: page.MODULE * t / 2 }, S));
+  }
+
+  const flat = [];
+  for (let i = 1; i < sizes.length; i++) {
+    if (sizes[i] <= sizes[i - 1]) {
+      flat.push((page.TEETH_MIN + i - 1) + '->' + (page.TEETH_MIN + i) + ' teeth: '
+        + sizes[i - 1].toFixed(1) + 'px -> ' + sizes[i].toFixed(1) + 'px');
+    }
+  }
+  ok(flat.length === 0, 'the epicyclic badge stops scaling at ' + flat.join(', ')
+    + ' -- full sweep ' + page.TEETH_MIN + '..' + page.TEETH_MAX + ' teeth: '
+    + sizes.map(s => s.toFixed(1)).join(', '));
+});
+
 /* ---- 1. the page and its constants --------------------------------------- */
 
 test('index.html parses and exposes its geometry constants', () => {

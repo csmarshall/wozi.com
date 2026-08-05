@@ -190,6 +190,49 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
   back out of `index.html`, executes the real closure, and measures the
   achieved aspect ratio across the whole `TEETH_MIN..TEETH_MAX` range — not
   one sampled size, which is what the bug was about.
+- **CL#116 — the epicyclic hub badge's dead knob, and the plateau it was
+  hiding.** (GitHub #94.)
+
+  Two faults, both in six lines of `renderVals()`'s badge sizing, and
+  measurement rather than reading is what told them apart. `discF` forked on
+  `epicyclic` (0.38 vs 0.72) on top of `capF`'s own shrink (0.55 vs 1.15) — a
+  second attempt at the same job. `g.r` runs 45.5–66.5 solve units over every
+  tooth count this page can deal (`TEETH_MIN`..`TEETH_MAX`, module-derived, not
+  hand-picked), so `g.r * 0.38` was always 17.3–25.3: short of `disc`'s own
+  30-floor **for every wheel the page has ever dealt, at every scale**, because
+  that floor was applied in solve units, before `S` scaled the value in — no
+  viewport could ever lift it clear. `disc` came out exactly 30 regardless of
+  teeth, which is what "dead" means here: not merely untested, but
+  unconditionally unreachable, confirmed by sweeping the full tooth range
+  rather than by inspecting the arithmetic. The badge that actually rendered
+  tracked `cap` alone, and plateaued the instant `cap` itself passed 30 — at 16
+  teeth — because the pinned `disc * S` became the smaller, size-deciding term
+  for every tooth count above it.
+
+  **The fix is one constant, not two.** `capF` already shrinks the epicyclic
+  badge — that is the comment sitting right above it — so `discF` no longer
+  forks on `epicyclic`; it is `0.72` for every kind, matching the ordinary
+  wheel's factor it was always meant to sit above. `cap`, smaller by `capF`
+  alone, is now what actually governs the epicyclic badge across the whole
+  tooth range, and the badge grows continuously from 32.5px to 48.1px over
+  13–19 teeth (measured at the render scale #64's own table used) instead of
+  flattening at 39.0px past 16. The ordinary-wheel path is untouched — its
+  `discF` was already live, so before and after render pixel-identical there.
+
+  **The floor is now stated once, in the unit it is legible in.** The same `30`
+  literal appeared twice, four lines apart, in two different units — a
+  solve-unit clamp on `disc` and a rendered-pixel clamp on `disc * S` — which is
+  what let the first one go dead without anyone noticing the second was doing
+  all the work. The solve-unit clamp (and its unreachable 60-ceiling twin) is
+  gone; the one clamp that remains is the pixel-space floor, applied after `S`
+  scales the badge down, which is the only place a legibility floor means
+  anything.
+
+  `npm test`'s existing legibility-floor test now exercises the fixed formula
+  unchanged (it reads the three lines out of the page, not a copy), and a new
+  test sweeps every dealable tooth count and fails if the epicyclic badge ever
+  stops growing — mutation-tested against the original dead-floor code, where
+  it fails naming the exact plateau (`16->17 teeth: 39.0px -> 39.0px`, etc.).
 
 - **CL#110 — `?hud`, an animation HUD for how the browser is really rendering
   the gears.** (GitHub #92.)
