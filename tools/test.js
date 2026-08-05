@@ -71,6 +71,10 @@ const page = (function build() {
        modules (#76). Read from the page like everything else, so the suite
        measures the bound that ships rather than a copy of it. */
     'PLATE_TOP_CLEAR',
+    /* And the second one (#95), which acts ALONG the line where PLATE_TOP_CLEAR
+       acts across it. Read from the page for the same reason, and named apart
+       from it for the reason the constants themselves give. */
+    'PLATE_START_ALONG',
     /* How far an escape run may wander off its own axis. fitEscapes both deals the
        wobble with it and derives its wheel-count backstop from it (#80), so the
        suite has to hand it in or the extracted function throws. */
@@ -1388,20 +1392,27 @@ function datumRunsOn(solved, axisRot, spineSlug, ghosts, sites, plates, S) {
 }
 /* plateSeat() lifted out of the page. It reads exactly two things off the
    component -- the measured viewport box and its own margin rule -- so both are
-   handed in and the seat it returns is the seat the page would compute. Warnings
-   are captured rather than printed: "neither side fits" is a reported state, and
-   a test that could not see it could not tell it from a silent give-up. */
-function plateSeatOn(vpBox, r, S, pw, ph) {
+   handed in and the seat it returns is the seat the page would compute, and one
+   constant, which is read out of index.html rather than copied (#95): a suite
+   holding its own 25 would agree with itself forever while the page moved.
+   `past` is the run-out datumLayer draws beyond the assembly, and is handed in
+   the same way the page hands it in. Warnings are captured rather than printed:
+   "neither side fits" is a reported state, and a test that could not see it
+   could not tell it from a silent give-up. */
+function plateSeatOn(vpBox, r, S, pw, ph, past, box) {
   const metrics = new Function('MODULE',
     'return function ' + grabBlock('  plateMetrics(s) {', '{', '}') + ';')(page.MODULE);
   const margin = new Function('return function ' + grabBlock('  plateMargin(s) {', '{', '}') + ';')();
-  const seat = new Function('return function ' + grabBlock('  plateSeat(r, S, pw, ph) {', '{', '}') + ';')();
+  const seat = new Function('PLATE_START_ALONG',
+    'return function ' + grabBlock('  plateSeat(r, S, pw, ph, past, box) {', '{', '}') + ';')(
+    page.PLATE_START_ALONG);
+  const clip = new Function('return function ' + grabBlock('  slabClip(px, py, dx, dy, box) {', '{', '}') + ';')();
   const warns = [];
-  const ctx = { _vpBox: vpBox, plateMetrics: metrics, plateMargin: margin };
+  const ctx = { _vpBox: vpBox, plateMetrics: metrics, plateMargin: margin, slabClip: clip };
   const real = console.warn;
   console.warn = (m) => warns.push(m);
   try {
-    const out = seat.call(ctx, r, S, pw, ph);
+    const out = seat.call(ctx, r, S, pw, ph, past === undefined ? 0 : past, box || vpBox);
     return { seat: out, warns: warns, pad: margin.call(ctx, S) };
   } finally { console.warn = real; }
 }
@@ -1700,13 +1711,18 @@ test('the plate seats on the side the page has room for, and the ticks follow it
      only, and the choice of side moves y only. That is the shape of the real
      failure -- both observed cases were cross-axis, which sliding cannot fix. */
   const r = { person: 'p', plate: 'P', ux: 1, uy: 0, nx: 0, ny: 1,
-    o: { x: 0, y: 0 }, alt: { x: 0, y: -20 }, plateAt: 0, stations: [], d0: 0, d1: 0 };
+    o: { x: 0, y: 0 }, alt: { x: 0, y: -20 }, stations: [], d0: 0, d1: 0 };
   const pw = 40, ph = 10, S = 1;
   const wide = { x0: -100, y0: -100, x1: 100, y1: 100 };
   const A = plateSeatOn(wide, r, S, pw, ph);
   eq(A.seat.side, 1, 'a plate with room on its own side is moved anyway');
   eq(A.seat.oy, 0, 'a plate with room on its own side does not stay on it');
-  eq(A.seat.at, 0, 'a plate with room at its own station is slid off it');
+  /* THE FIGURE IS MEASURED TO THE PLATE'S NEAR EDGE, from the start of the mark
+     (#95). With the drawn area defaulted to the page, the mark starts where the
+     page does, so the near edge lands exactly the stated figure inside it. */
+  eq(A.seat.at, wide.x0 + page.PLATE_START_ALONG + pw / 2,
+    'the plate is not seated ' + page.PLATE_START_ALONG + 'px in from the start of '
+    + 'its line, measured to the edge of the plate');
   eq(A.warns.length, 0, 'a plate that seats cleanly warns about it');
   /* THE MARGIN IS REAL, not nominal. The seat must hold the plate `pad` inside
      every edge, so a box exactly the plate's own size does NOT fit. */
@@ -1723,15 +1739,44 @@ test('the plate seats on the side the page has room for, and the ticks follow it
     + 'mirrored origin standing unused');
   eq(B.seat.oy, -20, 'the seat reports the mirrored side but not the mirrored origin');
   eq(B.warns.length, 0, 'a plate that seats on the mirror is reported as unplaceable');
-  /* SLIDING IS THE OTHER FREEDOM, and is preferred over mirroring: a station out
-     of reach along the run is pulled back to the nearest one that fits, on the
-     side the plate was already on. */
-  const narrow = { x0: -100, y0: -100, x1: 100, y1: 100 };
-  const far = Object.assign({}, r, { plateAt: 500 });
-  const C = plateSeatOn(narrow, far, S, pw, ph);
+  /* THE TWO STARTS, AND WHICH ONE WINS (#95). The mark starts where the drawing
+     starts, and the page only takes over once the drawing starts outside it --
+     which on the shipped composition is nearly always, because every escape run
+     is grown until it is past the edge. Both directions are checked here, since
+     an implementation that only ever took one of them would pass a test written
+     against the case it takes. */
+  const short_ = { x0: -50, y0: -100, x1: 50, y1: 100 };
+  const E = plateSeatOn(wide, r, S, pw, ph, 0, short_);
+  eq(E.seat.at, short_.x0 + page.PLATE_START_ALONG + pw / 2,
+    'a mark that stops INSIDE the page is not what the plate is seated from — the '
+    + 'plate stands off the edge of a page the line does not reach');
+  const long_ = { x0: -500, y0: -500, x1: 500, y1: 500 };
+  const F = plateSeatOn(wide, Object.assign({}, r, { d0: -300 }), S, pw, ph, 0, long_);
+  eq(F.seat.at, wide.x0 + page.PLATE_START_ALONG + pw / 2,
+    'a mark that starts off the page is seated from where it starts rather than '
+    + 'from where the page can show it — which is a plate nobody can see');
+  /* AND THAT IS WHAT ANSWERS GitHub #82. A chain with no leading escape run
+     starts its
+     mark at its own first gear, so every referent measured on the machine seats
+     that plate within a wheel of the one wheel the chain owns. Against a mark
+     that runs off the page, the plate clears it outright. */
+  const ro = 30;
+  ok(F.seat.at + pw / 2 < -ro,
+    'the plate is seated over the head wheel of a chain whose mark starts there, '
+    + 'which is GitHub #82 restated at ' + page.PLATE_START_ALONG + 'px');
+  /* WHAT WINS ON A PAGE TOO NARROW TO HONOUR THE FIGURE: the seat. The figure is
+     a preference and the interval in which the whole plate is on the page is
+     not, so a page shorter along the run than the figure plus a plate pushes the
+     plate BACK toward the start -- closer in than the stated distance rather
+     than hung over the far edge. */
+  const narrow = { x0: -100, y0: -100, x1: -40, y1: 100 };
+  const C = plateSeatOn(narrow, r, S, pw, ph, 0, long_);
   eq(C.seat.side, 1, 'a plate that only needed sliding was mirrored instead');
-  ok(C.seat.at < 500 && C.seat.at + pw / 2 + C.pad.pad <= 100 + 1e-9,
-    'a plate past the end of the page is not pulled back to a station that fits');
+  eq(C.seat.at, narrow.x1 - pw / 2 - C.pad.pad,
+    'a page with no room for the stated distance does not give it up — the seat '
+    + 'has to win, or the plate hangs off the far edge');
+  ok(C.seat.at - pw / 2 - narrow.x0 < page.PLATE_START_ALONG,
+    'the plate was slid the wrong way when the page could not honour the figure');
   /* NEITHER SIDE FITTING IS REPORTED, NOT HIDDEN. */
   const none = { x0: -100, y0: -1, x1: 100, y1: 1 };
   const D = plateSeatOn(none, r, S, pw, ph);
@@ -1772,13 +1817,25 @@ test('the datum plate defaults to the person name, untransformed', () => {
     + 'and gets no plate at all');
 });
 
-test('a datum spans its chain\'s ghosts and rides its plate on the last leading one', () => {
-  /* Rule 1 and rule 3. The run off the trailing edge is part of the machine the
-     line references, so the line goes where it goes; the plate sits alongside
-     the background wheel immediately before the first real gear, which is the
-     placard at the head of the run. A driven chain has no leading run at all --
-     that is the end its bridge arrives at -- and falls back to the head wheel
-     rather than vanishing. */
+test('a datum spans its chain\'s ghosts, and no chain seats its plate on a wheel', () => {
+  /* RULE 1 stands: the run off the trailing edge is part of the machine the line
+     references, so the line goes where it goes.
+
+     RULE 3 IS GONE (#95, GitHub #87). The plate used to sit alongside the last
+     LEADING
+     ghost, and a chain with no leading run -- which is every driven chain, since
+     that is the end its bridge arrives at -- fell back to its own head wheel.
+     That fallback is GitHub #82, and on a one-wheel chain the wheel it landed
+     on was
+     the whole chain. The seat is measured from the start of the MARK now, so
+     there is no wheel in it to fall back to and no branch to take, and this
+     asserts the two halves of that: nothing about a wheel survives in the run,
+     and the seat a chain with no leading run gets is the same seat, arrived at
+     by the same arithmetic, as the spine's.
+
+     A HORIZONTAL RUN FOR THE SEAT, so the start of the page along the line is
+     just its left edge measured from the origin, and the assertion does not need
+     a second copy of the clip to state what it expects. */
   const bad = [];
   [0, 90].forEach(rot => {
     const { solved, order } = runSolve(THREE, { axisRot: rot });
@@ -1804,18 +1861,56 @@ test('a datum spans its chain\'s ghosts and rides its plate on the last leading 
       bad.push(`rot ${rot}: the datum stops at the linked wheels — the background `
         + `machinery is not spanned (${b.d0.toFixed(0)}..${b.d1.toFixed(0)} vs `
         + `${r.d0.toFixed(0)}..${r.d1.toFixed(0)})`);
-    const lead0 = ghosts[0];
-    const want = (lead0.cx - r.o.x) * r.ux + (lead0.cy - r.o.y) * r.uy;
-    if (Math.abs(r.plateAt - want) > 1e-9)
-      bad.push(`rot ${rot}: the plate is not at the LAST leading ghost`);
-    /* Every other chain has no leading run, so its plate falls back to the head. */
-    runs.filter(x => x.person !== spineSlug).forEach(x => {
-      const c = axes.find(a => a.person === x.person);
-      const head = (c.head.cx - x.o.x) * x.ux + (c.head.cy - x.o.y) * x.uy;
-      if (Math.abs(x.plateAt - head) > 1e-9)
-        bad.push(`rot ${rot}: ${x.person} has no leading ghost and lost its plate `
-          + `rather than falling back to the head of the run`);
+    /* NO WHEEL ANCHOR IS PUBLISHED AT ALL. A run that still carried one would let
+       the old rule creep back into the seat without a single assertion moving. */
+    runs.forEach(x => {
+      if ('plateAt' in x)
+        bad.push(`rot ${rot}: ${x.person}'s run still publishes a wheel anchor for `
+          + 'the plate to ride');
     });
+    if (/\.lead\b/.test(DATUM_SRC))
+      bad.push('the datum still picks a leading ghost to seat its plate on');
+  });
+  ok(!/plateAt/.test(SRC), 'index.html still names a plate anchor taken off a wheel');
+  /* AND THE SEAT ITSELF, for a chain with a leading run and a chain without: same
+     distance in from the start of the page along their own lines, and both clear
+     of the wheel the old rule would have put them on. Only rot 0 -- the seat is
+     asserted against a horizontal run on purpose (see above). */
+  const { solved, order } = runSolve(THREE, { axisRot: 0 });
+  const sites = seatSlugs(solved);
+  const spineSlug = order[0].slug;
+  const axes = chainAxesOf(solved, 0, spineSlug);
+  const spine = axes.find(c => c.spine);
+  const step = spine.head.ro * 3;
+  /* A leading run for the spine and nothing for anybody else, which is the
+     asymmetry fitEscapes actually deals. */
+  const ghosts = [0, 1].map(k => ({ person: spineSlug, lead: true, k: k,
+    cx: spine.head.cx - step * (k + 1), cy: spine.head.cy }));
+  const runs = datumRunsOn(solved, 0, spineSlug, ghosts, sites);
+  /* A PAGE INSIDE THE DRAWN AREA, so the mark starts off it -- which is the
+     shipped case, and the only one under which GitHub #82 is answered: a plate
+     can only
+     stand clear of the wheels on a page that shows some line before the machine
+     starts. It does. The stage box is the LINKED wheels alone and the fit centres
+     it, so the escape runs and the empty line either side of them are what the
+     rest of the page carries: measured at 2560x1440, the spine's datum origin --
+     its first linked wheel -- sat 832 rendered px in from the near edge of the
+     page. Half the train's width is the same relationship in solve units. */
+  const vp = { x0: -solved.w * 0.5, y0: -4000, x1: solved.w + 40, y1: solved.h + 4000 };
+  const drawn = { x0: -9000, y0: -9000, x1: 9000, y1: 9000 };
+  const pw = 60, ph = 20;
+  runs.forEach(x => {
+    const c = axes.find(a => a.person === x.person);
+    const seat = plateSeatOn(vp, x, 1, pw, ph, 0, drawn).seat;
+    const want = (vp.x0 - seat.ox) + page.PLATE_START_ALONG + pw / 2;
+    if (Math.abs(seat.at - want) > 1e-9)
+      bad.push(`${x.person}${c.spine ? ' (spine)' : ''} seats its plate at `
+        + `${seat.at.toFixed(1)}, not ${want.toFixed(1)} — ${page.PLATE_START_ALONG}px `
+        + 'in from the start of its own mark');
+    const head = (c.head.cx - x.o.x) * x.ux + (c.head.cy - x.o.y) * x.uy;
+    if (seat.at + pw / 2 > head - c.head.ro)
+      bad.push(`${x.person}'s plate reaches back over its own head wheel, which is `
+        + 'the seat GitHub #82 reported');
   });
   ok(bad.length === 0, bad.join('\n      '));
 });

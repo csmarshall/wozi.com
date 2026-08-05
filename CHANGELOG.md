@@ -7,6 +7,92 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Changed
 
+- **#95 — the datum plate is seated from the start of the mark, not from a wheel
+  on it.** (GitHub #87, closing #82 and #77.) Charles: *"seat the datum plate
+  25px from the start of the datum line"*. That replaces a rule rather than
+  tuning one. The plate rode the **last leading ghost** — the background wheel
+  immediately before the first real gear — and a chain with no leading run fell
+  back to its own head wheel. Every driven chain has no leading run, because that
+  is the end its bridge arrives at, so the fallback was not an edge case: it was
+  the rule for everybody but the spine, and on a one-wheel chain the wheel it
+  landed on was the whole chain. That is GitHub #82, and it is gone with the
+  fallback — the seat has no wheel in it to fall back to and no branch to take.
+
+  **Which "start" it is measured from was the whole of the work.** The ticket
+  lists three readings and recommends `d0`, the outermost wheel of the run
+  including its background machinery, over the line's first drawn pixel, on the
+  grounds that the second makes the plate a function of the window rather than of
+  the machine — the property #84 was fixed to remove. Measured, that
+  recommendation does not survive its own reasoning, in two separate ways:
+
+  - **`d0` is never on the page.** An escape run is grown until it is 120 px past
+    the edge of the viewport — #87 above, the entry, not the ticket — so the
+    start of a chain that *has* a leading run is off the page by construction.
+    Instrumented at five viewports from 390×844 to 5120×1440, `d0` sat **134 to
+    281 rendered px outboard of the near edge on every one**, and the drawn line
+    then runs a further two modules beyond it. `plateSeat()` clamps a station
+    into the interval where the whole plate is on the page, so a preference
+    stated from `d0` would have been overruled on every load ever drawn: a
+    constant that never once takes effect, which is worse than no constant.
+  - **No referent measured on the machine answers GitHub #82.** A chain with no leading
+    run starts its mark *at its own first gear*. Both `d0` and "the first linked
+    wheel" put that plate within a wheel's radius of the one wheel the chain
+    owns — which is the complaint restated at 25 px, not a fix for it.
+
+  So the mark starts where the **drawing** starts: `Math.min(d0, the drawn area)`
+  less the run-out, and the page takes over once that is outboard of the frame.
+  One `Math.max`, and the machine still decides wherever the drawing stops inside
+  the frame — before the first fit there are no ghosts to widen the drawn area,
+  and a chain may be dealt a run that leaves by the far end only. The reasoning
+  is the one datumRuns() already states for the cross axis: *off the page is
+  invisible, and invisible is the one thing this mark may not be.*
+
+  **`PLATE_START_ALONG = 25`, named for the axis it acts on.** `PLATE_TOP_CLEAR`
+  is measured **across** the line, from the chain's extreme border to the top of
+  the placard; this is measured **along** it, from the start of the mark to the
+  plate's near edge — the plate's own half-width is carried inside `plateSeat()`
+  so what the figure names is the gap a viewer can actually see. The two were
+  filed as one ambiguous "20px" (GitHub #77) before either was written down, and
+  a second bare 20 beside the first would have read as related.
+
+  The line's slab clip moved out of `datumLayer()` into `slabClip()`, because the
+  seat and the drawing now have to agree about where the mark starts: a second
+  copy of that arithmetic is a plate standing a little way off the end of its own
+  line. `plateAt` is gone from the run, and with it the leading-ghost search that
+  produced it. The ghosts still record `lead` — the escape-run suite reads it to
+  assert that only the spine gets a leading run — but nothing in the page reads a
+  ghost's `k` any more, and that field is now dead. It is left alone rather than
+  deleted because it is set in `fitEscapes()`, which is not this change's to
+  touch; it wants a line of its own.
+
+  **What wins on a narrow screen: the seat.** The figure is a preference; the
+  interval in which the whole plate is on the page is not. A page shorter along
+  the run than the figure plus a plate pushes the plate *back* toward the start —
+  closer in than 25 px rather than hung over the far edge — and the suite asserts
+  that direction, because guessing it wrong is invisible until somebody resizes.
+
+  Measured from the DOM after the change: every plate's near edge sits **25.0 px**
+  from the near edge of the page along its own line, at 2560×1440, 5120×1440,
+  1440×900, 900×1400 and 390×844, portrait and landscape, and none of them
+  overlaps a live gear. The combined stage differs from HEAD by **7,248 px**
+  (5,593 at 1440×900, 1,655 at 390×844) and the diff is two plate rectangles at
+  each viewport — the one they left and the one they arrived at. Nothing else
+  moved. `?who=charles` is **0 px**: a solo page draws no datum at all.
+
+  **GitHub #83 is not fixed here, deliberately.** A one-link chain has one
+  station, so it gets one major tick and no minor ones, and the design is
+  explicit that minor ticks subdivide the gap between stations *"without
+  inventing a spacing to give it one"*. Every candidate needs a second choice
+  that nothing derives — which gap of the spine's, or how far the marks run on a
+  chain that has no gap of its own — and inventing that is the thing an earlier
+  mock was rejected for. Nothing was implemented. What this change does do for it
+  is remove the aggravation that ticket names: that chain's plate no longer sits
+  on the same lone gear as its one tick.
+
+  Gates: 69/69 suite, devices 24/24 and 4/4, motion PASS (37 of 37 rotating, no
+  strands, badges at 0 px), pixel gate as above. Looked at in light and dark at
+  2560×1440 and 5120×1440, and in portrait at 900×1400 and 390×844.
+
 - **A hostname selects a scope, not a person — and `wozi.com` is now everybody.**
   This is the change a visitor sees. `wozi.com`, `www.wozi.com` and the loopback
   names moved off Charles's entry into a new top-level `STAGE_HOSTS`, and they
