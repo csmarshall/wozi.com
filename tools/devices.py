@@ -86,7 +86,7 @@ AND_UA = ("Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, l
 #
 # THE CHROME NUMBERS ARE THE POINT. A phone's nominal height is not the height a
 # page gets: Safari and Chrome keep a URL bar, and in landscape Safari adds a tab
-# strip on top of it.測 measuring against the full device height is what made
+# strip on top of it. Measuring against the full device height is what made
 # this harness pass a layout that visibly failed on Charles's own iPhone -- the
 # viewport it was handed was 100px taller than any real browser would give.
 # Values are CSS px of chrome subtracted from the height, read off real Safari
