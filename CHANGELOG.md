@@ -122,6 +122,49 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
   `index.html` itself is untouched — the retired `CELL_MIN` stays retired, on
   purpose, the same as `honeycomb`'s whole family. `grabNumber()` is what had
   to cope, not the page.
+- **CL#111 — a three-wheel spine can now pay `ENDS_APART`.** (GitHub #104.)
+
+  `ENDS_APART` (90, in solve units) is the extra push kept between the
+  machine's two spine extremities so a run reads as a line rather than a
+  closed ring. A spine of exactly three wheels asks for the whole of it in
+  two mesh steps — the leaf's only host is one hop from the root — and on
+  measured ~40-50% of deals no bearing within the leaf's own ±60° nudge could
+  pay it, in either direction: not a search failure, but the root and the
+  ENDS_APART owed to it not fitting inside that swing at all. `wozi: wheel 2
+  ... found no clear bearing ...; planted anyway, and may clash` was the
+  visible result. Four wheels and longer never hit this: the host the check
+  compares against is by then several hops from the root, so the achievable
+  separation dwarfs the flat push and it was never the binding constraint.
+
+  **`ENDS_APART` itself is unchanged** — still the one flat figure, still 90,
+  still in solve units, still named and used exactly where it was. What
+  changed is `solve()`'s own arithmetic: the push it actually asks a wheel to
+  clear is now `Math.min(ENDS_APART, endsApartCapFor(o))`, where the cap is
+  the greatest distance from `o` any candidate the swing loop is *already
+  about to try* can reach — computed by walking that same discrete candidate
+  set once, not a second formula that could disagree with the search using
+  it. A longer spine's cap sits far above `ENDS_APART` and never binds, so
+  nothing here is a second measured constant standing in for the first: it is
+  a ceiling derived from the wheels already dealt and the swing already
+  budgeted, that happens to equal the old flat push whenever the chain is
+  long enough to afford it outright.
+
+  **Measured, not merely run once:** 1,000 real deals of a solo three-wheel
+  spine dropped from 483 warnings (48.3%, matching the issue's own ~40% within
+  sampling noise) before this change to 0 after, at both stage rotations. A
+  1–8 wheel sweep after the fix warns 0/80 at every length, matching the
+  issue's own report that only length three ever warned. `?who=charles` and
+  the combined stage are both 0px against `HEAD` (`tools/pixel_regress.py`) —
+  Charles's own chain is seven wheels, far past where the cap ever binds (a
+  500-trial sample of the same cap put its floor at 444.7 against a flat
+  push of 90), so nothing about its geometry moved.
+
+  `tools/test.js`'s `DECLARED` fixture (#85) shrinks its spine from four
+  wheels to three, which is what it should have been all along: it exists to
+  prove a declared spine and stack still compose, and a four-wheel spine
+  never exercised the one length this defect actually lived at. A dedicated
+  test drives 400 solo three-wheel deals on its own and asserts zero
+  no-clear-bearing warnings.
 
 - **CL#110 — `?hud`, an animation HUD for how the browser is really rendering
   the gears.** (GitHub #92.)

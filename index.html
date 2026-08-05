@@ -4838,8 +4838,48 @@ class Component extends DCLogic {
           : prev.r + r;
         const base = bridging ? bridgeBase : t.angle + (this._axisRot || 0);
         const maxStep = linked ? 150 : bridging ? BRIDGE_SWING : 60;
+        const tight = this._tight || 1;
+        /* WHAT THIS WHEEL'S OWN SWING CAN ACTUALLY PAY TOWARD ENDS_APART, per
+           already-placed extremity `o` -- not the flat push a two-hop spine
+           cannot afford (GitHub #104, CL#111). A three-wheel spine's leaf has
+           its host one hop from the root, so the root and the CLEARANCE and
+           ENDS_APART it is owed have to fit inside the same swing this loop is
+           about to search -- and roughly two fifths of deals drew a host too
+           small to hold it, regardless of which bearing the nudge tried, so no
+           amount of searching found one.
+           THE CAP IS MEASURED AGAINST THE SAME DISCRETE CANDIDATES THE SEARCH
+           BELOW TRIES, not the swing's continuous ideal bearing: a formula that
+           found a candidate this loop never visits would demand a distance nothing
+           here can actually place. Whichever of those candidates lands furthest
+           from `o` is what the swing can pay; ENDS_APART is asked for only up to
+           that ceiling, so the search below is guaranteed a satisfying candidate
+           exists before it goes looking for one. A LONGER SPINE NEVER FEELS THIS:
+           its host sits many hops from the root by the time a leaf is placed, so
+           the achievable distance dwarfs ENDS_APART and the cap sits above it,
+           unused -- which is why nothing here needs a second case for the chains
+           that already pay the flat push today. */
         let ang = base, placed = false;
         for (let pass = 0; pass < (linked ? 3 : 1) && !placed; pass++) {
+          /* RE-DERIVED EVERY PASS, NOT ONCE: a linked run's `d` grows 12% each
+             pass that fails to place it, and a cap computed against the shorter
+             `d` would go stale and under-pay a later pass. Direct-mesh wheels
+             (the shipped train) only ever take one pass, so this is one extra
+             small loop, not a repeated one, for anything on stage today. */
+          const endsApartCeiling = {};
+          const endsApartCapFor = (o) => {
+            if (endsApartCeiling[o.i] !== undefined) return endsApartCeiling[o.i];
+            let farthest = 0;
+            for (let step = 0; step <= maxStep; step += 4) {
+              for (let sgn = 1; sgn >= -1; sgn -= 2) {
+                const a = (base + sgn * step) * Math.PI / 180;
+                const px = prev.x + d * Math.cos(a), py = prev.y + d * Math.sin(a);
+                const dist = Math.hypot(px - o.x, py - o.y);
+                if (dist > farthest) farthest = dist;
+                if (step === 0) break;
+              }
+            }
+            return (endsApartCeiling[o.i] = Math.max(0, farthest - o.ro - ro - CLEARANCE * tight));
+          };
           for (let step = 0; step <= maxStep && !placed; step += 4) {
             for (let sgn = 1; sgn >= -1 && !placed; sgn -= 2) {
               const cand = base + sgn * step;
@@ -4849,9 +4889,9 @@ class Component extends DCLogic {
                 if (o.i === host && !free) return false;
                 /* The two ends of the train repel each other, so the run reads as a
                    line of machinery rather than a closed ring. */
-                const tight = this._tight || 1;
                 const need = o.ro + ro + CLEARANCE * tight
-                  + (isEnd(o.i) && isEnd(i) && o.i !== host ? ENDS_APART * tight : 0);
+                  + (isEnd(o.i) && isEnd(i) && o.i !== host
+                    ? Math.min(ENDS_APART * tight, endsApartCapFor(o)) : 0);
                 return Math.hypot(px - o.x, py - o.y) < need;
               });
               if (!clash && linked && g.length > 1) {
