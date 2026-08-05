@@ -410,6 +410,16 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **#101 — the gear menu named the mechanism instead of the thing being chosen.**
+  (GitHub #91.) The first entry read `Mixed deal (default)` while every other entry in
+  the list is a plain family name — `Isogrid`, `Radial brickwork`, `Radial isogrid` — so
+  "deal" was the one word describing how the wheels are picked rather than what you get.
+  Now `Mixed (default)`.
+
+  The `(default)` marker stays. It is the only thing in the menu that says which entry
+  you get without asking, and it is what `aria-current` is paired with, so dropping it
+  would take information out of the accessibility tree as well as off the page.
+
 - **#98 — one name was doing two jobs: a maximum was being used as an index.**
   `SPINE_LEN` was `Math.max(1, ...STAGE.people.map(p => p.links.length))` — the
   longest chain *anywhere on stage* — and the `TRAIN` builder then used it as a

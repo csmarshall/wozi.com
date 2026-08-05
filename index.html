@@ -5968,7 +5968,11 @@ class Component extends DCLogic {
           };
         };
         const out = [];
-        out.push(item(null, 'Mixed deal (default)'));
+        /* Every other entry here is a plain family name, so "deal" was the odd word
+           out -- it named the mechanism rather than the thing being chosen (#101).
+           The "(default)" marker stays: it is the only thing in the list that says
+           which entry you get without asking, and it is what aria-current pairs with. */
+        out.push(item(null, 'Mixed (default)'));
         CENTRE_FAMILIES.forEach(f => {
           out.push(item(f.type, names[f.type] || f.type));
           /* The double row rides directly under the single, since it is the same
