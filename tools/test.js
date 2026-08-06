@@ -122,6 +122,17 @@ function grabBlock(decl, open, close) {
 const PAGE_ORIGIN_MOUNT = new Function(
   grabDecl('const ORIGIN_MOUNT =') + ' return ORIGIN_MOUNT;')();
 
+/* engraving()'s handle/stamp type sizes, as fractions of MODULE -- read out of
+   the page's own line rather than retyped as two separate literals (GitHub
+   #102). `const T0 = fit(handle, mid, m * 0.80), B0 = fit(stamp, mid, m *
+   0.60);` is the one place both numbers are declared; a copy of either would
+   keep passing if engraving()'s own line changed. */
+const ENGRAVE_SIZES = (function () {
+  const m = SRC.match(/const T0 = fit\(handle, mid, m \* ([0-9.]+)\), B0 = fit\(stamp, mid, m \* ([0-9.]+)\);/);
+  if (!m) throw new Error('could not find engraving()\'s handle/stamp type-size line in index.html');
+  return { handle: parseFloat(m[1]), stamp: parseFloat(m[2]) };
+})();
+
 const page = (function build() {
   const consts = ['MODULE', 'TOOTH_ADD', 'TOOTH_DED', 'TOOTH_ROOT_MIN', 'BAND_RISE',
     'BAND_DEPTH', 'RIM_UNDER_BAND', 'BASELINE_MID', 'ROOT_MARGIN', 'MIN_MODULE',
@@ -4614,8 +4625,9 @@ test('index.html parses and exposes its geometry constants', () => {
 });
 
 test('the engraving band is taller than the text it carries', () => {
-  /* engraving() sets the handle at MODULE * 0.80 */
-  const textModules = 0.80;
+  /* engraving() sets the handle at MODULE * ENGRAVE_SIZES.handle -- read out
+     of the page (GitHub #102), not retyped. */
+  const textModules = ENGRAVE_SIZES.handle;
   ok(page.BAND_DEPTH > textModules,
     'band ' + page.BAND_DEPTH + 'm cannot hold ' + textModules + 'm lettering');
   ok(page.BAND_DEPTH < textModules * 2.2,
@@ -4631,7 +4643,7 @@ test('the ring the lettering rides on stays inside the band', () => {
      ring itself leaves the metal it is supposed to be cut into. Handle first (the
      larger of the two lines, so the larger shift), then the machining stamp. */
   const halfBand = page.BAND_DEPTH / 2;
-  [['handle', 0.80], ['stamp', 0.60]].forEach(([which, textModules]) => {
+  [['handle', ENGRAVE_SIZES.handle], ['stamp', ENGRAVE_SIZES.stamp]].forEach(([which, textModules]) => {
     const shift = page.BASELINE_MID * textModules;
     ok(shift < halfBand,
       which + ' ring is dropped ' + shift.toFixed(3) + 'm, past the band half-depth '
@@ -5017,16 +5029,29 @@ test('the bearing deal keeps the train a horizontal line, at a real rate', () =>
      comment at BAND_MAX in index.html). Given the RATE_FLOOR treatment
      'the tooth deal always produces a legal train' already has, for the same
      reason: a presence check cannot fail for a weak deal, only an absent one. */
-  const { ANG_MIN, ANG_MAX, BAND_MAX, MODULE } = page;
+  const { ANG_MIN, ANG_MAX, BAND_MAX, TEETH_MIN, TEETH_MAX } = page;
   ok(ANG_MIN > 0 && ANG_MAX > ANG_MIN, 'bearing range is degenerate');
   ok(ANG_MAX <= 45, 'bearings past 45 degrees stack the wheels diagonally');
+
+  /* rOf() is EXECUTED straight out of dealAngles() rather than modelled (GitHub
+     #102). A fixed `MODULE * 16` stand-in for rOf(parent) + rOf(child) measured
+     6 points optimistic against the page (#64, A13): TEETH_MEAN is 16.3, not
+     16, and -- more to the point -- the wheels feeding this drift are DEALT
+     per wheel from [TEETH_MIN, TEETH_MAX], not nominal, so a real step's radius
+     sum can be as wide as two TEETH_MAX blanks or as narrow as two TEETH_MIN
+     ones. Modelling it as one fixed pair understates the spread the actual
+     deal can produce. */
+  const rOf = new Function('MODULE', grabDecl('const rOf =') + ' return rOf;')(page.MODULE);
+
   /* Not a re-tuned number: the derived BAND_MAX/ENDS_MAX (CL#130) measure at
      84-100% legal across every swept length (worst case an 8-wheel chain,
      step-count parity again -- the caps did not remove that effect, only how
      punishing it is). RATE_FLOOR sits well under that floor and well over what
      the old flat 62/26 produced (9.7% worst case), so it passes the bounds
      this ticket derives with room to spare and would have failed the ones it
-     replaced -- see CL#130 for the measured before/after. */
+     replaced -- see CL#130 for the measured before/after. CL#130 measured that
+     against a modelled rOf; this test now executes the page's own, so treat the
+     stated percentages as the ticket's figures rather than as this file's. */
   const RATE_FLOOR = 0.5;
   const TRIALS = 4000;
   const bad = [];
@@ -5037,9 +5062,17 @@ test('the bearing deal keeps the train a horizontal line, at a real rate', () =>
       const first = Math.random() < 0.5 ? 1 : -1;
       const ang = [0];
       for (let i = 1; i < len; i++) ang.push(first * (i % 2 ? 1 : -1) * (ANG_MIN + Math.random() * (ANG_MAX - ANG_MIN)));
+      /* One tooth count DEALT per wheel, uniform over the same [TEETH_MIN,
+         TEETH_MAX] range dealTeeth() draws each wheel from -- not a nominal
+         average -- so a step's radius sum is exactly what a real chain of this
+         length could actually produce. */
+      const teeth = [];
+      for (let i = 0; i < len; i++) {
+        teeth.push(TEETH_MIN + Math.floor(Math.random() * (TEETH_MAX - TEETH_MIN + 1)));
+      }
       let y = 0, lo = 0, hi = 0;
       for (let i = 1; i < len; i++) {
-        y += (MODULE * 16) * Math.sin(ang[i] * Math.PI / 180);   /* two mid-size wheels */
+        y += (rOf({ teeth: teeth[i - 1] }) + rOf({ teeth: teeth[i] })) * Math.sin(ang[i] * Math.PI / 180);
         lo = Math.min(lo, y); hi = Math.max(hi, y);
       }
       if (hi - lo <= BAND_MAX && Math.abs(y) <= page.endsCapFor(len)) legal++;

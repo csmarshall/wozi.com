@@ -1,5 +1,7 @@
 /* Measures the mesh with true involute flanks, matching teethPath exactly. */
-const MODULE = 7, PA = 20, ADD = 1.00, DED = 1.25;
+const { grabNumber } = require('./mesh_extract.js');
+const MODULE = grabNumber('MODULE'), PA = grabNumber('TOOTH_PA'),
+  ADD = grabNumber('TOOTH_ADD'), DED = grabNumber('TOOTH_DED');
 const TRAIN = [
   { teeth: 17, angle: 0 }, { teeth: 15, angle: 20 }, { teeth: 18, angle: -24 },
   { teeth: 14, angle: 22 }, { teeth: 17, angle: -20 }, { teeth: 15, angle: 24 },
@@ -79,6 +81,6 @@ function run(thick, label) {
   }
   console.log(`${label.padEnd(26)} penetrating:${String(pen).padStart(4)}  max depth:${maxD.toFixed(2).padStart(6)}px  min gap:${minGap.toFixed(2).padStart(6)}px`);
 }
-console.log('involute flanks, 20 deg PA, add 1.00m, ded 1.25m\n');
+console.log(`involute flanks, ${PA} deg PA, add ${ADD.toFixed(2)}m, ded ${DED.toFixed(2)}m\n`);
 for (const t of [0.500, 0.495, 0.485, 0.475, 0.460, 0.440]) run(t, `  thickness ${t.toFixed(3)} of pitch`);
 console.log('\n(a real gear is 0.500; less is backlash. min gap ~0 = flanks touching.)');

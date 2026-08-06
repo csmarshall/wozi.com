@@ -1,9 +1,20 @@
 /* Replicates solve()'s placement and phase for the real TRAIN, then measures the
    mesh at every adjacent pair. Numbers, not impressions. */
 
-const MODULE = 7;
-const CLEARANCE = 13;  /* solve units, not pixels -- see index.html (GitHub #99) */
-const ENDS_APART = 90; /* solve units, not pixels -- see index.html (GitHub #99) */
+const { grabNumber } = require('./mesh_extract.js');
+
+const MODULE = grabNumber('MODULE');
+/* CLEARANCE and ENDS_APART are in solve units, not pixels (GitHub #99, CL#124).
+   Reading them rather than retyping them is what keeps that true here: the
+   literals this file used to carry were a second home for the same fact, and a
+   second home is where the units drifted apart in the first place. */
+const CLEARANCE = grabNumber('CLEARANCE');
+const ENDS_APART = grabNumber('ENDS_APART');
+/* The root dedendum teethPath actually uses (GitHub #102): this file's `1.15`
+   was TOOTH_DED's value before bf16c0c moved it to 1.25 for true involute
+   flanks, and nothing here followed. Read, not retyped, so it cannot happen
+   again. */
+const TOOTH_DED = grabNumber('TOOTH_DED');
 
 const TRAIN = [
   { teeth: 17, angle: 0,   prof: { add: 1.0,  tip: 0.36 } },
@@ -51,7 +62,7 @@ TRAIN.forEach((t, i) => {
     phase = ang + 180 - (0.5 - u) * pThis;
   }
   g.push({ i, teeth: t.teeth, prof, r, ro, x, y, dir, phase, ang,
-           rr: Math.max(4, r - MODULE * 1.15) });
+           rr: Math.max(4, r - MODULE * TOOTH_DED) });
 });
 
 console.log('per-wheel geometry (MODULE = ' + MODULE + ')');
