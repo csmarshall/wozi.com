@@ -168,6 +168,140 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
   there would be something stable to document.
 
 - **CL#120 — the datum showed through the bridge idlers, because a translucent
+- **CL#127 — spin-down from 200x was over almost at once, because a fixed
+  900ms lag is viscous drag on a massless flywheel.** (GitHub #106.)
+
+  Charles: *"cooking down from 200x speed to 1x speed seems to happen really
+  fast — is that obeying some artificial physics?"* Yes. `step()` eased the
+  flywheel with a first-order lag at a FIXED time constant:
+
+      this._v += (target - this._v) * (1 - Math.exp(-dt / 900));
+
+  Settling time for an exponential decay toward a target does not depend on
+  the SIZE of the jump — so 200x -> 1x and 2x -> 1x both took the same
+  ~4.5 seconds to settle. For the big drop that meant ~145x of the 199x gap
+  was gone in the first 900ms, leaving four more seconds of an imperceptible
+  crawl through the last 1x — measured on the real page (below) at 72.3x,
+  27.1x, 10.6x and 2.3x at 0.9s/1.8s/2.7s/4.5s, matching the issue's own
+  hand-derived table almost exactly. That is a physically coherent model — it
+  is exactly what viscous drag (friction proportional to speed) does — just
+  the wrong one: viscous drag on a flywheel with no mass. A heavy flywheel
+  under mostly Coulomb friction (~constant retarding torque) decelerates at a
+  CONSTANT rate instead, so stopping from 200x genuinely takes about 200x as
+  long as stopping from 1x — the behaviour the eye expects from something
+  that looks like cast iron.
+
+  **`BASE_MS` reconstructed, not merely asserted.** CLAUDE.md's `strobeSpeed()`
+  comment already showed `7200 = 360 * 20`, and Charles's own reconstruction —
+  a 20-tooth wheel takes `BASE_MS` (21000ms, 21s) to turn once, so an N-tooth
+  wheel takes `1050 * N` ms — is confirmed by code that predates every comment
+  discussing it: the original per-wheel animation duration, still in the
+  file's early history, was `dur: (BASE_MS * t.teeth / 20).toFixed(2)`. That is
+  the reconstruction stated as fact, not a guess dressed as one.
+
+  **Three candidates were built and measured against the real page, not
+  simulated** (`_v` has no hook to the outside — reading it would mean adding
+  one for a one-off capture, which is the kind of debug surface `?hud`'s own
+  CLAUDE.md section says to think hard before adding). `tools/spindown_capture.py`
+  boots the page pre-seeded to 200x via `localStorage` (the same
+  `Page.addScriptToEvaluateOnNewDocument` technique the other harnesses use),
+  taps the REAL corner "reset to 1x" button (`resetSpeed()`, GitHub #108 —
+  the actual production code path, not a simulated `setState`), and samples
+  the driving wheel's own `rotate(...)deg` transform at full frame rate,
+  in-page, for the whole run. Speed units are self-calibrated from one
+  candidate's own settle (see the script for why the naive per-candidate
+  self-calibration was wrong for the slowest candidate, and what fixed it) —
+  nothing in the harness needs to know `BASE_MS`, teeth counts, or which
+  candidate is running, the same "measure what ships" discipline `tools/test.js`
+  already holds to. `tools/spindown_report.py` turns the three JSON traces into
+  an overlaid speed-vs-time plot (linear and log) and a filmstrip contact
+  sheet. Candidates, all sharing one function name (`approachSpeed(v, target,
+  dt)`) so the call site in `step()` never changed shape:
+
+  - **A — as shipped, the control.** `900` named as `SPINDOWN_TAU_MS` and
+    nothing else changed. Reproduces the issue's own table.
+  - **B — proportional/logarithmic tau.** Keeps the exponential (still smooth)
+    but scales tau by the number of OCTAVES the transition spans —
+    `SPINDOWN_MS_PER_OCTAVE * log2(bigger/smaller)` — recomputed only when the
+    target actually changes (or `_v` was set directly by a flick, which
+    invalidates the cached tau so the next tick re-tunes against the new gap
+    instead of reusing one tuned for a different jump). The cheaper fix in
+    spirit, but it needs latched per-transition state (`_spinTarget`,
+    `_spinTau`) and a one-line touch to the drag handler's `up()` to keep that
+    state honest across a flick — more moving parts than candidate C for a
+    model that (at `SPINDOWN_MS_PER_OCTAVE=300`, the value captured) still
+    hadn't fully settled 9 seconds after the tap.
+  - **C — Coulomb-ish constant deceleration. Shipped.** `_v` moves toward
+    `target` at a fixed rate and ARRIVES, in finite time, rather than easing
+    toward it forever. The rate (`SPINDOWN_DECEL`, master-deg/ms²) is derived,
+    not hand-picked: `SPINDOWN_RANGE_MS` (2400ms) names the one tunable feel
+    figure — how long the flywheel takes to cross the WHOLE ladder, idleRate()
+    at `SPEED_CEIL` down to `SPEED_FLOOR` — and `SPINDOWN_DECEL` is that range
+    divided by that time, guarded against the schema's own degenerate fallback
+    (`SPEED_CEIL === SPEED_FLOOR`) so a broken prop schema can't also zero the
+    decel and freeze the flywheel. Memoryless: no latched state, no touch
+    needed anywhere outside `step()` and the constants it uses, correct
+    through a flick, an arrow key, hover-drag's `load` factor, or a motion
+    toggle exactly because it never looks at how `_v` got to where it is.
+
+  **2400ms is a placeholder for Charles's call**, same as CL#127 candidate B's
+  300ms/octave — captured against two other candidates, not asserted as the
+  only one that was built. Both a linear filmstrip and a log-scale plot are in
+  the capture (log shows the multiplicative SHAPE; linear shows what the eye
+  actually watches, which is the whole reason the fixed-tau model reads as
+  "over at once" despite being smooth in log-space the entire time).
+
+  **Spin-up shares this, deliberately** — the issue asked for the decision to
+  be explicit. `approachSpeed()` takes no direction argument: spin-up
+  (0 -> idleRate()) and spin-down are the identical formula, called with
+  `target` on whichever side of `v` it lands. Coulomb friction opposes motion
+  in either direction at the same magnitude, and a real train winds up slowly
+  for the same reason it coasts down slowly — no special case, and the suite
+  asserts the resulting symmetry directly (equal tick counts to converge A -> B
+  and B -> A).
+
+  **A felt side effect worth flagging, not fixed here.** Making the TOP of the
+  ladder take longer necessarily makes the BOTTOM snappier than the old
+  constant did, because `900` was tuned back when the ladder topped out at 2x
+  (the original prop schema), not 200x — it was never really "the" spin-down
+  feel, it was the feel for a jump that no longer exists at the top of the
+  range. Concretely: an arrow-key tap at 1x used to bleed off over ~900ms
+  under the old model; under the shipped constant it settles in ~270ms
+  (`driveCap()`'s own comment updated to stop citing the stale figure). That
+  is a consequence of fixing #106, not a second bug, but it is a real change
+  in feel for the single most common interaction on the page and Charles
+  should look at it deliberately rather than inherit it as a side effect.
+
+  **`npm test` grew six assertions**, extracted and RUN rather than read as
+  text (`tools/test.js`'s own stated reason: the guarantee here is about
+  behaviour over many ticks, not the shape of the source) — a bigger drop
+  settles more slowly than a smaller one; the per-tick step stays constant
+  mid-descent instead of shrinking toward the target (the exact shape an
+  exponential has and this candidate does not); the flywheel reaches its
+  target exactly, in finite time, and stays there; spin-up and spin-down
+  converge in equal tick counts; the old formula is confirmed gone from LIVE
+  code (checked against `STRIPPED_SRC`, not `SRC` — the old formula is quoted
+  verbatim in the block comment explaining why it changed, and a check against
+  raw source failed on its own prose before it was fixed to strip comments
+  first, GitHub #101's trap in a new guise); and `SPINDOWN_DECEL` is checked to
+  reference `SPEED_CEIL`/`SPEED_FLOOR`/`BASE_MS` in its own declaration rather
+  than being a bare tuned literal. **Mutation-tested by hand**, three mutants:
+  reverting `approachSpeed()`'s body to the old exponential (caught by five of
+  the six new tests), reverting the call site in `step()` back to the inline
+  old formula with `approachSpeed()` left intact but unused (caught by the
+  "old formula is gone" test), and hardcoding `SPINDOWN_DECEL` as a bare
+  literal instead of deriving it (caught by exactly the one test built for it,
+  nothing else). 104 -> 110, all green, restored clean after each mutant.
+
+  **`driveCap()`'s comment updated**, not its logic — it still reads `Math.max(8,
+  Math.abs(this.idleRate()))`, untouched, but the comment explaining WHY cited
+  a `~900ms` recovery figure that stopped being true the moment `900` stopped
+  existing anywhere in the file; it now describes the mechanism (`approachSpeed()`)
+  rather than a number that would have gone stale silently a second time.
+
+  **Verify:** `tools/verify_motion.py` against the shipped page — gears
+  advancing (39/39 in 700ms), badges at ≤0.01px, one console error (the
+  benign favicon 404) — run both without and with `?hud`.
   group of one cannot occlude anything.** (GitHub #86.)
 
   A bridge idler was dimmed by putting `opacity` on the wrapping `<div>` that

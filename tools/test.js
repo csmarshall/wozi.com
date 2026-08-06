@@ -1384,6 +1384,182 @@ test('there is exactly one range input on the page', () => {
     + 'rules for it are no longer provably scoped to a single control');
 });
 
+/* ---- 0d. the flywheel's approach to a new target speed (GitHub #106, CL#127)
+   ---------------------------------------------------------------------------
+
+   approachSpeed() is extracted and RUN, not read as text, because the property
+   this ticket exists to guarantee — a bigger drop settles more slowly than a
+   smaller one — is a claim about behaviour over many ticks, not about the
+   shape of the source. A regex can confirm the old `Math.exp(-dt / 900)` is
+   gone; only running the replacement against synthetic v/target/dt can confirm
+   it actually fixes #106 rather than merely renaming the bug. */
+
+/* The schema's own min/max, read out of the SAME data-props JSON PROP_SCHEMA
+   parses at runtime — not retyped, so a ladder change (the top stop moving off
+   200, say) moves these with it. This suite has no DOM to run PROP_SCHEMA's own
+   parse through, so the one JSON.parse happens here instead, against the exact
+   attribute string the page carries. */
+function speedSchema() {
+  const m = SRC.match(/data-props="([^"]*)"/);
+  ok(m, 'no data-props attribute found — the prop schema this suite reads is gone');
+  const json = m[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+  const schema = JSON.parse(json);
+  ok(schema.speed && typeof schema.speed.min === 'number' && typeof schema.speed.max === 'number',
+    'the prop schema has no speed.min/speed.max — SPEED_FLOOR/SPEED_CEIL would '
+    + 'fall back to defaults the page is not actually shipping');
+  return { floor: schema.speed.min, ceil: schema.speed.max };
+}
+
+/* Grabs the two constants and the function as one contiguous chunk — they are
+   written next to each other for exactly this reason (see the block comment
+   above them in index.html) — and executes it with the page's own BASE_MS and
+   speed schema, never a copy of either. */
+function loadApproachSpeed() {
+  const { floor, ceil } = speedSchema();
+  const baseMs = grabNumber('BASE_MS');
+  const start = SRC.indexOf('const SPINDOWN_RANGE_MS');
+  ok(start > 0, 'no SPINDOWN_RANGE_MS found — the flywheel\'s settle-time '
+    + 'constant (CL#127) has been renamed or removed without updating this suite');
+  const fnBlock = grabBlock('function approachSpeed(', '{', '}');
+  const end = SRC.indexOf(fnBlock, start) + fnBlock.length;
+  ok(end > start, 'function approachSpeed(...) not found after SPINDOWN_RANGE_MS');
+  const chunk = SRC.slice(start, end);
+  return new Function('BASE_MS', 'SPEED_CEIL', 'SPEED_FLOOR',
+    chunk + '\nreturn approachSpeed;')(baseMs, ceil, floor);
+}
+
+/* Ticks approachSpeed() from v0 toward target at a fixed dt, exactly the way
+   step() does (dt is clamped to 60 there too), and returns how many ticks it
+   took to REACH target — not merely get close to it. approachSpeed() is
+   expected to arrive exactly, in finite time (CL#127's whole point, versus an
+   exponential that only ever approaches); a runaway loop here means that
+   stopped being true. */
+function ticksToSettle(approachSpeed, v0, target, dt) {
+  let v = v0;
+  for (let i = 1; i <= 100000; i++) {
+    v = approachSpeed(v, target, dt);
+    if (v === target) return i;
+  }
+  throw new Error('approachSpeed() did not reach target ' + target + ' from ' + v0
+    + ' within 100000 ticks — it no longer arrives in finite time');
+}
+
+test('approachSpeed() replaces the fixed 900ms lag — GitHub #106', () => {
+  /* STRIPPED_SRC, not SRC -- the old formula is quoted verbatim in the block
+     comment documenting why it changed, and a check against the raw source
+     would fail on its own prose (the exact trap STRIPPED_SRC exists for,
+     GitHub #101). */
+  ok(!/Math\.exp\(-dt \/ 900\)/.test(STRIPPED_SRC),
+    'the old fixed-tau easing (Math.exp(-dt / 900)) is still LIVE CODE — #106 is unfixed');
+  ok(/this\._v = approachSpeed\(this\._v, target, dt\)/.test(SRC),
+    'step() does not call approachSpeed() — the flywheel update has moved '
+    + 'somewhere this suite is not looking, or was reverted');
+  ok(/function approachSpeed\(v, target, dt\)/.test(SRC),
+    'approachSpeed(v, target, dt) not found with that exact signature');
+});
+
+test('a bigger drop settles more slowly than a smaller one (GitHub #106\'s core complaint)', () => {
+  /* This is the property the shipped exponential got backwards: settling time
+     was independent of the size of the jump, so 200x -> 1x and 2x -> 1x took
+     the same ~4.5s. Big vs small, from the ladder's own floor and ceiling
+     rather than hand-picked numbers, so a ladder change keeps this test
+     honest about what "bigger" and "smaller" mean. */
+  const approachSpeed = loadApproachSpeed();
+  const { floor, ceil } = speedSchema();
+  const idleRate = (x) => (7200 / grabNumber('BASE_MS')) * x;
+  const dt = 1000 / 30;
+  const bigDrop = ticksToSettle(approachSpeed, idleRate(ceil), idleRate(floor), dt);
+  const smallDrop = ticksToSettle(approachSpeed, idleRate(2 * floor), idleRate(floor), dt);
+  ok(bigDrop > smallDrop,
+    `the ${ceil}x -> ${floor}x drop settled in ${bigDrop} ticks, no slower than the `
+    + `${2 * floor}x -> ${floor}x drop's ${smallDrop} — a bigger drop must take longer, `
+    + 'not the same or less');
+});
+
+test('the flywheel decelerates at a CONSTANT rate, not one that shrinks near the target', () => {
+  /* The exact shape #106 asks to move away from: an exponential's per-tick
+     step shrinks as `_v` nears its target, which is what concentrates all the
+     visible motion into the first fraction of a second and leaves an
+     imperceptible crawl for the rest. Sampled mid-descent (well clear of
+     both the starting value and the final snap-to-target tick, where a
+     from-rest or arrival tick can legitimately be a partial step) rather than
+     inferred from a settle-time ratio — a ratio over few enough ticks that
+     the size of ONE tick's step is a large fraction of the total gap turned
+     out to be too noisy an instrument for this (a 2x -> 1x drop settles in a
+     single tick almost regardless of the model, which says nothing about
+     whether the rate is constant). */
+  const approachSpeed = loadApproachSpeed();
+  const { floor, ceil } = speedSchema();
+  const idleRate = (x) => (7200 / grabNumber('BASE_MS')) * x;
+  const dt = 1000 / 30;
+  let v = idleRate(ceil);
+  const target = idleRate(floor);
+  const deltas = [];
+  for (let i = 0; i < 30 && v !== target; i++) {
+    const before = v;
+    v = approachSpeed(v, target, dt);
+    deltas.push(before - v);
+  }
+  ok(deltas.length > 10, 'fewer than 10 ticks before settling — not enough of a '
+    + 'mid-descent window to say anything about the shape of the approach');
+  const midWindow = deltas.slice(2, -2); // clear of the first tick and the final snap
+  const first = midWindow[0];
+  midWindow.forEach((d, i) => {
+    ok(Math.abs(d - first) < 1e-6,
+      `tick ${i}'s step (${d}) differs from an earlier mid-descent tick's (${first}) `
+      + '— the deceleration is not constant, which is what an exponential (fixed or '
+      + 'logarithmic tau) looks like from inside this loop');
+  });
+});
+
+test('the flywheel actually ARRIVES at its target, in finite time (GitHub #106, CL#127)', () => {
+  /* An exponential asymptote never truly arrives — the shipped control (CL#127's
+     candidate A) leaves a residual forever. Requiring exact arrival is what
+     rules a reversion to that shape out, rather than merely a slower one. */
+  const approachSpeed = loadApproachSpeed();
+  const { floor, ceil } = speedSchema();
+  const idleRate = (x) => (7200 / grabNumber('BASE_MS')) * x;
+  const dt = 1000 / 30;
+  const ticks = ticksToSettle(approachSpeed, idleRate(ceil), idleRate(floor), dt);
+  ok(ticks < 100000, 'did not settle within the tick budget');
+  // ticksToSettle() itself only returns on v === target; reaching here at all
+  // is the assertion. A second call confirms it STAYS there rather than
+  // overshooting and oscillating back out.
+  const held = approachSpeed(idleRate(floor), idleRate(floor), dt);
+  eq(held, idleRate(floor), 'approachSpeed() moved v away from a target it had already reached');
+});
+
+test('spin-up and spin-down share the same approach — GitHub #106 asks explicitly', () => {
+  /* Charles: a real train winds up slowly and coasts down slowly. approachSpeed()
+     takes no direction argument at all — target > v (spin-up) and target < v
+     (spin-down) go through the identical formula — so this checks the actual
+     behavioural symmetry that no-special-case implies: converging from A to B
+     takes exactly as many ticks as converging from B to A. */
+  const approachSpeed = loadApproachSpeed();
+  const { floor, ceil } = speedSchema();
+  const idleRate = (x) => (7200 / grabNumber('BASE_MS')) * x;
+  const dt = 1000 / 30;
+  const spinDown = ticksToSettle(approachSpeed, idleRate(ceil), idleRate(floor), dt);
+  const spinUp = ticksToSettle(approachSpeed, idleRate(floor), idleRate(ceil), dt);
+  eq(spinDown, spinUp,
+    'spin-up and spin-down settle in different tick counts — approachSpeed() is '
+    + 'branching on direction somewhere, which #106 says it should not');
+});
+
+test('the settle-rate constant is DERIVED from the speed ladder and BASE_MS, not a bare deg/ms² literal', () => {
+  /* CLAUDE.md: no drifting constants. The one tunable figure this candidate
+     exposes is a wall-clock DURATION (named and commented in index.html as a
+     placeholder for Charles's call); the actual master-degrees-per-ms-squared
+     rate has to come from that duration divided by the ladder's own span, or a
+     ladder change (moving the top stop off 200x) would silently desync the feel
+     from the number that is supposed to define it. */
+  const chunk = SRC.slice(SRC.indexOf('const SPINDOWN_RANGE_MS'),
+    SRC.indexOf('function approachSpeed('));
+  ok(/SPEED_CEIL/.test(chunk) && /SPEED_FLOOR/.test(chunk) && /BASE_MS/.test(chunk),
+    'the settle-rate constant does not reference SPEED_CEIL, SPEED_FLOOR and '
+    + 'BASE_MS — it may have been hand-tuned as a bare number instead of derived');
+});
+
 /* ---- the real solver, executed against a stage of our choosing ------------ */
 
 /* EXECUTES solve() ITSELF, sliced out of index.html. Everything above tests the

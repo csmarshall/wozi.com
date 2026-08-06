@@ -714,6 +714,60 @@ const SPEED_STOPS = (() => {
   }
   return out.length ? out : [SPEED_FLOOR];
 })();
+
+/* THE FLYWHEEL'S APPROACH TO A NEW TARGET SPEED (CL#127, GitHub #106). Used for
+   spin-up (0 -> the idle rate) and spin-down (any rate -> a slower one, or to
+   rest) alike -- one function, called from step() with whatever `target`
+   idleRate() and motionActive() computed that tick, exactly like every other
+   read of the flywheel. It used to be a first-order lag with a FIXED time
+   constant:
+
+     this._v += (target - this._v) * (1 - Math.exp(-dt / 900));
+
+   -- viscous drag on a MASSLESS flywheel: settling time is independent of the
+   SIZE of the drop, so 200x -> 1x sheds ~145x in the first 900ms and then
+   spends four more seconds crawling the last 1x (#106). A heavy flywheel under
+   mostly COULOMB friction -- roughly constant retarding TORQUE rather than
+   drag proportional to speed -- decelerates at a CONSTANT RATE instead, so
+   stopping from 200x genuinely takes about 200x as long as stopping from 1x,
+   which is the behaviour the eye expects from something that looks like cast
+   iron. That is the model here: `_v` moves toward `target` at a fixed rate and
+   ARRIVES, in finite time, rather than easing toward it forever.
+
+   SPINDOWN_DECEL is that rate, in master-degrees per ms per ms -- and it is
+   DERIVED, not tuned directly. SPINDOWN_RANGE_MS names the one feel figure
+   this candidate actually exposes: how long the flywheel takes to cross the
+   WHOLE ladder at that constant rate, from idleRate() at SPEED_CEIL down to
+   idleRate() at SPEED_FLOOR. SPINDOWN_DECEL is just that range divided by that
+   time, so there is one number to retune by eye and nothing here can drift out
+   of step with SPEED_CEIL/SPEED_FLOOR the way a hand-picked deg/ms^2 would.
+   `Math.max(SPEED_CEIL - SPEED_FLOOR, SPEED_FLOOR)` guards the degenerate case
+   where the prop schema failed to parse and both collapsed to the same
+   value (PROP_SCHEMA above) -- without it SPINDOWN_DECEL would be exactly 0
+   and the flywheel would never move at all, which is a worse failure than a
+   schema that only has one speed.
+
+   2400ms IS A PLACEHOLDER FOR CHARLES'S CALL. It is the candidate that shipped
+   out of three built and captured against the real page (`_v` has no outside
+   hook, so all three were compared as measured wheel rotation, not simulated
+   -- see tools/spindown_capture.py and tools/spindown_report.py), not the only
+   one that was built: a fixed-tau control (identical to the code above) and a
+   logarithmic-tau candidate (tau scaled by the number of octaves a transition
+   spans, so each halving takes the same wall-clock time) are in the CL#127
+   CHANGELOG entry, captures and all.
+
+   SPIN-UP SHARES THIS, DELIBERATELY (#106 asks explicitly). This is the same
+   function called with target > v instead of target < v -- Coulomb friction
+   opposes motion in either direction at the same magnitude, and a real train
+   winds up slowly for the same reason it coasts down slowly. No special case. */
+const SPINDOWN_RANGE_MS = 2400;
+const SPINDOWN_DECEL = ((7200 / BASE_MS) * Math.max(SPEED_CEIL - SPEED_FLOOR, SPEED_FLOOR))
+  / SPINDOWN_RANGE_MS;
+function approachSpeed(v, target, dt) {
+  const diff = target - v;
+  const step = SPINDOWN_DECEL * dt;
+  return Math.abs(diff) <= step ? target : v + Math.sign(diff) * step;
+}
 const GHOST_COLORS = ['#9AA6AD', '#A9B4BA', '#8F9BA3', '#B3BCC2'];
 
 /* ONE WAY TO WRITE A POLAR POINT. There were seven copies of this formula --
@@ -3041,9 +3095,11 @@ class Component extends DCLogic {
      idle rate was 0.343 — twenty-three times slower than the bound, so the bound
      only ever caught a genuinely violent flick. The speed control now reaches
      68.6 at its top stop, and a fixed 8 would stop being a ceiling on user input
-     and start being a BRAKE: one arrow key at 200x slams the train from 68.6 to
-     8, then it climbs back over ~900ms. The greater of the two is a ceiling
-     again at every stop, and identical to the old one at 1x. */
+     and start being a BRAKE: one arrow key at 200x would clamp the train down
+     to 8 and leave it climbing back to 68.6 through approachSpeed() (CL#127) —
+     visibly slower than the flick it was supposed to be capping, not faster.
+     The greater of the two is a ceiling again at every stop, and identical to
+     the old one at 1x. */
   driveCap() { return Math.max(8, Math.abs(this.idleRate())); }
 
   /* Does a stop sample the teeth below Nyquist? The ladder is allowed to run
@@ -3803,7 +3859,7 @@ class Component extends DCLogic {
         /* LAYER: hover drag — attention loads the machine and it slows a little. */
         const load = (this.props.hoverDrag && (this.state.hover || this.state.overStage)) ? 0.4 : 1;
         const target = this.motionActive() ? this._dirSign * this.idleRate() * load : 0;
-        this._v += (target - this._v) * (1 - Math.exp(-dt / 900));
+        this._v = approachSpeed(this._v, target, dt);
         this._M += this._v * dt;
         this.applyRotation();
       }
