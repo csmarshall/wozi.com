@@ -285,6 +285,37 @@ seeded with `solved.bridgeRuns` so an escape run refuses to cross one, and
 **every structural run must be published into that list** or it becomes the one
 run on the page that anything may be laid straight across.
 
+**Who gets a *leading* escape run is decided by drive, not by the spine** (CL#132).
+The spine gets both runs. A chain something on stage drives gets only the
+trailing one — its leading end is where its bridge arrives, and a second tail
+there would run into the machinery driving it. **A self-driven root gets both**,
+because nothing arrives at its leading end except its own origin run. That last
+case was the bug: the gate read `!spine` while the argument only ever covered
+`driven`, so a root's leading side stopped dead in open space (x=406 at 1440×900)
+while the spine's ran off the frame (x=−222). A root's leading run is hosted on
+the **outermost origin idler**, not on the lead gear — the origin run already
+occupies that side — and that idler is already placed, so this adds nothing to
+`TRAIN`.
+
+**A solved wheel says what it is *for*, not only where it is** (CL#132). `drive`
+is `'bridge'`, `'origin'` or null and `serves` names the chain a ghost carries,
+so "is this chain self-driven" is answerable from the solve instead of by
+indexing back into `TRAIN` or inferring it from position. `fitEscapes` records
+each ghost's host centre for the same reason: a run's heading means nothing
+measured from the wrong origin, and the host stopped being `head`-or-`tail` the
+moment a root's leading run moved onto its origin tip.
+
+**`MAX_IDLERS` is budgeted against the cross axis, and an origin run does not
+travel along it.** `IDLERS_FOR(roomy)` is binary — `roomy ? MAX_IDLERS :
+MIN_IDLERS` — and `idlerCount()` asks whether `STAGE_CROSS(MAX_IDLERS)` fits the
+**cross** axis, because the count was written for bridges, which travel across to
+separate chains. An origin run travels along its **own chain's** long axis. So
+raising `MAX_IDLERS` to lengthen an origin run makes it *shorter*: the larger
+demand fails the cross-axis test and falls back to `MIN_IDLERS`. Measured, not
+reasoned — a 6-idler pool dropped a root to one leading ghost. **This is still
+true and is not fixed**; the shared count is documented below as a feature, but
+the budget behind it only ever measured one direction.
+
 **There are two kinds of structural run and one count** (GitHub #116, CL#123). A
 **bridge** carries a dependent chain's drive in from the chain that drives it; an
 **origin run** carries a self-driven chain's drive in from off the stage. They

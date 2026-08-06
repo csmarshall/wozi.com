@@ -7,6 +7,82 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Changed
 
+- **CL#132 — a self-driven root gets its leading escape run, because the rule
+  withholding it was written about bridges.** (GitHub #116 follow-up.)
+
+  Charles, looking at the live combined stage: *"why in the fuck doesn't harper's
+  chain look the same as my chain — the logic for both chains should be identical
+  now since they are independent"*, and then the precise version: *"you only have
+  two leading gears — and the chain doesn't extend in front of the only gear in
+  the chain."*
+
+  He was right, and the page was doing it deliberately in two places.
+
+  **Measured before it was touched.** At 1440×900 Charles's row ran ghosts off
+  the left edge to x=−222; Harper's stopped dead at x=406, a third of the way
+  into the frame. Both ran off the right edge normally. So the fault was one
+  end of one chain, not the composition.
+
+  **The cause is that the two sides were made of different things.** Harper's
+  leading side is an **origin run** — structural, a `TRAIN` entry, capped at
+  `MAX_IDLERS`. Every side of the spine is an **escape run** — decoration,
+  computed after the fit, which keeps adding ghosts until it leaves the
+  viewport. A capped run cannot reach the frame; an uncapped one always does.
+  That is also why her *trailing* run had six ghosts and the spine's had three:
+  it starts further from the edge, so it has more distance to fill.
+
+  **`fitEscapes` withheld the leading run from every chain that is not the
+  spine, and the argument it was written with only covers driven chains:** "the
+  end a driven chain is missing its leading run at is the end its bridge arrives
+  at, so the chain visibly receives its power there instead of trailing a second
+  tail into the machinery that drives it." A root has no bridge arriving
+  anywhere. The gate is now `owns an origin run`, asked of the solve, rather than
+  `is the spine`. A driven chain keeps exactly what it had.
+
+  **Hosted on the outermost origin idler, not on the lead gear**, because the
+  origin run already occupies that side and starting at the lead gear would lay
+  the escape ghosts straight over it. That idler is a wheel `solve()` has already
+  placed, so this stays what an escape run is and adds nothing to `TRAIN` — #55
+  is untouched.
+
+  **`drive` and `serves` are now published on the solved wheel.** The geometry
+  was published and the *purpose* was not, so "which chain does this idler carry"
+  could only be recovered by indexing back into `TRAIN` or inferring it from
+  position. Recording it is what this file already argues for elsewhere, and it
+  is what lets the escape pass stay ignorant of the chain tree. `fitEscapes` also
+  records each ghost's host centre, because a run's heading is meaningless
+  measured from the wrong origin and the host is no longer `head`-or-`tail`.
+
+  **The other exception was left alone, and it earns it.** The spine still takes
+  no idlers — not because it is the datum, but because *"that is also what keeps
+  a solo page byte-identical in behaviour"*: one chain is one root, the root is
+  the spine, and a solo page has never drawn ghosts.
+
+  **The bigger-pool alternative was built and photographed, and it made things
+  worse.** Raising `MAX_IDLERS` to 6 dropped Harper to *one* leading ghost.
+  `IDLERS_FOR(roomy)` is binary — `roomy ? MAX_IDLERS : MIN_IDLERS` — and
+  `idlerCount()` asks whether `STAGE_CROSS(MAX_IDLERS)` fits the **cross** axis,
+  so a larger cap fails that test and falls back to the minimum. Worth stating
+  plainly: **`MAX_IDLERS` is budgeted against the cross axis because it was
+  written for bridges, which travel across; an origin run travels along its own
+  chain's long axis.** The shared count is documented as a feature, but the
+  budget behind it only ever measured one direction. That is still true and is
+  not fixed here.
+
+  **And the assertion that guarded the withheld run had never tested a driven
+  chain.** It ran on `THREE`, whose own comment says its chains "are therefore
+  self-driven, each with an origin run of its own" — yet it checked `!spine`,
+  called that "driven", and reported `driven chain mid got 2 escape runs`. A new
+  test puts the rule on `CASCADE`, which has `hub` as spine, `kid` and `cub`
+  genuinely bridged, and `far` a root — all four cases on one stage, with a
+  vacuity guard so it cannot pass by solving without a bridge. Both tests fail if
+  the one new `hosts.push` is removed; that was checked rather than assumed.
+
+  Two harness models of emission order were removed as fallout, both of which
+  aimed at the wrong run the moment a root pushed a second host: `String(2 + bi)`
+  for "the spine's two, then one per branch", and `lead ? head : tail` for a
+  run's origin. Selected by what the run *is* now.
+
 - **CL#131 — the light background steps down from 90.8% to 88% lightness.**
   (Charles: *"is the light mode background too light? Almost blinding."*)
 

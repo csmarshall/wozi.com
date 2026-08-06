@@ -15,3 +15,9 @@ Wozi.com theme conversion.zip
 # is a whitelist — but they accumulate fast enough to bury a real diff in
 # `git status`, which is where this repo checks whether a tree is clean.
 scratchpad/
+
+# Headless-Chrome user-data dirs the harnesses in tools/ create beside whatever
+# script launched them (cp-shots, cp-chain, …). A profile is ~14MB of sqlite and
+# cache across ~670 files, and a `git add -A` in a worktree swept exactly that
+# into a commit once. Never wanted, never published, and large enough to matter.
+cp-*/

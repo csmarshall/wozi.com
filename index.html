@@ -3815,7 +3815,39 @@ class Component extends DCLogic {
       hosts.push({ g: c.head, deg: c.deg + 180, person: c.person, lead: true });
       hosts.push({ g: c.tail, deg: c.deg, person: c.person, lead: false });
     });
-    axes.forEach(c => { if (!c.spine) hosts.push({ g: c.tail, deg: c.deg, person: c.person, lead: false }); });
+    axes.forEach(c => {
+      if (c.spine) return;
+      hosts.push({ g: c.tail, deg: c.deg, person: c.person, lead: false });
+      /* A SELF-DRIVEN ROOT GETS ITS LEADING RUN TOO, and the rule above is why it
+         did not. That rule withholds the leading run because "the end a driven
+         chain is missing its leading run at is the end its BRIDGE arrives at" --
+         a good argument, and one that only covers a chain something on stage
+         drives. A root has no bridge arriving anywhere: its drive comes in on an
+         origin run, which is structural and therefore capped at MAX_IDLERS, so
+         its leading side stopped dead in open space while the spine's ran off
+         the frame. Gating on `driven` rather than on `!spine` is the whole fix;
+         a driven chain still gets exactly what it got before.
+
+         HOSTED ON THE OUTERMOST ORIGIN IDLER, not on the lead gear, because the
+         origin run already occupies that side -- starting at the lead gear would
+         lay the escape ghosts straight over it. That idler is a wheel solve()
+         has already placed, so this stays what an escape run is: decoration
+         computed after the fit, adding nothing to TRAIN.
+
+         AND "IS THIS CHAIN SELF-DRIVEN" IS ASKED AS "does it own an origin run",
+         which is the same question and one this function can answer from the
+         solve it already has. A driven chain's idlers carry `drive: 'bridge'`,
+         so it finds no tip and keeps precisely the behaviour above. Reaching for
+         DRIVE_FROM instead would couple the escape pass to the chain tree for a
+         fact the wheels in front of it already state. */
+      let tip = null, far = -1;
+      solved.gears.forEach(g => {
+        if (g.drive !== 'origin' || g.serves !== c.person) return;
+        const d = Math.hypot(g.cx - c.head.cx, g.cy - c.head.cy);
+        if (d > far) { far = d; tip = g; }
+      });
+      if (tip) hosts.push({ g: tip, deg: c.deg + 180, person: c.person, lead: true });
+    });
     /* How far a heading travels before it leaves the viewport. */
     const reachAlong = (px, py, deg) => {
       const a = deg * Math.PI / 180, dx = Math.cos(a), dy = Math.sin(a);
@@ -3943,7 +3975,15 @@ class Component extends DCLogic {
           ro: r + MODULE * TOOTH_ADD, i: 'gh' + ei + k,
           /* whose run this is, which end of that chain it leaves by, and how far
              along it -- k 0 is the wheel in mesh with the chain itself */
-          person: host.person, lead: host.lead, k: k };
+          person: host.person, lead: host.lead, k: k,
+          /* AND THE WHEEL IT GREW FROM. A run's heading only means anything
+             measured from its host, and the host is no longer recoverable from
+             the chain: a leading run used to start at c.head always, but a
+             self-driven root's starts at the far end of its origin run instead.
+             Anything measuring the heading would otherwise have to re-derive
+             which of those applies -- modelling the rule it is supposed to be
+             checking. Recorded here, where it is already known. */
+          hostCx: host.g.cx, hostCy: host.g.cy };
         ghosts.push(g);
         /* PROGRESS ALONG THE RUN'S AXIS, not the length of the step that made it.
            `span` is measured straight down the escape bearing to the viewport edge,
@@ -5618,7 +5658,15 @@ class Component extends DCLogic {
         bridgeRuns.push([{ x: g[gi[oEnd.a]].x, y: g[gi[oEnd.a]].y }, { x: x, y: y }]);
       }
       gi[i] = g.length;
-      g.push({ i: i, teeth: t.teeth, color: t.color, cv: t.cv || null, crot: t.crot || 0, slug: slugFor[i] || null, person: t.person, role: t.role, belt: t.link || null, kind: t.kind || 'holes', arms: t.arms || 5, prof: prof, chainFrom: chainFrom,
+      /* `drive` and `serves` say what a ghost is FOR -- 'bridge' or 'origin', and
+         whose chain it carries. The geometry was published and the purpose was
+         not, so anything downstream wanting "which chain does this idler belong
+         to" had to reach back into TRAIN by index or infer it from position.
+         fitEscapes needs exactly that to find a self-driven chain's origin tip,
+         and inferring it is the class of thing this file already refuses to do
+         ("recording it here is free; recovering it afterwards is not"). Null on
+         a link wheel, which carries `person` instead. */
+      g.push({ i: i, teeth: t.teeth, color: t.color, cv: t.cv || null, crot: t.crot || 0, slug: slugFor[i] || null, person: t.person, role: t.role, drive: t.drive || null, serves: t.bridge || null, belt: t.link || null, kind: t.kind || 'holes', arms: t.arms || 5, prof: prof, chainFrom: chainFrom,
         r: r, ro: ro, x: x, y: y, dir: dir, phase: phase });
     });
     /* NO TWO CHAINS OVERLAP -- said out loud rather than argued for (Charles,
