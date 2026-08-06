@@ -7,6 +7,97 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Changed
 
+- **CL#123 — `bridge` was a boolean about the spine; `child` names a parent.**
+  (Charles, 2026-08-05/06. GitHub #116, which supersedes GitHub #107 and
+  replaces CL#122 outright.)
+
+  Charles: *"why in the heck would we want an undriven set of gears if it's not
+  'bridged' — change `bridge` to be `child`: if set to another name then bridge
+  off that at the appropriate spot, with re-ordering etc; if set to null, or
+  removed, then the chain is independent."*
+
+  `bridge: true | false` answered "does the spine reach me?", which is not the
+  question that matters. It could only ever express a **star off the spine** —
+  there was nowhere to say that chain C is driven by chain B — and `bridge:
+  false` produced a set of gears nothing turns.
+
+      child: 'charles'      a dependent, driven off Charles's group
+      child: null / absent  independent, and independent means SELF-DRIVEN
+
+  **Independence is a drive path, not a disconnection.** An independent chain
+  gets an **origin run** of its own: a run of plain idlers, the same count a
+  bridge takes, carrying drive in from off the stage. It has its own resulting
+  direction — derived from that idler count, exactly as a bridged chain's is —
+  and reads as its own machine running rather than as one that happens to spin.
+  Both chains still turn on **the one master angle**, and that must never change:
+  a second integrator drifts out of mesh within seconds and has broken this page
+  twice (CL#3).
+
+  **Siblings cascade; they do not all hang off the parent.** `child: 'charles'`
+  declares *membership* of Charles's dependent group — the attachment point is
+  computed. The first child takes its drive from the parent, and every later
+  sibling takes it from the **lead gear of the sibling before it**, because you
+  do not take four power take-offs off one gear. Siblings order by `order`, then
+  link count, then name.
+
+  **The stack is a depth-first walk of that tree, not a sort.** A dependent
+  follows its parent immediately even when an unrelated root is longer — Charles,
+  then Charles's child, then Harper. Link count and name survive only as the
+  sibling tie-break. This preserves the invariant the whole solve rests on *by
+  construction*: `solve()` places wheels in `TRAIN` order and a drive run may only
+  hang off a wheel already placed, and a cascade is inherently ordered, so
+  `CHAIN_ORDER[0] === SPINE` still holds without a sort having to agree.
+
+  **`spine: true` is retired; `order` survives, narrowed.** The spine is *the
+  first root* — a root is exactly what `child: null` means, and the first of them
+  is exactly what the walk lays out first — so the two declarations could only
+  ever have agreed, and a config could express a disagreement the page would then
+  have had to arbitrate. `order` still ranks **siblings**, and the roots are
+  siblings, which is where it names the axis. Both retired keys are **warned
+  about rather than ignored**: a file still carrying one is an unfinished
+  migration, and reading it in silence would draw a composition nobody asked for.
+
+  **Three mistakes become newly expressible and all three are refused by name**,
+  each with a console warning and the chain placed as a root: a chain naming
+  itself, a chain naming a slug that is not a person in `config.js`, and a
+  **cycle**. The cycle check walks the parent links it has already resolved and
+  stops the first time it revisits a name — one pass, and it cannot recurse. A
+  parent that is simply not on *this* stage is silent and not a mistake: a solo
+  page carries one person, so every dependent is legitimately a root there.
+
+  **A failed hop is announced with everything it stranded.** A bridge that cannot
+  be placed cleanly still refuses and the chain is still placed undriven — but
+  under a cascade every chain whose drive path runs *through* it loses its drive
+  as well, while keeping its position and its bridge, so nothing moves and nothing
+  is missing. That is invisible in a still and invisible in the geometry, so the
+  refusal warning now names the chains it left undriven, from the one refusal that
+  caused it rather than as n symptoms.
+
+  **`ORIGIN_MOUNT` is a placeholder for Charles's call, not a preference of the
+  code's.** Where a self-driven chain's run *originates* is the question #107
+  never settled and #116 left to be answered from a photograph: `'edge'` (the run
+  trails off the stage; the chain's position stays solved) or `'fixed'` (the run
+  starts at an anchored mount; the chain's position is pinned and the gap between
+  chains becomes `CHAIN_RANK × ORIGIN_PITCH` instead of what the idlers take up).
+  `'edge'` is defaulted because it is the reading that changes nothing else, and
+  the A/B is a one-word edit. It is deliberately **not** a URL parameter: `?seed`
+  is the only determinism affordance shipped code carries (CL#109).
+
+  **An origin run is structure, not decoration.** Its idlers are `TRAIN` entries
+  solved *with* the train, they park by the same count a bridge's do, and the run
+  is published into `bridgeRuns` — so a later bridge and `fitEscapes` both refuse
+  to cross one, exactly as they refuse to cross a bridge.
+
+  **What the gates say.** `npm test` **110 passed, 0 failed** (104 on `main`).
+  `tools/verify_motion.py`: 36 of 36 rotating elements advanced, one console
+  error, the benign `/favicon.ico` 404. `tools/dom_invariants.py`: **MESH ok, 8
+  meshing pairs over 10 wheels, 2 components** — and the component count is the
+  thing to read carefully. Under CL#122 Harper's single wheel meshed with nothing
+  at all and the gate **failed** on an orphan; her origin run is what fixes that.
+  It is still **two components**, and always will be: a chain nothing on stage
+  drives is a second mesh *by definition* — that is what independence is. One
+  component and a self-driven chain cannot both be true.
+
 - **CL#131 — the light background steps down from 90.8% to 88% lightness.**
   (Charles: *"is the light mode background too light? Almost blinding."*)
 

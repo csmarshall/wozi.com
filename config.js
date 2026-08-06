@@ -203,13 +203,73 @@ window.WOZI_CONFIG = {
                at is refused outright, with a warning: the bridge idlers are
                grey, and a chain that grey would read as structure rather than
                as somebody's.
-       order   optional, a number. WHERE THIS CHAIN SITS IN THE STACK — TOPMOST
-               in landscape, LEFTMOST in portrait. Ascending: the lowest number
-               is nearest the top, and nearest the left when the stage turns.
-               This is a PRESENTATION choice and it is the answer to "put Charles
-               first".
+       child   optional. WHO TURNS THIS CHAIN — the slug of the chain it takes its
+               drive from. `child: null`, or no key at all, means the chain is a
+               ROOT: nothing on stage drives it, and it is SELF-DRIVEN by an
+               origin run of its own idlers instead (Charles, GitHub #116).
 
-               Absent, a chain falls in BEHIND everyone who declares one, and
+                 child: 'charles'   driven off Charles's chain
+                 child: null        independent
+                 (key absent)       independent
+
+               IT REPLACED `bridge`, WHICH WAS A BOOLEAN ABOUT THE SPINE.
+               `bridge: true` could only ever say "the spine reaches me" — a star,
+               never a tree — and `bridge: false` said "nothing reaches me", which
+               left an undriven set of gears standing on the page. Naming a parent
+               answers who drives this chain AND where it sits, and it makes chain
+               C off chain B off chain A expressible for the first time.
+
+               IT DECLARES MEMBERSHIP, NOT THE ATTACHMENT POINT. `child: 'charles'`
+               puts this chain in Charles's dependent group; the wheel it actually
+               hangs off is computed. The first child takes its drive from the
+               parent; every LATER SIBLING takes it from the LEAD GEAR OF THE
+               SIBLING BEFORE IT, because you do not take four power take-offs off
+               one gear, you cascade them. Siblings order by `order`, then link
+               count, then name — see `order` below.
+
+               THE STACK IS A DEPTH-FIRST WALK OF THIS TREE. A dependent follows
+               its parent immediately even when an unrelated root has more links:
+               Charles, then Charles's child, then Harper — not Charles, Harper,
+               Charles's child. Link count and name decide only the order of
+               siblings now.
+
+               THE SPINE IS THE FIRST ROOT, which is why `spine: true` no longer
+               exists: a root is exactly what `child: null` means, and the axis has
+               always been whichever chain is laid out first. Give a root the
+               lowest `order` among the roots and it is the axis.
+
+               THREE MISTAKES ARE REFUSED BY NAME, each with a console warning and
+               the chain placed as a root: a chain naming ITSELF, a chain naming a
+               slug that is not a person here at all, and a CYCLE (a child of b, b
+               child of a). A parent who is simply not on THIS stage is silent and
+               not a mistake — a solo page carries one person, so every dependent
+               is legitimately a root there. A parent with NO LINKS is stepped
+               over to the nearest ancestor that has some, since a chain that is
+               not laid out cannot drive anything.
+
+               THE KEYS THIS REPLACED ARE WARNED ABOUT, NOT IGNORED. A `bridge` or
+               a `spine` still in this file is not a typo, it is a migration
+               nobody finished, and the console names it and says what to write
+               instead. Both are ignored either way, so the page still draws.
+
+               WHERE A ROOT'S OWN DRIVE COMES IN is `ORIGIN_MOUNT` in index.html,
+               not a key here: 'edge' trails the run off the stage and leaves the
+               chain's position solved, 'fixed' anchors it to a mount and pins the
+               position. It is one word, it is awaiting Charles's call from a
+               photograph, and it is deliberately not reachable from the URL.
+
+       order   optional, a number. WHERE THIS CHAIN SITS AMONG ITS SIBLINGS —
+               TOPMOST in landscape, LEFTMOST in portrait. Ascending: the lowest
+               number is nearest the top, and nearest the left when the stage
+               turns. This is a PRESENTATION choice and it is the answer to "put
+               Charles first".
+
+               IT ORDERS SIBLINGS, NOT THE PAGE. The stack is the walk of the
+               `child` tree above, so this breaks ties between chains that share a
+               parent — and between the ROOTS, which is also where it names the
+               axis, since the spine is the first root.
+
+               Absent, a chain falls in BEHIND every sibling that declares one, and
                those are ordered by LINK COUNT, then by NAME, both DESCENDING
                (Charles, 2026-08-05). Declared numbers always win, so a half
                declared file is well defined rather than half sorted.
@@ -219,44 +279,8 @@ window.WOZI_CONFIG = {
                is a layout that depends on the browser, which is not a rule at
                all. Two people with the same name are the only remaining tie.
 
-               It does NOT decide the spine — see `spine` below. The two were one
-               key until #85, and they agreed only because sorting by link count
-               named the longest chain the axis as a side effect. Numbers need
-               not be contiguous and mean nothing but their sequence; use 10, 20,
-               30 if you expect to insert people between them.
-
-       spine   optional, default false. THIS CHAIN IS THE AXIS the composition is
-               built around: it sets the scale, every other chain is laid out
-               parallel to it, and every bridge ultimately hangs off it. A
-               GEOMETRY choice, and at most one chain may claim it.
-
-               Absent from every person, the spine is whichever chain the stack
-               puts first, skipping any with no links. It reads the stack rather
-               than repeating a rule of its own, so the fallback spine inherits
-               whatever the stack's own fallback is — today link count then name,
-               which on a stage where the lengths differ is the longest chain, the
-               rule this has always followed. There is one home for "which chain
-               leads", and this is not a second copy of it.
-
-               THE SPINE IS ALWAYS LAID OUT FIRST whatever its `order` says, and
-               that is structural: a bridge may only hang off a wheel already
-               placed, so growth goes one way and it starts at the axis. Declaring
-               a spine that is not first in the stack is legal and honoured — the
-               chain simply leads the layout, and the rest keep their declared
-               sequence behind it.
-
-               A chain with no links cannot be the spine (it is not laid out at
-               all), and two chains cannot both be it. Either way the console
-               names the declaration that was dropped and what stood in for it.
-
-       bridge  optional, default true. On a combined stage every chain but the
-               spine is driven off it through a short run of plain idler
-               wheels, which is also what sets the gap between the two. Set
-               `bridge: false` and this chain is placed in the same spot with no
-               drive reaching it — it becomes a machine of its own standing
-               beside the others rather than one the spine turns. It has no
-               effect on a page showing a single chain, because there is nothing
-               to bridge to.
+               Numbers need not be contiguous and mean nothing but their sequence;
+               use 10, 20, 30 if you expect to insert people between them.
 
      THE PICKER IS HIDDEN WHILE THERE IS ONE PERSON, and hidden again whenever
      the view is deliberately one person — a personal subdomain or an explicit
@@ -276,14 +300,18 @@ window.WOZI_CONFIG = {
       slug: 'charles',
       name: 'Charles',
       hosts: ['charles.wozi.com'],
-      /* CHARLES FIRST, AND HIS CHAIN IS THE AXIS -- stated rather than inferred
-         (#85). Both were already true, as a consequence of his being the longest
-         chain, and neither said so: eight links on Harper's chain and the whole
+      /* CHARLES FIRST, AND HIS CHAIN IS THEREFORE THE AXIS -- stated rather than
+         inferred (#85), and now stated with ONE key rather than two (CL#123).
+         Both were already true as a consequence of his being the longest chain,
+         and neither said so: eight links on Harper's chain and the whole
          composition would have rebuilt around her with nothing in this file to
-         say that had ever been chosen. Declaring them changes no pixel today,
-         which is the point. */
+         say that had ever been chosen.
+
+         `spine: true` is gone because it could only ever agree with this. He has
+         no `child`, so he is a root; `order: 1` puts him first among the roots;
+         and the first root IS the axis. Declaring it twice was one fact wearing
+         two keys, either of which could be edited without the other. */
       order: 1,
-      spine: true,
       links: [
         { slug: 'linkedin',  handle: 'csmarshall' },
         { slug: 'github',    handle: 'csmarshall' },
@@ -316,6 +344,23 @@ window.WOZI_CONFIG = {
          per the note above. */
       hosts: ['harper.wozi.com'],
       order: 2,
+      /* HER CHAIN STANDS ON ITS OWN, at Charles's request (2026-08-05), and it is
+         SAID BY SAYING NOTHING: no `child` key means no parent, which means a
+         root, which means self-driven. That is the whole of the declaration now.
+
+         WHAT CHANGED UNDER IT (GitHub #116, CL#123). CL#122 shipped this as
+         `bridge: false`, which was independence BY DISCONNECTION -- she was
+         placed at the same distance with no drive reaching her at all, which is
+         not what was asked for and Charles said so. She now has her OWN ORIGIN
+         RUN: a run of plain idlers of her own, carrying drive in from off the
+         stage, giving her chain its own sense of rotation. A machine beside the
+         machine, running, rather than a set of gears nothing turns.
+
+         BOTH CHAINS STILL TURN ON THE ONE MASTER ANGLE. Independence here is an
+         independent DRIVE PATH and never an independent timebase; a second
+         integrator drifts out of mesh within seconds and has broken this page
+         twice (CL#3). That distinction is the whole of what "independent" means
+         in this file and must never become anything more. */
       /* HARPER'S CHAIN IS PURPLE, at Charles's request (#68). The seed is the
          pool's own purple rather than a new hex: it is an authored colour that
          has already been judged good on these wheels, and it sits inside the

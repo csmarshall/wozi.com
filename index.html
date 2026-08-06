@@ -900,28 +900,28 @@ const SELECTED = STAGE.mode === 'solo' && STAGE.people.length === 1
    One home for that rule, because the spine is defined by it. */
 const HAS_WHEELS = (p) => (p.links || []).length > 0;
 
-/* THE STACK: WHAT ORDER THE CHAINS SIT IN ACROSS THE CROSS AXIS -- TOPMOST in
-   landscape and LEFTMOST in portrait, which are the same statement once you
-   know the bridges run away from the stage origin (see BRIDGE_BEARING; the
-   handedness half of that was wrong until 2026-08-05). A PRESENTATION choice,
-   declared per person as `order: <number>`, ascending.
+/* WHERE A CHAIN SITS AMONG ITS SIBLINGS -- TOPMOST in landscape and LEFTMOST in
+   portrait, which are the same statement once you know the drive runs away from
+   the stage origin (see BRIDGE_BEARING; the handedness half of that was wrong
+   until 2026-08-05). A PRESENTATION choice, declared per person as
+   `order: <number>`, ascending.
 
-   IT IS NOT THE SAME QUESTION AS WHICH CHAIN IS THE SPINE. The spine is a
-   GEOMETRY choice: it sets the scale, it is the axis every other chain runs
-   parallel to, and every bridge ultimately hangs off it. One key used to do both
-   jobs, and the two agreed only because the sort made them agree -- sorting by
-   link count named the longest chain the spine as a SIDE EFFECT of deciding
-   where the others sat. Give Harper eight links and the whole composition
-   rebuilt around her, with nothing in config.js to say that had ever been a
-   choice. That is the same defect as the old PEOPLE[0] hostname fallback: a
-   default that works by accident and says nothing about itself.
+   IT ORDERS SIBLINGS, NOT THE PAGE (GitHub #116, CL#123). The stack used to be
+   one flat sort over every chain on stage. It is now a depth-first walk of the
+   DRIVE TREE below, so a dependent follows its parent immediately even when an
+   unrelated root has more links. What is left for `order` is breaking ties
+   between chains that share a parent -- and between the ROOTS, which is also
+   where it names the axis, since the spine is simply the first root. That is
+   what retired `spine: true`: the two declarations could only ever agree, because
+   the spine has always been laid out first and CHAIN_RANK has always ranked from
+   it, so "first in the stack" and "the axis" were one fact wearing two keys.
 
    WHAT AN UNDECLARED CHAIN FALLS BACK TO: link count descending, then NAME
-   descending (Charles, 2026-08-05). It sits at the far end of the stack -- which
-   is what Infinity says, and why the fallback needs no branch of its own -- so it
-   falls in behind everyone who declares an `order`, and two chains declaring the
-   SAME number fall through to the same two keys rather than to whichever the
-   engine happened to compare first.
+   descending (Charles, 2026-08-05). It sits at the far end of its OWN sibling
+   group -- which is what Infinity says, and why the fallback needs no branch of
+   its own -- so it falls in behind every sibling that declares an `order`, and
+   two siblings declaring the SAME number fall through to the same two keys
+   rather than to whichever the engine happened to compare first.
 
    THE NAME IS WHERE PEOPLE ORDER USED TO BE. The tie used to break on the order
    config.js wrote, which held only because Array.prototype.sort is stable -- a
@@ -947,71 +947,164 @@ const HAS_WHEELS = (p) => (p.links || []).length > 0;
    whichever pairs the engine happened to compare. */
 const STACK_AT = (p) => typeof p.order === 'number' && isFinite(p.order) ? p.order : Infinity;
 const NAME_KEY = (p) => String(p.name == null ? p.slug : p.name).toLowerCase();
-const CHAIN_STACK = STAGE.people.slice().sort((a, b) =>
-  (STACK_AT(a) === STACK_AT(b) ? 0 : STACK_AT(a) - STACK_AT(b))
+const SIBLING_SORT = (a, b) => (STACK_AT(a) === STACK_AT(b) ? 0 : STACK_AT(a) - STACK_AT(b))
   || (b.links || []).length - (a.links || []).length
-  || (NAME_KEY(a) < NAME_KEY(b) ? 1 : NAME_KEY(a) > NAME_KEY(b) ? -1 : 0));
+  || (NAME_KEY(a) < NAME_KEY(b) ? 1 : NAME_KEY(a) > NAME_KEY(b) ? -1 : 0);
 
-/* THE SPINE is the chain the composition is built around: the axis every other
-   chain runs parallel to, and the one every bridge ultimately hangs off. A
-   GEOMETRY choice, declared per person as `spine: true` (GitHub #85).
+/* WHO TURNS WHOM. `child: '<slug>'` names the chain this one takes its drive
+   from; `child: null`, or no key at all, means the chain is a ROOT and takes its
+   drive from nothing on stage (Charles, GitHub #116, CL#123).
 
-   THE DEFAULT IS WHICHEVER CHAIN THE STACK PUTS FIRST, skipping any that have no
-   wheels exactly as the TRAIN builder does -- which under the default stack is
-   the longest chain on stage, the rule this has always followed.
+   IT REPLACES `bridge`, WHICH WAS A BOOLEAN ABOUT THE SPINE. `bridge: true`
+   could only ever say "the spine reaches me" -- a star, never a tree -- and
+   `bridge: false` said "nothing reaches me", which is not the same question as
+   who drives me. Naming a parent answers both at once, and the stack falls out
+   of it rather than being declared beside it.
 
-   A DECLARATION THAT CANNOT BE HONOURED IS ANNOUNCED, NOT OBEYED IN SILENCE. A
-   chain with no links is not laid out at all, so it cannot be the axis the others
-   hang off; and two chains cannot both be the axis. Either way the console names
-   the declaration that was dropped and what stood in for it, because a
-   composition still has to arrive -- the same bargain the bridge search strikes
-   when no anchor clears.
+   THREE THINGS BECOME NEWLY EXPRESSIBLE, AND ALL THREE ARE REFUSED BY NAME. A
+   chain naming ITSELF, a chain naming a slug that is not a person at all, and a
+   CYCLE -- a child of b, b child of a. Each is announced and the offending chain
+   is made a root, because the alternative is a walk that never terminates. The
+   cycle check walks the parent links it has already resolved and stops the first
+   time it revisits a name, so it costs one pass and cannot recurse.
 
-   THE ANSWER IS SETTLED BEFORE ANYTHING IS SAID ABOUT IT. Both warnings read the
-   chain that was actually used rather than re-guessing it, because two bad
-   declarations can arrive together -- two chains claiming the axis and neither
-   with any links -- and a message that works out its own replacement is one more
-   copy of this derivation, free to disagree with the one that ships. */
-const SPINE = (function () {
-  const asked = CHAIN_STACK.filter(p => p.spine === true);
-  const usable = asked.filter(HAS_WHEELS);
-  const chosen = usable[0] || CHAIN_STACK.find(HAS_WHEELS) || null;
-  const stoodIn = chosen ? '"' + chosen.slug + '" is the axis instead'
-    : 'no chain on stage has any links, so there is no axis at all';
-  if (asked.length > 1) {
-    console.warn('wozi: ' + asked.length + ' chains declare spine: true ('
-      + asked.map(p => p.slug).join(', ') + ') -- only one chain can be the axis, '
-      + 'so ' + stoodIn);
-  }
-  if (asked.length && !usable.length) {
-    console.warn('wozi: chain "' + asked[0].slug + '" declares spine: true but has '
-      + 'no links, so it is not laid out at all -- ' + stoodIn);
-  }
-  return chosen;
+   A PARENT THAT IS NOT ON THIS STAGE IS SILENT, and deliberately. A solo page
+   carries exactly one person, so every dependent's parent is legitimately absent
+   there and the chain is simply a root -- the same silence `bridge` kept on a
+   single-chain page, where there was nothing to bridge to.
+
+   A PARENT WITH NO WHEELS CANNOT DRIVE ANYTHING either: a chain with no links is
+   not laid out at all, so the drive is taken from the nearest ancestor that IS
+   on the page. Resolved here rather than in the walk, so the tree the walk sees
+   contains only chains that exist. */
+const CHAIN_PARENT = (function () {
+  const onStage = {}, configured = {};
+  STAGE.people.forEach(p => { onStage[p.slug] = p; });
+  (CONF.PEOPLE || []).forEach(p => { configured[p.slug] = true; });
+  /* THE RETIRED KEYS ARE ANNOUNCED, NOT IGNORED. `bridge` and `spine` did real
+     work until CL#123, so a file that still carries one is not a typo -- it is a
+     config that has not been migrated, and reading it in silence would draw a
+     composition nobody asked for. */
+  STAGE.people.forEach(p => {
+    if (p.bridge !== undefined) {
+      console.warn('wozi: chain "' + p.slug + '" still declares bridge: '
+        + p.bridge + ', which was retired by CL#123 -- use child: '
+        + (p.bridge === false ? 'null (or no key) for an independent chain'
+          : "'<slug>' to name the chain that drives it") + '. It is ignored.');
+    }
+    if (p.spine !== undefined) {
+      console.warn('wozi: chain "' + p.slug + '" still declares spine: ' + p.spine
+        + ', which was retired by CL#123 -- the spine is the first root, so give '
+        + 'it the lowest `order` among the roots instead. It is ignored.');
+    }
+  });
+  const par = {};
+  STAGE.people.forEach(p => {
+    if (p.child == null) { par[p.slug] = null; return; }
+    const want = String(p.child);
+    if (want === p.slug) {
+      console.warn('wozi: chain "' + p.slug + '" declares itself its own child'
+        + ' -- nothing drives itself, so it is placed as an independent chain');
+      par[p.slug] = null; return;
+    }
+    if (!configured[want]) {
+      console.warn('wozi: chain "' + p.slug + '" declares child: "' + want
+        + '", which is not a person in config.js -- placing it as an independent'
+        + ' chain');
+      par[p.slug] = null; return;
+    }
+    par[p.slug] = onStage[want] ? want : null;
+  });
+  STAGE.people.forEach(p => {
+    const seen = [p.slug];
+    let at = par[p.slug];
+    while (at != null) {
+      if (seen.indexOf(at) >= 0) {
+        console.warn('wozi: chain "' + p.slug + '" is in a drive cycle ('
+          + seen.concat(at).join(' -> ') + ') -- a chain cannot drive itself'
+          + ' through others, so it is placed as an independent chain');
+        par[p.slug] = null;
+        break;
+      }
+      seen.push(at);
+      at = par[at];
+    }
+  });
+  STAGE.people.forEach(p => {
+    let at = par[p.slug];
+    while (at != null && !HAS_WHEELS(onStage[at])) at = par[at];
+    par[p.slug] = at;
+  });
+  return par;
 })();
 
-/* THE LAYOUT ORDER: the spine, then the stack. TRAIN is emitted in it and
-   CHAIN_RANK ranks by it, and it is DERIVED from the two declarations above
-   rather than being a third thing that has to be kept in step with them.
+/* THE LAYOUT ORDER, AND WHICH WHEEL EACH CHAIN TAKES ITS DRIVE FROM. Both come
+   out of ONE depth-first walk of the drive tree, because they are the same fact:
+   a chain is laid out immediately after whatever turns it.
 
-   THE SPINE IS ALWAYS AT THE HEAD, whatever the stack says, and that is
-   STRUCTURAL rather than a preference: solve() places wheels in TRAIN order and a
-   bridge may only hang off a wheel ALREADY placed, so a chain can only ever be
-   driven from one earlier in this list. Growth goes one way and it starts at the
-   axis. The stack is still honoured in full for every chain that is not the
-   spine -- which is every chain the stacking choice is about.
+   THE STACK IS A WALK, NOT A SORT (Charles, GitHub #116). A dependent follows
+   its parent immediately even if an unrelated root has more links -- me, then my
+   child, then Harper, rather than me, Harper, my child. Link count and name
+   survive only as the sibling tie-break, which is what SIBLING_SORT is.
 
-   SO CHAIN_ORDER[0] IS THE SPINE BY CONSTRUCTION whenever any chain has wheels,
-   which is what lets the attachment search rank by CHAIN_RANK and get "the chain
-   immediately above this one" for free. It used to be true only because the sort
-   happened to make it true. */
-const CHAIN_ORDER = SPINE
-  ? [SPINE].concat(CHAIN_STACK.filter(p => p !== SPINE))
-  : CHAIN_STACK.slice();
-/* Where each chain sits in that order, by slug: 0 is the spine. The bridge
-   attachment search ranks its candidates by it, so a chain hangs off the one
-   immediately above it in the stack and the rest stack away from the spine,
-   rather than reaching back past a chain that should be below them. */
+   SIBLINGS CASCADE; THEY DO NOT ALL HANG OFF THE PARENT. `child: 'charles'`
+   declares MEMBERSHIP of Charles's dependent group, not the attachment point.
+   The first child takes its drive from the parent; every later sibling takes it
+   from the LEAD GEAR OF THE SIBLING BEFORE IT. That is the physically honest
+   shape -- you do not take four power take-offs off one gear, you cascade them
+   -- and it is why the ordering rule and the drive topology are one traversal
+   rather than two declarations that have to agree.
+
+   IT PRESERVES THE INVARIANT THE WHOLE SOLVE RESTS ON, by construction. solve()
+   places wheels in TRAIN order and a bridge may only hang off a wheel ALREADY
+   placed; a cascade is inherently ordered, since each sibling's anchor is the
+   previous sibling's lead gear, which is by definition already down. Growth goes
+   one way and it starts at the axis, exactly as it did when every bridge hung
+   off the spine.
+
+   CHAINS WITH NO WHEELS ARE NOT IN THE TREE AT ALL and are appended afterwards,
+   in sibling order, so CHAIN_ORDER[0] is a chain that is actually laid out --
+   which is what makes CHAIN_ORDER[0] === SPINE true by construction rather than
+   by a sort happening to agree. */
+const CHAIN_TREE = (function () {
+  const kids = {}, roots = [], order = [], driveFrom = {};
+  STAGE.people.filter(HAS_WHEELS).forEach(p => {
+    const par = CHAIN_PARENT[p.slug];
+    if (par == null) roots.push(p); else (kids[par] = kids[par] || []).push(p);
+  });
+  const walk = (p) => {
+    order.push(p);
+    const mine = (kids[p.slug] || []).sort(SIBLING_SORT);
+    mine.forEach((k, n) => { driveFrom[k.slug] = n === 0 ? p.slug : mine[n - 1].slug; });
+    mine.forEach(walk);
+  };
+  roots.sort(SIBLING_SORT).forEach(walk);
+  return {
+    order: order.concat(STAGE.people.filter(p => !HAS_WHEELS(p)).sort(SIBLING_SORT)),
+    driveFrom: driveFrom
+  };
+})();
+/* The spine, then the stack, exactly as before -- except that it is no longer
+   assembled from two declarations that had to be reconciled. TRAIN is emitted in
+   this order and CHAIN_RANK ranks by it. */
+const CHAIN_ORDER = CHAIN_TREE.order;
+/* WHICH CHAIN A DEPENDENT TAKES ITS DRIVE FROM, by slug: its parent when it is
+   the first child, the sibling before it otherwise. A root has no entry, which
+   is the one test for "is this chain independent" anywhere below. */
+const DRIVE_FROM = CHAIN_TREE.driveFrom;
+/* THE SPINE is the chain the composition is built around: the axis every other
+   chain runs parallel to, and the one the drive tree grows out of. It is THE
+   FIRST ROOT and nothing else -- no longer a declaration of its own (CL#123),
+   because a root is exactly what `child: null` means and the first of them is
+   exactly what the walk puts first.
+
+   NULL WHEN NOTHING ON STAGE HAS WHEELS, which is the only case CHAIN_ORDER[0]
+   is not laid out: the wheel-less chains are appended after the walk, so an
+   entirely wheel-less stage is the one stage whose head is one of them. */
+const SPINE = CHAIN_ORDER.length && HAS_WHEELS(CHAIN_ORDER[0]) ? CHAIN_ORDER[0] : null;
+/* Where each chain sits in that order, by slug: 0 is the spine. The attachment
+   search ranks its candidates by it, so a chain that cannot reach its own drive
+   source falls back toward the chains nearest it rather than reaching past them. */
 const CHAIN_RANK = {};
 CHAIN_ORDER.forEach((p, k) => { CHAIN_RANK[p.slug] = k; });
 /* HOW MANY WHEELS THE SPINE HAS, and nothing else. It is used as an INDEX BOUND
@@ -1021,8 +1114,10 @@ CHAIN_ORDER.forEach((p, k) => { CHAIN_RANK[p.slug] = k; });
    IT USED TO BE A MAXIMUM: `Math.max(1, ...people.map(links.length))`, the
    longest chain anywhere on stage. That is a different quantity wearing this
    name, and the two agree only while the spine IS the longest chain, which the
-   old CHAIN_ORDER sort happened to guarantee and a DECLARED spine does not. An
-   index whose validity rests on a sort in another declaration is one edit away
+   old CHAIN_ORDER sort happened to guarantee and neither a declared spine nor
+   the drive tree that replaced it (CL#123) does -- the first root need not be
+   the longest chain on stage, and under a tree it need not even be the longest
+   root. An index whose validity rests on a sort in another declaration is one edit away
    from pointing past the array it indexes (#98) -- and a malformed static tree is
    exactly what #65 was. The maximum-shaped quantity that genuinely sets the SCALE
    is NOMINAL_CHAIN, further down; it is a maximum over every CONFIGURED person,
@@ -1079,9 +1174,15 @@ const PLATE_TOP_CLEAR = 20;
    honoured. See plateSeat(). */
 const PLATE_START_ALONG = 25;
 
-/* HOW MANY IDLERS BRIDGE A CHAIN TO THE ONE THAT DRIVES IT. Never zero -- two
-   chains meshing directly would read as one machine, and the bridge is what
-   makes the drive visible.
+/* HOW MANY IDLERS STAND BETWEEN A CHAIN AND ITS DRIVE. Never zero -- two chains
+   meshing directly would read as one machine, and the idlers are what make the
+   drive visible.
+
+   THE SAME COUNT SERVES BOTH KINDS OF DRIVE RUN (CL#123). A dependent's bridge
+   carries its drive in from another chain; an independent chain's ORIGIN RUN
+   carries it in from off the stage. They are the same run of plain idlers and
+   they take the same count, so how many wheels stand between a chain and
+   whatever turns it is one number and not two.
 
    MAX_IDLERS is not a number that looked right. Every wheel in a bridge sits at
    the sum of two pitch radii from its neighbour, so an idler contributes exactly
@@ -1102,11 +1203,65 @@ const MAX_IDLERS = 2;
    gives, because the wheels do not. */
 const IDLERS_FOR = (roomy) => roomy ? MAX_IDLERS : MIN_IDLERS;
 
-/* One bridge per chain that is not the spine: which person it feeds, which
-   TRAIN entries are its idlers (empty when that person set `bridge: false`), and
-   the index of the chain's first wheel. Filled by the TRAIN builder below and
-   read by solve(), which decides where each one hangs from. */
+/* WHERE AN INDEPENDENT CHAIN'S OWN DRIVE COMES FROM, and it is the one question
+   GitHub #116 left for Charles to answer from a photograph rather than in
+   advance. An independent chain is SELF-DRIVEN -- it has its own run of idlers,
+   its own resulting direction, and reads as its own machine -- but the run has
+   to start somewhere, and there are two honest answers:
+
+     'edge'   the run leaves the chain's lead gear and heads OFF THE STAGE, the
+              way an escape run does, so the drive arrives from off-frame and the
+              machine reads as continuing past the viewport. The chain's position
+              stays SOLVED: it is placed exactly where an undriven chain was
+              placed, at the gap its idlers would have occupied, so nothing about
+              the fit changes and the gap between chains is still a consequence
+              of the drive.
+
+     'fixed'  the run starts at an ANCHORED MOUNT on the stage -- a fixed station
+              on the cross axis, one per chain -- and runs inward to the lead
+              gear. It reads more deliberate, and it costs the fit a degree of
+              freedom: the chain no longer finds its own place, so the gap
+              between chains stops being what the idlers take up and becomes
+              CHAIN_RANK times ORIGIN_PITCH below.
+
+   THE DEFAULT IS A PLACEHOLDER FOR CHARLES'S CALL, not a preference of the
+   code's. 'edge' is defaulted because it is the reading that changes nothing
+   else: every other rule in this file about where a chain sits stays exactly as
+   written, and the A/B is a one-word edit here.
+
+   IT IS NOT A URL PARAMETER. `?seed` is the only determinism affordance shipped
+   code carries (CL#109) and a second switch reachable from the address bar would
+   be a second way for the page to draw something no gate photographs. */
+const ORIGIN_MOUNT = 'edge';
+
+/* One entry per chain that is DRIVEN BY ANOTHER CHAIN, plus one position-only
+   entry per independent chain under ORIGIN_MOUNT 'edge': which person it feeds,
+   which TRAIN entries are its bridge idlers (EMPTY for an independent chain,
+   which takes its position from the same search and its drive from its own
+   origin run instead), the index of the chain's first wheel, which chain it
+   takes its drive from and, when that drive comes off a sibling, the exact lead
+   gear it is meant to come off. Filled by the TRAIN builder below and read by
+   solve(), which decides where each one hangs from. */
 const BRIDGES = [];
+
+/* One entry per chain that drives ITSELF: the idlers of its origin run, the
+   index of its first wheel, and whether that run is mounted ('fixed') or trails
+   off the stage ('edge'). Under 'edge' the idlers are CHILDREN of the lead gear
+   and run outward; under 'fixed' they are its PARENTS and run inward from the
+   mount. Either way they are TRAIN entries solved WITH the train -- structure,
+   not decoration -- and never escape-run machinery, which is computed after the
+   fit and may move nothing. */
+const ORIGINS = [];
+
+/* THE LEAD GEAR OF EVERY CHAIN, by slug -- the TRAIN index of its first wheel.
+   Filled by the TRAIN builder as the walk goes, so it can only ever name a wheel
+   already on the array, which is what makes it safe for a later sibling to take
+   its drive off. Read afterwards by anything that needs to find a chain's own
+   wheels: the attachment search asks it where a candidate's chain begins. It
+   used to be recovered by searching BRIDGES for the chain's entry, which was
+   answerable only for chains that HAVE a bridge -- and a self-driven one does
+   not (CL#123). */
+const HEAD_OF = {};
 
 /* One entry per wheel across every chain on stage, plus the idlers that bridge
    each chain onto the spine.
@@ -1140,12 +1295,19 @@ const TRAIN = (function () {
   CHAIN_ORDER.forEach(p => {
     const links = p.links || [];
     if (!HAS_WHEELS(p)) return;
-    /* A chain bridges unless its own config entry says otherwise. `bridge:
-       false` says "no drive", not "no position" -- an unbridged chain is still
-       placed clear of the others, it simply arrives there without idlers. */
-    const bridged = out.length > 0 && p.bridge !== false;
-    const idlers = [];
-    if (bridged) {
+    /* THE SPINE TAKES NO IDLERS AT ALL, and it is the only chain that does not
+       (CL#123). It is the datum the composition is built on, and its two escape
+       runs already say the machine continues past the frame at both ends. Every
+       OTHER chain arrives through a run of plain idlers: a BRIDGE when something
+       on stage drives it, its own ORIGIN RUN when nothing does.
+
+       That is also what keeps a solo page byte-identical in behaviour. One chain
+       is one root, the root is the spine, and the spine takes nothing -- the same
+       silence `bridge` kept on a single-chain page. */
+    const first = out.length === 0;
+    const driven = !first && DRIVE_FROM[p.slug] != null;
+    const idlers = [], origin = [];
+    if (driven) {
       for (let k = 0; k < MAX_IDLERS; k++) {
         /* The first idler's parent is where the bridge HANGS FROM, and that is
            solved rather than placed -- see solve(). The middle of the spine is
@@ -1154,24 +1316,75 @@ const TRAIN = (function () {
 
            IT IS IN RANGE BY CONSTRUCTION, not by luck: this loop skips chains
            with no wheels and emits SPINE first -- CHAIN_ORDER puts the spine at
-           its head, and the spine HAS_WHEELS by definition -- and the spine is
-           unbridged, so it takes no idlers and its wheels ARE out[0 ..
-           SPINE_LEN-1]. Half of SPINE_LEN-1 therefore lands on a spine wheel
-           however the stack is declared, and nothing here needs the spine to be
-           the longest chain on stage. It did before (#98). */
+           its head, and the spine HAS_WHEELS by definition -- and the spine
+           takes no idlers, so its wheels ARE out[0 .. SPINE_LEN-1]. Half of
+           SPINE_LEN-1 therefore lands on a spine wheel however the tree is
+           declared, and nothing here needs the spine to be the longest chain on
+           stage. It did before (#98). */
         idlers.push(out.length);
         out.push({ slug: null, prof: { rim: 1.7 },
           parent: k === 0 ? Math.floor((SPINE_LEN - 1) / 2) : out.length - 1,
-          person: null, role: 'idler', bridge: p.slug });
+          person: null, role: 'idler', bridge: p.slug, drive: 'bridge' });
+      }
+    }
+    /* A MOUNTED ORIGIN RUN IS EMITTED BEFORE ITS CHAIN, because it drives it: the
+       lead gear parents onto the last idler still in mesh, exactly as a bridged
+       chain's does. Its first idler is a ROOT with no parent at all -- the only
+       wheel on the page whose position is a station rather than a relationship --
+       and solve() puts it on the mount. */
+    const mounted = !first && !driven && ORIGIN_MOUNT === 'fixed';
+    if (mounted) {
+      for (let k = 0; k < MAX_IDLERS; k++) {
+        origin.push(out.length);
+        out.push({ slug: null, prof: { rim: 1.7 },
+          parent: k === 0 ? null : out.length - 1,
+          person: null, role: 'idler', bridge: p.slug, drive: 'origin' });
       }
     }
     const base = out.length;
     links.forEach((l, i) => {
       out.push({ slug: l.slug, prof: { rim: 1.7 },
-        parent: i === 0 ? (bridged ? idlers[idlers.length - 1] : null) : base + i - 1,
+        parent: i === 0
+          ? (driven ? idlers[idlers.length - 1]
+            : mounted ? origin[origin.length - 1] : null)
+          : base + i - 1,
         person: p.slug, role: 'link' });
     });
-    if (base > 0) BRIDGES.push({ person: p.slug, idlers: idlers, head: base });
+    /* AN EDGE-MOUNTED ORIGIN RUN IS EMITTED AFTER ITS CHAIN, as CHILDREN of the
+       lead gear running outward off the stage. Mesh is symmetric, so a run whose
+       phases are computed outward from the lead gear is geometrically identical
+       to one computed inward from an off-frame motor -- and computing it outward
+       is what lets the chain keep the position it already had. The one thing
+       parentage would have got wrong on its own is the DIRECTION, and solve()
+       sets that from the idler count rather than from the parentage: the wheel at
+       the far end is the driver, so the lead gear turns whichever way the count
+       of idlers between them says. */
+    if (!first && !driven && !mounted) {
+      for (let k = 0; k < MAX_IDLERS; k++) {
+        origin.push(out.length);
+        out.push({ slug: null, prof: { rim: 1.7 },
+          parent: k === 0 ? base : out.length - 1,
+          person: null, role: 'idler', bridge: p.slug, drive: 'origin' });
+      }
+    }
+    if (!first) {
+      /* WHICH WHEEL THE DRIVE IS MEANT TO COME OFF. The first child of a parent
+         may take it anywhere on the parent's chain, so the search is free and
+         `at` is null; every LATER SIBLING takes it off the LEAD GEAR of the
+         sibling before it, which is a named wheel and already placed. `HEAD_OF`
+         is filled as the walk goes, so naming it costs nothing and cannot point
+         forward. */
+      const from = driven ? DRIVE_FROM[p.slug] : null;
+      if (driven || !mounted) {
+        BRIDGES.push({ person: p.slug, idlers: idlers, head: base, from: from,
+          at: from != null && from !== CHAIN_PARENT[p.slug] && HEAD_OF[from] != null
+            ? HEAD_OF[from] : null });
+      }
+      if (origin.length) {
+        ORIGINS.push({ person: p.slug, idlers: origin, head: base, mounted: mounted });
+      }
+    }
+    HEAD_OF[p.slug] = base;
   });
   return out;
 })();
@@ -1183,6 +1396,14 @@ const BRIDGE_FROM = {}, BRIDGE_HEAD = {};
 BRIDGES.forEach(b => {
   BRIDGE_FROM[b.idlers.length ? b.idlers[0] : b.head] = b;
   BRIDGE_HEAD[b.head] = b;
+});
+/* Which origin run a wheel belongs to, keyed by TRAIN index -- asked of every
+   idler in the run and of the lead gear it drives, so it is built once rather
+   than searched per wheel per pass, exactly as the two above are. */
+const ORIGIN_OF = {};
+ORIGINS.forEach(o => {
+  o.idlers.forEach(ix => { ORIGIN_OF[ix] = o; });
+  ORIGIN_OF[o.head] = o;
 });
 
 /* The tooth counts above are the seed, not the answer: they are dealt per load,
@@ -4784,6 +5005,30 @@ class Component extends DCLogic {
       b.idlers.forEach((ix, k) => { idlerSlot[ix] = k; if (k >= nIdle) parked[ix] = true; });
       if (b.idlers.length) parentOf[b.head] = b.idlers[Math.min(nIdle, b.idlers.length) - 1];
     });
+    /* AN ORIGIN RUN IS PARKED BY THE SAME COUNT AS A BRIDGE (CL#123), and it has
+       to be: it is the same run of idlers standing between a chain and its drive,
+       so a cross axis that only has room for one of them has room for one of
+       these. Under 'edge' the idlers hang off the lead gear outward, so the
+       surplus is the FAR one and parking it needs no re-parenting; under 'fixed'
+       they run inward to the lead gear, so the lead gear re-parents onto the last
+       one still in mesh exactly as a bridged chain's does. */
+    ORIGINS.forEach(o => {
+      o.idlers.forEach((ix, k) => { idlerSlot[ix] = k; if (k >= nIdle) parked[ix] = true; });
+      if (o.mounted) parentOf[o.head] = o.idlers[Math.min(nIdle, o.idlers.length) - 1];
+    });
+    /* WHERE EACH ORIGIN RUN IS FINISHED, keyed by the TRAIN index that finishes
+       it, and what segment it then occupies. Published into `bridgeRuns` for the
+       same reason a bridge is: it is metal carrying drive across the composition,
+       and anything placed afterwards -- another chain's bridge here, an escape
+       run in fitEscapes -- has to be able to refuse to cross it.
+       Derived at solve time rather than at load because which idler is the last
+       one in mesh depends on nIdle, which is a property of the viewport. */
+    const originEnd = {};
+    ORIGINS.forEach(o => {
+      const last = o.idlers[Math.min(nIdle, o.idlers.length) - 1];
+      if (o.mounted) originEnd[o.head] = { a: o.idlers[0] };
+      else originEnd[last] = { a: o.head };
+    });
     /* PERPENDICULAR TO THE SPINE, RELATIVE TO IT. The stage rotates the whole
        train by this._axisRot in portrait, so a bearing in absolute screen degrees
        would keep the bridge horizontal and send it across the SHORT axis --
@@ -4818,6 +5063,32 @@ class Component extends DCLogic {
     };
     const bridgeBase = (this._axisRot || 0)
       + BRIDGE_BEARING * (fromOrigin(1) >= fromOrigin(-1) ? 1 : -1);
+    /* WHICH WAY AN ORIGIN RUN TRAVELS, and it is the whole of the difference
+       between the two answers ORIGIN_MOUNT offers. Under 'edge' the run hangs off
+       the lead gear and heads BACK ALONG THE CHAIN'S OWN AXIS, away from the
+       composition and off the stage -- the same heading the spine's leading escape
+       run takes, so the drive arrives from the same off-frame direction the
+       machine is already said to continue in. Under 'fixed' it starts at a mount
+       and runs the other way, INTO the lead gear.
+       Relative to the stage axis in both cases, never to the screen: the whole
+       train turns by _axisRot in portrait, and a run written in absolute degrees
+       is the #67 failure exactly (see BRIDGE_BEARING above). */
+    const originBase = (this._axisRot || 0) + (ORIGIN_MOUNT === 'edge' ? 180 : 0);
+    /* WHERE A MOUNTED ORIGIN RUN STARTS, in solve units, and this is the degree of
+       freedom 'fixed' costs the fit. The chain no longer finds its own place off a
+       solved anchor -- it hangs off a station, so the gap between two chains stops
+       being what their idlers take up and becomes this pitch. Derived from the
+       same nominal wheel and the same idler count the bridges are (see
+       STAGE_CROSS, which counts a bridge as n+1 nominal centre distances), so the
+       two kinds of run leave the same room across the stage and nothing here is a
+       measured constant. The spine's own root is the origin of solve space, so
+       rank 0 is the mount line and every other chain steps off it. */
+    const ORIGIN_PITCH = (nIdle + 1) * MODULE * TEETH_MEAN;
+    const mountFor = (person) => {
+      const a = bridgeBase * Math.PI / 180;
+      const d = (CHAIN_RANK[person] || 0) * ORIGIN_PITCH;
+      return { x: d * Math.cos(a), y: d * Math.sin(a) };
+    };
     /* HOW FAR OFF PERPENDICULAR A BRIDGE MAY BE NUDGED before it stops reading as
        a bridge and starts reading as a wandering chain. Not a new tuned number:
        it is the width of the bearing range the serpentine itself is dealt from,
@@ -4866,18 +5137,28 @@ class Component extends DCLogic {
          would outrank a near one on the wrong chain. Comparing the tiers in
          sequence leaves nothing to hold:
 
-           1. THE CHAIN IMMEDIATELY ABOVE THIS ONE, which is the LAST chain
-              placed -- CHAIN_ORDER descending. Every bridge runs the same way,
-              so hanging each chain off the one before it is what lays them out
-              in CHAIN_ORDER from the TOP in landscape and from the LEFT in
-              portrait (Charles, 2026-08-02, 2026-08-05). Ranked the
-              other way round, every chain hangs off the spine and they all
-              arrive in the SAME row, ordered by nothing. If the chain above has
-              no clear bearing the search falls back through the ones above it,
-              which is a chain out of order but never one on top of another.
-           2. a linked wheel before an idler -- a bridge should hang off a
-              machine, not off another bridge;
-           3. nearest the middle of ITS OWN chain, so a branch balances the run
+           1. THE EXACT WHEEL THE DRIVE IS MEANT TO COME OFF, when there is one
+              (CL#123). A later sibling takes its power off the LEAD GEAR of the
+              sibling before it -- `b.at` -- because you do not take four power
+              take-offs off one gear, you cascade them. A first child has no such
+              wheel: it may take its drive anywhere on its parent's chain, and
+              this tier is flat for every candidate.
+           2. HOW FAR THE CANDIDATE'S CHAIN IS FROM THE ONE THIS CHAIN IS MEANT TO
+              BE DRIVEN BY, walking the drive path -- the designated source, then
+              whatever drives THAT, and so on back to the spine. So a failed hop
+              falls back to the sibling before it, then to the parent, then to the
+              parent's own source: the chain arrives out of drive order but never
+              on top of another, and the fallback is stated rather than being
+              whatever the ranking happened to do. Anything off that path ranks
+              behind all of it, nearest-placed first.
+              For a chain with no drive source at all -- an independent one, whose
+              only use for this search is a POSITION -- the path is empty and this
+              reduces to the old rule exactly: prefer the chain immediately above,
+              which is what lays them out in CHAIN_ORDER from the TOP in landscape
+              and from the LEFT in portrait (Charles, 2026-08-02, 2026-08-05).
+           3. a linked wheel before an idler -- a drive run should hang off a
+              machine, not off another run;
+           4. nearest the middle of ITS OWN chain, so a branch balances the run
               it hangs from rather than hanging off one end. Measured against the
               spine's middle this was meaningless for a cascade, which is the
               only case it is ever asked about.
@@ -4886,14 +5167,31 @@ class Component extends DCLogic {
          layout, one row nearer the spine than that chain. */
       const midOf = (k) => {
         if (TRAIN[k].person == null) return k;          /* an idler is its own middle */
-        const b = BRIDGES.filter(bb => bb.person === TRAIN[k].person)[0];
-        const head = b ? b.head : 0;
+        const head = HEAD_OF[TRAIN[k].person] || 0;
         let n = 0;
         while (TRAIN[head + n] && TRAIN[head + n].person === TRAIN[k].person) n++;
         return head + (n - 1) / 2;
       };
+      /* THE DRIVE PATH THIS CHAIN IS MEANT TO REACH BACK ALONG: its own source,
+         then that source's source, and so on. Walked once per bridge rather than
+         once per candidate, and guarded against revisiting a name -- CHAIN_PARENT
+         has already refused every cycle it could see, so this cannot loop, and
+         the guard is there because a walk that CAN loop must never be one edit
+         away from doing it. */
+      const drivePath = (function () {
+        const path = [];
+        let at = b.from;
+        while (at != null && path.indexOf(at) < 0) { path.push(at); at = DRIVE_FROM[at]; }
+        return path;
+      })();
+      const driveDist = (slug) => {
+        const k = drivePath.indexOf(slug);
+        return k >= 0 ? k
+          : drivePath.length + CHAIN_ORDER.length - (CHAIN_RANK[slug] || 0);
+      };
       const tiers = (k) => [
-        -CHAIN_RANK[TRAIN[k].person != null ? TRAIN[k].person : TRAIN[k].bridge],
+        b.at != null && k === b.at ? 0 : 1,
+        driveDist(TRAIN[k].person != null ? TRAIN[k].person : TRAIN[k].bridge),
         TRAIN[k].role === 'link' ? 0 : 1,
         Math.abs(k - midOf(k))
       ];
@@ -4968,9 +5266,10 @@ class Component extends DCLogic {
       };
       const tally = (w) => w.foul + ' fouled a wheel, ' + w.over
         + ' passed over one, ' + w.cross + ' crossed another bridge';
-      /* No idlers already means an unbridged chain (`bridge: false`): its one
-         step carries the gap the idlers would have made, so that setting changes
-         the drive and not the position. There is nothing to refuse. */
+      /* NO IDLERS ALREADY MEANS AN INDEPENDENT CHAIN, which comes to this search
+         for a POSITION and not for a drive (CL#123): its one step carries the gap
+         the idlers would have made, and its own origin run turns it. Nothing here
+         can be refused, because there is no bridge to refuse. */
       const wanted = b.idlers.slice(0, nIdle);
       let out = search(wanted), bridged = wanted.length > 0;
       if (!out.found && wanted.length) {
@@ -4983,15 +5282,45 @@ class Component extends DCLogic {
            another run is not, because it is the rule itself failing.
 
            So the chain is placed WITHOUT its bridge, which is not a new
-           behaviour to get wrong -- it is exactly what `bridge: false` produces,
-           down to the gap: the idlers are parked, the head becomes a root, and
-           it stands at the distance the idlers would have set. It is searched
-           for again in that shape, because the reasons a bridge is rejected are
-           mostly the idlers' own: two wheels of metal that an empty gap does not
-           put there. */
+           behaviour to get wrong -- it is exactly the shape an independent chain
+           is placed in, down to the gap: the idlers are parked, the head becomes
+           a root, and it stands at the distance the idlers would have set. It is
+           searched for again in that shape, because the reasons a bridge is
+           rejected are mostly the idlers' own: two wheels of metal that an empty
+           gap does not put there.
+
+           AND IT IS UNDRIVEN, WHICH IS THE ONE PLACE THIS PAGE STILL DRAWS AN
+           UNDRIVEN CHAIN (CL#123). It cannot fall back to an origin run of its
+           own: the idlers that would carry one are TRAIN entries dealt at load,
+           and a dependent chain has none, because a refusal is discovered here at
+           solve time rather than declared in config.js. Adding wheels at solve
+           time is #55 exactly -- teeth, colours and centre designs are dealt once
+           against these indices. So the fallback is announced and left visibly
+           poorer than what was asked for, which is the honest end of a failure.
+
+           AND THE FAILURE IS NOT LOCAL, WHICH IS WHAT A CASCADE ADDED (CL#123).
+           Every chain whose drive path runs THROUGH this one loses its drive too
+           -- a later sibling still cascades off this chain's lead gear and is
+           still placed exactly where it was going to be, so nothing moves and
+           nothing is missing, and the only symptom is a run of chains that turn
+           because everything turns rather than because anything drives them. That
+           is invisible in a still and invisible in the geometry, so the console is
+           the one place it can be said, and it is said HERE rather than being
+           re-derived per chain: naming them from the one refusal that caused it is
+           the difference between a cause and n symptoms. */
+        const stranded = CHAIN_ORDER.filter(p => {
+          let at = DRIVE_FROM[p.slug], hops = 0;
+          while (at != null && hops++ <= CHAIN_ORDER.length) {
+            if (at === b.person) return true;
+            at = DRIVE_FROM[at];
+          }
+          return false;
+        }).map(p => p.slug);
         console.warn('wozi: no clear bridge anchor for chain "' + b.person
           + '" — all ' + cands.length + ' candidates rejected (' + tally(out.why)
-          + '); refusing to bridge it, and placing it undriven instead');
+          + '); refusing to bridge it, and placing it undriven instead'
+          + (stranded.length ? ', which leaves ' + stranded.join(', ')
+            + ' undriven too — they take their drive through it' : ''));
         bridged = false;
         out = search([]);
       }
@@ -5008,6 +5337,32 @@ class Component extends DCLogic {
           + ', which may clash');
         out.at = cands.length ? cands[0] : null;
       }
+      /* A FAILED HOP IS ANNOUNCED, NOT ABSORBED (CL#123). A dependent is meant to
+         take its drive from one named chain -- its parent when it is the first
+         child, the sibling before it otherwise -- and when the search cannot
+         reach that chain at all, tier 2 above has already walked the drive path
+         back toward the spine and found somewhere that works. That is the
+         DEFINED fallback rather than an accident, and it is what stops one
+         refused hop orphaning every sibling behind it; but the composition now
+         says something different from what config.js declares, and the console is
+         the only place that can say so.
+
+         WHICH CHAIN, NOT WHICH WHEEL. `b.at` names the exact lead gear a later
+         sibling is meant to cascade off, and it is a strong PREFERENCE -- tier 1
+         of the ranking, ahead of everything else -- but the wheel a run can
+         actually clear is the search's business, and a drive taken off the
+         second wheel of the right chain is the same drive. Warning at wheel
+         granularity would fire on a composition that is doing exactly what was
+         asked, which is how a console warning stops being read. */
+      if (out.found && b.from != null && out.at != null) {
+        const took = TRAIN[out.at].person != null ? TRAIN[out.at].person : TRAIN[out.at].bridge;
+        if (took !== b.from) {
+          console.warn('wozi: chain "' + b.person + '" could not take its drive from '
+            + 'chain "' + b.from + '"'
+            + (b.at != null ? ' (the lead gear of the sibling before it, wheel ' + b.at + ')' : '')
+            + ' — it is driven off chain "' + took + '" (wheel ' + out.at + ') instead');
+        }
+      }
       this._bridgeAt[b.person] = { at: out.at, bridged: bridged };
       return this._bridgeAt[b.person];
     };
@@ -5023,10 +5378,24 @@ class Component extends DCLogic {
          from its own parent is what makes a branch possible. The initial values
          are the ones the old declaration held, so the root is unchanged. */
       let x = 0, y = 0, dir = 1, phase = 0;
+      /* A MOUNTED ORIGIN RUN STARTS AT A STATION, which makes this the one wheel
+         on the page whose position is an absolute rather than a relationship
+         (CL#123, ORIGIN_MOUNT 'fixed'). It has no parent to derive from, so it
+         takes the mount and nothing below touches it -- including the clearance
+         nudge, which has nothing to nudge against: a mount that has to move is
+         not a mount. That is the degree of freedom this reading costs, stated
+         where it is spent.
+         Under 'edge' this never fires: every origin idler there hangs off its own
+         chain's lead gear, so all of them have parents. */
+      if (t.drive === 'origin' && t.parent == null) {
+        const m = mountFor(t.bridge);
+        x = m.x; y = m.y;
+      }
       /* A BRIDGE STARTS HERE: take the anchor from the attachment solve rather
-         than the default the TRAIN builder wrote. An unbridged chain's first
-         wheel stays a ROOT -- no parent, no drive -- but is still placed off the
-         same anchor, so `bridge: false` costs it its idlers and nothing else.
+         than the default the TRAIN builder wrote. An independent chain's first
+         wheel stays a ROOT as far as this loop is concerned -- no parent to
+         inherit a sense from -- but is still placed off the same anchor, so being
+         self-driven costs it its bridge and nothing else.
          EVERY non-first root needs real coordinates: without this they all
          resolve to (0,0) and the second chain draws on top of the first. */
       const starts = BRIDGE_FROM[i];
@@ -5057,16 +5426,26 @@ class Component extends DCLogic {
         const prev = g[gi[host]];
         const linked = !!t.link;
         /* A WHEEL IS COMPLETING A BRIDGE when it is an idler, when its host is
-           one, or when it is an unbridged chain's root: the run that sets the gap
-           between two chains is perpendicular to them, and only then does the
-           chain it feeds go back to running parallel to the spine. */
-        const bridging = free || t.role === 'idler' || TRAIN[host].role === 'idler';
+           one, or when it is an independent chain's root: the run that sets the
+           gap between two chains is perpendicular to them, and only then does the
+           chain it feeds go back to running parallel to the spine.
+           AN ORIGIN RUN IS NOT A BRIDGE, and this is the one line that has to know
+           it (CL#123). It is made of the same idlers, but it travels ALONG the
+           chain's own axis rather than across to another chain -- so it takes
+           `originBase` and a chain wheel's swing, not the bridge bearing and the
+           bridge's. Fold the two together and an independent chain's drive leaves
+           by the cross axis, which is the shape a bridge has and the exact
+           confusion #67 was. */
+        const onOrigin = t.drive === 'origin' || TRAIN[host].drive === 'origin';
+        const bridging = !onOrigin
+          && (free || t.role === 'idler' || TRAIN[host].role === 'idler');
         /* Distance is fixed by the drive type; the bearing is nudged until this wheel
            clears every wheel it is not meshed with by at least CLEARANCE. */
         let d = linked ? (prev.r + r) * (t.spread || 2) * (this._spreadBoost || 1)
           : free ? prev.r + r + nIdle * MODULE * TEETH_MEAN
           : prev.r + r;
-        const base = bridging ? bridgeBase : t.angle + (this._axisRot || 0);
+        const base = t.drive === 'origin' ? originBase
+          : bridging ? bridgeBase : t.angle + (this._axisRot || 0);
         const maxStep = linked ? 150 : bridging ? BRIDGE_SWING : 60;
         const tight = this._tight || 1;
         /* WHAT THIS WHEEL'S OWN SWING CAN ACTUALLY PAY TOWARD ENDS_APART, per
@@ -5175,11 +5554,24 @@ class Component extends DCLogic {
           chainFrom = host;
           strands.push([{ x: prev.x, y: prev.y }, { x: x, y: y }]);
         } else if (free) {
-          /* AN UNBRIDGED CHAIN IS ITS OWN MACHINE. Nothing drives it, so there is
-             no sense to inherit and no tooth phase to mesh: it takes the same
-             values the spine's own root takes, and no consumer has to special-case
-             a wheel with no parent. */
-          dir = 1;
+          /* AN INDEPENDENT CHAIN IS ITS OWN MACHINE, AND NOW SHOWS ITS OWN DRIVE
+             (Charles, GitHub #116, CL#123). It has no parent to inherit a tooth
+             phase from, so it starts one of its own exactly as the spine's root
+             does -- but its SENSE is no longer simply "the same way as the spine".
+
+             THE DIRECTION IS DERIVED FROM ITS OWN IDLER COUNT, which is the same
+             rule a bridged chain already obeys: what decides which way a chain
+             turns is how many wheels stand between it and whatever drives it. The
+             far end of the origin run is the driver, so an odd count reverses the
+             lead gear and an even one does not. That is where "its own resulting
+             direction" comes from, and it is derived rather than dealt -- there is
+             no second integrator anywhere in it, and there must never be (CL#3).
+
+             A REFUSED BRIDGE FALLS THROUGH THIS UNCHANGED. It reaches `free` with
+             no origin run of its own (see the refusal above), so ORIGIN_OF has
+             nothing for it and it keeps the spine's own sense, undriven. */
+          const own = ORIGIN_OF[i];
+          dir = own && !own.mounted && (nIdle % 2) ? -1 : 1;
           phase = 0;
         } else {
           dir = -prev.dir;
@@ -5213,6 +5605,17 @@ class Component extends DCLogic {
         if (at != null && gi[at] >= 0) {
           bridgeRuns.push([{ x: g[gi[at]].x, y: g[gi[at]].y }, { x: x, y: y }]);
         }
+      }
+      /* AN ORIGIN RUN IS RECORDED THE SAME WAY A BRIDGE IS, and for the same
+         reason: it is metal carrying drive across the composition, so a bridge
+         placed after it and an escape run placed after the fit both have to be
+         able to refuse to cross it (CL#123). The segment is finished at whichever
+         wheel completes the run -- the last idler still in mesh under 'edge', the
+         lead gear under 'fixed' -- which is why originEnd is keyed on that index
+         rather than on the chain. */
+      const oEnd = originEnd[i];
+      if (oEnd && gi[oEnd.a] >= 0) {
+        bridgeRuns.push([{ x: g[gi[oEnd.a]].x, y: g[gi[oEnd.a]].y }, { x: x, y: y }]);
       }
       gi[i] = g.length;
       g.push({ i: i, teeth: t.teeth, color: t.color, cv: t.cv || null, crot: t.crot || 0, slug: slugFor[i] || null, person: t.person, role: t.role, belt: t.link || null, kind: t.kind || 'holes', arms: t.arms || 5, prof: prof, chainFrom: chainFrom,
