@@ -1807,7 +1807,41 @@ function smallestBlankHolding(wantTwo) {
    Collisions are NOT checked here: solve() already nudges each bearing until the
    wheel clears everything it is not meshed with, so this only has to propose a
    shape worth looking at. */
-const ANG_MIN = 14, ANG_MAX = 30, BAND_MAX = 62, ENDS_MAX = 26;
+const ANG_MIN = 14, ANG_MAX = 30;
+/* THE WIDEST DRIFT ANY ONE STEP OF THE WALK CAN EVER CONTRIBUTE, because
+   BAND_MAX and ENDS_MAX below both need it and a value copied into two
+   expressions is a value that can drift apart from itself (GitHub #97,
+   CL#130).
+
+   A step's y-contribution is (rOf(parent) + rOf(child)) * sin(angle) --
+   MODULE * teeth, in effect -- so its ceiling is that expression maximised
+   over what the deal is allowed to draw: the widest pair of wheels a step
+   could ever join, at the steepest bearing ANG_MAX allows. That is exactly
+   the "widest pair" endsCapFor() below derives for its own two-wheel floor,
+   where a single step IS the whole chain's drift with nothing to cancel
+   against -- computed once here rather than twice, so the two stay equal by
+   construction instead of by two people typing the same arithmetic. */
+const STEP_DRIFT_MAX = MODULE
+  * Math.min(2 * TEETH_MAX, Math.round(TEETH_MEAN * 2) + TEETH_SLACK) / 2
+  * Math.sin(ANG_MAX * Math.PI / 180);
+/* BAND_MAX and ENDS_MAX used to be flat literals, 62 and 26, bounding a drift
+   that is not flat -- MODULE and the tooth range both feed STEP_DRIFT_MAX
+   above, so the old numbers were only ever right by coincidence at today's
+   MODULE = 7 and were never re-earned when either moved. Sweeping every
+   chain length the page can carry showed the cost even at today's constants:
+   57% of draws legal on average, dropping to 9.7% on an 8-wheel chain, purely
+   from parity -- an even number of steps cannot fully cancel back to its own
+   baseline (see endsCapFor's comment), and a flat cap sized for the lengths
+   that CAN cancel starves the ones that cannot.
+
+   Derived from STEP_DRIFT_MAX instead: ENDS_MAX is that ceiling itself, and
+   BAND_MAX is twice it, since the walk's highest point and its lowest point
+   can each reach roughly that far from the baseline in opposite directions
+   before the alternating sign pulls it back. That is reasoning about the
+   shape, not a measurement standing in for one -- the actual rate it buys is
+   what tools/test.js's rate-floor gate below measures and prints, not
+   asserted here. */
+const BAND_MAX = 2 * STEP_DRIFT_MAX, ENDS_MAX = STEP_DRIFT_MAX;
 /* THE END-DRIFT CAP A CHAIN OF n WHEELS CAN ACTUALLY BE HELD TO, because a cap
    that asks for less than the geometry allows is not a cap, it is a filter that
    never passes.
@@ -1815,11 +1849,11 @@ const ANG_MIN = 14, ANG_MAX = 30, BAND_MAX = 62, ENDS_MAX = 26;
    A serpentine alternates its bearings, so consecutive steps cancel: a chain
    with an EVEN number of steps can return to its own baseline, and one with an
    ODD number cannot -- whatever the draw, it is left holding a single
-   uncancelled step. The shallowest step the deal can draw is already past an
-   ENDS_MAX of 26, so a TWO-wheel chain (one step) could never satisfy the cap:
-   with the caps applied per chain, the deal would have exhausted every try and
-   assigned no bearings at all, and every wheel's `angle` would have read
-   undefined.
+   uncancelled step. A TWO-wheel chain (one step) is the extreme case: there is
+   nothing to trade against, so any cap short of the widest step the deal is
+   allowed to draw could never be satisfied -- with the caps applied per chain,
+   the deal would have exhausted every try and assigned no bearings at all, and
+   every wheel's `angle` would have read undefined.
 
    IT IS A TWO-WHEEL CHAIN THAT IS THE CASE, not every odd-step chain. Three
    steps or more alternate, so their signed sum can be brought to either side of
@@ -1837,7 +1871,14 @@ const ANG_MIN = 14, ANG_MAX = 30, BAND_MAX = 62, ENDS_MAX = 26;
    two TEETH_MAX blanks, or -- since a two-wheel chain's total is its own tooth
    target plus slack -- that, whichever is smaller. Every term is the deal's own,
    so this follows the bounds rather than needing to be re-measured, and no chain
-   shipped today is a two-wheel chain. */
+   shipped today is a two-wheel chain.
+
+   SINCE GITHUB #97 (CL#130), ENDS_MAX ITSELF IS THIS SAME FIGURE -- the module-
+   and-teeth-derived STEP_DRIFT_MAX above computes exactly this "widest pair"
+   arithmetic once, for both this floor and the general cap, so the Math.max()
+   below is a no-op today rather than dead: it stays as the actual floor for
+   whichever day ENDS_MAX and STEP_DRIFT_MAX are next allowed to diverge, rather
+   than assuming the two will always coincide. */
 function endsCapFor(n) {
   if (n !== 2) return ENDS_MAX;
   const pair = Math.min(2 * TEETH_MAX, Math.round(TEETH_MEAN * n) + TEETH_SLACK);
