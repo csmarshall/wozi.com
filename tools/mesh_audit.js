@@ -2,8 +2,8 @@
    mesh at every adjacent pair. Numbers, not impressions. */
 
 const MODULE = 7;
-const CLEARANCE = 13;
-const ENDS_APART = 90;
+const CLEARANCE = 13;  /* solve units, not pixels -- see index.html (GitHub #99) */
+const ENDS_APART = 90; /* solve units, not pixels -- see index.html (GitHub #99) */
 
 const TRAIN = [
   { teeth: 17, angle: 0,   prof: { add: 1.0,  tip: 0.36 } },
