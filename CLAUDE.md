@@ -145,6 +145,23 @@ by it, the flywheel eases to the new target, and every wheel follows because not
 one of them is animated on its own. Moving *where* the control is drawn must
 never give it a second job.
 
+**The flywheel decelerates at a constant rate, not a constant time constant**
+(GitHub #106, CL#127). `approachSpeed(v, target, dt)` is the one function
+`step()` calls to move `_v` toward whatever `target` `idleRate()` and
+`motionActive()` computed that tick — spin-up and spin-down both, no direction
+special-case, because Coulomb friction opposes motion the same way in either
+direction and a real train winds up slowly for the same reason it coasts down
+slowly. It used to be a first-order lag at a fixed 900ms time constant, which
+is viscous drag on a flywheel with no mass: settling time was independent of
+the SIZE of the jump, so 200× → 1× and 2× → 1× took the same ~4.5s and the big
+drop read as over almost at once. `SPINDOWN_DECEL` is derived from
+`SPINDOWN_RANGE_MS` (the one tunable feel figure — how long the flywheel takes
+to cross the whole `SPEED_CEIL`↔`SPEED_FLOOR` ladder) divided by the ladder's
+own span, never a hand-picked master-deg/ms², so a ladder change cannot desync
+the feel from the number that defines it. `SPINDOWN_RANGE_MS` is a placeholder
+for Charles's call, captured against two other candidates rather than asserted
+as the only one built — see CL#127.
+
 **The speed that strobes is derived; the speed the control stops at is chosen.**
 Keep those apart. A wheel's angle is `_M / teeth` and its pitch is `360 / teeth`,
 so **one tooth of travel is 360 master-degrees on every wheel** — the tooth count
