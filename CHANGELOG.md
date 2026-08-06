@@ -7,6 +7,51 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Changed
 
+- **CL#130 — `BAND_MAX`/`ENDS_MAX` were absolute against a proportional
+  drift, and the suite's gate on them was one legal draw in 2000.** (GitHub
+  #97, split from #64's finding A9.)
+
+  Both caps bound `dealAngles`' accumulated `y` drift, computed from
+  `(rOf(parent) + rOf(child)) * sin(angle)` — `MODULE * teeth`, in effect —
+  while the caps themselves were flat literals, 62 and 26, right only by
+  coincidence at today's `MODULE = 7` and never re-earned when it or the
+  tooth range moved.
+
+  **Derived instead of retuned.** `STEP_DRIFT_MAX` computes, once, the widest
+  drift any single step of the walk could ever contribute — the same "widest
+  pair, steepest angle" arithmetic `endsCapFor()`'s two-wheel floor already
+  used, now shared rather than duplicated. `ENDS_MAX` is that ceiling
+  itself; `BAND_MAX` is twice it, since the walk's highest and lowest points
+  can each reach roughly that far from the baseline before the alternating
+  sign pulls it back. At `MODULE = 7` this lands at `BAND_MAX = 129.5`,
+  `ENDS_MAX = 64.75` — both well past the old 62/26, which is the point: the
+  old numbers were not merely un-derived, they were too tight.
+
+  **The suite's own gate could not have told anyone that.** `'the bearing
+  deal keeps the train a horizontal line'` asserted only `legal >= 1` across
+  2000 trials — indistinguishable, to that assertion, from a dealer that is
+  legal 0.05% of the time. Renamed `'…, at a real rate'` and given the
+  `dealTeeth` treatment: a measured rate per swept chain length (1 through 9
+  wheels, plus every length a configured chain actually carries), a hard
+  fail at zero, and a floor (`RATE_FLOOR = 0.5`) below it. Same family of gap
+  as CL#104 (an assertion that could not fail for the reason it was written)
+  and CL#113 (a message describing the wrong state).
+
+  **Measured, not merely argued.** At the old flat 62/26 the legal rate
+  swept from 100% (short chains) down to 9.7% on an 8-wheel chain — an even
+  number of steps cannot fully cancel its own drift back to baseline, so a
+  cap sized loosely enough for the lengths that cancel starved the lengths
+  that cannot, and a flat number could not represent both. The derived bounds
+  measure 84–100% across the same sweep, worst case still the 8-wheel
+  parity chain. Confirmed by mutation: reverting `BAND_MAX`/`ENDS_MAX` to
+  the old literals fails the strengthened gate outright — *"a chain of 8
+  wheels: only 9.5% of draws are legal (floor is 50%)"* — restored
+  afterward.
+
+  **`?seed=8231` and the pixel gate move, as expected.** A change to the
+  bearing deal changes the shapes it can draw; `tools/pixel_regress.py`
+  showed the combined stage and `?who=charles` both moving by exactly that
+  and nothing else — see the PR for the measured deltas.
 - **CL#126 — `tools/dom_invariants.py` had a third unguarded copy of the
   first-match extractor.** (GitHub #114.)
 

@@ -116,7 +116,7 @@ const page = (function build() {
   const consts = ['MODULE', 'TOOTH_ADD', 'TOOTH_DED', 'TOOTH_ROOT_MIN', 'BAND_RISE',
     'BAND_DEPTH', 'RIM_UNDER_BAND', 'BASELINE_MID', 'ROOT_MARGIN', 'MIN_MODULE',
     'TEETH_MIN', 'TEETH_MAX', 'TEETH_SLACK', 'TEETH_HOST',
-    'ANG_MIN', 'ANG_MAX', 'BAND_MAX', 'ENDS_MAX',
+    'ANG_MIN', 'ANG_MAX',
     /* The clear-metal gap engraving()'s fit() solves its sweep cap FROM (GitHub #98).
        Read out of the page so the gap-constancy test below measures the ratio
        the page actually ships, not a copy of it. */
@@ -179,9 +179,18 @@ const page = (function build() {
        it is the page's own -- executed here rather than re-derived, so the
        bearing test below measures the rule that ships. */
     + 'const TEETH_MEAN = ' + grabNumber('TEETH_MEAN') + ';\n'
+    /* BAND_MAX and ENDS_MAX stopped being literals at GitHub #97 (CL#130): they
+       are now derived from STEP_DRIFT_MAX, itself an expression over MODULE and
+       the tooth/bearing range, so grabNumber() -- which only ever matched a bare
+       numeric literal -- cannot read them any more. Grabbed as the real
+       declarations instead of re-derived here, for the same reason endsCapFor is
+       grabbed as a block below: a copy of the arithmetic is exactly the drift
+       this suite exists to catch. */
+    + grabDecl('const STEP_DRIFT_MAX =') + '\n'
+    + grabDecl('const BAND_MAX =') + '\n'
     + grabBlock('function endsCapFor(', '{', '}') + '\n'
     + 'return { planetaryBore, planetaryMenuFor, RAVIGNEAUX_MENU, PLANETARY_FLAVOURS, '
-    + 'endsCapFor, TEETH_MEAN, '
+    + 'endsCapFor, TEETH_MEAN, STEP_DRIFT_MAX, BAND_MAX, ENDS_MAX, '
     + consts.join(', ') + ' };';
   const built = new Function('enumeratePlanetaries', src)(enumeratePlanetaries);
   /* One entry per chain, in PEOPLE order. The page has no TEETH_SUM constant any
@@ -4272,20 +4281,39 @@ test('the largest blank a deal guarantees can host a planetary', () => {
     + 'force-seat has nowhere honest to put the planetary');
 });
 
-test('the bearing deal keeps the train a horizontal line', () => {
+test('the bearing deal keeps the train a horizontal line, at a real rate', () => {
   /* Swept over every chain length a page could carry, not just the ones shipped:
      the caps are applied PER CHAIN now, so a length that cannot satisfy them
      leaves that chain's wheels on the deal's fallback draw rather than on a
      legal one -- and until endsCapFor existed, a two-wheel chain was exactly
-     such a length and the deal assigned no bearings at all. */
+     such a length and the deal assigned no bearings at all.
+
+     THE GATE USED TO BE "at least one legal draw in 2000" (GitHub #97). That
+     passes just as happily at a 0.05% legal rate as at 99% -- every load but
+     one in two thousand landing on the closest-draw fallback reads as green --
+     so it could not have told anyone the flat BAND_MAX/ENDS_MAX literals this
+     test used to check were starving some chain lengths (CL#130 found 9.7% on
+     an 8-wheel chain at the old 62/26, purely from step-count parity: see the
+     comment at BAND_MAX in index.html). Given the RATE_FLOOR treatment
+     'the tooth deal always produces a legal train' already has, for the same
+     reason: a presence check cannot fail for a weak deal, only an absent one. */
   const { ANG_MIN, ANG_MAX, BAND_MAX, MODULE } = page;
   ok(ANG_MIN > 0 && ANG_MAX > ANG_MIN, 'bearing range is degenerate');
   ok(ANG_MAX <= 45, 'bearings past 45 degrees stack the wheels diagonally');
+  /* Not a re-tuned number: the derived BAND_MAX/ENDS_MAX (CL#130) measure at
+     84-100% legal across every swept length (worst case an 8-wheel chain,
+     step-count parity again -- the caps did not remove that effect, only how
+     punishing it is). RATE_FLOOR sits well under that floor and well over what
+     the old flat 62/26 produced (9.7% worst case), so it passes the bounds
+     this ticket derives with room to spare and would have failed the ones it
+     replaced -- see CL#130 for the measured before/after. */
+  const RATE_FLOOR = 0.5;
+  const TRIALS = 4000;
   const bad = [];
   const lens = [...new Set([...page.TRAIN_LENS, 1, 2, 3, 4, 5, 6, 7, 8, 9])];
   lens.forEach((len) => {
     let legal = 0;
-    for (let trial = 0; trial < 2000; trial++) {
+    for (let trial = 0; trial < TRIALS; trial++) {
       const first = Math.random() < 0.5 ? 1 : -1;
       const ang = [0];
       for (let i = 1; i < len; i++) ang.push(first * (i % 2 ? 1 : -1) * (ANG_MIN + Math.random() * (ANG_MAX - ANG_MIN)));
@@ -4296,8 +4324,13 @@ test('the bearing deal keeps the train a horizontal line', () => {
       }
       if (hi - lo <= BAND_MAX && Math.abs(y) <= page.endsCapFor(len)) legal++;
     }
-    if (!legal) bad.push('a chain of ' + len + ' wheels: no bearing draw '
-      + 'satisfies the drift caps; every load would fall back');
+    const rate = legal / TRIALS;
+    if (rate === 0) bad.push('a chain of ' + len + ' wheels: no bearing draw '
+      + 'satisfies the drift caps at all; every load would fall back');
+    else if (rate < RATE_FLOOR) bad.push('a chain of ' + len + ' wheels: only '
+      + (rate * 100).toFixed(1) + '% of draws are legal (floor is '
+      + (RATE_FLOOR * 100).toFixed(0) + '%); the deal will often exhaust its '
+      + 'tries and fall back to the closest draw instead of a legal one');
   });
   ok(bad.length === 0, bad.join('\n      '));
 });
