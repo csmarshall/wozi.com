@@ -272,8 +272,8 @@ on an explicit `isIntersecting === false` *after* the stage has non-zero size,
 and the flag must be one expression evaluated in `step()`. Latching it true
 froze the entire page (#7).
 
-**A bridge is structure; an escape run is decoration.** On a combined stage
-every chain but the spine is driven off it through ghost idlers, and those
+**A drive run is structure; an escape run is decoration.** On a combined stage
+every chain but the spine arrives through a run of ghost idlers, and those
 idlers are **solved with the train** — they are `TRAIN` entries, they mesh, and
 the gap between two chains is exactly what they take up, so the spacing is a
 consequence of the drive rather than a number beside it. Escape runs are the
@@ -281,7 +281,30 @@ other ghosts: computed *after* the fit, off wheels that are already placed,
 purely to carry the eye off the edge. **Never merge the two.** They look alike
 on the page and are opposites in the solve — one may move a chain, the other may
 not move anything. What they do share is the crossing rule: `fitEscapes` is
-seeded with the bridges so an escape run refuses to cross one.
+seeded with `solved.bridgeRuns` so an escape run refuses to cross one, and
+**every structural run must be published into that list** or it becomes the one
+run on the page that anything may be laid straight across.
+
+**There are two kinds of structural run and one count** (GitHub #116, CL#123). A
+**bridge** carries a dependent chain's drive in from the chain that drives it; an
+**origin run** carries a self-driven chain's drive in from off the stage. They
+are the same run of plain idlers, they take the same `MAX_IDLERS`, they park by
+the same `nIdle`, and both go into `bridgeRuns` — so how many wheels stand
+between a chain and whatever turns it is one number and not two. The one line
+that has to know the difference is the bearing: an origin run travels **along its
+own chain's axis** (`originBase`), a bridge **across to another chain**
+(`bridgeBase`). Fold them together and an independent chain's drive leaves by the
+cross axis, which is the #67 confusion exactly.
+
+**`ORIGIN_MOUNT` decides where a self-driven chain's run originates, and it is
+awaiting Charles's call.** `'edge'` (shipped) trails the run off the stage and
+leaves the chain's position **solved**; `'fixed'` starts it at an anchored mount
+and makes the position **pinned**, with the gap between chains becoming
+`CHAIN_RANK × ORIGIN_PITCH` instead of what the idlers take up. It is one word in
+`index.html` and deliberately **not** a URL parameter — `?seed` is the only
+determinism affordance shipped code carries (CL#109), and a second switch
+reachable from the address bar would be a second way for the page to draw
+something no gate photographs.
 
 **A bridge bearing is relative to the axis, never to the screen.** The stage
 rotates the whole train by `_axisRot` in portrait. `BRIDGE_BEARING` is 90°
@@ -303,32 +326,56 @@ being written down. Note what caught it and what did not — every harness here
 measured *along the bridge direction*, and both mirror images pass that. The
 regression test is in screen `x`/`y` for that reason.
 
-**Which chain is the spine and what order the rest stack in are two declarations,
-not one sort** (#85). `spine: true` names the axis — a geometry choice, since it
-sets the scale and every other chain is laid parallel to it. `order: <n>` names
-the stack — a presentation choice, ascending, **topmost in landscape and leftmost
-in portrait**. Both are per-person keys in `config.js` and both are documented
-there.
+**One key says who drives a chain, and the stack falls out of it** (GitHub #116,
+CL#123). `child: '<slug>'` names the chain this one takes its drive from;
+`child: null`, or no key at all, means the chain is a **root** — nothing on stage
+drives it, and it is **self-driven** by an origin run of its own. It replaced
+`bridge: true|false`, which was a boolean about the spine: it could express a
+star and never a tree, and its `false` produced a set of gears nothing turns.
 
-**What an undeclared chain falls back to is link count, then name, both
-descending**, and it falls in behind every chain that does declare an `order`.
-The name is where `PEOPLE` order used to be: the tie broke on the line a person
-was written on, which held only because `Array.prototype.sort` is stable and
-which nothing in `config.js` said out loud. Naming the key makes the sort total,
-so nothing leans on sort stability any more, and `PEOPLE` order now decides only
-the person picker. The compare is case-folded and deliberately **not**
+**`child` declares membership, not the attachment point.** The wheel a chain
+actually hangs off is computed: the **first child takes its drive from the
+parent, and every later sibling takes it from the lead gear of the sibling before
+it** — you do not take four power take-offs off one gear, you cascade them.
+
+**The stack is a depth-first walk of that tree, not a sort.** A dependent follows
+its parent immediately even when an unrelated root is longer. Link count and name
+survive only as the **sibling** tie-break, and `order: <n>` ranks siblings
+ascending — **topmost in landscape and leftmost in portrait**. Undeclared falls in
+behind every sibling that declares one, then by link count, then by name, both
+descending. The name is where `PEOPLE` order used to be: the tie broke on the
+line a person was written on, which held only because `Array.prototype.sort` is
+stable and which nothing in `config.js` said out loud. `PEOPLE` order now decides
+only the person picker. The compare is case-folded and deliberately **not**
 locale-aware — a tie-break that changes with the runtime's ICU data is a drifting
 constant wearing a method call.
 
-The spine's fallback does not restate any of that: it is *whichever chain the
-stack puts first*, skipping any with no wheels. One home for "which chain leads".
+**`spine: true` is retired, because the spine is the first root.** A root is
+exactly what `child: null` means and the first of them is exactly what the walk
+lays out first, so the two declarations could only ever have agreed — and a
+config could express a disagreement the page would then have had to arbitrate.
+The roots are siblings, so `order` still names the axis; it is the same lever it
+always was, one scope narrower. **Both retired keys are warned about, not
+ignored**: a file still carrying one is an unfinished migration, and reading it in
+silence would draw a composition nobody asked for.
 
-`CHAIN_ORDER` is derived from the two and is not a third thing to keep in step:
-it is the spine followed by the stack. **The spine is always at its head**, which
-is structural rather than a preference — `solve()` places wheels in `TRAIN` order
-and a bridge may only hang off a wheel already placed, so growth goes one way and
-it starts at the axis. `CHAIN_ORDER[0] === SPINE` is therefore true by
-construction rather than by the sort happening to make it true.
+**Three mistakes are newly expressible and all three are refused by name**, each
+warned and the chain placed as a root: a chain naming **itself**, a chain naming a
+slug that is **not a person in `config.js`**, and a **cycle**. The cycle check
+walks the parent links already resolved and stops the first time it revisits a
+name — one pass, and it cannot recurse. A parent that is simply **not on this
+stage** is silent and not a mistake: a solo page carries one person, so every
+dependent is legitimately a root there. A parent with **no wheels** is stepped
+over to the nearest ancestor that has some, so the tree the walk sees contains
+only chains that are actually drawn.
+
+`CHAIN_ORDER` is that walk, with wheel-less chains appended after it, and is not
+a second thing to keep in step. **The spine is always at its head**, which is
+structural rather than a preference — `solve()` places wheels in `TRAIN` order and
+a drive run may only hang off a wheel already placed, and a cascade is inherently
+ordered because each sibling's anchor is the previous sibling's lead gear.
+`CHAIN_ORDER[0] === SPINE` is therefore true by construction rather than by a
+sort happening to make it true.
 
 **`SPINE` and `SELECTED` are different questions and no longer share a name.**
 `SPINE` is which chain is the axis; `SELECTED` is which person the page is about,
@@ -354,9 +401,28 @@ one on purpose.
 
 **A bridge that cannot be placed cleanly refuses.** When no anchor clears the
 non-crossing rule, the bridge is abandoned and the chain is placed *unbridged* —
-the same shape `bridge: false` produces, at the same distance, warning to the
-console. An undriven chain now and then is a cost; a bridge drawn across another
-run is the rule itself failing. **A crossing bridge is never drawn.**
+at the same distance, warning to the console. An undriven chain now and then is a
+cost; a bridge drawn across another run is the rule itself failing. **A crossing
+bridge is never drawn.** This is the one place the page still draws an undriven
+chain: a refusal is discovered at *solve* time, and the idlers that would carry an
+origin run are `TRAIN` entries dealt at *load* time, so it cannot fall back to
+one. Adding wheels at solve time is #55 exactly.
+
+**And a refusal is not local, which is what the cascade added** (CL#123). Every
+chain whose drive path runs *through* the refused one loses its drive too — while
+keeping its position and its own bridge, so nothing moves and nothing is missing,
+and the only symptom is a run of chains that turn because everything turns. The
+refusal warning therefore **names the chains it stranded**, from the one refusal
+that caused it rather than as *n* symptoms. It is invisible in a still and
+invisible in the geometry; the console is the only place it can be said.
+
+**A self-driven chain is a second connected component, and always will be.**
+`tools/dom_invariants.py` reports the component count and asserts only that no
+wheel is an *orphan* — and that distinction is now load-bearing. CL#122's
+`bridge: false` left Harper's single wheel meshing with nothing at all, which
+failed the gate; her origin run is what fixes it. The count is still **2**,
+because a chain nothing on stage drives is a separate mesh by definition. One
+component and a self-driven chain cannot both be true.
 
 ## Dormant capability: chain and belt
 

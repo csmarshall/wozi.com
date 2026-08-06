@@ -112,6 +112,16 @@ function grabBlock(decl, open, close) {
   return grabBlockFrom(SRC, 'index.html', decl, open, close);
 }
 
+/* WHICH ANSWER index.html SHIPS to "where does an independent chain's own drive
+   come from" (GitHub #116, CL#123) -- executed, not pattern-matched, because
+   grabNumber() reads numbers and this one is a word. Every fixture below builds
+   at the shipped value unless it deliberately asks for the other, so the suite
+   moves with the constant rather than pinning it: the two readings are an A/B
+   awaiting Charles's call, and a harness that hardcoded one would start failing
+   the day the default flipped, which is a test measuring the wrong thing. */
+const PAGE_ORIGIN_MOUNT = new Function(
+  grabDecl('const ORIGIN_MOUNT =') + ' return ORIGIN_MOUNT;')();
+
 const page = (function build() {
   const consts = ['MODULE', 'TOOTH_ADD', 'TOOTH_DED', 'TOOTH_ROOT_MIN', 'BAND_RISE',
     'BAND_DEPTH', 'RIM_UNDER_BAND', 'BASELINE_MID', 'ROOT_MARGIN', 'MIN_MODULE',
@@ -973,50 +983,87 @@ function grabDecl(decl) {
 }
 
 /* Executes the real TRAIN builder out of index.html rather than modelling it.
-   Returns the bridges it filled in as well as the wheels: the two are built
-   together, and a test that only saw the array could not tell an idler apart
-   from the chain it feeds. Every value the builder closes over is handed in
-   from the page rather than re-typed -- MAX_IDLERS is read out of index.html,
-   and HAS_WHEELS, CHAIN_STACK, SPINE, CHAIN_ORDER and SPINE_LEN are the page's
-   OWN LINES, executed against the fixture, in the page's own declaration order.
-   SPINE_LEN used to be re-derived here, which is the one thing this file forbids:
-   a suite holding its own copy of a derivation passes happily while the page
-   computes something else.
+   Returns the bridges and the origin runs it filled in as well as the wheels:
+   the three are built together, and a test that only saw the array could not
+   tell an idler apart from the chain it feeds, nor a bridge idler from an origin
+   idler. Every value the builder closes over is handed in from the page rather
+   than re-typed -- MAX_IDLERS and ORIGIN_MOUNT are read out of index.html, and
+   HAS_WHEELS, SIBLING_SORT, CHAIN_PARENT, CHAIN_TREE, CHAIN_ORDER, DRIVE_FROM,
+   SPINE and SPINE_LEN are the page's OWN LINES, executed against the fixture, in
+   the page's own declaration order. SPINE_LEN used to be re-derived here, which
+   is the one thing this file forbids: a suite holding its own copy of a
+   derivation passes happily while the page computes something else.
 
-   THE FIXTURE GOES IN THROUGH THE PAGE'S OWN TWO DECLARATIONS -- `order` and
-   `spine` per person (#85) -- exactly as config.js does, and there is no longer
-   any way past them. There used to be: a `stack` argument substituted CHAIN_STACK
+   THE FIXTURE GOES IN THROUGH THE PAGE'S OWN DECLARATIONS -- `child` and `order`
+   per person (GitHub #116, CL#123) -- exactly as config.js does, and there is no
+   way past them. There used to be: a `stack` argument substituted CHAIN_STACK
    outright, so a test could reach a layout order no config could ask for. The
-   split is what retired it. Any head and any sequence behind it are now
-   expressible as declarations, so the only orders the override still bought were
-   the ILLEGAL ones -- a spine that is not at the head, or a headless chain with
-   no wheels -- and a harness that can build a train the page cannot is a harness
-   that can pass a test the page would fail. */
-function buildTrain(people) {
+   drive tree is what finally retired the need for one. Any head, any sequence
+   behind it and any shape of tree are expressible as declarations, so the only
+   orders an override still bought were the ILLEGAL ones -- a spine that is not at
+   the head, or a headless chain with no wheels -- and a harness that can build a
+   train the page cannot is a harness that can pass a test the page would fail.
+
+   `conf` IS THE WHOLE OF config.js, NOT THE STAGE, and the two are different on
+   purpose: CHAIN_PARENT tells a `child` naming somebody who is simply not on THIS
+   stage (silent, legitimate on a solo page) from one naming a slug that is not a
+   person anywhere (a typo, warned). A fixture that does not care passes neither
+   and gets the stage back as the config, which is what a combined stage is. */
+function buildTrain(people, conf, mount) {
   const expr = grabBlock('const TRAIN = (function', '(', ')');
-  const bridges = [];
-  const built = new Function('STAGE', 'MAX_IDLERS', 'BRIDGES', 'console',
+  const bridges = [], origins = [], headOf = {};
+  const built = new Function('STAGE', 'CONF', 'MAX_IDLERS', 'ORIGIN_MOUNT',
+    'BRIDGES', 'ORIGINS', 'HEAD_OF', 'console',
     grabDecl('const HAS_WHEELS =') + '\n'
     + grabDecl('const STACK_AT =') + '\n'
     + grabDecl('const NAME_KEY =') + '\n'
-    + grabDecl('const CHAIN_STACK =') + '\n'
-    + grabBlock('const SPINE = (function', '(', ')') + '();\n'
+    + grabDecl('const SIBLING_SORT =') + '\n'
+    + grabBlock('const CHAIN_PARENT = (function', '(', ')') + '();\n'
+    + grabBlock('const CHAIN_TREE = (function', '(', ')') + '();\n'
     + grabDecl('const CHAIN_ORDER =') + '\n'
+    + grabDecl('const DRIVE_FROM =') + '\n'
+    + grabDecl('const SPINE =') + '\n'
     + grabDecl('const SPINE_LEN =') + '\n'
     + 'return { train: ' + expr.replace(/^const TRAIN = /, '') + '(), '
-    + 'order: CHAIN_ORDER, spine: SPINE };')(
-    { people: people }, grabNumber('MAX_IDLERS'), bridges, spineConsole);
-  return { train: built.train, bridges, order: built.order, spine: built.spine,
+    + 'order: CHAIN_ORDER, spine: SPINE, driveFrom: DRIVE_FROM, '
+    + 'parent: CHAIN_PARENT };')(
+    { people: people }, { PEOPLE: conf || people }, grabNumber('MAX_IDLERS'),
+    mount || PAGE_ORIGIN_MOUNT, bridges, origins, headOf, spineConsole);
+  return { train: built.train, bridges, origins, headOf, order: built.order,
+    spine: built.spine, driveFrom: built.driveFrom, parent: built.parent,
     spineWarns: spineConsole.taken() };
 }
-/* SPINE's declaration announces a spine it cannot honour rather than obeying it
-   in silence, so the suite has to be able to READ that -- and must not print it
-   over the test output on the fixtures that provoke it deliberately. */
+/* CHAIN_PARENT announces a `child` it cannot honour rather than obeying it in
+   silence, so the suite has to be able to READ that -- and must not print it over
+   the test output on the fixtures that provoke it deliberately. */
 const spineConsole = (function () {
   const said = [];
   return { warn: (m) => said.push(m), error: (m) => said.push(m),
     taken: () => said.splice(0, said.length) };
 })();
+
+/* FOUR CHAINS AND A REAL CASCADE (Charles, GitHub #116, CL#123), which is the
+   shape two chains cannot show and three can only just: a spine with TWO
+   dependents and an unrelated root standing behind the whole subtree.
+
+   EVERY KEY IS SET AGAINST WHAT A SORT WOULD DO, so nothing here can pass by
+   agreeing with the old rule:
+
+     `far` is the LONGEST chain on stage and is still LAST, because it is a root
+     and the walk finishes the spine's subtree first -- link count no longer
+     orders the page, only siblings;
+     `kid` and `cub` are declared in PEOPLE in the order cub-then-kid, and must
+     come out kid-then-cub, because siblings sort by link count descending;
+     so `cub` -- the SECOND sibling -- takes its drive off `kid`'s lead gear and
+     not off `hub`, which is the cascade itself;
+     and `hub` is a three-wheel axis with a seven-wheel chain elsewhere on stage,
+     the #98 arrangement, so the default anchor index is exercised too. */
+const CASCADE = [
+  { slug: 'cub', child: 'hub', links: [{ slug: 'c1' }] },
+  { slug: 'far', links: [1, 2, 3, 4, 5, 6, 7].map(n => ({ slug: 'f' + n })) },
+  { slug: 'hub', order: 10, links: [{ slug: 'h1' }, { slug: 'h2' }, { slug: 'h3' }] },
+  { slug: 'kid', child: 'hub', links: [{ slug: 'k1' }, { slug: 'k2' }] }
+];
 
 test('every TRAIN entry names its parent, and the parents form one tree', () => {
   const { train } = buildTrain([{ slug: 'p', links: [{ slug: 'a' }, { slug: 'b' }, { slug: 'c' }] }]);
@@ -1084,29 +1131,52 @@ test('the ends-apart rule means the spine\'s extremities, not any two leaves', (
     + 'a branched stage is pushed ENDS_APART');
 });
 
-test('every non-spine chain is reached through at least one idler', () => {
-  /* Chains never mesh directly -- the bridge is what makes the drive legible. */
+test('every chain but the spine stands off through at least one idler', () => {
+  /* Chains never mesh directly -- the idlers are what make the drive legible,
+     and it is the same floor for both kinds of run (CL#123): a BRIDGE when
+     another chain drives this one, an ORIGIN RUN when nothing does. */
   ok(/role:\s*'idler'/.test(SRC), 'no idler role is ever assigned');
   ok(/MIN_IDLERS/.test(SRC), 'there is no floor on the number of idlers in a bridge');
-  const { train, bridges } = buildTrain([
+  const MIN = grabNumber('MIN_IDLERS');
+
+  /* A DEPENDENT. `child: 'a'` is the declaration; the bridge is what it buys. */
+  const driven = buildTrain([
+    { slug: 'a', links: [{ slug: 'p' }, { slug: 'q' }, { slug: 'r' }] },
+    { slug: 'b', child: 'a', links: [{ slug: 's' }] }
+  ]);
+  eq(driven.bridges.length, 1, 'the dependent chain got no bridge');
+  eq(driven.origins.length, 0, 'a chain something else drives was given an origin '
+    + 'run as well, so it is being driven twice');
+  ok(driven.bridges[0].idlers.length >= MIN,
+    `bridge carries ${driven.bridges[0].idlers.length} idlers, floor is ${MIN}`);
+  /* Walk from the driven chain's first wheel back toward the spine: it must pass
+     through idlers and never mesh a link of another chain directly. */
+  let at = driven.train[driven.bridges[0].head].parent, hops = 0, seen = 0;
+  while (at !== null && hops++ <= driven.train.length) {
+    if (driven.train[at].role === 'idler') seen++;
+    else break;
+    at = driven.train[at].parent;
+  }
+  ok(seen >= MIN, `the driven chain meshes a linked wheel after ${seen} idlers`);
+  ok(at !== null && driven.train[at].role === 'link' && driven.train[at].person === 'a',
+    'the bridge does not land on the spine');
+
+  /* AN INDEPENDENT CHAIN, which is the same claim about the other kind of run.
+     It takes no bridge idlers -- nothing on stage drives it -- and gets a run of
+     its own instead, so it is never a set of gears standing there undriven
+     (Charles, GitHub #116). */
+  const own = buildTrain([
     { slug: 'a', links: [{ slug: 'p' }, { slug: 'q' }, { slug: 'r' }] },
     { slug: 'b', links: [{ slug: 's' }] }
   ]);
-  eq(bridges.length, 1, 'the second chain got no bridge');
-  const MIN = grabNumber('MIN_IDLERS');
-  ok(bridges[0].idlers.length >= MIN,
-    `bridge carries ${bridges[0].idlers.length} idlers, floor is ${MIN}`);
-  /* Walk from the driven chain's first wheel back to the root: it must pass
-     through idlers and never mesh a link of another chain directly. */
-  let at = train[bridges[0].head].parent, hops = 0, seen = 0;
-  while (at !== null && hops++ <= train.length) {
-    if (train[at].role === 'idler') seen++;
-    else break;
-    at = train[at].parent;
-  }
-  ok(seen >= MIN, `the driven chain meshes a linked wheel after ${seen} idlers`);
-  ok(at !== null && train[at].role === 'link' && train[at].person === 'a',
-    'the bridge does not land on the spine');
+  eq(own.origins.length, 1, 'an independent chain got no origin run, so nothing '
+    + 'turns it -- which is the state GitHub #116 exists to remove');
+  eq(own.origins[0].person, 'b', 'the origin run does not feed the chain it belongs to');
+  ok(own.origins[0].idlers.length >= MIN,
+    `an origin run carries ${own.origins[0].idlers.length} idlers, floor is ${MIN}`);
+  eq(own.bridges.filter(b => b.idlers.length).length, 0,
+    'an independent chain kept bridge idlers, so it is being driven by the chain '
+    + 'it takes no drive from');
 });
 
 test('a parent always appears earlier in TRAIN than its children', () => {
@@ -1114,19 +1184,31 @@ test('a parent always appears earlier in TRAIN than its children', () => {
      placed. A forward reference reads undefined and the branch lands wherever
      the last iteration happened to leave it -- silently, with no error. The
      spine is emitted first for exactly this reason, so the check has to run on
-     a stage where the spine is NOT the first person in config order. */
-  const { train } = buildTrain([
-    { slug: 'short', links: [{ slug: 's' }] },
-    { slug: 'long', links: [{ slug: 'a' }, { slug: 'b' }, { slug: 'c' }] }
-  ]);
-  const bad = [];
-  train.forEach((t, i) => {
-    if (t.parent === null) return;
-    if (t.parent >= i) bad.push(`wheel ${i} (${t.role}) names parent ${t.parent}, which is not placed yet`);
+     a stage where the spine is NOT the first person in config order.
+
+     ONE ROOT PER INDEPENDENT CHAIN, and no more (CL#123). It used to be exactly
+     one on any stage, because every chain but the spine hung off the spine. A
+     self-driven chain is a second tree by definition -- that is what
+     independence IS -- so the count is a statement about the DECLARATIONS
+     rather than a constant: every chain with no `child` is a root, every chain
+     with one is not, and anything else means the tree was built from something
+     other than the config. */
+  [[[{ slug: 'short', links: [{ slug: 's' }] },
+     { slug: 'long', links: [{ slug: 'a' }, { slug: 'b' }, { slug: 'c' }] }], 'long'],
+   [CASCADE, 'hub']
+  ].forEach(([people, head]) => {
+    const { train } = buildTrain(people);
+    const bad = [];
+    train.forEach((t, i) => {
+      if (t.parent === null) return;
+      if (t.parent >= i) bad.push(`wheel ${i} (${t.role}) names parent ${t.parent}, which is not placed yet`);
+    });
+    eq(train.filter(t => t.parent === null).length,
+      people.filter(p => p.child == null && (p.links || []).length).length,
+      'the number of roots in TRAIN is not the number of independent chains');
+    eq(train[0].person, head, 'the spine is not emitted first');
+    ok(bad.length === 0, bad.join('\n      '));
   });
-  eq(train.filter(t => t.parent === null).length, 1, 'a bridged stage must have exactly one root');
-  eq(train[0].person, 'long', 'the spine is not emitted first');
-  ok(bad.length === 0, bad.join('\n      '));
 });
 
 test("the static tree's default bridge anchor is a spine wheel, whatever the layout order", () => {
@@ -1134,24 +1216,26 @@ test("the static tree's default bridge anchor is a spine wheel, whatever the lay
      `Math.max(1, ...people.map(p => p.links.length))` -- the longest chain
      ANYWHERE on stage -- and the TRAIN builder used it as a WHEEL INDEX INTO
      THE SPINE. Those two quantities agree only while the spine IS the longest
-     chain, which the old CHAIN_ORDER sort guaranteed and a DECLARED spine does
-     not. The guarantee lived in a different declaration from the index it was
-     propping up, which is the whole defect.
+     chain, which the old CHAIN_ORDER sort guaranteed and neither a declared
+     spine nor the drive tree that replaced it (CL#123) does. The guarantee lived
+     in a different declaration from the index it was propping up, which is the
+     whole defect.
 
-     So the fixture DECLARES the short chain the axis: a two-wheel spine with a
-     seven-wheel chain behind it, the arrangement #85 exists to make askable and
-     one no sort by link count could ever produce. Under the old derivation the
+     So the fixture MAKES the short chain the axis, by making the long one its
+     dependent: a two-wheel spine with a seven-wheel chain hanging off it, the
+     arrangement #85 made askable and one no sort by link count could ever
+     produce. `child` is what asks for it now. Under the old derivation the
      default anchor is floor((7-1)/2) = 3 -- past the spine's last wheel at index
      1, landing on one of the bridged chain's OWN idlers, and a forward reference
      into the bargain. solve() overwrites this parent before anything is drawn,
      so no pixel ever moved; #65 was a malformed static tree all the same, and
      being unable to build one is worth having. */
   const people = [
-    { slug: 'spine', spine: true, links: [{ slug: 'a' }, { slug: 'b' }] },
-    { slug: 'long', links: [1, 2, 3, 4, 5, 6, 7].map(n => ({ slug: 'l' + n })) }
+    { slug: 'spine', links: [{ slug: 'a' }, { slug: 'b' }] },
+    { slug: 'long', child: 'spine', links: [1, 2, 3, 4, 5, 6, 7].map(n => ({ slug: 'l' + n })) }
   ];
   const { train, bridges } = buildTrain(people);
-  eq(train[0].person, 'spine', 'the declared spine was not laid out first');
+  eq(train[0].person, 'spine', 'the chain nothing drives was not laid out first');
   const spineWheels = train.filter(t => t.role === 'link' && t.person === 'spine').length;
 
   /* The fixture is only evidence if it would have caught the old shape. This is
@@ -1224,28 +1308,52 @@ test('the bridge bearing is relative to the stage axis, never absolute', () => {
     'the bridge bearing is not expressed as BRIDGE_BEARING from the axis: ' + decl);
 });
 
-test('a chain that opts out of bridging is a root, and keeps no idlers', () => {
-  /* `bridge: false` is a per-person setting in config.js and says "no drive",
-     not "no position": the chain stays a root, and solve() still has to place it
-     clear of the others -- every root but the first resolved to (0,0) before
-     this task, which drew the second chain on top of the first. */
-  const { train, bridges } = buildTrain([
+test('an independent chain keeps its position and takes its drive from itself', () => {
+  /* No `child` says "nothing here drives me", not "put me nowhere": the chain
+     stays a root, and solve() still has to place it clear of the others -- every
+     root but the first resolved to (0,0) before that was fixed, which drew the
+     second chain on top of the first.
+
+     WHAT IT DOES NOT MEAN IS UNDRIVEN (Charles, GitHub #116, CL#123). `bridge:
+     false` shipped that for one release as CL#122 and it is what this replaces:
+     the chain is a root, keeps no BRIDGE idlers -- there is nothing on stage to
+     hang them off -- and gets an ORIGIN RUN of its own instead, so it reads as
+     its own machine running rather than as a set of gears nothing turns. */
+  const { train, bridges, origins } = buildTrain([
     { slug: 'a', links: [{ slug: 'p' }, { slug: 'q' }, { slug: 'r' }] },
-    { slug: 'b', bridge: false, links: [{ slug: 's' }] }
+    { slug: 'b', links: [{ slug: 's' }] }
   ]);
-  eq(train.filter(t => t.role === 'idler').length, 0,
-    'an unbridged chain still built idlers');
-  eq(bridges.length, 1, 'an unbridged chain is not registered, so nothing places it');
   /* Every message in this file names the FAULT, not the invariant, and these two
-     were the only pair with no word in them saying so -- "an unbridged chain
-     claims idlers" and "an unbridged chain is not a root" read as flat statements
-     about a healthy tree, and quoted out of a failing run they say the opposite of
-     what is being claimed. Their neighbours above carry "still" and "so nothing
-     places it"; these carry it now too. */
-  eq(bridges[0].idlers.length, 0, 'an unbridged chain kept idlers on its bridge '
-    + 'record, and it has no drive to hang them off');
-  eq(train[bridges[0].head].parent, null, 'an unbridged chain was given a parent, '
-    + 'so it is being driven by the chain it opted out of');
+     were the only pair with no word in them saying so -- "an independent chain
+     claims idlers" and "an independent chain is not a root" read as flat
+     statements about a healthy tree, and quoted out of a failing run they say the
+     opposite of what is being claimed. Their neighbours carry "still" and "so
+     nothing places it"; these carry it now too. */
+  eq(bridges.length, 1, 'an independent chain is not registered, so nothing places it');
+  eq(bridges[0].idlers.length, 0, 'an independent chain kept bridge idlers on its '
+    + 'record, and there is no drive on stage to hang them off');
+  eq(train.filter(t => t.role === 'idler' && t.drive === 'bridge').length, 0,
+    'an independent chain still built bridge idlers');
+  eq(origins.length, 1, 'an independent chain got no origin run, so it stands '
+    + 'undriven -- the CL#122 shape this replaced');
+  eq(train.filter(t => t.role === 'idler' && t.drive === 'origin').length,
+    grabNumber('MAX_IDLERS'), 'the origin run was not dealt the same idlers a '
+    + 'bridge is, so the two runs no longer take the same room across the stage');
+  /* UNDER 'edge' the run hangs off the lead gear outward and the head stays a
+     root; under 'fixed' the run runs inward from a mount and the head parents
+     onto its last idler, which makes the MOUNT the root. Either way the chain
+     is exactly one tree with exactly one root, and it is not the spine's. */
+  const head = train[bridges[0].head];
+  if (PAGE_ORIGIN_MOUNT === 'edge') {
+    eq(head.parent, null, 'an independent chain was given a parent, so it is '
+      + 'being driven by a chain it declares no relationship to');
+    ok(origins[0].idlers.every(ix => train[ix].parent != null),
+      'an edge-mounted origin idler is a root, so it has nothing to be placed off');
+  } else {
+    eq(train[origins[0].idlers[0]].parent, null,
+      'a mounted origin run does not start at a station, so it has nothing to '
+      + 'be placed off');
+  }
   ok(/const free = /.test(SRC),
     'solve() has no branch for a root that is not the first wheel, so it would '
     + 'resolve to (0,0) on top of the spine');
@@ -1571,7 +1679,8 @@ test('the settle-rate constant is DERIVED from the speed ladder and BASE_MS, not
    _idlerN, and both are supplied, which is the same thing fitStage() does. */
 function runSolve(people, opts) {
   opts = opts || {};
-  const { train, bridges, order, spine } = buildTrain(people);
+  const { train, bridges, origins, headOf, order, spine, driveFrom, parent } =
+    buildTrain(people, opts.conf, opts.mount);
   const MODULE = page.MODULE, TEETH_MEAN = grabNumber('TEETH_MEAN');
   /* Real deals, so the geometry under test is geometry the page can produce. */
   new Function('TRAIN', 'TEETH_MIN', 'TEETH_MAX', 'TEETH_SLACK', 'TEETH_HOST',
@@ -1583,8 +1692,15 @@ function runSolve(people, opts) {
     grabBlock('(function dealAngles()', '{', '}') + ')();')(
     train, MODULE, page.ANG_MIN, page.ANG_MAX, page.BAND_MAX, page.endsCapFor);
 
+  /* The three index lookups solve() asks per wheel per pass -- two into BRIDGES
+     and one into ORIGINS -- executed out of index.html rather than rebuilt, for
+     the same reason everything else here is: a harness that keeps its own copy of
+     "which run does this wheel belong to" can agree with itself while the page
+     disagrees with both. */
   const lookups = grabDecl('const BRIDGE_FROM =') + '\n'
-    + grabBlockFrom(SRC, 'index.html', 'BRIDGES.forEach(b => {', '{', '}') + ');';
+    + grabBlockFrom(SRC, 'index.html', 'BRIDGES.forEach(b => {', '{', '}') + ');\n'
+    + grabDecl('const ORIGIN_OF =') + '\n'
+    + grabBlockFrom(SRC, 'index.html', 'ORIGINS.forEach(o => {', '{', '}') + ');';
   const body = grabBlock('  solve() {', '{', '}').replace(/^\s*solve\(\)\s*/, '');
   /* CHAIN_RANK is the page's own line too, run against the order buildTrain got
      from executing the page's CHAIN_ORDER -- not a second sort of the fixture. */
@@ -1596,7 +1712,8 @@ function runSolve(people, opts) {
   people.forEach(p => (p.links || []).forEach(l => {
     (sites[p.slug] = sites[p.slug] || {})[l.slug] = {};
   }));
-  const solve = new Function('TRAIN', 'BRIDGES', 'MODULE', 'TOOTH_ADD',
+  const solve = new Function('TRAIN', 'BRIDGES', 'ORIGINS', 'ORIGIN_MOUNT',
+    'HEAD_OF', 'DRIVE_FROM', 'CHAIN_ORDER', 'MODULE', 'TOOTH_ADD',
     'TEETH_MEAN', 'MIN_IDLERS', 'MAX_IDLERS', 'CLEARANCE', 'ENDS_APART',
     'ANG_MIN', 'ANG_MAX', 'CHAIN_RANK', 'SPINE_SLUG', 'PAIR_SLOTS', 'PAIRS', 'SINGLES',
     'SITES', 'console', `
@@ -1613,12 +1730,14 @@ function runSolve(people, opts) {
   ctx._tight = opts.tight === undefined ? 1 : opts.tight;
   ctx._spreadBoost = 1;
   ctx._solved = null;
-  const solved = solve(train, bridges, MODULE, page.TOOTH_ADD, TEETH_MEAN,
+  const solved = solve(train, bridges, origins, opts.mount || PAGE_ORIGIN_MOUNT,
+    headOf, driveFrom, order, MODULE, page.TOOTH_ADD, TEETH_MEAN,
     grabNumber('MIN_IDLERS'), grabNumber('MAX_IDLERS'), grabNumber('CLEARANCE'),
     grabNumber('ENDS_APART'), page.ANG_MIN, page.ANG_MAX, CHAIN_RANK,
     spine ? spine.slug : '', [], [], [], sites,
     { warn: (m) => warns.push(m), error: (m) => warns.push(m) }).call(ctx);
-  return { solved, train, bridges, warns, ctx, order, spine };
+  return { solved, train, bridges, origins, headOf, warns, ctx, order, spine,
+    driveFrom, parent };
 }
 
 /* Which chain a placed wheel belongs to: an idler belongs to the chain it
@@ -1649,25 +1768,32 @@ function crossChainFouls(train, solved) {
   return out;
 }
 
-/* Three chains whose PEOPLE order is deliberately NOT their length order, so a
-   layout that follows config order sorts differently from one that follows
-   chain length. Four when the cascade itself is under test. */
+/* Three INDEPENDENT chains -- no `child` anywhere, so all three are roots -- whose
+   PEOPLE order is deliberately NOT their length order, so a layout that follows
+   config order sorts differently from one that follows chain length. Two of them
+   are therefore self-driven, each with an origin run of its own (CL#123), which
+   is what makes this the fixture for everything about ROOTS: the sibling
+   fallback, the stacking, and the shape a chain nothing on stage drives arrives
+   in. Anything about a bridge wants CASCADE, declared up with the TRAIN builder
+   because the builder's own tests need it too. */
 const THREE = [
   { slug: 'mid', links: [{ slug: 'a' }, { slug: 'b' }, { slug: 'c' }] },
   { slug: 'tiny', links: [{ slug: 'd' }] },
   { slug: 'spine', links: [1, 2, 3, 4, 5, 6, 7].map(n => ({ slug: 's' + n })) }
 ];
 
-/* THE SAME THREE CHAINS WITH BOTH DECLARATIONS MADE (#85), and made so that
-   neither agrees with link count nor with the other: the spine is the MIDDLE
-   chain, and the stack behind it runs shortest to longest. PEOPLE order is a
-   third sequence again, so nothing here can pass by accident of the file.
+/* THE SAME THREE CHAINS, STACKED BY DECLARATION rather than by length: the axis
+   is the MIDDLE chain, and the stack behind it runs shortest to longest. PEOPLE
+   order is a third sequence again, so nothing here can pass by accident of the
+   file.
 
    THIS ARRANGEMENT WAS UNREACHABLE under the single sort. Longest-first answered
    both questions at once -- which chain is the axis, and what order the rest sit
    in -- so no config could ask for a short spine or for a stack that is not
-   length order. That is the whole of what the split buys, and it is only proved
-   by a fixture that uses it.
+   length order. That is what #85's split bought, and CL#123 keeps every bit of it
+   with ONE key instead of two: these are all roots, `order` ranks the roots, and
+   THE SPINE IS THE FIRST ROOT. `spine: true` is gone because it could only ever
+   have agreed with that.
 
    MID IS A THREE-WHEEL SPINE ON PURPOSE (Charles, 2026-08-05 / GitHub #104): it
    used to be four, specifically so this fixture would not exercise the ENDS_APART
@@ -1675,16 +1801,16 @@ const THREE = [
    inherited a console.warn nobody wrote it to expect, and a well-formedness
    assertion that treats a coin-flip warning as sometimes-fine is not an
    assertion. Now that a three-wheel spine is fixed (CL#111), this is the more
-   honest fixture: the general "declared spine + stack compose cleanly" test
-   and the specific "three-wheel spine pays ENDS_APART" regression are the same
-   shape of claim, so one fixture proves both rather than the second needing a
-   twin of the first. */
+   honest fixture: the general "a declared stack composes cleanly" test and the
+   specific "three-wheel spine pays ENDS_APART" regression are the same shape of
+   claim, so one fixture proves both rather than the second needing a twin of the
+   first. */
 const DECLARED = [
-  { slug: 'mid', order: 20, spine: true,
-    links: [{ slug: 'a' }, { slug: 'b' }, { slug: 'c' }] },
-  { slug: 'tiny', order: 10, links: [{ slug: 'd' }] },
+  { slug: 'mid', order: 10, links: [{ slug: 'a' }, { slug: 'b' }, { slug: 'c' }] },
+  { slug: 'tiny', order: 20, links: [{ slug: 'd' }] },
   { slug: 'big', order: 30, links: [1, 2, 3, 4, 5, 6, 7].map(n => ({ slug: 's' + n })) }
 ];
+
 
 /* Each chain's mean position along the CROSS AXIS, in the increasing screen
    direction: down at _axisRot 0, right at 90. Idlers are excluded -- they span
@@ -1796,76 +1922,244 @@ test('the spine is topmost in landscape and LEFTMOST in portrait', () => {
   ok(bad.length === 0, bad.join('\n      '));
 });
 
-test('the spine is a separate choice from the stack, and each moves alone', () => {
-  /* The two keys are only worth having if they are independent. Take the same
-     three chains and change ONE declaration at a time: dropping `spine` must move
-     the axis and leave the stack alone, and changing `order` must move the stack
-     and leave the axis alone. Under one sort key neither was possible -- there was
-     one lever and it moved both. */
-  const drop = (p) => { const q = Object.assign({}, p); delete q.spine; return q; };
-  const noSpine = buildTrain(DECLARED.map(drop));
-  eq(noSpine.spine.slug, 'tiny',
-    'with no chain declaring itself the axis, the spine is not the head of the stack');
-  eq(noSpine.order.map(p => p.slug).join(','), 'tiny,mid,big',
-    'dropping the spine declaration changed the stacking order too');
+test('the spine is the first root, and a dependent can never be one', () => {
+  /* WHAT REPLACED `spine: true` (Charles, GitHub #116, CL#123). The axis used to
+     be its own declaration, kept separate from `order` because #85 found the two
+     entangled in one sort. Under a drive tree there is nothing left for it to
+     say: a root is exactly what "no `child`" means, the walk lays the roots out
+     in `order`, and the first chain laid out IS the axis -- so the two keys could
+     only ever have agreed, and a config could express a disagreement that the
+     page would then have had to arbitrate.
+
+     WHAT SURVIVES IS `order`, and it still moves the axis -- among the ROOTS.
+     Changing which root is first changes the spine, which is the whole of what
+     `spine: true` used to buy, in the key that was already there. */
+  const declared = buildTrain(DECLARED);
+  eq(declared.spine.slug, 'mid', 'the lowest-ordered root is not the axis');
+  eq(declared.order.map(p => p.slug).join(','), 'mid,tiny,big',
+    'the declared stack was not honoured');
 
   const reordered = DECLARED.map(p => p.slug === 'big'
     ? Object.assign({}, p, { order: 1 }) : p);
   const moved = buildTrain(reordered);
-  eq(moved.spine.slug, 'mid', 'reordering the stack moved the axis with it');
-  eq(moved.order.map(p => p.slug).join(','), 'mid,big,tiny',
-    'the reordered stack was not honoured behind the spine');
+  eq(moved.spine.slug, 'big', 'moving a root to the head of the stack did not '
+    + 'move the axis with it, so `order` no longer names the spine and nothing does');
+  eq(moved.order.map(p => p.slug).join(','), 'big,mid,tiny',
+    'the reordered stack was not honoured');
 
-  /* AND THE SPINE IS ALWAYS THE HEAD OF THE LAYOUT, however far down the stack it
-     was declared. That is structural, not cosmetic: a bridge may only hang off a
-     wheel already placed, so a spine emitted second would be driven by the chain
-     it is supposed to drive. */
-  [DECLARED, reordered, DECLARED.map(drop), THREE].forEach(people => {
+  /* A DEPENDENT IS NEVER THE AXIS, however low its `order`. `order` ranks
+     siblings, and a chain with a parent is laid out inside its parent's subtree
+     by construction -- there is no number it can carry that puts it first. */
+  const low = CASCADE.map(p => p.child ? Object.assign({}, p, { order: -99 }) : p);
+  eq(buildTrain(low).spine.slug, 'hub',
+    'a dependent chain became the axis, so the walk is being overridden by a sort');
+
+  /* AND THE SPINE IS ALWAYS THE HEAD OF THE LAYOUT. That is structural, not
+     cosmetic: a bridge may only hang off a wheel already placed, so a spine
+     emitted second would be driven by the chain it is supposed to drive. */
+  [DECLARED, reordered, CASCADE, low, THREE].forEach(people => {
     const { order, spine } = buildTrain(people);
     eq(order[0].slug, spine.slug,
       'CHAIN_ORDER[0] is ' + order[0].slug + ', not the spine ' + spine.slug);
   });
 });
 
-test('a spine declaration that cannot be honoured is announced, not obeyed', () => {
-  /* An empty chain is not laid out at all, so it cannot be the axis the others
-     hang off, and two chains cannot both be it. Silently picking something else
-     would leave config.js reading as though a choice had been made that the page
-     never made -- the same class of quiet default as the old PEOPLE[0] hostname
-     fallback. The composition still has to arrive, so it falls back and says so. */
-  const empty = buildTrain([
-    { slug: 'nothing', spine: true, links: [] },
-    { slug: 'mid', links: [{ slug: 'a' }, { slug: 'b' }] },
-    { slug: 'tiny', links: [{ slug: 'd' }] }
-  ]);
-  eq(empty.spine.slug, 'mid', 'a chain with no links was made the spine');
-  ok(empty.spineWarns.some(w => /nothing/.test(w) && /no links/.test(w)),
-    'nothing was said about the spine declaration that was dropped: '
-    + (empty.spineWarns.join(' | ') || '(silence)'));
+test('the stack is a depth-first walk of the drive tree, not a sort', () => {
+  /* Charles, GitHub #116: "if chloe ends up being marked as my child and harper
+     has 3 clickable links, it goes me -> chloe child since it's a dependent,
+     then harper". A DEPENDENT FOLLOWS ITS PARENT IMMEDIATELY even when an
+     unrelated root is longer -- so link count stops ordering the page and
+     survives only as the sibling tie-break.
 
-  const both = buildTrain([
-    { slug: 'first', spine: true, links: [{ slug: 'a' }] },
-    { slug: 'second', spine: true, links: [{ slug: 'b' }, { slug: 'c' }] }
-  ]);
-  eq(both.spine.slug, 'second',
-    'two spine declarations did not resolve to the one earlier in the stack');
-  ok(both.spineWarns.some(w => /only one chain can be the axis/.test(w)),
-    'two chains claimed the axis in silence: '
-    + (both.spineWarns.join(' | ') || '(silence)'));
+     CASCADE is built to fail under a flat sort: `far` is the longest chain on
+     stage and comes LAST, because it is a root and the walk finishes the spine's
+     subtree before starting another one. Sort the four by anything at all and
+     `far` moves. */
+  const { order, driveFrom } = buildTrain(CASCADE);
+  eq(order.map(p => p.slug).join(','), 'hub,kid,cub,far',
+    'the chains did not come out as a depth-first walk of the drive tree');
 
-  /* BOTH FAULTS AT ONCE, because that is the case a message can get wrong on its
-     own. Two empty chains claiming the axis fires both warnings, and each has to
-     name the chain that ACTUALLY stood in -- neither may work out its own
-     replacement, or the console describes a composition the page did not draw. */
-  const worst = buildTrain([
-    { slug: 'ghost-a', spine: true, links: [] },
-    { slug: 'ghost-b', spine: true, links: [] },
-    { slug: 'real', links: [{ slug: 'a' }, { slug: 'b' }] }
+  /* AND IT IS RECURSIVE, not one level deep: a grandchild follows ITS parent,
+     inside its parent's own subtree, before the walk returns to the roots. */
+  const deep = buildTrain(CASCADE.concat([
+    { slug: 'pup', child: 'cub', links: [{ slug: 'p1' }] },
+    { slug: 'gcub', child: 'kid', links: [{ slug: 'g1' }] }
+  ]));
+  eq(deep.order.map(p => p.slug).join(','), 'hub,kid,gcub,cub,pup,far',
+    'a grandchild did not follow its own parent, so the walk is not depth-first');
+
+  /* A PARENT IS ALWAYS PLACED BEFORE ANYTHING IT DRIVES, which is the invariant
+     the entire solve rests on -- a bridge may only hang off a wheel already
+     placed -- and under a tree it has to be checked rather than assumed. */
+  const rank = {};
+  order.forEach((p, k) => { rank[p.slug] = k; });
+  Object.keys(driveFrom).forEach(slug => {
+    ok(rank[driveFrom[slug]] < rank[slug],
+      `${slug} takes its drive from ${driveFrom[slug]}, which is laid out after it`);
+  });
+});
+
+test('siblings cascade off each other, they do not all hang off the parent', () => {
+  /* Charles, GitHub #116: "obviously dependents sort by # of links -- with the
+     lead gear of the first child being the place where the PTO for the next
+     child feeds off". `child: 'hub'` declares MEMBERSHIP of hub's dependent
+     group; the attachment point is COMPUTED. You do not take four power
+     take-offs off one gear, you cascade them.
+
+     SO THE SIBLING SORT AND THE DRIVE TOPOLOGY ARE ONE FACT. `kid` has two links
+     and `cub` one, so kid leads and cub takes its drive from KID -- and `cub` is
+     written FIRST in the fixture's PEOPLE, so a config-order walk fails this. */
+  const { bridges, headOf, driveFrom, parent } = buildTrain(CASCADE);
+  eq(driveFrom.kid, 'hub', 'the first sibling does not take its drive from the parent');
+  eq(driveFrom.cub, 'kid', 'the second sibling hangs off the parent instead of off '
+    + 'the lead gear of the sibling before it');
+  eq(parent.cub, 'hub', 'the declared parent was rewritten by the cascade -- '
+    + '`child` names the group, and the group is still hub');
+
+  /* AND THE COMPUTED ATTACHMENT NAMES A WHEEL, not just a chain. A first child
+     may take its drive anywhere along its parent's chain, so the search is left
+     free (`at` is null); a later sibling names the exact lead gear. */
+  const by = {};
+  bridges.forEach(b => { by[b.person] = b; });
+  eq(by.kid.at, null, "the first sibling's attachment was pinned to one wheel, so "
+    + 'the search has nothing left to choose between');
+  eq(by.cub.at, headOf.kid, 'the second sibling does not name its predecessor\'s '
+    + 'lead gear as the wheel its drive comes off');
+  ok(by.cub.at < by.cub.head, 'the wheel the drive comes off is emitted after the '
+    + 'chain it drives, so it is not placed when it is asked for');
+
+  /* THREE DEEP, because two siblings cannot tell a cascade from a rule that says
+     "the previous chain". A third sibling must chain off the SECOND, not the first
+     and not the parent. */
+  const three = buildTrain(CASCADE.concat([
+    { slug: 'runt', child: 'hub', links: [{ slug: 'r1' }] }
+  ]));
+  /* cub and runt both have one link, so the name breaks it, descending: runt, cub. */
+  eq(three.order.map(p => p.slug).join(','), 'hub,kid,runt,cub,far',
+    'siblings did not sort by link count then name, descending');
+  eq(three.driveFrom.runt, 'kid', 'the second of three siblings did not take its '
+    + 'drive from the first');
+  eq(three.driveFrom.cub, 'runt', 'the third sibling did not take its drive from '
+    + 'the second -- the drive is a star off the parent, not a cascade');
+});
+
+test('a child naming itself, a stranger, or a cycle is refused by name', () => {
+  /* THREE MISTAKES BECOME NEWLY EXPRESSIBLE the moment a declaration names
+     another chain, and all three are refused ALOUD and placed as roots. A walk
+     that can recurse must never be one edit away from doing it, and a config
+     that is quietly ignored is a composition nobody asked for. */
+  const links = [{ slug: 'x' }];
+  const self = buildTrain([
+    { slug: 'a', links: links },
+    { slug: 'b', child: 'b', links: links }
   ]);
-  eq(worst.spine.slug, 'real', 'two empty spine declarations did not fall back to the stack');
-  eq(worst.spineWarns.filter(w => /"real" is the axis/.test(w)).length, 2,
-    'a warning named something other than the chain that was actually used: '
-    + (worst.spineWarns.join(' | ') || '(silence)'));
+  eq(self.parent.b, null, 'a chain declaring itself its own child was honoured');
+  ok(self.spineWarns.some(w => /"b"/.test(w) && /its own child/.test(w)),
+    'a chain drove itself in silence: ' + (self.spineWarns.join(' | ') || '(silence)'));
+
+  const stranger = buildTrain([
+    { slug: 'a', links: links },
+    { slug: 'b', child: 'nobody', links: links }
+  ]);
+  eq(stranger.parent.b, null, 'a child naming a slug that is not a person was honoured');
+  ok(stranger.spineWarns.some(w => /"nobody"/.test(w) && /not a person/.test(w)),
+    'a dangling child name passed in silence: '
+    + (stranger.spineWarns.join(' | ') || '(silence)'));
+
+  /* A CYCLE, which is the one that does not merely draw the wrong thing -- an
+     unguarded walk never terminates. Two-chain and three-chain, because a
+     two-chain cycle can be caught by a self-reference test that a longer one
+     walks straight past. */
+  [[{ slug: 'a', child: 'b', links: links }, { slug: 'b', child: 'a', links: links }],
+   [{ slug: 'a', child: 'c', links: links }, { slug: 'b', child: 'a', links: links },
+    { slug: 'c', child: 'b', links: links }]
+  ].forEach(people => {
+    const cyc = buildTrain(people);
+    const broke = people.filter(p => cyc.parent[p.slug] == null);
+    ok(broke.length > 0, 'a drive cycle of ' + people.length + ' chains was left intact');
+    ok(cyc.order.length === people.length,
+      'a drive cycle lost a chain out of the layout instead of breaking the cycle');
+    ok(cyc.spineWarns.some(w => /drive cycle/.test(w)),
+      'a drive cycle was broken in silence: '
+      + (cyc.spineWarns.join(' | ') || '(silence)'));
+    /* And every chain still reaches a root in at most one pass per chain, which
+       is the property the guard exists to give. */
+    people.forEach(p => {
+      let at = cyc.parent[p.slug], hops = 0;
+      while (at != null && hops++ <= people.length) at = cyc.parent[at];
+      ok(hops <= people.length, `${p.slug} still walks a cycle after the refusal`);
+    });
+  });
+});
+
+test('a parent off this stage is silent; a parent with no wheels is stepped over', () => {
+  /* A SOLO PAGE CARRIES ONE PERSON, so every dependent's parent is legitimately
+     absent there. That is not a mistake and must not warn -- it is the same
+     silence `bridge` kept on a single-chain page, where there was nothing to
+     bridge to. The test is the difference between a slug that is not on stage and
+     one that is not in config.js at all, which is why buildTrain takes both. */
+  const conf = [{ slug: 'a', links: [{ slug: 'x' }] },
+    { slug: 'b', child: 'a', links: [{ slug: 'y' }] }];
+  const solo = buildTrain([conf[1]], conf);
+  eq(solo.parent.b, null, 'a dependent whose parent is not on stage was given one');
+  eq(solo.spine.slug, 'b', 'a solo dependent is not the axis of its own page');
+  eq(solo.spineWarns.join(' | '), '',
+    'a solo page warned about a parent that is simply not on it');
+  eq(solo.bridges.length, 0, 'the one chain on a solo page was given a bridge');
+  eq(solo.origins.length, 0, 'the one chain on a solo page was given an origin '
+    + 'run -- the spine takes no idlers, and a solo page is all spine');
+
+  /* A PARENT WITH NO LINKS IS NOT LAID OUT AT ALL, so it cannot drive anything.
+     The drive is taken from the nearest ancestor that IS on the page rather than
+     from a chain that is not there, and the walk therefore never sees it. */
+  const gap = buildTrain([
+    { slug: 'top', links: [{ slug: 'a' }, { slug: 'b' }] },
+    { slug: 'hollow', child: 'top', links: [] },
+    { slug: 'under', child: 'hollow', links: [{ slug: 'c' }] }
+  ]);
+  eq(gap.parent.under, 'top', 'a chain with no wheels was left driving another one');
+  eq(gap.order.map(p => p.slug).join(','), 'top,under,hollow',
+    'a chain with no wheels is inside the walk instead of appended after it');
+  eq(gap.driveFrom.under, 'top', 'the drive was taken from a chain that is not drawn');
+});
+
+test('the keys CL#123 retired are announced, not ignored', () => {
+  /* `bridge` and `spine` did real work until CL#123, so a file still carrying one
+     is not a typo -- it is a config that has not been migrated, and reading it in
+     silence would draw a composition nobody asked for while config.js reads as
+     though a choice had been made. Both are ignored, and both say so. */
+  const stale = buildTrain([
+    { slug: 'a', spine: true, links: [{ slug: 'x' }, { slug: 'y' }] },
+    { slug: 'b', bridge: false, links: [{ slug: 'z' }] }
+  ]);
+  ok(stale.spineWarns.some(w => /"a"/.test(w) && /spine/.test(w) && /retired/.test(w)),
+    'a leftover `spine` was ignored in silence: '
+    + (stale.spineWarns.join(' | ') || '(silence)'));
+  ok(stale.spineWarns.some(w => /"b"/.test(w) && /bridge/.test(w) && /retired/.test(w)),
+    'a leftover `bridge` was ignored in silence: '
+    + (stale.spineWarns.join(' | ') || '(silence)'));
+  /* AND THE MESSAGE SAYS WHAT TO WRITE INSTEAD, which is the whole value of
+     warning rather than dropping the key: `bridge: false` becomes no `child` at
+     all, and `bridge: true` becomes a `child` naming somebody. */
+  const kept = buildTrain([
+    { slug: 'a', links: [{ slug: 'x' }] },
+    { slug: 'b', bridge: true, links: [{ slug: 'z' }] }
+  ]);
+  ok(kept.spineWarns.some(w => /child: '<slug>'/.test(w)),
+    'the migration note for `bridge: true` does not name the key that replaces it: '
+    + (kept.spineWarns.join(' | ') || '(silence)'));
+  ok(stale.spineWarns.some(w => /child: null/.test(w)),
+    'the migration note for `bridge: false` does not name what replaces it: '
+    + (stale.spineWarns.join(' | ') || '(silence)'));
+  /* AND NEITHER KEY DOES ANYTHING. `a` declares the axis and does not get it --
+     `b` is the shorter chain but neither declares an `order`, so the fallback
+     ranks the roots by link count and `a` leads on its own merits; the proof that
+     `spine: true` was ignored is that the identical stage without it lays out
+     exactly the same. */
+  eq(stale.order.map(p => p.slug).join(','),
+    buildTrain([{ slug: 'a', links: [{ slug: 'x' }, { slug: 'y' }] },
+      { slug: 'b', links: [{ slug: 'z' }] }]).order.map(p => p.slug).join(','),
+    'a retired key changed the layout, so it is still being read');
 });
 
 test('the stack nobody declares is link count, then name, descending', () => {
@@ -1977,7 +2271,7 @@ test('a half-declared stack puts the declarations first, and the rest behind the
     'an unusable `order` was treated as a position rather than as no declaration');
 });
 
-test('the shipped config declares its spine and its stack, and gets what it declares', () => {
+test('the shipped config declares its stack and its drive, and gets what it declares', () => {
   /* #85 is only finished if the FILE says where each chain goes. Everything above
      proves the keys work on fixtures; this is the one that reads config.js, and
      it is what stops the next person added to the household from arriving with
@@ -1985,11 +2279,18 @@ test('the shipped config declares its spine and its stack, and gets what it decl
      inference the whole issue exists to remove, and which would come back
      silently, because the default is deliberately the old rule.
 
-     It is a gate on the config rather than on the code, so it says what to do:
-     give the new chain an `order`. */
+     IT GATES `child` TOO NOW (GitHub #116, CL#123). A `child` is the one key in
+     this file that names ANOTHER entry, so it is the one key that can be wrong
+     about something other than itself: a typo, a self-reference or a cycle. The
+     page refuses all three aloud at load, which is the right behaviour on a
+     browser and the wrong place to find out. This is that same check, before the
+     deploy.
+
+     It is a gate on the config rather than on the code, so it says what to do. */
   const people = loadConfig().PEOPLE || [];
   const bad = [];
-  const seen = {};
+  const seen = {}, known = {};
+  people.forEach(p => { known[p.slug] = p; });
   people.forEach(p => {
     if (!('order' in p)) {
       bad.push(`"${p.slug}" declares no order -- give it one (they need not be `
@@ -2006,40 +2307,92 @@ test('the shipped config declares its spine and its stack, and gets what it decl
     seen[p.order] = p.slug;
   });
 
-  const claimed = people.filter(p => p.spine === true);
-  if (claimed.length !== 1) {
-    bad.push(`${claimed.length} chains declare spine: true (`
-      + (claimed.map(p => p.slug).join(', ') || 'none') + ') -- exactly one chain '
-      + 'is the axis the composition is built around, and it should say so');
-  }
-  claimed.forEach(p => {
-    if (!(p.links || []).length) bad.push(`"${p.slug}" declares spine: true but `
-      + 'has no links, so it is not laid out at all and cannot be the axis');
+  /* THE RETIRED KEYS ARE A CONFIG FAULT, not a code one: the page ignores them
+     and warns, and a file that still carries one is a migration nobody finished. */
+  people.forEach(p => {
+    ['spine', 'bridge'].forEach(k => {
+      if (p[k] !== undefined) {
+        bad.push(`"${p.slug}" still declares ${k}: ${JSON.stringify(p[k])}, which `
+          + 'CL#123 retired -- `child` names who drives a chain, and its absence '
+          + 'means nothing does');
+      }
+    });
   });
+
+  people.forEach(p => {
+    if (p.child == null) return;
+    if (p.child === p.slug) {
+      bad.push(`"${p.slug}" declares itself its own child -- nothing drives itself`);
+      return;
+    }
+    if (!known[p.child]) {
+      bad.push(`"${p.slug}" declares child: ${JSON.stringify(p.child)}, which is `
+        + 'not a person in this file');
+      return;
+    }
+    const walk = [p.slug];
+    let at = known[p.child];
+    while (at && at.child != null) {
+      if (walk.indexOf(at.slug) >= 0) break;
+      walk.push(at.slug);
+      at = known[at.child];
+      if (at && walk.indexOf(at.slug) >= 0) {
+        bad.push(`"${p.slug}" is in a drive cycle (${walk.concat(at.slug).join(' -> ')})`);
+        break;
+      }
+    }
+  });
+
+  /* AT LEAST ONE ROOT, or there is no axis and nothing on the page is driven by
+     anything: a file where every chain names a parent is a file that is all
+     cycle, however it is walked. */
+  const roots = people.filter(p => p.child == null && (p.links || []).length);
+  if (!roots.length) {
+    bad.push('no chain in config.js is a root -- every one names a `child`, so '
+      + 'there is no axis for the composition to be built around');
+  }
   ok(bad.length === 0, bad.join('\n      '));
 
   /* AND THE PAGE USES WHAT THE FILE SAYS. Read back through index.html's own
      declarations against the real PEOPLE, so the assertion is about the shipped
-     config going through the shipped derivation, not about either alone. */
+     config going through the shipped derivation, not about either alone. The
+     expected order is worked out HERE, from the file, rather than read back out
+     of the page: the roots in ascending `order`, each followed by its own
+     dependents. */
   const { order, spine, spineWarns } = buildTrain(people);
-  eq(spine.slug, claimed[0].slug, 'the chain config.js declares the axis is not '
-    + 'the one the page laid out first');
-  eq(spineWarns.join(' | '), '', 'the shipped config provoked a spine warning');
-  eq(order.map(p => p.slug).join(','),
-    [claimed[0].slug].concat(people.filter(p => p !== claimed[0])
-      .slice().sort((a, b) => a.order - b.order).map(p => p.slug)).join(','),
-    'the shipped chains do not lay out as the spine followed by ascending order');
+  const byOrder = (a, b) => a.order - b.order;
+  const want = [];
+  const push = (p) => {
+    want.push(p.slug);
+    people.filter(k => k.child === p.slug && (k.links || []).length)
+      .sort(byOrder).forEach(push);
+  };
+  roots.slice().sort(byOrder).forEach(push);
+  eq(spine.slug, want[0], 'the first root in config.js is not the chain the page '
+    + 'laid out first, and the spine is the first root');
+  eq(spineWarns.join(' | '), '', 'the shipped config provoked a drive-tree warning');
+  eq(order.filter(p => (p.links || []).length).map(p => p.slug).join(','),
+    want.join(','),
+    'the shipped chains do not lay out as a walk of the drive tree in `order`');
 });
 
-test('a declared spine and stack still compose into a well-formed machine', () => {
-  /* The keys are not worth having if the arrangement they unlock does not solve.
-     DECLARED is the hard case on purpose -- a THREE-wheel spine with a SEVEN-wheel
-     chain in the stack, which the old sort could never present to the solver -- so
-     everything the composition is required to be is asked of it at once, at both
-     stage rotations and at both idler counts:
+test('a declared stack and a real cascade still compose into a well-formed machine', () => {
+  /* The keys are not worth having if the arrangements they unlock do not solve.
+     Both hard cases go through the same battery, at both stage rotations and at
+     both idler counts:
 
-       every bridge hangs off a chain EARLIER in the layout order, which is what
-       "a wheel already placed" means once solve() has chosen the anchor;
+       DECLARED -- three INDEPENDENT chains, a THREE-wheel axis with a SEVEN-wheel
+       chain behind it, which no sort by link count could ever present to the
+       solver, and which under CL#123 also means two self-driven chains each
+       carrying an origin run of its own;
+       CASCADE -- a spine with TWO dependents that chain off each other, plus an
+       unrelated root, which is the only shape that exercises a computed
+       attachment onto a named lead gear AND an origin run in the same solve.
+
+     What is asked of each:
+
+       every drive run hangs off a chain EARLIER in the layout order, which is
+       what "a wheel already placed" means once solve() has chosen the anchor;
        no chain head fell back to the origin, the failure the bridge exists to
        remove;
        every wheel of every chain is placed at a finite point -- coverage;
@@ -2047,42 +2400,70 @@ test('a declared spine and stack still compose into a well-formed machine', () =
        -- three wheels, the shortest length that ever needs to pay ENDS_APART at
        all (GitHub #104) -- never falls back to planting a wheel with a warning. */
   const bad = [];
-  for (let trial = 0; trial < 40 && bad.length === 0; trial++) {
-    const rot = trial % 2 ? 90 : 0, n = trial % 4 < 2 ? 1 : 2;
-    const ctx = {};
-    const { solved, train, bridges, warns, spine, order } =
-      runSolve(DECLARED, { axisRot: rot, idlerN: n, ctx });
-    const where = `axisRot ${rot}, ${n} idler(s): `;
-    eq(spine.slug, 'mid', 'the declared spine is not the axis the solver used');
-    warns.forEach(w => bad.push(where + `warned "${w}"`));
-    const rank = {};
-    order.forEach((p, k) => { rank[p.slug] = k; });
-    const at = {};
-    solved.gears.forEach(w => { at[w.i] = w; });
-    bridges.forEach(b => {
-      const anchor = (ctx._bridgeAt || {})[b.person];
-      if (!anchor || anchor.at == null) return;   /* a refused bridge is warned above */
-      const host = chainOfWheel(train, { i: anchor.at, person: train[anchor.at].person });
-      if (!(rank[host] < rank[b.person])) {
-        bad.push(where + `chain ${b.person} hangs off ${host}, which is not `
-          + 'earlier in the layout order');
-      }
-      const head = at[b.head];
-      if (!head) bad.push(where + `chain ${b.person}'s head is not placed at all`);
-      else if (Math.hypot(head.x, head.y) < 1e-9) {
-        bad.push(where + `chain ${b.person}'s head fell back to the origin`);
-      }
-    });
-    train.forEach((t, i) => {
-      if (t.role !== 'link') return;
-      const w = at[i];
-      if (!w) bad.push(where + `${t.person} wheel ${i} was not placed at all`);
-      else if (!isFinite(w.x) || !isFinite(w.y)) {
-        bad.push(where + `${t.person} wheel ${i} is at (${w.x}, ${w.y})`);
-      }
-    });
-    crossChainFouls(train, solved).forEach(f => bad.push(where + f));
-  }
+  [['DECLARED', DECLARED, 'mid'], ['CASCADE', CASCADE, 'hub']].forEach(([label, people, axis]) => {
+    for (let trial = 0; trial < 40 && bad.length === 0; trial++) {
+      const rot = trial % 2 ? 90 : 0, n = trial % 4 < 2 ? 1 : 2;
+      const ctx = {};
+      const { solved, train, bridges, origins, warns, spine, order } =
+        runSolve(people, { axisRot: rot, idlerN: n, ctx });
+      const where = `${label} at axisRot ${rot}, ${n} idler(s): `;
+      eq(spine.slug, axis, label + ': the first root is not the axis the solver used');
+      warns.forEach(w => bad.push(where + `warned "${w}"`));
+      const rank = {};
+      order.forEach((p, k) => { rank[p.slug] = k; });
+      const at = {};
+      solved.gears.forEach(w => { at[w.i] = w; });
+      bridges.forEach(b => {
+        const anchor = (ctx._bridgeAt || {})[b.person];
+        if (!anchor || anchor.at == null) return;   /* a refused bridge is warned above */
+        const host = chainOfWheel(train, { i: anchor.at, person: train[anchor.at].person });
+        if (!(rank[host] < rank[b.person])) {
+          bad.push(where + `chain ${b.person} hangs off ${host}, which is not `
+            + 'earlier in the layout order');
+        }
+        const head = at[b.head];
+        if (!head) bad.push(where + `chain ${b.person}'s head is not placed at all`);
+        else if (Math.hypot(head.x, head.y) < 1e-9) {
+          bad.push(where + `chain ${b.person}'s head fell back to the origin`);
+        }
+      });
+      /* AN ORIGIN RUN IS STRUCTURE, SO ITS IDLERS ARE PLACED WHEELS -- every one
+         of them that is still in mesh at this idler count, at a finite point.
+         A run that is registered and not drawn is a chain that says it drives
+         itself and shows nothing doing it.
+
+         AND EXACTLY THAT MANY. `nIdle` is a property of the VIEWPORT -- how much
+         cross axis there is to spend -- and an origin run is the same run of
+         plain idlers a bridge is, so a stage with room for one bridge idler has
+         room for one of these. Parked in the same pass and by the same count, so
+         the surplus must be absent as firmly as the rest must be present:
+         asserting only the presence half leaves a run free to draw its full
+         MAX_IDLERS on a viewport that has room for one. */
+      origins.forEach(o => {
+        o.idlers.forEach((ix, k) => {
+          const w = at[ix];
+          if (k < n) {
+            if (!w) bad.push(where + `${o.person}'s origin idler ${ix} was not placed`);
+            else if (!isFinite(w.x) || !isFinite(w.y)) {
+              bad.push(where + `${o.person}'s origin idler ${ix} is at (${w.x}, ${w.y})`);
+            }
+          } else if (w) {
+            bad.push(where + `${o.person}'s origin run drew idler ${ix}, slot ${k}, `
+              + `on a stage with room for ${n} — the surplus is not parked`);
+          }
+        });
+      });
+      train.forEach((t, i) => {
+        if (t.role !== 'link') return;
+        const w = at[i];
+        if (!w) bad.push(where + `${t.person} wheel ${i} was not placed at all`);
+        else if (!isFinite(w.x) || !isFinite(w.y)) {
+          bad.push(where + `${t.person} wheel ${i} is at (${w.x}, ${w.y})`);
+        }
+      });
+      crossChainFouls(train, solved).forEach(f => bad.push(where + f));
+    }
+  });
   ok(bad.length === 0, [...new Set(bad)].slice(0, 5).join('\n      '));
 });
 
@@ -2139,6 +2520,64 @@ test('no wheel of one chain ever overlaps a wheel of another', () => {
   ok(bad.length === 0, bad.slice(0, 5).join('\n      '));
 });
 
+test('a self-driven chain takes its sense from its own idler count, not a second clock', () => {
+  /* "Its own idler train, its own ratio, its own resulting direction" (GitHub
+     #107, folded into #116). WHERE THE DIRECTION COMES FROM is the whole of the
+     claim: the far end of the origin run is the driver, so the count of idlers
+     between it and the lead gear decides which way that chain turns -- the same
+     rule a bridged chain has always obeyed, applied to a run that starts off the
+     stage instead of on another chain.
+
+     SO IT IS DERIVED, AND IT MOVES WHEN THE COUNT MOVES. Solve the same stage at
+     one idler and at two: an independent chain's lead gear must come out the
+     other way round, and the spine's must not move at all, because nothing
+     stands between the spine and the drive it is the datum of.
+
+     AND THERE IS NO SECOND INTEGRATOR IN ANY OF IT (CL#3, the invariant this
+     page has broken twice). Independence is an independent drive PATH; every
+     wheel's angle is still `phase + dir * _M / teeth` off the one master angle,
+     and `dir` is a solve-time constant. The rule is checked at its one home --
+     applyRotation() -- because a second clock would have to appear there. */
+  const dirOf = (solved, slug, heads) => {
+    const w = solved.gears.find(g => g.i === heads[slug]);
+    return w ? w.dir : null;
+  };
+  const bad = [];
+  for (let trial = 0; trial < 20; trial++) {
+    [0, 90].forEach(rot => {
+      const one = runSolve(THREE, { axisRot: rot, idlerN: 1 });
+      const two = runSolve(THREE, { axisRot: rot, idlerN: 2 });
+      const spine = one.order[0].slug;
+      const where = `axisRot ${rot}: `;
+      if (dirOf(one.solved, spine, one.headOf) !== dirOf(two.solved, spine, two.headOf)) {
+        bad.push(where + 'the spine changed sense with the idler count, and nothing '
+          + 'stands between it and the drive');
+      }
+      one.origins.forEach(o => {
+        if (o.mounted) return;   /* a mounted run re-parents instead; see below */
+        const a = dirOf(one.solved, o.person, one.headOf);
+        const b = dirOf(two.solved, o.person, two.headOf);
+        if (a === null || b === null) return bad.push(where + o.person + "'s lead gear was not placed");
+        if (a === b) {
+          bad.push(where + `${o.person} turns ${a} through both one idler and two, `
+            + 'so its sense is not derived from its own origin run at all');
+        }
+      });
+    });
+  }
+  ok(bad.length === 0, [...new Set(bad)].slice(0, 4).join('\n      '));
+
+  /* ONE CLOCK, read at the only place a second one could be introduced. */
+  const rot = grabBlock('  applyRotation() {', '{', '}');
+  ok(!/requestAnimationFrame|performance\.now|Date\.now|setInterval|setTimeout/.test(rot),
+    'applyRotation() reaches for a clock of its own — every wheel must derive '
+    + 'from the one master angle (CL#3)');
+  const angles = rot.match(/rotate\('[^)]*\+[^)]*\)/g) || [];
+  ok(angles.length > 0 && angles.every(a => /_M/.test(a)),
+    'a transform is written from something other than the master angle: '
+    + angles.filter(a => !/_M/.test(a)).join(' | '));
+});
+
 test('no chain head is ever dropped at the origin', () => {
   /* The cascade path the bridge exists to remove: a head whose host is not on
      stage keeps x = y = 0 and draws on top of the spine's first wheel. Only
@@ -2166,9 +2605,12 @@ test('an exhausted anchor search refuses to bridge, and says so', () => {
      the wheel wherever it ran out. That is the one rule this solver exists to
      enforce, loosened in silence. A chain turning up undriven is the acceptable
      cost; a bridge drawn across another run is not.
-     Forced by asking for a clearance nothing can satisfy, so EVERY candidate is
-     rejected for every chain. */
-  const { solved, train, bridges, warns } = runSolve(THREE, { tight: 400 });
+
+     IT NEEDS A STAGE WITH BRIDGES ON IT, which is CASCADE and no longer THREE:
+     under CL#123 a stage of roots has no bridges to refuse, because nothing on it
+     is driven by anything else. Forced by asking for a clearance nothing can
+     satisfy, so EVERY candidate is rejected for every dependent chain. */
+  const { solved, train, bridges, origins, warns } = runSolve(CASCADE, { tight: 400 });
 
   const anchor = warns.filter(w => /no clear bridge anchor/.test(w));
   ok(anchor.length > 0,
@@ -2179,11 +2621,19 @@ test('an exhausted anchor search refuses to bridge, and says so', () => {
   ok(/refusing to bridge/.test(anchor[0]),
     'the warning does not say the bridge was refused: ' + anchor[0]);
 
-  /* NO BRIDGE GEOMETRY IS EMITTED. Not a parked surplus idler -- none at all. */
-  const idlers = solved.gears.filter(w => w.role === 'idler');
-  eq(idlers.length, 0,
-    'a refused bridge still drew ' + idlers.length + ' idler(s): '
-    + idlers.map(w => 'wheel ' + w.i).join(', '));
+  /* NO BRIDGE GEOMETRY IS EMITTED. Not a parked surplus idler -- none at all.
+     The origin runs on the same stage are untouched by any of this: a refusal is
+     a statement about an anchor on ANOTHER chain, and a self-driven chain has no
+     anchor to lose. Counted apart for exactly that reason -- summing them would
+     let a refused bridge hide behind an origin run that is still there. */
+  const bridgeIdlers = solved.gears.filter(w => w.role === 'idler'
+    && train[w.i].drive === 'bridge');
+  eq(bridgeIdlers.length, 0,
+    'a refused bridge still drew ' + bridgeIdlers.length + ' idler(s): '
+    + bridgeIdlers.map(w => 'wheel ' + w.i).join(', '));
+  eq(solved.gears.filter(w => w.role === 'idler' && train[w.i].drive === 'origin').length,
+    origins.length * grabNumber('MAX_IDLERS'),
+    'a refused bridge cost an unrelated chain its own origin run');
 
   /* AND THE CHAIN IS STILL PLACED. Refusing the bridge must not cost the chain
      its position: every wheel of every chain is on stage, and no head fell back
@@ -2210,6 +2660,67 @@ test('an exhausted anchor search refuses to bridge, and says so', () => {
      what arrives is a composition, not a pile. */
   const fouls = crossChainFouls(train, solved);
   ok(fouls.length === 0, 'refused chains overlap: ' + fouls.join('; '));
+});
+
+test('a refused hop keeps its cascade in place, and names what it left undriven', () => {
+  /* THE ONE THING A CASCADE ADDED TO A REFUSAL (Charles, GitHub #116, CL#123). A
+     bridge that cannot be placed cleanly refuses and the chain is placed
+     undriven; under a star off the spine that cost exactly one chain its drive.
+     Under a cascade every chain whose drive path runs THROUGH the refused one
+     loses its drive as well -- and loses NOTHING ELSE, which is what makes it
+     dangerous: a later sibling still cascades off the refused chain's lead gear,
+     is still placed exactly where it was going, and looks completely correct.
+
+     SO THE DEFINED FALLBACK IS: POSITION SURVIVES, DRIVE DOES NOT, AND THE
+     CONSOLE SAYS WHOSE. Asserted as all three -- the downstream sibling is still
+     bridged and still hangs off the chain it was told to, no wheel is lost, and
+     the refusal warning names the chains it stranded.
+
+     PROVOKED RATHER THAN FORCED. A clearance nothing can satisfy refuses every
+     bridge on the stage, which is not the interesting case; the interesting one
+     is a refusal partway down a cascade, and that arrives on its own at a
+     clearance in between. Trials are run until it does, and the test says so
+     rather than passing vacuously if it never happens. */
+  let saw = 0;
+  const bad = [];
+  [2.5, 3, 4].forEach(t => {
+    for (let k = 0; k < 30; k++) {
+      [0, 90].forEach(rot => {
+        [1, 2].forEach(n => {
+          const ctx = {};
+          const { train, solved, warns } = runSolve(CASCADE, { axisRot: rot, idlerN: n, tight: t, ctx });
+          const refused = warns.filter(w => /no clear bridge anchor/.test(w));
+          const named = refused.map(w => (w.match(/chain "([^"]+)"/) || [])[1]);
+          if (named.indexOf('kid') < 0 || named.indexOf('cub') >= 0) return;
+          saw++;
+          const where = `tight ${t}, axisRot ${rot}, ${n} idler(s): `;
+          /* THE REFUSAL NAMES WHAT IT STRANDED. `cub` takes its drive through
+             `kid`, so a refusal of kid's bridge is the cause of cub being
+             undriven, and it is the only place that can be said. */
+          const w = refused[named.indexOf('kid')];
+          if (!/undriven too/.test(w) || !/cub/.test(w)) {
+            bad.push(where + 'the refusal did not name the cascade it stranded: ' + w);
+          }
+          /* AND THE CASCADE IS STILL THERE. cub keeps its bridge, still hangs off
+             kid, and every one of its wheels is still placed -- the failure is a
+             loss of drive and of nothing else. */
+          const a = ctx._bridgeAt.cub;
+          if (!a || a.at == null) return bad.push(where + 'cub lost its anchor with kid\'s');
+          if (!a.bridged) bad.push(where + 'cub lost its own bridge to a refusal upstream of it');
+          const took = train[a.at].person != null ? train[a.at].person : train[a.at].bridge;
+          if (took !== 'kid') bad.push(where + 'cub cascades off ' + took + ', not off kid');
+          const placed = {};
+          solved.gears.forEach(g => { placed[g.i] = g; });
+          train.forEach((e, i) => {
+            if (e.role === 'link' && !placed[i]) bad.push(where + `${e.person} wheel ${i} was dropped`);
+          });
+        });
+      });
+    }
+  });
+  ok(saw > 0, 'no trial refused a hop partway down the cascade, so nothing here '
+    + 'was actually exercised — widen the clearance sweep');
+  ok(bad.length === 0, [...new Set(bad)].slice(0, 5).join('\n      '));
 });
 
 test('a bridge anchor survives the idler count dropping under it', () => {
@@ -2524,14 +3035,21 @@ test('a ghost addendum is derived from TOOTH_ADD, and every reader of it agrees 
 test('a chain axis is measured from its own linked wheels, never its idlers', () => {
   /* Including an idler drags the axis toward the BRIDGE, which is perpendicular
      to the chain -- for a one-wheel chain it becomes the bridge exactly. That is
-     the whole defect: escape runs leaving along the spine-to-branch diagonal. */
+     the whole defect: escape runs leaving along the spine-to-branch diagonal.
+
+     SO THE FIXTURE HAS TO BE ONE WITH BRIDGES ON IT, which is CASCADE and not
+     THREE (CL#123). An origin run's idlers travel ALONG their chain's own axis
+     rather than across to another chain, so counting them barely moves the answer
+     and the naive measurement below has nothing to be measurably worse than --
+     the test would pass on a page where the defect was fully present. */
   const bad = [];
   [0, 90].forEach(rot => {
-    const { solved, train, order } = runSolve(THREE, { axisRot: rot });
+    const { solved, train, order } = runSolve(CASCADE, { axisRot: rot });
     const axes = chainAxesOf(solved, rot, order[0].slug);
-    eq(axes.length, THREE.length, 'rot ' + rot + ': not every chain has an axis');
+    eq(axes.length, CASCADE.length, 'rot ' + rot + ': not every chain has an axis');
     const spine = axes.find(c => c.spine);
-    ok(spine && spine.person === order[0].slug, 'rot ' + rot + ': the spine is not the longest chain');
+    ok(spine && spine.person === order[0].slug,
+      'rot ' + rot + ': the chain chainAxes() calls the spine is not the one laid out first');
     axes.forEach(c => {
       if (c.wheels.some(w => w.role !== 'link'))
         bad.push(`rot ${rot}: ${c.person}'s axis counts a wheel that is not a link`);
@@ -2548,6 +3066,15 @@ test('a chain axis is measured from its own linked wheels, never its idlers', ()
         bad.push(`rot ${rot}: a one-wheel chain measured an axis of its own (${c.deg}) `
           + `instead of falling back to the stage axis (#67)`);
       if (c.spine) return;
+      /* THE COMPARISON BELOW IS ABOUT BRIDGE IDLERS, so a chain that has none is
+         not evidence either way (CL#123). An ORIGIN run's idlers travel along
+         their own chain's axis rather than across to another chain, so counting
+         them barely moves the naive answer -- and a fixture that let a
+         self-driven chain into this comparison would be asserting that a
+         difference of nearly nothing is a difference, which passes on a page
+         where the defect is fully present. */
+      if (!solved.gears.some(w => w.role === 'idler'
+        && train[w.i].bridge === c.person && train[w.i].drive === 'bridge')) return;
       /* What the old code did: first-to-last across everything the chain is
          reached through. It must be measurably more bridge-ward than the answer. */
       const with_ = solved.gears.filter(w => (w.person != null ? w.person : train[w.i].bridge) === c.person);
@@ -2573,11 +3100,19 @@ test('an escape run refuses to cross a bridge, not only another escape run', () 
      deliberately across the branch's own run, and the run must move.
 
      Step 3 is what stops this passing vacuously -- it asserts the planted bridge
-     really does lie across the run that was placed without it. */
+     really does lie across the run that was placed without it.
+
+     AND THE SET IT IS SEEDED WITH INCLUDES ORIGIN RUNS (CL#123). THREE is three
+     roots, so two of its four published runs are origin runs -- a self-driven
+     chain's own drive is metal across the composition exactly as a bridge is, and
+     every one of them is planted in turn below rather than only the first. */
   const bad = [];
   const seg = (p) => ({ x: p.cx, y: p.cy });
   [0, 90].forEach(rot => {
-    const { solved, order } = runSolve(THREE, { axisRot: rot });
+    const { solved, order, origins } = runSolve(THREE, { axisRot: rot });
+    ok(origins.length > 0 && solved.bridgeRuns.length > origins.length,
+      'rot ' + rot + ': the fixture publishes no origin run, so this test cannot '
+      + 'tell whether fitEscapes sees one');
     const spineSlug = order[0].slug;
     const branches = chainAxesOf(solved, rot, spineSlug).filter(c => !c.spine);
     const clear = fitEscapesOn(Object.assign({}, solved, { bridgeRuns: [] }), rot, spineSlug);
@@ -2650,9 +3185,18 @@ test('the bridges come out of solve(), and stay distinct from the drawn strands'
   ok(/chains: chains/.test(ret.slice(0, 200)),
     'the drawn strand list is gone or renamed — bridges and strands must stay '
     + 'separately addressable');
-  const { solved } = runSolve(THREE, { axisRot: 0 });
-  eq(solved.bridgeRuns.length, THREE.length - 1,
-    'a solve of three chains does not publish one bridge run per driven chain');
+  /* ONE PUBLISHED RUN PER STRUCTURAL RUN, and there are two kinds now (CL#123):
+     a BRIDGES entry -- the run that carries another chain's drive in, or, for an
+     independent chain, the step that carries its position -- and an ORIGINS
+     entry, the run a self-driven chain turns on. Both are metal laid across the
+     composition, so both have to come out where a later bridge and fitEscapes can
+     refuse to cross them; an origin run that stayed inside solve() would be the
+     exact hole this test was written to close, reopened for the new run. Counted
+     off the TRAIN builder's own two arrays rather than off a number, because
+     which chains get which run is the config's business and not this test's. */
+  const { solved, bridges, origins } = runSolve(CASCADE, { axisRot: 0 });
+  eq(solved.bridgeRuns.length, bridges.length + origins.length,
+    'solve() does not publish one run per bridge and one per origin run');
   ok(solved.bridgeRuns.every(s => s.length === 2
       && s.every(p => Number.isFinite(p.cx) && Number.isFinite(p.cy))),
     'a published bridge run is not a finite two-point segment in stage units');
@@ -4853,6 +5397,7 @@ test('a kidney slot keeps its width-to-length proportion across the whole dealt 
   });
   ok(bad.length === 0, bad.join('\n      '));
 });
+
 
 /* ---- report -------------------------------------------------------------- */
 
