@@ -39,7 +39,21 @@
      which finds nothing the moment that block is wrapped in a @media, written
      ':root, :host', or joined by a second sheet, and a datum with no reference
      is a datum nobody can see. */
-  --ref-bg:#E8EAE5; --ref-muted:#6B7E7C;
+  /* THE LIGHT BACKGROUND IS A CHOSEN TONE, and it was lowered from #E8EAE5
+     (90.8% L) to #E1E4DD (88% L) because Charles found the page close to
+     blinding. It is not derivable -- it is where a human said the glare stops --
+     but the CONSTRAINT on it is, and that is the part worth writing down:
+     `--muted` against this background is the binding ratio, not `--ink`.
+
+     Ink is near-black, so darkening the background moves it TOWARD the ink and
+     LOWERS ink contrast rather than raising it (11.38:1 shipped, 10.73:1 here) --
+     the opposite of the intuition, and still far clear of the 4.5:1 floor.
+     `--muted` is what runs out: 3.54:1 shipped, 3.33:1 here, against a 3:1 floor
+     for UI text. One further step to 85% L lands at 3.12:1, which is 0.12 of
+     margin -- so anything darker than this needs `--muted` lifted with it, and
+     is a light-theme pass rather than one token. Measured, not estimated;
+     variants and contrast tables were photographed before this was picked. */
+  --ref-bg:#E1E4DD; --ref-muted:#6B7E7C;
   --bg:var(--ref-bg); --ink:#20302E; --muted:var(--ref-muted); --hair:#D5DAD6; --chip:#FFFFFF;
   --accent:#3B7DE8; --shadow:0 1px 2px rgba(20,40,38,.06);
   /* THE METAL AND BRASS RAMPS, kept as a comment rather than as declarations

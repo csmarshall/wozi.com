@@ -7,6 +7,40 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Changed
 
+- **CL#131 — the light background steps down from 90.8% to 88% lightness.**
+  (Charles: *"is the light mode background too light? Almost blinding."*)
+
+  `--ref-bg` moves `#E8EAE5` → `#E1E4DD`. A chosen tone, not a derived one — it
+  is where a human said the glare stops — but the **constraint** on it is
+  derivable and is now written beside it.
+
+  **Two corrections came out of measuring this, and both were mine.**
+
+  First, I blamed the wrong thing. I said `--chip: #FFFFFF` paints the eight
+  badge discs and that they, not the background, were the glare. **That has been
+  false since CHANGELOG #35**, which fixed this exact complaint: the badge fill
+  is a per-theme literal (`#CCCEC9` light, `#DFE2DE` dark), deliberately
+  detached from `--chip`. Today `--chip` paints only the closed-by-default gear
+  panel and the `?hud` instrument, neither visible in a normal load. So the
+  background really was the only remaining glare source, which is what Charles
+  said in the first place.
+
+  Second, **darkening the background lowers ink contrast rather than raising
+  it.** Ink is near-black, so moving the background down moves it *toward* the
+  ink and shrinks the gap — 11.38:1 shipped, 10.73:1 here. Still far clear of
+  the 4.5:1 floor, but the mechanism is the opposite of the intuition.
+
+  **`--muted` is the binding ratio, and that is the number to remember.** It
+  goes 3.54:1 → 3.33:1 against a **3:1** floor for UI text. A further step to
+  85% L lands at **3.12:1** — 0.12 of margin. So 88% leaves room and 85% very
+  nearly does not: anything darker needs `--muted` lifted with it, which makes
+  it a light-theme pass rather than a one-token change.
+
+  Decided from photographs, not from the numbers: seven variants at a fixed seed
+  with the contrast table printed on each panel, including a dark-theme
+  reference showing the chip-to-background relationship dark keeps and light
+  had been accused of breaking.
+
 - **CL#130 — `BAND_MAX`/`ENDS_MAX` were absolute against a proportional
   drift, and the suite's gate on them was one legal draw in 2000.** (GitHub
   #97, split from #64's finding A9.)
