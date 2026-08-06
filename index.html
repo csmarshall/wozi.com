@@ -597,12 +597,18 @@ const ENGRAVE_TRACK = 0.10;
    every size it tries for the same string is one memoised canvas call, not
    several. */
 const ENGRAVE_TW_REF = 200;
-const TOOTH_ROOT_MIN = 4;  /* px floor under any root circle. Without it a tiny gear
-                              computes a negative root radius; with it, a gear small
-                              enough to hit the floor comes out with SHORT teeth that
-                              no longer reach their partner. Anything sizing a gear
-                              must check this rather than trip over it — see
-                              planetaryMenuFor(). */
+const TOOTH_ROOT_MIN = 4;  /* Floor under any root circle, in SOLVE UNITS -- not
+                              pixels; teethPath() and planetaryBore()/ROOT_MARGIN
+                              compare it straight against r = MODULE * teeth/2,
+                              which is the same unscaled space, and it predates
+                              px() (#61) so it is not run through that conversion
+                              either (GitHub #99 found this alongside CLEARANCE
+                              and ENDS_APART's same mislabel). Without it a tiny
+                              gear computes a negative root radius; with it, a
+                              gear small enough to hit the floor comes out with
+                              SHORT teeth that no longer reach their partner.
+                              Anything sizing a gear must check this rather than
+                              trip over it — see planetaryMenuFor(). */
 const TOOTH_FILLET = 0.38; /* root fillet radius, in modules — the standard value that
                               goes with 20-degree full depth. Without it the flank meets
                               the root circle at a sharp corner, which no cut gear has. */
@@ -717,8 +723,33 @@ function segDist(p, a, b) {
   t = Math.max(0, Math.min(1, t));
   return Math.hypot(p.x - (a.x + t * vx), p.y - (a.y + t * vy));
 }
-const ENDS_APART = 90; /* extra push between the two extremities of the spine */
-const CLEARANCE = 13; /* px kept between the tip circles of wheels that are not meshed */
+/* Extra push kept between the spine's two extremities, in SOLVE UNITS -- the
+   same unscaled unit MODULE and every wheel radius are measured in, not
+   pixels. solve() spends it entirely in that space (see endsApartCapFor()
+   below); it only becomes a screen distance once the fit scale S is applied
+   at render, alongside `tight`, so the realised gap is ENDS_APART * tight * S
+   and moves with the viewport (GitHub #99).
+
+   NOT expressed as a MODULE multiple: 90 / MODULE is 12.857, which is not a
+   round figure in the unit this file otherwise reasons in, and back-solving
+   a multiplier from today's value would only dress the same tuned number in
+   different clothes -- it was tuned as a flat push in solve units, not as
+   "so many modules", and forcing the second story onto it would claim a
+   derivation that is not actually there. */
+const ENDS_APART = 90;
+/* Clearance kept between the tip circles of wheels that are not meshed, in
+   SOLVE UNITS -- not pixels, and not derived from any screen measurement.
+   Compared directly against o.ro + p.ro below, which are themselves solve
+   units (MODULE * teeth/2 + MODULE * TOOTH_ADD), so this only becomes a
+   screen distance -- CLEARANCE * tight * S -- once solve() hands the layout
+   to render, and #64 measured that realised gap at 6.6-66.6px across the
+   viewport range for this same 13 (GitHub #99).
+
+   NOT expressed as a MODULE multiple, for the same reason as ENDS_APART
+   above: 13 / MODULE is 1.857, not a round figure, so it was tuned by eye in
+   solve units rather than conceived as a module count -- see ENDS_APART's
+   comment. */
+const CLEARANCE = 13;
 
 /* The gear train. Each entry meshes with the one before it:
    teeth  — tooth count (sets size and speed)

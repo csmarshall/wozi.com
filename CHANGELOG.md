@@ -56,6 +56,37 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
   deliberately independent implementation since there is no clean shared
   module across a language boundary without adding a build step this repo
   does not otherwise have.
+- **CL#124 — three constants said "px" and none of them was px.** (GitHub #99.)
+
+  `CLEARANCE` was commented *"px kept between the tip circles of wheels that are
+  not meshed"* and `ENDS_APART` *"extra push between the two extremities of the
+  spine"* — both in **solve units**, which are scaled by `tight` and then by `S`
+  on the way to the screen. So a value reading as "13 px" is not 13 px on any
+  display, and the realised gap is `CLEARANCE * tight * S`.
+
+  **A comment stating the wrong unit is worse than no comment**: it is a false
+  statement a reader will act on, and it sits in the same family as CL#112 (an
+  extractor silently returning a retired value) and CL#113 (assertion messages
+  describing the state that held rather than the one that broke). Three
+  varieties of the file saying something that is not true.
+
+  **The sweep found a third**, which is the point of sweeping rather than fixing
+  the two that were reported: `TOOTH_ROOT_MIN = 4` carried the same "px floor"
+  label and is also solve units — compared straight against `r = MODULE *
+  teeth/2`, the same unscaled space. It predates `px()` (CHANGELOG #61), so it is
+  not run through that conversion either.
+
+  **Deliberately NOT re-expressed as `MODULE` multiples.** CLAUDE.md's rule is
+  that a derivable value should be derived, and a clearance stated in modules
+  would survive a change to `MODULE` where a bare 90 would not — but these were
+  *tuned as flat pushes in solve units*, not conceived as module counts, and
+  rewriting them as multiples would assert a relationship nobody established.
+  That is a different change, and it would have to prove itself at 0px rather
+  than be smuggled in beside a comment fix.
+
+  This waited for CL#111, which fixed the three-wheel spine and deliberately left
+  `ENDS_APART` itself untouched — a flat 90, same declaration — precisely so
+  there would be something stable to document.
 
 - **CL#120 — the datum showed through the bridge idlers, because a translucent
   group of one cannot occlude anything.** (GitHub #86.)
