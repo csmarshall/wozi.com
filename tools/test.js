@@ -2911,6 +2911,7 @@ function fitEscapesOn(solved, axisRot, spineSlug, margin) {
        placed with, not merely where its centre landed. */
     (runs[ei] = runs[ei] || []).push({ cx: g.cx, cy: g.cy,
       person: g.person, lead: g.lead, k: g.k,
+      hostCx: g.hostCx, hostCy: g.hostCy,
       ro: g.ro, r: g.r, i: g.i, teeth: g.teeth });
   });
   return runs;
@@ -2938,9 +2939,20 @@ test('escape runs follow each chain axis, never its bridge axis', () => {
     const spine = axes.find(c => c.spine);
     const branches = axes.filter(c => !c.spine);
     const runs = fitEscapesOn(solved, rot, spineSlug);
-    /* The spine keeps both runs; every other chain gets ONE, on the same side.
-       The missing leading run is where the bridge attaches, so a driven chain
-       visibly receives its power there. */
+    /* WHO GETS A LEADING RUN, and the rule is about DRIVE, not about the spine.
+       The spine keeps both. A chain something on stage drives keeps only the
+       trailing one, because the leading end is where its bridge arrives and a
+       second tail there would run into the machinery driving it. A SELF-DRIVEN
+       ROOT keeps both as well: nothing arrives at its leading end except its own
+       origin run, so withholding the run left it stopping dead in open space
+       while the spine ran off the frame.
+
+       THIS FIXTURE IS ALL ROOTS, which is the whole reason the old form of this
+       assertion was never true of what it claimed. It asserted "every non-spine
+       chain gets one" and reported failures as "driven chain mid", against a
+       THREE whose own comment says its chains "are therefore self-driven, each
+       with an origin run of its own". The driven case is asserted separately,
+       below, against CASCADE -- which actually has bridges. */
     const byPerson = {};
     Object.keys(runs).forEach(ei => {
       const r = runs[ei];
@@ -2955,11 +2967,19 @@ test('escape runs follow each chain axis, never its bridge axis', () => {
     }
     branches.forEach(c => {
       const mine = byPerson[c.person] || [];
-      if (mine.length !== 1) {
-        bad.push(`rot ${rot}: driven chain ${c.person} got ${mine.length} escape runs, not one`);
-      } else if (mine[0][0].lead) {
+      /* Asked of the solve rather than of the config: a chain owns an origin run
+         exactly when it is self-driven, and the wheels say so themselves. */
+      const selfDriven = solved.gears.some(g => g.drive === 'origin' && g.serves === c.person);
+      const want = selfDriven ? 2 : 1;
+      if (mine.length !== want) {
+        bad.push(`rot ${rot}: ${selfDriven ? 'self-driven root' : 'driven chain'} ${c.person} `
+          + `got ${mine.length} escape runs, not ${want}`);
+      } else if (!selfDriven && mine[0][0].lead) {
         bad.push(`rot ${rot}: driven chain ${c.person}'s run leaves by the LEADING end, `
           + 'which is the end its bridge arrives at');
+      } else if (selfDriven && mine.filter(r => r[0].lead).length !== 1) {
+        bad.push(`rot ${rot}: self-driven root ${c.person}'s two runs do not leave by `
+          + 'opposite ends');
       }
     });
     /* And the heading of every run, against its OWN chain's axis rather than
@@ -2970,7 +2990,12 @@ test('escape runs follow each chain axis, never its bridge axis', () => {
       const home = {};
       solved.gears.forEach(g => { home[g.i] = g; });
       (byPerson[c.person] || []).forEach(r => {
-        const host = r[0].lead ? c.head : c.tail;
+        /* THE WHEEL THE RUN ACTUALLY GREW FROM, as recorded by fitEscapes. This
+           was `r[0].lead ? c.head : c.tail`, which stopped being true when a
+           self-driven root's leading run moved onto the far end of its origin
+           run -- and a heading measured from the wrong origin is off by the
+           whole length of that run. */
+        const host = { cx: r[0].hostCx, cy: r[0].hostCy };
         const last = r[r.length - 1];
         const deg = Math.atan2(last.cy - host.cy, last.cx - host.cx) * 180 / Math.PI;
         if (axisOff(deg, c.deg) >= axisOff(deg, c.deg + 90)) {
@@ -2989,6 +3014,51 @@ test('escape runs follow each chain axis, never its bridge axis', () => {
         }
       });
     });
+  });
+  ok(bad.length === 0, bad.join('\n      '));
+});
+
+test('a DRIVEN chain keeps only its trailing escape run, and a root keeps both', () => {
+  /* THE RULE THIS ASSERTS HAD NEVER BEEN TESTED AGAINST A DRIVEN CHAIN. The
+     assertion above ran on THREE, whose chains are all self-driven roots -- its
+     own comment says so -- yet it reported failures as "driven chain mid got N
+     escape runs". It was checking `!spine`, calling that "driven", and no
+     fixture on the page ever put a real bridge under it.
+
+     CASCADE has all four cases at once: `hub` is the spine, `kid` and `cub` are
+     driven off it (and off each other, as the cascade), and `far` is a root with
+     an origin run of its own. So this is the first time the withheld leading run
+     is measured on a chain that actually has a bridge arriving there -- which is
+     the entire justification the rule was written with. */
+  const bad = [];
+  [0, 90].forEach(rot => {
+    const { solved, order } = runSolve(CASCADE, { axisRot: rot });
+    const spineSlug = order[0].slug;
+    const axes = chainAxesOf(solved, rot, spineSlug);
+    const runs = fitEscapesOn(solved, rot, spineSlug);
+    const byPerson = {};
+    Object.keys(runs).forEach(ei => {
+      const r = runs[ei];
+      (byPerson[r[0].person] = byPerson[r[0].person] || []).push(r);
+    });
+    let sawDriven = 0;
+    axes.forEach(c => {
+      const mine = byPerson[c.person] || [];
+      const selfDriven = solved.gears.some(g => g.drive === 'origin' && g.serves === c.person);
+      const want = (c.spine || selfDriven) ? 2 : 1;
+      if (!c.spine && !selfDriven) sawDriven++;
+      if (mine.length !== want) {
+        bad.push(`rot ${rot}: ${c.person} (${c.spine ? 'spine' : selfDriven ? 'root' : 'driven'}) `
+          + `got ${mine.length} escape runs, wanted ${want}`);
+      } else if (want === 1 && mine[0][0].lead) {
+        bad.push(`rot ${rot}: driven chain ${c.person} kept its LEADING run, which is the `
+          + 'end its bridge arrives at');
+      }
+    });
+    /* Without this the whole test passes vacuously if CASCADE ever stops
+       producing a bridged chain. */
+    ok(sawDriven >= 1, `rot ${rot}: CASCADE solved with no driven chain at all, so the `
+      + 'rule this test exists for was not exercised');
   });
   ok(bad.length === 0, bad.join('\n      '));
 });
@@ -3127,11 +3197,21 @@ test('an escape run refuses to cross a bridge, not only another escape run', () 
     const spineSlug = order[0].slug;
     const branches = chainAxesOf(solved, rot, spineSlug).filter(c => !c.spine);
     const clear = fitEscapesOn(Object.assign({}, solved, { bridgeRuns: [] }), rot, spineSlug);
-    branches.forEach((c, bi) => {
-      /* Which host index this branch's run got: the hosts are the spine's two,
-         then one per branch in chainAxes order. */
-      const ei = String(2 + bi);
-      const run = clear[ei];
+    /* SELECTED BY WHAT THE RUN IS, not by where it landed in the hosts array.
+       This used to compute `String(2 + bi)` from "the spine's two, then one per
+       branch" -- an arithmetic model of the emission order, which silently
+       aimed at the wrong run the moment a self-driven root started pushing a
+       leading host as well as a trailing one. It then reported that a bridge
+       laid across `tiny`'s run had not moved it, while actually examining
+       `mid`'s. The trailing run is the one this test anchors at `c.tail`, so
+       ask for that. */
+    const runOf = (set, person) => {
+      const k = Object.keys(set).find(key =>
+        set[key][0].person === person && !set[key][0].lead);
+      return k ? set[k] : null;
+    };
+    branches.forEach((c) => {
+      const run = runOf(clear, c.person);
       if (!run || !run.length) { bad.push(`rot ${rot}: ${c.person} got no escape run at all`); return; }
       const a = { x: c.tail.cx, y: c.tail.cy };
       const b = { x: run[run.length - 1].cx, y: run[run.length - 1].cy };
@@ -3155,7 +3235,7 @@ test('an escape run refuses to cross a bridge, not only another escape run', () 
         }
         const blocked = fitEscapesOn(Object.assign({}, solved, { bridgeRuns: [blocker] }),
           rot, spineSlug);
-        const moved = blocked[ei];
+        const moved = runOf(blocked, c.person);
         if (!moved || !moved.length) {
           bad.push(`${where}: the run was dropped rather than re-aimed`);
         } else if (JSON.stringify(moved) === JSON.stringify(run)) {
