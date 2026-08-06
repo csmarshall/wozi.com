@@ -28,8 +28,12 @@
 'use strict';
 
 const { enumeratePlanetaries } = require('./enumerate-planetaries.js');
+const { grabNumber } = require('./mesh_extract.js');
 
-const PA = 20, ADD = 1.00, DED = 1.25, THICK = 0.495;
+/* Everything here is in MODULES (m2 = 1, see header), so these are the page's
+   TOOTH_* fractions read directly -- no MODULE scale to multiply through. */
+const PA = grabNumber('TOOTH_PA'), ADD = grabNumber('TOOTH_ADD'),
+  DED = grabNumber('TOOTH_DED'), THICK = grabNumber('TOOTH_THICK');
 const inv = (x) => Math.tan(x) - x;
 const D2R = Math.PI / 180, TAU = Math.PI * 2;
 

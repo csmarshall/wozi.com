@@ -3,7 +3,14 @@
    between a tooth and the space it enters. Sweeps candidate tooth thicknesses so
    the fix is chosen from measurement rather than taste. */
 
-const MODULE = 7;
+const { grabNumber } = require('./mesh_extract.js');
+
+const MODULE = grabNumber('MODULE');
+/* The root dedendum teethPath actually uses (GitHub #102): this file's `1.15`
+   below was TOOTH_DED's value before bf16c0c moved it to 1.25 for true
+   involute flanks, and nothing here followed. Read, not retyped, so it
+   cannot happen again. */
+const TOOTH_DED = grabNumber('TOOTH_DED');
 
 const TRAIN = [
   { teeth: 17, angle: 0,   prof: { add: 1.0,  tip: 0.36 } },
@@ -21,7 +28,7 @@ const TRAIN = [
    with a fixed 66%-of-pitch base and a `tip`-wide top. */
 function outline(n, r, add, tipFrac, phaseDeg, cx, cy, arcSteps = 6, baseR0 = 0.17) {
   const m = MODULE;
-  const ro = r + m * add, rr = Math.max(4, r - m * 1.15);
+  const ro = r + m * add, rr = Math.max(4, r - m * TOOTH_DED);
   const a = 2 * Math.PI / n;
   const t0 = 0.5 - tipFrac / 2, t1 = 0.5 + tipFrac / 2;
   const r0 = baseR0, r1 = 1 - baseR0;

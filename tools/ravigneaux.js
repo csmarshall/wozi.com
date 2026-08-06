@@ -18,8 +18,10 @@
 */
 'use strict';
 
-const ADD = 1.00, DED = 1.25;
-const RING_STUB = 0.70;          /* the ring's stub addendum, as shipped */
+const { grabNumber, grabBlock } = require('./mesh_extract.js');
+
+const ADD = grabNumber('TOOTH_ADD'), DED = grabNumber('TOOTH_DED');
+const RING_STUB = grabNumber('RING_STUB');   /* the ring's stub addendum, as shipped */
 const CLEAR = 0.25;              /* tip clearance we insist on between free parts */
 const MIN_TEETH = 8;             /* measured floor: seven-tooth pinions foul the ring */
 const MAX_ZR = +(process.argv[2] || 35);
@@ -69,10 +71,17 @@ function feasible(Zs, Zp1, Zp2, Zr, N) {
 
 /* Room, exactly as index.html derives it: blank, less band, less the ring under
    the band. m2 = 2*bore/(Zr+4). A set is only useful if its smallest member
-   still has a real root circle and its teeth are big enough to read. */
-const MODULE = 7, BAND_RISE = 1.3, BAND_DEPTH = 1.59, RIM_UNDER_BAND = 0.6;
-const TOOTH_ROOT_MIN = 4, ROOT_MARGIN = 1.05, MIN_MODULE = 1.8;
-const boreOf = (teeth) => MODULE * teeth / 2 - MODULE * (BAND_RISE + BAND_DEPTH) - MODULE * RIM_UNDER_BAND;
+   still has a real root circle and its teeth are big enough to read.
+
+   boreOf() executes the page's OWN planetaryBore(), rather than a second copy
+   of its algebra -- a hand-typed formula agrees with itself forever while
+   BAND_RISE, BAND_DEPTH or RIM_UNDER_BAND drift underneath it (GitHub #102). */
+const MODULE = grabNumber('MODULE');
+const TOOTH_ROOT_MIN = grabNumber('TOOTH_ROOT_MIN'), ROOT_MARGIN = grabNumber('ROOT_MARGIN'),
+  MIN_MODULE = grabNumber('MIN_MODULE');
+const boreOf = new Function('MODULE', 'BAND_RISE', 'BAND_DEPTH', 'RIM_UNDER_BAND',
+  grabBlock('function planetaryBore(teeth) {', '{', '}') + '\nreturn planetaryBore;')(
+  MODULE, grabNumber('BAND_RISE'), grabNumber('BAND_DEPTH'), grabNumber('RIM_UNDER_BAND'));
 
 function smallestBlankFor(s) {
   for (let teeth = 13; teeth <= 22; teeth++) {
