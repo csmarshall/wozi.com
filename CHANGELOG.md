@@ -168,6 +168,46 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
   there would be something stable to document.
 
 - **CL#120 — the datum showed through the bridge idlers, because a translucent
+  group of one cannot occlude anything.** (GitHub #86.)
+
+  A bridge idler was dimmed by putting `opacity` on the wrapping `<div>` that
+  also carries its rotation. That makes the whole wheel translucent — so the
+  datum line, painted behind it, read straight through the teeth and the hub.
+  Dimming and occluding are different jobs and one property cannot do both.
+
+  The fix separates them. Opacity moves off the div and onto a `<g>` **inside**
+  the wheel's own SVG, and an opaque backing plate is painted before that group:
+  a `<use>` of the wheel's **own tooth path**, filled and stroked in `var(--bg)`,
+  so the plate is exactly the tooth silhouette and no second geometry exists to
+  drift from it. Because compositing is linear, `bg + alpha*(colour - bg)` is
+  what a pre-blended fill would have produced — the same pixels, without
+  recolouring anything, so the ink census still reads the original hues.
+
+  **Verified by arithmetic rather than by eye**, which is worth recording because
+  a screenshot cannot tell a fixed leak from a lucky crop. Reading the idler's
+  own rendered fill and computing the composite predicts **(175.4, 178.6,
+  177.6)** in light theme; the after-shot at the datum crossing reads a flat
+  **(175, 179, 177)** — under 1/255 per channel, with no datum ink in it. The
+  same pixels before read (145-152, 152-158, 152-158), deviating 20-30/255,
+  which is the additive blend that was the bug.
+
+  **`?who=charles` is 0 px** across both themes and against two separate base
+  commits: the solo path has no datum and no bridge, and is untouched.
+
+  **The escape-run ghosts are deliberately not covered, and that is correct** —
+  a point worth writing down because it looks like an omission. `wheelOpacity()`
+  returns a value only for `role === 'idler'`, so escape-run outriggers take the
+  null branch and get no plate. They do not need one: unlike idlers, they and the
+  datum already live inside the **same** `ghosts` container under one group-level
+  opacity, so the translucent-group-of-one problem never applied to them. An
+  isolated escape ghost on the datum baseline diffs **0 px** before and after.
+  The two classes are in different coordinate spaces and only one of them was
+  ever broken.
+
+  `EDGE` names the stroke width the plate and the real path share, so they cannot
+  drift apart. It is not a new tuned number — it is the literal `1` that was
+  already on the outline, given one home.
+
 - **CL#127 — spin-down from 200x was over almost at once, because a fixed
   900ms lag is viscous drag on a massless flywheel.** (GitHub #106.)
 
