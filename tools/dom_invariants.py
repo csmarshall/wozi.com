@@ -97,16 +97,51 @@ def free_port():
 with open(os.path.join(ROOT, "index.html"), encoding="utf-8") as _f:
     _HTML = _f.read()
 
+# Block comments stripped once, up front -- same idiom tools/test.js's
+# grabNumber() and tools/mesh_dirs.py's _grab_number() already use (GitHub
+# #101, CL#112). Without it a name merely DISCUSSED in prose, or sitting in a
+# retired branch commented out rather than deleted, reads exactly like a live
+# declaration -- MODULE and BAND_DEPTH each have a second textual match
+# inside a comment quoting their own declaration in prose.
+_STRIPPED_HTML = re.sub(r"/\*[\s\S]*?\*/", "", _HTML)
+
 
 def _grab_number(name):
-    m = re.search(r"\b" + re.escape(name) + r"\s*=\s*(-?[0-9]+(?:\.[0-9]+)?)", _HTML)
+    """CONTRACT (GitHub #101 / #114, CL#112): returns the value of the ONE
+    live `NAME = <number>` assignment in index.html. Fatal if NAME is
+    assigned more than once in the comment-stripped source -- even if only
+    one of those assignments' right-hand side is a plain number literal.
+
+    That clause is the load-bearing half, not the comment-stripping: it is
+    exactly the shape of the CELL_MIN trap this closes. Counting only plain
+    numeric matches would still miss a case where one declaration is a
+    literal and the other is not -- there both used to look like exactly one
+    match. Counting ASSIGNMENTS to the name, literal or not, is what actually
+    disambiguates it; see tools/test.js's grabNumber() docstring for the full
+    account and tools/mesh_dirs.py's _grab_number() for the identical Python
+    copy this one is a third of."""
+    assignments = re.findall(r"\b" + re.escape(name) + r"\s*=(?!=)", _STRIPPED_HTML)
+    if len(assignments) > 1:
+        sys.exit(f"FATAL: constant {name} is assigned {len(assignments)} times in "
+                 "index.html -- _grab_number() cannot tell which one ships (the "
+                 "CELL_MIN trap, GitHub #101)")
+    m = re.search(r"\b" + re.escape(name) + r"\s*=\s*(-?[0-9]+(?:\.[0-9]+)?)", _STRIPPED_HTML)
     if not m:
         sys.exit(f"FATAL: constant not found in index.html: {name}")
     return float(m.group(1))
 
 
 def _grab_string(name):
-    m = re.search(r"\b" + re.escape(name) + r"\s*=\s*'([^']*)'", _HTML)
+    """Same contract as _grab_number() above, for a quoted string constant --
+    arguably the more important half, since a string has no shape to fail
+    on: any first match looks like a valid answer, so an ambiguity check is
+    the only thing standing between this and a plausible wrong colour."""
+    assignments = re.findall(r"\b" + re.escape(name) + r"\s*=(?!=)", _STRIPPED_HTML)
+    if len(assignments) > 1:
+        sys.exit(f"FATAL: constant {name} is assigned {len(assignments)} times in "
+                 "index.html -- _grab_string() cannot tell which one ships (the "
+                 "CELL_MIN trap, GitHub #101)")
+    m = re.search(r"\b" + re.escape(name) + r"\s*=\s*'([^']*)'", _STRIPPED_HTML)
     if not m:
         sys.exit(f"FATAL: constant not found in index.html: {name}")
     return m.group(1)
