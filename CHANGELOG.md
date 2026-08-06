@@ -7,6 +7,56 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Changed
 
+- **CL#126 — `tools/dom_invariants.py` had a third unguarded copy of the
+  first-match extractor.** (GitHub #114.)
+
+  CL#112 fixed the `CELL_MIN` trap in `tools/test.js`'s `grabNumber()` and its
+  Python mirror in `tools/mesh_dirs.py`: both took the FIRST regex match with
+  no ambiguity check, so a name assigned twice — once retired, once live —
+  silently returned whichever happened to appear earlier. `#114` was filed
+  because that fix left a third copy untouched: `tools/dom_invariants.py`'s
+  own `_grab_number()`, and a `_grab_string()` with the identical weakness.
+
+  Not a live bug — the three names this file extracts (`MODULE`, `TOOTH_ADD`,
+  `FLAT_INK`) each resolve to exactly one assignment in `index.html` today —
+  but that was true of `CELL_MIN` too, right up until it wasn't. The failure
+  mode is a plausible wrong value with everything downstream still passing,
+  and `_grab_string()` is arguably worse: a string has no shape to fail on,
+  so any first match looks like a valid answer.
+
+  **The same contract, ported rather than re-derived.** Comments are stripped
+  first (`MODULE` and `BAND_DEPTH` each have a second textual match inside a
+  comment quoting their own declaration in prose), then both functions count
+  every *assignment* to the name — literal or not — and refuse if there is
+  more than one. Counting only numeric literals is the naive fix and would
+  not have caught `CELL_MIN`, since the live declaration is `px(3.9, 2.2,
+  6.0)`, not a number; CL#112's mutation testing already established that
+  the assignment count, not the comment-stripping, is the load-bearing half.
+
+  **Verified by mutation, on scratch copies of `index.html` only** — this
+  ticket is tools-only and `index.html` itself was never touched. A second
+  `MODULE = ` assignment made `_grab_number('MODULE')` throw "constant
+  MODULE is assigned 2 times… cannot tell which one ships"; a second
+  `FLAT_INK = ` assignment made `_grab_string('FLAT_INK')` throw the same
+  shape of message. Both restored. Swept every name the file actually
+  extracts (`MODULE`, `TOOTH_ADD`, `FLAT_INK`) against real `index.html`:
+  each resolves to exactly one assignment, and `tools/dom_invariants.py`
+  still passes all four checks against a served copy of `main`.
+
+  **Three files, three copies, one fix applied twice now.** Worth naming
+  since it is the pattern this ticket exists to close: a shared helper is
+  not obviously worth it — it would span one `.js` and two `.py` files with
+  no natural import path between them, for ~15 lines of logic each copy
+  already carries a from-scratch, well-commented account of — but three
+  independent copies have now needed the identical patch twice, which is
+  exactly the "one home for a fact" rule this repo holds everywhere else.
+  Left as a recommendation rather than acted on here: extract a single
+  `extract_constant.py` (or equivalent) that `mesh_dirs.py` and
+  `dom_invariants.py` both import, and accept that `test.js` stays a fourth,
+  deliberately independent implementation since there is no clean shared
+  module across a language boundary without adding a build step this repo
+  does not otherwise have.
+
 - **CL#120 — the datum showed through the bridge idlers, because a translucent
   group of one cannot occlude anything.** (GitHub #86.)
 
