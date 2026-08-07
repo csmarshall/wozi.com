@@ -1801,26 +1801,23 @@ const CENTRE_FAMILIES = [
     variants: [{ arms: 4 }, { arms: 5 }, { arms: 6 }] },
   { type: 'pockets', web: 3.1, hub: 0.22,
     variants: [{ arms: 6 }, { arms: 5 }, { arms: 4 }] },
-  /* RETIRED, not deleted -- Charles does not like how these three read, and the
-     renderers stay intact behind them the way the chain and belt do. Put an
-     entry back in this list and it returns to the deal and to the Table of
-     Gears at once; nothing else needs wiring.
-       spiral    curved spokes
-       iris      iris blades
-       labyrinth labyrinth rotor  (its entry is further down, also commented)
-  { type: 'spiral', web: 2.6, hub: 0.14,
-    variants: [{ arms: 5, sweep: 0.3 }, { arms: 6, sweep: 0.22 }, { arms: 4, sweep: 0.38 }] },
-  { type: 'iris', web: 2.9, hub: 0.2,
-    variants: [{ arms: 6 }, { arms: 8 }, { arms: 10 }] },
-  */
+  /* FOUR FAMILIES ARE RETIRED: spiral (curved spokes), iris (iris blades),
+     honeycomb (ring-course cells) and labyrinth (labyrinth rotor). Charles does
+     not like how they read, and their renderers stay intact in gearSvg the way
+     the chain and belt do -- restoring one is an entry here plus nothing else.
+     Their commented-out entries used to sit in this array and were removed
+     because they read as live code: every source scan counted them, so the
+     picker and the contact sheet were repeatedly reported as "missing" families
+     that were never dealt. A retired family is named here and drawn nowhere.
+
+     NOTE the sharp edge that cost real time: `?kind=labyrinth` does NOT error.
+     dealCentres falls back to the full mix when the name is not in the array, so
+     a retired family silently yields an ordinary deal. */
   { type: 'star', web: 3.0, hub: 0.22,
     variants: [{ arms: 5 }, { arms: 7 }, { arms: 9 }] },
-  /* retired with spiral and iris: the ring-course honeycomb, replaced by the
-     true lattice below. Cells in concentric courses never read as honeycomb,
-     because the walls between courses do not line up with the walls within one.
-  { type: 'honeycomb', web: 3.1, hub: 0.2,
-    variants: [{ arms: 8, cell: 4.2 }, { arms: 8, cell: 5.6 }, { arms: 8, cell: 7.2 }] },
-  */
+  /* honeycomb is retired (see above): cells in concentric courses never read as
+     honeycomb, because the walls between courses do not line up with the walls
+     within one. hexcore below is the true lattice that replaced it. */
   /* A small hub on purpose. The boss is drawn at 1.5x hubR and the core has to
      clear it, so a fat boss eats the very rings that make this design work --
      at hub 0.2 the web had room for barely two. */
@@ -1871,10 +1868,6 @@ const CENTRE_FAMILIES = [
   /* CELL_MIN is the real guard here: a ring target of five would happily grind
      the cells down to specks to reach it, so the floor stops it and the search
      falls back to the most rings a legible cell can manage. */
-  /* retired with spiral and iris, above
-  { type: 'labyrinth', web: 3.2, hub: 0.18,
-    variants: [{ arms: 5 }, { arms: 6 }, { arms: 7 }] },
-  */
   /* `arms` is a CEILING now, not a count (CL#117, GitHub #96): the sunburst
      branch of gearSvg derives the most windows the smallest blank's rInR can
      legibly cut and takes whichever of this and the dealt number is smaller.
