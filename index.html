@@ -3053,6 +3053,15 @@ const ACCENTS = CONF.ACCENTS || {};
    families that work already sit. */
 const MIN_CUT = 5.6;
 
+/* THE WEIGHT EVERY EPICYCLIC CONTOUR IS DRAWN AT. The annulus, the planets and
+   the sun are all the same kind of line -- ft.line at 1px -- and they should
+   read as one drawing. They did not: the ring carried `strokeOpacity: 0.6` and
+   the two teethPath calls simply OMITTED the attribute, so the planets and sun
+   inherited the SVG default of 1 and came out heavier than the ring they run
+   inside. Nobody chose that; one line had it and two did not. Stated once so a
+   fourth reader cannot drift the same way. */
+const EPI_LINE_OP = 0.6;
+
 function flatTones(hex, soft) {
   const n = parseInt(hex.slice(1), 16);
   let c = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
@@ -6548,7 +6557,7 @@ class Component extends DCLogic {
         ringD += 'A' + ringRoot.toFixed(2) + ' ' + ringRoot.toFixed(2) + ' 0 0 1 ' + PT(ringRoot, c + aR / 2) + ' ';
       }
       ringD += 'Z M' + bore.toFixed(2) + ',0 A' + bore.toFixed(2) + ',' + bore.toFixed(2) + ' 0 1 0 -' + bore.toFixed(2) + ',0 A' + bore.toFixed(2) + ',' + bore.toFixed(2) + ' 0 1 0 ' + bore.toFixed(2) + ',0 Z';
-      post.push(h('path', { key: 'epiring', d: ringD, fillRule: 'evenodd', fill: ft.body, stroke: ft.line, strokeWidth: 1, strokeOpacity: 0.6 }));
+      post.push(h('path', { key: 'epiring', d: ringD, fillRule: 'evenodd', fill: ft.body, stroke: ft.line, strokeWidth: 1, strokeOpacity: EPI_LINE_OP }));
       /* STAR ARRANGEMENT -- the carrier is grounded to the axle, per the
          physics verification (scratchpad/planetary-physics.md: Willis +
          tabulation, cross-checked; precedent ALF 502 turbofan star box,
@@ -6623,8 +6632,12 @@ class Component extends DCLogic {
           h('path', { d: 'M0,0 L' + rad.r.toFixed(2) + ',0', stroke: ft.line, strokeWidth: 3, strokeOpacity: 0.85 }),
           h('g', { transform: 'translate(' + rad.r.toFixed(2) + ',0)' },
             h('g', { ref: epi(kFac, base), style: { transform: 'rotate(' + base.toFixed(2) + 'deg)' } },
-              h('path', { d: this.teethPath(teeth, pitchR, -1, m2), fill: fill, stroke: ft.line, strokeWidth: 1 })),
-            h('circle', { r: 2.4, fill: ft.line })));
+              h('path', { d: this.teethPath(teeth, pitchR, -1, m2), fill: fill, stroke: ft.line, strokeWidth: 1, strokeOpacity: EPI_LINE_OP })),
+            /* The stud end. Same ink as every other contour in the assembly, so it
+               takes the same weight -- it is the one place ft.line is used as a
+               FILL rather than a line, and at full opacity it was the darkest
+               thing in the epicyclic while the ring, planets and sun sat at 0.6. */
+            h('circle', { r: 2.4, fill: ft.line, fillOpacity: EPI_LINE_OP })));
       const planets = [];
       for (let k2 = 0; k2 < NP; k2++) {
         const A = k2 * (360 / NP);
@@ -6634,12 +6647,20 @@ class Component extends DCLogic {
           planets.push(station('i' + k2, { a: A, r: Rc }, Zp1, Rp, kP, baseP1At(A), ft.face));
           planets.push(station('o' + k2, { a: A + dTheta, r: Rc2 }, Zp2, Rp2r, kP2, baseP2At(A), ft.well));
         } else {
-          planets.push(station('pw' + k2, { a: A, r: Rc }, Zp, Rp, kP, basePAt(A), ft.face));
+          /* ONE BLANK, ONE TONE. The ring, the planets and the sun are gears in a single
+             set, on one plane, cut from one piece -- so they take the wheel's own
+             body colour and are told apart by their contours, which is exactly what
+             ft.face's own comment argues for ('in a flat drawing the raised face is
+             told by its outline, not by a tonal jump'). Before this the sun was
+             ft.well and the planets ft.face, 1.42x apart on a yellow wheel, which
+             read as a sun sunk in a pocket. The TWO-ROW rows keep their difference:
+             they counter-rotate, and that is information rather than inheritance. */
+          planets.push(station('pw' + k2, { a: A, r: Rc }, Zp, Rp, kP, basePAt(A), ft.body));
         }
       }
       post.push(h('g', { key: 'epicarrier', ref: epi(kC, baseC), style: { transform: 'rotate(' + baseC.toFixed(2) + 'deg)' } }, planets));
       post.push(h('g', { key: 'episun', ref: epi(kS, baseS), style: { transform: 'rotate(' + baseS.toFixed(2) + 'deg)' } },
-        h('path', { d: this.teethPath(Zs, Rs, -1, m2), fill: ft.well, stroke: ft.line, strokeWidth: 1 })));
+        h('path', { d: this.teethPath(Zs, Rs, -1, m2), fill: ft.body, stroke: ft.line, strokeWidth: 1, strokeOpacity: EPI_LINE_OP })));
     } else if (kind === 'iris') {
       /* Aperture blades: tangential crescents, pointed at both ends. The metal
          between blades is a full-depth curved spoke — nothing floats. */

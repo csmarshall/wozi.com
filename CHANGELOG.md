@@ -7,6 +7,39 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Changed
 
+- **CL#134 — the epicyclic is one part, so it reads at one weight and one tone.**
+
+  Charles, on a light-mode planetary: *"why do the planets have a thicker/more
+  defined border than the ring of teeth that they run in?"*, then *"the sun gear
+  is noticeably darker than the planets"*, then *"why don't the ring, planets and
+  body all end up the same color?!"*
+
+  **The weight was an omission, not a choice.** The annulus carried
+  `strokeOpacity: 0.6`; the planet and sun `teethPath` calls simply left the
+  attribute out and inherited SVG's default of 1, so the parts came out heavier
+  than the ring they run inside. The stud was worse again -- `fill: ft.line` at
+  full opacity, the one place the contour ink is used as a FILL rather than a
+  line, which made it the darkest thing in the assembly. `EPI_LINE_OP` states the
+  figure once and the ring, planets, sun and stud all read it, in both themes.
+
+  **The tone was inheritance.** Planets were `ft.face` (7% toward white) and the
+  sun `ft.well` (13% toward black) -- 1.42x apart on a yellow wheel, 1.51x on a
+  blue one -- so the sun read as sunk in a pocket. Nothing defended it: the one
+  comment about differing fills is about the TWO-ROW case, where the rows
+  counter-rotate and identical fills "would hide the one thing worth seeing".
+  A single-row planetary has no second row, so the justification never applied.
+  Ring, planets and sun now all take `ft.body`, and are told apart by their
+  contours -- which is what `ft.face`'s own comment argues for: "in a flat
+  drawing the raised face is told by its outline, not by a tonal jump."
+
+  **The two-row rows keep their difference.** On `ravigneaux` the inner and outer
+  rows stay `ft.face` and `ft.well`, because there the tonal split carries
+  information rather than inheritance.
+
+  The carrier arm is deliberately left heavier (`strokeWidth: 3`,
+  `strokeOpacity: 0.85`): its own comment says the load path "is drawn, not
+  implied", which is a stated decision rather than an omission.
+
 - **CL#133 — a cut opening is only as legible as what shows through it, and in
   light mode that was the page plus a shadow.** (GitHub #120.)
 
