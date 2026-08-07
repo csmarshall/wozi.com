@@ -3045,6 +3045,14 @@ const ACCENTS = CONF.ACCENTS || {};
    original in value -- while still taking the chroma out, which was the actual
    complaint. Cheaper and more targeted: fix the thing that was wrong, leave the
    thing that was not. */
+/* THE SMALLEST OPENING THAT STILL READS AS ONE, in solve units.
+   A cut has to hold a wall on each side and its own contour and still leave an
+   interior. Measured across four seeds and every wheel: sunburst never cuts
+   below 7.41 and reads at every colour; hexcore sits at 5.61; isogrid reached
+   3.34 and polariso 2.18, and those are the two that muddle. 5.6 is where the
+   families that work already sit. */
+const MIN_CUT = 5.6;
+
 function flatTones(hex, soft) {
   const n = parseInt(hex.slice(1), 16);
   let c = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
@@ -6988,7 +6996,24 @@ class Component extends DCLogic {
       for (let a2 = 0; a2 < rOutTryI.length && !sideI; a2++) {
         rOutI = rOutTryI[a2];
         const seenI = [];
-        for (let sd = Math.min((g.cv && g.cv.cell) || 7.0, 11.5); sd >= 5.2; sd -= 0.1) {
+        /* THE FLOOR BELONGS ON THE CUT, NOT ON THE PITCH. `sd` is the lattice
+           pitch; the opening is then shrunk about its centroid to leave the wall,
+           so what is actually cut is sd - 1.732*WALL. Floored at a pitch of 5.2
+           that yielded a 3.34-unit opening -- measured -- against a wall of ~1.06
+           and its own 0.35 outline, so the borders were most of the cell and the
+           pattern muddled. sunburst never goes below 7.41 and reads at every
+           colour. Flooring the CUT makes the sweep stop at a coarser pitch, which
+           is the same thing sunburst's maxLegible does: fewer, larger openings
+           rather than more, finer ones. */
+        const wallI0 = Math.max(px(1.06, 0.55, 2.4), 1.2 * (g.teeth || TEETH_MAX) / TEETH_MAX);
+        const sdFloor = MIN_CUT + 1.732 * wallI0;
+        /* AND THE SEARCH MUST START AT OR ABOVE THE FLOOR. It counts DOWN from the
+           dealt cell size, so a floor above that start meant the loop never ran at
+           all and the fallback took over -- the floor was applied to a search that
+           did not execute. Measured: min opening moved only 3.34 -> 4.12 and the
+           opening COUNT went up, the opposite of fewer-and-larger. */
+        const sdStart = Math.max(sdFloor, Math.min((g.cv && g.cv.cell) || 7.0, 11.5));
+        for (let sd = sdStart; sd >= sdFloor; sd -= 0.1) {
           const pt = (i3, j3) => [sd * (i3 + j3 / 2), sd * (Math.sqrt(3) / 2) * j3];
           const nn = Math.ceil(rOutI / sd) + 3;
           let lo3 = Infinity, hi3 = 0, cnt = 0;
@@ -7015,7 +7040,10 @@ class Component extends DCLogic {
         seenI.forEach(r3 => { if (r3.waste < bw3) bw3 = r3.waste; });
         seenI.forEach(r3 => { if (r3.waste <= bw3 + 0.5 && r3.s > sideI) sideI = r3.s; });
       }
-      if (!sideI) sideI = Math.max(5.6, (g.cv && g.cv.cell) || 7.0);
+      /* The fallback obeys the same floor -- it was the path actually taken when the
+         sweep could not run, so leaving it at 5.6 pitch reintroduced the fine cell. */
+      if (!sideI) sideI = Math.max(MIN_CUT + 1.732 * Math.max(px(1.06, 0.55, 2.4),
+        1.2 * (g.teeth || TEETH_MAX) / TEETH_MAX), (g.cv && g.cv.cell) || 7.0);
       const ptI = (i2, j2) => [sideI * (i2 + j2 / 2), sideI * (Math.sqrt(3) / 2) * j2];
       const nI = Math.ceil(rOutI / sideI) + 3;
       for (let j2 = -nI; j2 <= nI; j2++) {
@@ -7068,7 +7096,12 @@ class Component extends DCLogic {
       const WALLP = Math.max(px(1.06, 0.55, 2.4), 1.2 * (g.teeth || TEETH_MAX) / TEETH_MAX);
       const rInP = coreIn(hubR), rOutP = coreOut;
       const spanP = rOutP - rInP;
-      const target = Math.max(3.6, (g.cv && g.cv.cell) || 5.0);
+      /* SAME FLOOR, SAME REASON AS isogrid: 3.6 floors the COURSE HEIGHT, but the
+         cell is then shrunk by 1.732*WALLP to leave the wall, so what is actually
+         cut was ~1.8-2.2 units -- measured 2.18, the finest opening on the page and
+         the one that muddles worst. Floor the CUT and let the course grow, which
+         yields fewer, taller courses rather than more, finer ones. */
+      const target = Math.max(MIN_CUT + 1.732 * WALLP, (g.cv && g.cv.cell) || 5.0);
       const nC = Math.max(1, Math.round(spanP / target));
       const hC = spanP / nC;
       const XY = (rad, a) => [rad * Math.cos(a), rad * Math.sin(a)];
@@ -7289,6 +7322,18 @@ class Component extends DCLogic {
         h('path', { d: path + ' ' + holes.join(' '), fillRule: 'evenodd', fill: 'url(#' + id + 'f)', stroke: this.state.theme === 'dark' ? ft.line : ft.edge, strokeWidth: this.state.theme === 'dark' ? 1.6 : 1.1, strokeLinejoin: 'round' }),
         inner,
         h('circle', { r: faceR, fill: 'none', stroke: 'var(--edge)', strokeWidth: 1, strokeOpacity: 0.4 })),
+      (function () {
+        if (!holes.length || this.state.theme === 'dark') return null;
+        const feat = (2 * wellR) / Math.sqrt(holes.length);
+        const FLOOR = 0.35;
+        const raw = feat * 0.030;
+        const w = Math.max(FLOOR, Math.min(1.6, raw));
+        const short = Math.max(0, Math.min(1, (FLOOR - raw) / FLOOR));
+        const op = Math.min(1, 0.60 + 0.40 * Math.sqrt(short));
+        return h('path', { key: 'cutedge', d: holes.join(' '), fill: 'none',
+          stroke: ft.line, strokeWidth: w, strokeOpacity: op,
+          strokeLinejoin: 'round' });
+      }).call(this),
       post,
       h('circle', { r: hubR, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2 }),
       h('circle', { r: Math.max(3, hubR * 0.4), fill: p[3], opacity: 0.5 }),
@@ -7932,7 +7977,15 @@ class Component extends DCLogic {
              into a grey puddle on a pale one. */
           background: this.state.theme === 'dark'
             ? 'radial-gradient(closest-side, rgba(10,20,26,.26) 0%, rgba(10,20,26,.20) 58%, rgba(10,20,26,.08) 80%, rgba(10,20,26,0) 100%)'
-            : 'radial-gradient(closest-side, rgba(24,34,30,.15) 0%, rgba(24,34,30,.11) 58%, rgba(24,34,30,.04) 80%, rgba(24,34,30,0) 100%)'
+            /* NO CAST SHADOW IN LIGHT MODE. The layer paints a soft dark halo under
+               each wheel, and it shows through the openings as well as the tooth
+               gaps -- measured, a cut read 22 units darker than the page beside the
+               gear, so what a hole showed was never the page. On a pale page that
+               reads as grey wash inside every centre. Dark mode keeps its halo,
+               where the wheel is lighter than the page and the shadow does the job
+               it was written for. The badge disc keeps its own 0 3px 10px lift, so
+               the page still reads as layered. */
+            : 'none'
         } }))),
       /* A viewBox, so chainEl() can keep emitting solve-unit path data and pitch
          dash arrays while the element it lands in is already at display size.

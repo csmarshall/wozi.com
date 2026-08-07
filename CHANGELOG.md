@@ -7,6 +7,70 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Changed
 
+- **CL#133 — a cut opening is only as legible as what shows through it, and in
+  light mode that was the page plus a shadow.** (GitHub #120.)
+
+  Charles, on the shipped light stage: *"the gear centers for a number of them
+  become washed out as the outer gear color goes lighter"*, then, marking 51 of
+  150 cells on a family x colour matrix, *"look at any light colored gear in
+  light mode - their internals are hardly discernable"*.
+
+  **Openings are CUT, not drawn.** Every family but the two epicyclics appends
+  its openings to the wheel's own path under `fillRule: 'evenodd'`, so the
+  material is removed and what shows inside is whatever is behind. A cut's
+  contrast is therefore `body vs page` — 1.33:1 on the palest wheel in light
+  against 4.74–9.54 in dark. `planetary` and `ravigneaux` cut nothing; they draw
+  their ring and teeth in `ft.line`, 40% toward black from the wheel's own
+  colour, and were the only two families marked 0/10 at every colour. That is
+  the whole asymmetry, and the fix is to give the cut families the contour the
+  drawn ones always had.
+
+  **Proportional on both axes, no per-family table.** Colour is `ft.line`, so a
+  pale wheel gets a line 40% darker than itself and Harper's chain gets a purple
+  one. Width is a fraction of the opening — measured, opening size spans 5.6x
+  across the families (34.6 units on `spokes`, 6.2 on `isogrid`), and a flat 1px
+  read as a contour on `sunburst` while flooding `isogrid` into speckle. Opacity
+  ramps only where the width has bottomed out on the aliasing floor, which is
+  the one axis that cannot thicken a lattice.
+
+  **`MIN_CUT` — the floor was on the wrong quantity.** `isogrid` floors its
+  lattice PITCH at 5.2, then shrinks each cell by `1.732 * WALL` to leave the
+  wall, so what was actually cut measured **3.34** units; `polariso` reached
+  **2.18**. At that size the walls and the contour are most of the cell. The
+  floor now sits on the CUT and the pitch is derived from it, which makes the
+  sweep stop coarser: `isogrid` 108 openings -> 60, `polariso` 120 -> 72,
+  `polarbrick` 90 -> 36. Fewer and larger, which is exactly what `sunburst`'s
+  `maxLegible` already does — and `sunburst`, which never cuts below 7.41, was
+  never the complaint.
+
+  Two corrections on the way: flooring the sweep did nothing at first because it
+  counts DOWN from the dealt cell size, so a floor above that start meant the
+  loop never ran and the fallback took over — the min moved 3.34 -> 4.12 and the
+  opening COUNT went UP. The fallback needed the floor too.
+
+  **And light mode no longer casts a wheel shadow.** The shared layer paints a
+  halo under each wheel and shows through the openings as well as the tooth
+  gaps: measured, a cut read **22 units darker** than the page beside the gear,
+  so a hole never showed the page. Charles: *"there should be no adjustment to
+  what is visible as the background behind the gear"*. With it off the interiors
+  measure bit-identical to `--ref-bg`. Dark keeps its halo, where the wheel is
+  lighter than the page and the shadow does what it was written for; the badge
+  disc keeps its own lift, so the page still reads as layered.
+
+  **Things measured and discarded**, each of which looked right until it was
+  photographed: darkening the wheel BODY (aimed at `shades()`, which does not
+  paint the body — rendered luminance moved +0.009); a `LIGHT_BODY_FLOOR` solved
+  against wheel-vs-page (a +0.224 predictor, where family was +0.275); a uniform
+  tint inside each opening (the contrast curve is V-shaped and 0.16 sits at its
+  bottom, taking the yellow from 1.33:1 to 1.03:1); and a clipped, offset "inner
+  shadow" that turned out to be that same tint, since a 2.2px drop on a 30px ray
+  overlaps 93% of itself.
+
+  Placement mattered more than any of the tuning: the contour must be drawn
+  OUTSIDE the clipped group. Inside it the clip is `path + holes` with evenodd,
+  so a stroke on a hole boundary loses its inner half — deepening the ink from
+  0.78 to 0.96 measured 0.43% dark pixels against shipped's 0.42%.
+
 - **CL#132 — a self-driven root gets its leading escape run, because the rule
   withholding it was written about bridges.** (GitHub #116 follow-up.)
 

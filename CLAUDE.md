@@ -247,6 +247,36 @@ widening `tools/devices.py`'s safe-area selector to see the slider at all
 (GitHub #108) — the panel's own overflow was invisible to that harness before
 there was a form control inside it worth measuring.
 
+**A cut opening is only as legible as what shows through it** (CL#133). Every
+family but `planetary` and `ravigneaux` appends its openings to the wheel's own
+path under `fillRule: 'evenodd'`, so the material is REMOVED and a cut shows
+whatever is behind — the page. Its contrast is therefore `body vs page`: 1.33:1
+on the palest wheel in light against 4.74–9.54 in dark. The epicyclics cut
+nothing and DRAW their ring and teeth in `ft.line`, which is why they read at
+every colour and the cut families did not. Every cut now gets that same contour:
+`ft.line` for the ink, a fraction of the opening for the width, and opacity
+raised only where the width has bottomed out on the aliasing floor. **Draw it
+OUTSIDE the clipped group** — inside, the clip is `path + holes` with evenodd and
+a stroke on a hole boundary loses its inner half.
+
+**`MIN_CUT` floors the CUT, never the pitch** (CL#133). A lattice floors its
+pitch and then shrinks each cell by `1.732 * WALL` to leave the wall, so a 5.2
+pitch cut a 3.34-unit opening and `polariso` reached 2.18 — at that size the
+walls and the contour are most of the cell. The pitch floor is derived from
+`MIN_CUT`, so a blank that cannot host cells at that size cuts FEWER, LARGER
+ones. That is what `sunburst`'s `maxLegible` has always done, and `sunburst` was
+never the complaint. Note the search counts DOWN from the dealt cell size, so a
+floor above its start silently skips the loop and the fallback takes over — the
+fallback needs the floor too. `hexcore` and `labyrinth` have their own sizing and
+are NOT yet held to it.
+
+**Light mode casts no wheel shadow** (CL#133). The shared layer shows through the
+openings as well as the tooth gaps, so a cut measured 22 units darker than the
+page beside the gear and never showed the page at all. Off in light, kept in
+dark, where the wheel is lighter than the page and the halo does what it was
+written for. The badge disc keeps its own `0 3px 10px`, so the page still reads
+as layered.
+
 **Lighting from directly above.** All shading is symmetric about the vertical
 axis: vertical body gradients, radial highlights at 50% horizontally, specular
 arc centred on the bottom, cast shadows straight down. Any diagonal or corner
