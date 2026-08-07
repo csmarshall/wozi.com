@@ -3062,6 +3062,16 @@ const MIN_CUT = 5.6;
    fourth reader cannot drift the same way. */
 const EPI_LINE_OP = 0.6;
 
+/* THE PLATE EVERY BRAND MARK IS STRUCK ON. Pale in BOTH themes on purpose:
+   several marks are near-black (GitHub, Threads) and need a light field under
+   them (#22), and that requirement does not change with the page. */
+const BADGE_DISC = '#DFE2DE';
+/* AND THE EDGE THAT SEPARATES IT FROM THE PAGE. One disc now serves both
+   themes, which leaves it at 1.02:1 against a light page -- so where a badge
+   or its expanded pill overlaps the page it has no boundary at all. Dark needs
+   none: the disc is 12.25:1 there. The same element carries both states, so
+   edging it covers the circle and the pill together. */
+
 function flatTones(hex, soft) {
   const n = parseInt(hex.slice(1), 16);
   let c = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
@@ -8224,9 +8234,18 @@ class Component extends DCLogic {
              contrast. Dark mode's #DFE2DE is untouched: it already clears
              12.2:1 against #1E2226, and the complaint in #35 was about light
              mode specifically. */
-          background: this.state.theme === 'dark' ? '#DFE2DE' : '#CCCEC9',
+          /* ONE DISC, BOTH THEMES. It was a per-theme pair, and the light value had
+             drifted twice (#35): #FFFFFF glared, #EDEFEA landed at 1.05:1 against
+             the page and vanished, then #CCCEC9 went the other way. But the disc
+             sits on a WHEEL, never on the page, so page contrast was the wrong
+             thing to tune against -- and #CCCEC9 measured 1.07:1 against a yellow
+             wheel, which is why it read as grime on warm colours. #DFE2DE clears
+             1.30:1 there, and improves the marks it exists to carry: GitHub's
+             near-black goes 11.28 -> 13.69, Threads' 13.24 -> 16.07, both far above
+             the 4.5:1 floor. One value, so there is no second copy to drift. */
+          background: BADGE_DISC,
           color: on ? 'var(--accent)' : 'var(--ink)',
-          border: '1px solid rgba(20,30,35,.14)', boxShadow: '0 3px 10px rgba(8,16,20,.28)', zIndex: 5, cursor: 'pointer',
+          border: '1px solid ' + (this.state.theme === 'dark' ? 'rgba(20,30,35,.14)' : 'rgba(20,30,35,.40)'), boxShadow: '0 3px 10px rgba(8,16,20,.28)', zIndex: 5, cursor: 'pointer',
           transform: 'translate(-50%,-50%)' + (bo ? ' translate(' + bo.x.toFixed(1) + 'px,' + bo.y.toFixed(1) + 'px)' : '') + ' scale(' + (on ? 1.06 : 1) + ')',
           transition: 'transform .22s cubic-bezier(.34,1.56,.64,1), color .2s ease, '
             + 'width .26s cubic-bezier(.22,1,.36,1), left .26s cubic-bezier(.22,1,.36,1)'

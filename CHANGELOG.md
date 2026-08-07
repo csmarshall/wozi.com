@@ -7,6 +7,35 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Changed
 
+- **CL#135 — one badge disc for both themes, and an edge so it has a boundary.**
+
+  Charles, on a light stage: *"why do the plates for the icon/links look sort of
+  dirty as compared to the background?"*, then *"I like the disc in light mode
+  matching dark mode... but could we give a slight border/edge to the disc in
+  light mode - both when in a circle and when expanded"*.
+
+  **It was tuned against the wrong thing.** The disc was a per-theme pair and the
+  light value had drifted twice already (#35): `#FFFFFF` glared, `#EDEFEA` landed
+  at 1.05:1 against the page and vanished, and `#CCCEC9` went the other way. Each
+  move was judged against the PAGE — but the disc sits on a WHEEL and never
+  touches the page. Measured against one: `#CCCEC9` is **1.07:1** on a yellow
+  wheel, which is why it read as grime on warm colours. `#DFE2DE` clears
+  **1.30:1** there, and improves the marks the plate exists to carry — GitHub's
+  near-black 11.28 → **13.69**, Threads' 13.24 → **16.07**, both far above the
+  4.5:1 floor #22 set. `BADGE_DISC` states it once, so there is no second copy to
+  drift, and the file keeps one fewer theme conditional.
+
+  **Which leaves it at 1.02:1 against a light page**, so wherever a badge or its
+  expanded pill overlaps the background it has no boundary at all. The existing
+  `1px solid rgba(20,30,35,.14)` was the same in both themes and far too faint to
+  serve: `#c3c7c4`, 1.33:1 against the page. Light now takes `.40` — `#8e9493`,
+  **2.40:1** — and dark keeps `.14`, since its disc is 12.25:1 against its page
+  and needs nothing.
+
+  **One element carries both states.** The circle and the expanded pill are the
+  same node — the pill is that node with a width/left transition — so edging it
+  covers both, and they cannot drift apart later.
+
 - **CL#134 — the epicyclic is one part, so it reads at one weight and one tone.**
 
   Charles, on a light-mode planetary: *"why do the planets have a thicker/more
