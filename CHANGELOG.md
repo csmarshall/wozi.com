@@ -5,6 +5,44 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ## Unreleased
 
+### Fixed
+
+- **CL#137 — `MIN_CUT` is stated in pixels, and set from the family that works
+  rather than the one that was complained about.** (Follows CL#133.)
+
+  Two faults in one constant, found while checking CL#133's claim that a lattice
+  floors its pitch from `MIN_CUT`.
+
+  **The units were wrong.** `MIN_CUT = 5.6` was in solve units, and whether a cut
+  reads is a question about what reaches the eye. `--gsfit` measures 1.396 at
+  1440x900, 0.842 on a phone in landscape and 1.461 at 5K, so one solve-unit
+  floor is a 1.7x spread in what it actually asks for: 7.8px on the desk, 4.7px
+  on a phone. That is exactly the trap the hexcore wall floor fell into and that
+  `px()` was written for — this constant was simply never converted. It is now
+  `MIN_CUT_PX = 10.3`, converted per render.
+
+  **The figure was wrong too, and taken from the wrong witness.** 5.6 came from
+  hexcore, a family Charles had already complained about. The family that reads
+  at every colour is sunburst, and across four seeds and every wheel it never
+  cuts below 7.41 solve units — measured on the desk, where S is 1.396, so
+  10.3px is the requirement the working family actually meets.
+
+  A phone therefore asks for MORE solve units to make the same 10.3px, and cuts
+  fewer, larger openings. That is the intent, not a side effect: fine detail is
+  precisely what a small screen cannot show.
+
+  `MIN_CUT_LO`/`MIN_CUT_HI` (7.0 and 12.5 units) are rails, not the mechanism —
+  over the real range of `--gsfit` the conversion lands between 7.05 and 12.23,
+  so neither binds today.
+
+  **What this does NOT fix.** `hexcore` and `labyrinth` have their own sizing and
+  are still not held to the floor, so hexcore reading as round cells rather than
+  hexagons is untouched and open. The hexcore row on the comparison sheet does
+  move, and that is the deal shifting rather than the floor acting: changing the
+  cell count changes RNG consumption, so a before/after pair is not guaranteed to
+  be the same tooth count or colour. Sheet: `scratchpad/mincut_sheet.py`.
+
+
 ### Changed
 
 - **CL#135 — one badge disc for both themes, and an edge so it has a boundary.**

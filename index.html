@@ -3038,13 +3038,42 @@ const ACCENTS = CONF.ACCENTS || {};
    original in value -- while still taking the chroma out, which was the actual
    complaint. Cheaper and more targeted: fix the thing that was wrong, leave the
    thing that was not. */
-/* THE SMALLEST OPENING THAT STILL READS AS ONE, in solve units.
+/* THE SMALLEST OPENING THAT STILL READS AS ONE, in PIXELS ON SCREEN.
+
    A cut has to hold a wall on each side and its own contour and still leave an
-   interior. Measured across four seeds and every wheel: sunburst never cuts
-   below 7.41 and reads at every colour; hexcore sits at 5.61; isogrid reached
-   3.34 and polariso 2.18, and those are the two that muddle. 5.6 is where the
-   families that work already sit. */
-const MIN_CUT = 5.6;
+   interior, and whether it manages that is a question about what the eye
+   receives -- so the figure is stated in px and converted per render by px(),
+   exactly as hexcore's cell floor is. Stated in solve units it would be correct
+   at ONE screen size and wrong everywhere else: `--gsfit` measures 1.396 at
+   1440x900 but 0.842 on a phone in landscape and 1.461 at 5K, so a single
+   solve-unit floor is a 1.7x spread in what it actually asks for. That is the
+   trap the hexcore wall fell into (see px() in gearSvg) and this constant was
+   sitting in it.
+
+   THE FIGURE. Measured across four seeds and every wheel: sunburst never cuts
+   below 7.41 solve units and reads at every colour; hexcore sits at 5.61;
+   isogrid reached 3.34 and polariso 2.18, and those two are the ones that
+   muddle. Those are desktop measurements, where S is 1.396 -- so the family
+   that demonstrably works never goes under 7.41 x 1.396 = 10.3px, and that is
+   the requirement. The retired 5.6 was neither: it was taken from hexcore, a
+   family Charles had already complained about, and it was 7.8px on the desk and
+   4.7px on a phone.
+
+   Consequences worth knowing. A phone asks for MORE solve units to make the
+   same 10.3px, so a small screen cuts FEWER, LARGER openings -- which is the
+   intent, since fine detail is exactly what it cannot show. And per the lattice
+   note in CLAUDE.md, the cell search counts DOWN from the dealt size, so a floor
+   above where it starts skips the loop and the fallback takes over; the fallback
+   is floored too. */
+const MIN_CUT_PX = 10.3;
+
+/* Rails, not the mechanism. Over the real range of `--gsfit` (0.842 to 1.461)
+   the conversion lands between 7.05 and 12.23 solve units, so neither of these
+   binds today -- they exist so an unforeseen scale cannot ask for an opening
+   narrower than the one sunburst proved legible, or reserve half the blank for
+   a single cut on some future display. */
+const MIN_CUT_LO = 7.0;
+const MIN_CUT_HI = 12.5;
 
 /* THE WEIGHT EVERY EPICYCLIC CONTOUR IS DRAWN AT. The annulus, the planets and
    the sun are all the same kind of line -- ft.line at 1px -- and they should
@@ -6241,6 +6270,10 @@ class Component extends DCLogic {
        ten times the metal for a wall nobody asked to be thicker. */
     const px = (want, lo, hi) => Math.min(hi === undefined ? Infinity : hi,
                                           Math.max(lo === undefined ? 0 : lo, want / (S || 1)));
+    /* The cut floor in this render's own units. One conversion, here, rather
+       than px(...) repeated at each of the three lattices that floor against it
+       -- the clamp bounds would then be written three times and could disagree. */
+    const MIN_CUT = px(MIN_CUT_PX, MIN_CUT_LO, MIN_CUT_HI);
     const h = React.createElement;
     /* BOTH THEMES ARE FLAT -- Charles's call, 2026-07-30, after a side-by-side
        against the modelled version. This was a `const flat = true` guarding
