@@ -1648,6 +1648,88 @@ test('the flywheel actually ARRIVES at its target, in finite time (GitHub #106, 
   eq(held, idleRate(floor), 'approachSpeed() moved v away from a target it had already reached');
 });
 
+/* driveCap() is a class method, not a constant, so it is extracted with rateAt()
+   -- the one home for the 1x rate that both it and idleRate() are built on --
+   and both are run against the page's own BASE_MS and speed schema. Read as
+   text this would only confirm a shape; the properties below are arithmetic. */
+function loadDriveCap() {
+  const { floor, ceil } = speedSchema();
+  const baseMs = grabNumber('BASE_MS');
+  const rateAt = grabBlock('rateAt(mult) {', '{', '}');
+  const driveCap = grabBlock('driveCap() {', '{', '}');
+  const host = new Function('BASE_MS', 'SPEED_CEIL', 'SPEED_FLOOR', 'speedFactor',
+    'const o = { ' + rateAt + ', ' + driveCap
+    + ', idleRate() { return this.rateAt(speedFactor); } }; return o;');
+  return (factor) => host(baseMs, ceil, floor, factor);
+}
+
+test('how long a throw can coast is the ladder\'s own crossing time (GitHub #121, CL#136)', () => {
+  /* THE REGRESSION, stated as the arithmetic that caused it. Once CL#127 made
+     the flywheel decelerate at a CONSTANT rate, the time a thrown wheel coasts
+     stopped being a property of the easing and became purely
+     (driveCap() - idleRate()) / SPINDOWN_DECEL. driveCap() was `max(8,
+     idleRate())`, so at 1x it was 8 -- and 8 -> 0.343 at the shipped
+     deceleration is 269ms. No throw, however hard, could outlast a quarter
+     second, which is #121: the train read as refusing to coast.
+
+     Deriving the cap from the ladder's top instead makes this exact rather than
+     merely bigger: a saturating throw sheds idleRate(ceil) - idleRate(floor) at
+     a rate defined as that same span over SPINDOWN_RANGE_MS, so it takes
+     SPINDOWN_RANGE_MS precisely. Asserted as an identity, not a threshold,
+     because a threshold would need a number nobody derived -- and the identity
+     is what makes the hardest possible throw and the full slider sweep the same
+     journey, one by hand and one by control. */
+  const approachSpeed = loadApproachSpeed();
+  const capFor = loadDriveCap();
+  const { floor, ceil } = speedSchema();
+  const rangeMs = grabNumber('SPINDOWN_RANGE_MS');
+  const at1x = capFor(floor);
+
+  /* A tick fine enough that quantisation is a rounding error rather than the
+     measurement -- the identity is about the continuous rate, and step()'s real
+     dt is not this suite's to choose. */
+  const dt = 0.5;
+  const ticks = ticksToSettle(approachSpeed, at1x.driveCap(), at1x.idleRate(), dt);
+  const coastMs = ticks * dt;
+  ok(Math.abs(coastMs - rangeMs) <= dt * 2,
+    `a saturating throw at ${floor}x coasts ${coastMs.toFixed(1)}ms, but the ladder's own `
+    + `crossing time is ${rangeMs}ms — driveCap() and SPINDOWN_DECEL are no longer `
+    + 'derived from the same span, so the hardest throw and a full slider sweep have '
+    + 'drifted apart');
+
+  /* And it must still be a CEILING at every stop, which is what `max(8, ...)`
+     was protecting when the cap was a fixed number: a cap below the idle rate
+     would clamp the train DOWN and act as a brake (the failure the old comment
+     called out at 200x). Being the largest idleRate() the schema permits, it
+     clears every stop by construction -- this checks the construction. */
+  SPEED_STOPS_FOR_TEST().forEach(stop => {
+    const o = capFor(stop);
+    ok(o.driveCap() >= o.idleRate() - 1e-9,
+      `at ${stop}x the drive cap (${o.driveCap()}) is below the idle rate `
+      + `(${o.idleRate()}) — the cap has become a brake, not a ceiling`);
+  });
+
+  /* The historic 8 is gone from live code. Quoted in the comment that explains
+     why, so STRIPPED_SRC and not SRC -- the #101 trap. */
+  ok(!/Math\.max\(8,\s*Math\.abs\(this\.idleRate\(\)\)\)/.test(STRIPPED_SRC),
+    'driveCap() still returns max(8, idleRate()) as live code — #121 is unfixed');
+});
+
+/* The ladder the shipped page builds, rebuilt here from the schema's own bounds
+   by the same 1-2-5 rule index.html uses, so the stops this suite checks the cap
+   against are the stops the control actually offers. */
+function SPEED_STOPS_FOR_TEST() {
+  const { floor, ceil } = speedSchema();
+  const out = [];
+  for (let decade = 1; decade <= ceil; decade *= 10) {
+    for (const rung of [1, 2, 5]) {
+      const v = decade * rung;
+      if (v >= floor && v <= ceil) out.push(v);
+    }
+  }
+  return out.length ? out : [floor];
+}
+
 test('spin-up and spin-down share the same approach — GitHub #106 asks explicitly', () => {
   /* Charles: a real train winds up slowly and coasts down slowly. approachSpeed()
      takes no direction argument at all — target > v (spin-up) and target < v

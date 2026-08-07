@@ -3311,17 +3311,37 @@ class Component extends DCLogic {
      60/30 = 2 whole frames, 60/24 = 2.5. */
   tickRate() { return this.props.frameRate ?? 30; }
 
-  /* HOW HARD A HAND MAY DRIVE THE FLYWHEEL, in master-degrees per millisecond.
-     8 is the historic bound on a flick or an arrow key, and it stood while the
-     idle rate was 0.343 — twenty-three times slower than the bound, so the bound
-     only ever caught a genuinely violent flick. The speed control now reaches
-     68.6 at its top stop, and a fixed 8 would stop being a ceiling on user input
-     and start being a BRAKE: one arrow key at 200x would clamp the train down
-     to 8 and leave it climbing back to 68.6 through approachSpeed() (CL#127) —
-     visibly slower than the flick it was supposed to be capping, not faster.
-     The greater of the two is a ceiling again at every stop, and identical to
-     the old one at 1x. */
-  driveCap() { return Math.max(8, Math.abs(this.idleRate())); }
+  /* HOW HARD A HAND MAY DRIVE THE FLYWHEEL, in master-degrees per millisecond,
+     and it is a property of the MACHINE rather than of the current setting
+     (GitHub #121, CL#136).
+
+     It was `max(8, idleRate())`. The 8 was historic — it stood while the idle
+     rate was 0.343, twenty-three times slower, so it only ever caught a
+     genuinely violent flick — and `max` was added so it could not become a
+     BRAKE once the speed control reached 68.6 at its top stop. Both of those
+     readings treat the cap as a loose bound on input, which it stopped being
+     the moment CL#127 made the flywheel decelerate at a CONSTANT RATE: from
+     then on the cap is the only thing deciding how long a throw can coast,
+     because the coast is exactly (cap - idleRate()) / SPINDOWN_DECEL. At 1x
+     that is 8 -> 0.343, which is 269ms — so no throw, however hard, outlasted a
+     quarter of a second, and the train read as refusing to coast at all.
+     Measured, not reasoned: a saturating flick settled in 283ms against 2115ms
+     to 90% under the pre-CL#127 lag.
+
+     The ladder top is the ceiling, and it is not a new number — a hand may wind
+     the train up to the fastest the machine can be ASKED to run, and no
+     further. Two things fall out that the historic 8 could not express. A
+     saturating throw now takes SPINDOWN_RANGE_MS to come back, because it IS
+     the ladder, travelled by hand instead of by the slider. And the coast
+     becomes proportional to effort — a gentle throw still dies in ~150ms, a
+     hard one runs for seconds — which is what constant deceleration MEANS and
+     what the old fixed-tau lag could not do at any cap, since its settling time
+     ignored the size of the drop.
+
+     Not `max(...)` with anything: this is already the largest idleRate() the
+     schema permits, so it is a ceiling at every stop by construction, and
+     identical to the old behaviour at the top stop where the two agreed. */
+  driveCap() { return Math.abs(this.rateAt(SPEED_CEIL)); }
 
   /* Does a stop sample the teeth below Nyquist? The ladder is allowed to run
      past this — the top stops exist to be ludicrous — but the control has to say
@@ -3353,7 +3373,14 @@ class Component extends DCLogic {
     return best;
   }
 
-  idleRate() { return (7200 / BASE_MS) * this.speedFactor(); }
+  /* THE MASTER RATE AT A GIVEN MULTIPLIER, in master-degrees per millisecond.
+     One home for `7200 / BASE_MS` — the rate the train runs at 1x — because two
+     callers now want it at two DIFFERENT multipliers: idleRate() at whatever
+     the control is set to, and driveCap() at the ladder's top. Written out
+     twice those would be two chances to update one of them. */
+  rateAt(mult) { return (7200 / BASE_MS) * mult; }
+
+  idleRate() { return this.rateAt(this.speedFactor()); }
 
   /* The hub cap is a magnet on the axle: click-hold-drag pulls it off against a
      rubber-band tether (tanh, so it strains harder the further out it gets) to

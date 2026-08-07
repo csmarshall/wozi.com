@@ -5,6 +5,77 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ## Unreleased
 
+### Fixed
+
+- **CL#136 — a thrown wheel coasts for as long as the throw deserves, because
+  the ceiling on a throw is now the machine's, not a remembered 8.**
+  (GitHub #121.)
+
+  Charles: *"when one manually grabs and throws the wheel recent updates have
+  prevented the free flowing return to normal — one used to be able to throw the
+  gear chain and have it coast back to normal now it artificially holds."*
+
+  **The recent update was CL#127, and it did not have a bug in it.** It replaced
+  a fixed-tau exponential with constant deceleration, which is what GitHub #106
+  asked for and is the right model for a heavy wheel under Coulomb friction.
+  What changed underneath it is what `driveCap()` MEANS. Under an exponential,
+  settling time is independent of the size of the drop, so the cap bounded how
+  FAST a throw could go and nothing else. Under constant deceleration the coast
+  is exactly `(driveCap() - idleRate()) / SPINDOWN_DECEL` — so the cap silently
+  became the only thing deciding how LONG a throw could run.
+
+  `driveCap()` was `max(8, idleRate())`. At 1× that is 8, and 8 → 0.343 at the
+  shipped deceleration is **269ms**. Not 269ms for a gentle throw — 269ms for
+  the hardest throw physically expressible, because every throw was clamped to
+  the same ceiling. That is the whole complaint.
+
+  **Measured, on the real page, through a real gesture.** A CDP pointer drag
+  through the actual `pointerdown`/`pointermove`/`pointerup` path, with `_v`
+  logged per tick from a staged copy under `scratchpad/` (the hook never reaches
+  the repo, let alone the bucket):
+
+  | | saturating throw | gentle throw |
+  | --- | --- | --- |
+  | before CL#127 (fixed 900ms τ) | 2115ms to 90% | 2115ms to 90% |
+  | shipped | **283ms** | 164ms |
+  | this change | **1848ms** | 199ms |
+
+  Note the first row: under the old lag a gentle throw and a violent one took
+  the *same* time to settle, which is the #106 defect seen from the other side.
+  Effort buying nothing is why it needed replacing; effort buying nothing but
+  capped at a quarter second is why #121 was raised.
+
+  **The fix is a subtraction.** The 8 was historic and its own comment admitted
+  it — it "stood while the idle rate was 0.343". The ladder's top is the natural
+  ceiling and is not a new number: a hand may wind the train up to the fastest
+  the machine can be *asked* to run, and no further. Two things then fall out
+  that a fixed 8 could not express. A saturating throw takes exactly
+  `SPINDOWN_RANGE_MS` to come back, because it **is** the ladder, travelled by
+  hand instead of by the slider. And the coast becomes proportional to effort,
+  which is what constant deceleration means.
+
+  `rateAt(mult)` is added as the one home for the 1× rate, since `idleRate()`
+  and `driveCap()` now want it at two different multipliers and writing
+  `7200 / BASE_MS` a third time would be a third place to update.
+
+  **The regression test is the identity, not a threshold.** A saturating throw's
+  coast and `SPINDOWN_RANGE_MS` are algebraically the same quantity once both
+  derive from the ladder's span, so `tools/test.js` asserts they are equal
+  rather than picking a duration nobody derived. Confirmed to fail on the
+  original defect: restoring `max(8, idleRate())` reports *"a saturating throw
+  at 1x coasts 269.5ms, but the ladder's own crossing time is 2400ms"*. It also
+  checks the cap clears the idle rate at every declared stop — the brake case
+  the old `max(...)` was there to prevent — and that the 8 is gone from live
+  code.
+
+  **`SPINDOWN_RANGE_MS` is untouched at 2400**, and is still the placeholder
+  awaiting Charles's call that CL#127 left. This change gives that one number a
+  second job it can now be judged on: it is both how long the slider takes to
+  cross the ladder and how long the hardest throw runs.
+
+  Nothing about the page at rest changes — `pixel_regress` is 0px at both
+  viewports.
+
 ### Changed
 
 - **CL#132 — a self-driven root gets its leading escape run, because the rule
