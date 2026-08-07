@@ -7,6 +7,69 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#138 — `hexcore` and `labyrinth` are held to `MIN_CUT` too, each by its
+  own geometry.** (Follows CL#137.)
+
+  Charles: *"let's hold hexcore and labyrinth to the floor too — how do we
+  calculate that"*.
+
+  **The conversion is the whole calculation, and it is different per family.**
+  `MIN_CUT` floors the opening's NARROWEST dimension, so each family needs its
+  own map from its size parameter to that width:
+
+  | family | parameter | narrow dimension | floor |
+  | --- | --- | --- | --- |
+  | isogrid, polariso | lattice pitch | pitch less a wall each side | `MIN_CUT + 1.732 * WALL` |
+  | hexcore | `cellX`, the CIRCUMRADIUS | across the FLATS = `sqrt(3) * cellX` | `MIN_CUT / sqrt(3)` |
+  | labyrinth | `wL`, radial slot width | already the narrow one | `MIN_CUT` |
+
+  hexcore is not isogrid's case: its wall is ADDITIVE in `step`
+  (`cellX + WALLX / sqrt(3)`), so it sits between cells and takes nothing off the
+  opening — `cellX` is pure cut, and the only correction needed is flats rather
+  than vertices. The gap this closes, measured: the old floor allowed **6.8px
+  across the flats at every viewport against a 10.3px requirement, 34% under**,
+  which is the "reads as dots" complaint as a number.
+
+  labyrinth's cap of 6 solve units was below `MIN_CUT` at every viewport, so
+  every slot it ever cut was under the floor by construction.
+
+  **The floor had to become an AIM for hexcore, not a gate.** Its rings are
+  anchored at the wheel centre, so ring radii land on fixed multiples of the
+  pitch and a ring is wholly in or wholly out — cells do not degrade gracefully,
+  they stop fitting. Applied as a hard floor it emptied **1 of 7 wheels on a desk
+  and 3 of 7 on a phone**, measured by `scratchpad/hexcore_census.py`, which
+  counts cut paths off the rendered DOM across four seeds and four viewports. The
+  sweep now retries at hexcore's own legibility floor, which bounds the fallback
+  at what already shipped: never a smaller cell than before, never a web that used
+  to be full and is now empty. Final census: **no blank web introduced anywhere**.
+
+  **A separate bug the census exposed, and the more interesting one.** The sweep
+  was `for (c = ceiling; c >= floor; c -= 0.05)`, which anchors the tested sizes
+  to where it STARTS — so moving the ceiling silently tests a different set, and
+  the floor itself is sampled only when the span happens to be a whole number of
+  steps. A 13-tooth wheel went blank at one viewport and not at a neighbouring
+  one with IDENTICAL `rIn`/`rOut`, because the only feasible size sat just under
+  the last grid point that ceiling produced. Counting down from the floor makes
+  the tested set independent of the ceiling and always samples the floor exactly.
+  This was latent before this change and would have surfaced on any ceiling edit.
+
+  **`CELL_MAX` had to move with the floor or invert it.** A flat 4.8 solve units
+  sat above the old floor on a desk (2.79) and BELOW the new one on a phone in
+  landscape (7.06), and a ceiling under the floor collapses the sweep to one
+  iteration. It is now `CELL_MIN * 1.7` — and 1.7 is the one judged figure here,
+  taken from the ratio the shipped pair expressed at desktop (4.8 / 2.79), since
+  how much range the search gets is not a property of the geometry.
+
+  **`LATTICE_WALL`** is added as the one home for the wall between openings: the
+  same expression was written out four times.
+
+  **labyrinth is corrected but unphotographed, and that is not an oversight.** It
+  is retired — no `CENTRE_FAMILIES` entry, and `?kind=labyrinth` silently returns
+  an ordinary mix rather than erroring — so there is no picture to check a chosen
+  figure against. It is therefore bounded by its own row pitch (widen past that
+  and neighbouring rows merge) and drops a row when the floor will not fit, rather
+  than by any number picked by eye.
+
 - **CL#137 — `MIN_CUT` is stated in pixels, and set from the family that works
   rather than the one that was complained about.** (Follows CL#133.)
 

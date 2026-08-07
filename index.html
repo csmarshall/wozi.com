@@ -6274,6 +6274,16 @@ class Component extends DCLogic {
        than px(...) repeated at each of the three lattices that floor against it
        -- the clamp bounds would then be written three times and could disagree. */
     const MIN_CUT = px(MIN_CUT_PX, MIN_CUT_LO, MIN_CUT_HI);
+    /* THE WALL EVERY LATTICE LEAVES BETWEEN ITS OPENINGS, in this render's units.
+       1.06px is the thinnest that still reads as a wall rather than a seam;
+       below it the pattern aliases into the grey smear rejected twice. The
+       tooth-count term keeps the wall a fixed SHARE of the annulus, so it does
+       not cost a 13-tooth wheel three times what it costs a 19-tooth one.
+       One home, because this exact expression was written out four times --
+       hexcore's WALLX, isogrid's wallI0, polariso's WALLP and labyrinth's --
+       which is four chances to update three of them. */
+    const LATTICE_WALL = Math.max(px(1.06, 0.55, 2.4),
+                                  1.2 * (g.teeth || TEETH_MAX) / TEETH_MAX);
     const h = React.createElement;
     /* BOTH THEMES ARE FLAT -- Charles's call, 2026-07-30, after a side-by-side
        against the modelled version. This was a `const flat = true` guarding
@@ -6827,10 +6837,41 @@ class Component extends DCLogic {
       /* 1.06px is the thinnest that still reads as a wall rather than a seam;
          below it the lattice aliases into the grey smear rejected twice. Ceiling
          so a 5K display does not spend ten times the metal on it. */
-      const WALLX = Math.max(px(1.06, 0.55, 2.4), 1.2 * (g.teeth || TEETH_MAX) / TEETH_MAX);
-      /* 3.9px is where a cell stops reading as a hexagon and becomes a dot.
-         Was a flat 3.1 units -- 1.58px on a phone, 15.87px on a 5K. */
-      const CELL_MIN = px(3.9, 2.2, 6.0), CELL_MAX = 4.8;
+      const WALLX = LATTICE_WALL;
+      /* HELD TO MIN_CUT LIKE EVERY OTHER LATTICE (CL#138). This was
+         `px(3.9, 2.2, 6.0)` -- hexcore's own empirical floor, measured as "where
+         a cell stops reading as a hexagon and becomes a dot" -- and it is
+         retired because it disagreed with the shared floor and lost.
+
+         THE CONVERSION IS THE WHOLE CALCULATION, and it is not isogrid's. There
+         the cut is inset by a wall on each side, so the pitch has to clear
+         MIN_CUT PLUS the wall. Here `cellX` is the hexagon's CIRCUMRADIUS -- the
+         radius its vertices sit at -- and the wall is additive in `step` below
+         (`cellX + WALLX / sqrt(3)`), so it lives BETWEEN cells and takes nothing
+         off the opening. `cellX` is pure cut.
+
+         What MIN_CUT floors is the opening's NARROWEST dimension, which for a
+         hexagon is across the FLATS, not across the vertices: 2 x inradius =
+         sqrt(3) x circumradius. So sqrt(3) * cellX >= MIN_CUT, and the floor is
+         MIN_CUT / sqrt(3).
+
+         The gap it closes, measured: the old floor allowed 6.8px across the
+         flats at every viewport against a 10.3px requirement -- 34% under, which
+         is the "reads as dots" complaint stated as a number. */
+      const CELL_MIN = MIN_CUT / Math.sqrt(3);
+      /* THE CEILING HAS TO MOVE WITH THE FLOOR OR IT INVERTS IT. It was a flat
+         4.8 solve units, which sat above the old floor on a desk (2.79) and
+         BELOW the new one on a phone in landscape (7.06) -- and a ceiling under
+         the floor collapses the sweep to a single iteration, throwing away the
+         search that picks the size. Expressed as a multiple of the floor it
+         cannot invert at any scale.
+
+         1.7 IS THE ONE JUDGED FIGURE HERE and cannot be derived: it is how much
+         range the search is given, not a property of the geometry. It is taken
+         from the pair that shipped -- 4.8 / 2.79 = 1.72 at the desktop scale
+         those two were written against -- so the search keeps the room it had,
+         now at every scale instead of one. */
+      const CELL_MAX = CELL_MIN * 1.7;
       /* Clear the BOSS, not the hub. The boss disc is drawn at hubR * 1.5 and
          painted over the web, so a lattice that only cleared hubR * 1.1 ran its
          innermost ring underneath it -- half-covered cells, and the ragged inner
@@ -6935,44 +6976,83 @@ class Component extends DCLogic {
          was choosing, 17T to 4.35 with 30.
          Ties on fit go to the LARGER cell, which is the counterweight the last
          version lacked: fit was bounded at both ends, size at neither. */
+      /* THE SHARED FLOOR IS AN AIM, NOT A GATE -- because the alternative is a
+         blank web, and a blank web is worse than a small cell (CL#138).
+
+         hexcore's rings are anchored at the wheel CENTRE, so ring radii land on
+         fixed multiples of the pitch and a ring is wholly in or wholly out.
+         Bigger cells therefore do not degrade gracefully: past a point no ring
+         lands inside the annulus at all and the sweep returns nothing. Measured
+         when MIN_CUT was applied as a hard floor: 1 of 7 wheels went blank on a
+         desk and 3 of 7 on a phone, where MIN_CUT converts to 12.23 solve units
+         and asks for a hexagon 14.1 across.
+
+         So the floor is tried, and if the blank cannot host a single ring at
+         that size the sweep repeats at hexcore's OWN legibility floor -- the
+         `px(3.9, 2.2, 6.0)` that shipped before this change, measured as where a
+         cell stops reading as a hexagon and becomes a dot. That bounds the
+         fallback: this can never draw a cell smaller than what already shipped,
+         and can never leave a web empty that used to be full.
+
+         It is the same trade the shell clearance already makes twenty lines up
+         -- "the clearance is a nicety; having ANY pattern is not" -- applied to
+         the cell floor, and it is why this is a list rather than a constant. */
+      const CELL_FLOORS = [CELL_MIN, px(3.9, 2.2, 6.0)];
       let cellX = 0, bestWaste = Infinity, rOutX = rOutTry[0];
-      for (let attempt = 0; attempt < rOutTry.length && !cellX; attempt++) {
-        rOutX = rOutTry[attempt];
-        bestWaste = Infinity;
-        const seen = [];
-        for (let c = ceiling; c >= CELL_MIN; c -= 0.05) {
-          /* PITCH ADDS THE WALL ACROSS THE FLATS, not across the radius
-             (#62). Two hexagons meet flat-to-flat, and a hexagon's inradius is
-             sqrt3/2 of its circumradius -- so adding WALLX/2 to the
-             circumradius opens a gap of only WALLX * sqrt3/2, 13.4% thinner
-             than asked for. Measured 0.736-1.039 against a nominal 0.85-1.20.
-             Dividing by sqrt3 makes the gap the wall. */
-          const step = c + WALLX / Math.sqrt(3), px = Math.sqrt(3) * step, ry2 = 1.5 * step;
-          const at = (q, r) => [px * (q + r / 2), ry2 * r];
-          const span = Math.ceil(rOutX / step) + 2;
-          let ink0 = Infinity, ink1 = 0, n = 0;
-          for (let k = 0; k <= span; k++) {
-            for (const [q, r] of ringOf(k)) {
-              const P = at(q, r);
-              let v0 = Infinity, v1 = 0, ok = true;
-              for (let v = 0; v < 6; v++) {
-                const va = (90 + 60 * v) * Math.PI / 180;
-                const d = Math.hypot(P[0] + c * Math.cos(va), P[1] + c * Math.sin(va));
-                if (d > rOutX) { ok = false; break; }
-                v0 = Math.min(v0, d); v1 = Math.max(v1, d);
+      for (let fi = 0; fi < CELL_FLOORS.length && !cellX; fi++) {
+        const floorC = CELL_FLOORS[fi];
+        const ceilingF = Math.max(floorC, ceiling);
+        for (let attempt = 0; attempt < rOutTry.length && !cellX; attempt++) {
+          rOutX = rOutTry[attempt];
+          bestWaste = Infinity;
+          const seen = [];
+          /* THE GRID IS ANCHORED AT THE FLOOR, NOT THE CEILING. Written as
+             `for (c = ceilingF; c >= floorC; c -= 0.05)` the set of sizes
+             actually tested depends on where the sweep STARTS, so moving the
+             ceiling silently tests a different set -- and the floor itself is
+             sampled only when the span happens to be a whole number of steps.
+             That is how a 13-tooth wheel went blank at one viewport and not at
+             a neighbouring one with identical rIn/rOut: the only feasible size
+             sat just under the last grid point the ceiling happened to produce.
+             Counting down from the floor samples floorC exactly, every time,
+             and makes the tested set independent of the ceiling. Still walked
+             largest-first, so the "larger cells win ties" rule is unchanged. */
+          const nSteps = Math.max(0, Math.floor((ceilingF - floorC) / 0.05 + 1e-9));
+          for (let si = nSteps; si >= 0; si--) {
+            const c = floorC + si * 0.05;
+            /* PITCH ADDS THE WALL ACROSS THE FLATS, not across the radius
+               (#62). Two hexagons meet flat-to-flat, and a hexagon's inradius is
+               sqrt3/2 of its circumradius -- so adding WALLX/2 to the
+               circumradius opens a gap of only WALLX * sqrt3/2, 13.4% thinner
+               than asked for. Measured 0.736-1.039 against a nominal 0.85-1.20.
+               Dividing by sqrt3 makes the gap the wall. */
+            const step = c + WALLX / Math.sqrt(3), px = Math.sqrt(3) * step, ry2 = 1.5 * step;
+            const at = (q, r) => [px * (q + r / 2), ry2 * r];
+            const span = Math.ceil(rOutX / step) + 2;
+            let ink0 = Infinity, ink1 = 0, n = 0;
+            for (let k = 0; k <= span; k++) {
+              for (const [q, r] of ringOf(k)) {
+                const P = at(q, r);
+                let v0 = Infinity, v1 = 0, ok = true;
+                for (let v = 0; v < 6; v++) {
+                  const va = (90 + 60 * v) * Math.PI / 180;
+                  const d = Math.hypot(P[0] + c * Math.cos(va), P[1] + c * Math.sin(va));
+                  if (d > rOutX) { ok = false; break; }
+                  v0 = Math.min(v0, d); v1 = Math.max(v1, d);
+                }
+                if (!ok || v0 < rInX) continue;
+                n++; ink0 = Math.min(ink0, v0); ink1 = Math.max(ink1, v1);
               }
-              if (!ok || v0 < rInX) continue;
-              n++; ink0 = Math.min(ink0, v0); ink1 = Math.max(ink1, v1);
             }
+            if (!n) continue;
+            seen.push({ c: c, waste: (ink0 - rInX) + (rOutX - ink1) });
           }
-          if (!n) continue;
-          seen.push({ c: c, waste: (ink0 - rInX) + (rOutX - ink1) });
+          if (!seen.length) continue;
+          let best = Infinity;
+          seen.forEach(r => { if (r.waste < best) best = r.waste; });
+          /* among sizes that fit essentially as well, take the LARGEST cell */
+          seen.forEach(r => { if (r.waste <= best + 0.35 && r.c > cellX) { cellX = r.c; bestWaste = r.waste; } });
         }
-        if (!seen.length) continue;
-        let best = Infinity;
-        seen.forEach(r => { if (r.waste < best) best = r.waste; });
-        /* among sizes that fit essentially as well, take the LARGEST cell */
-        seen.forEach(r => { if (r.waste <= best + 0.35 && r.c > cellX) { cellX = r.c; bestWaste = r.waste; } });
       }
       if (cellX) {
         /* THE SIZE is chosen by complete rings above, but the KEEP is exact.
@@ -7062,7 +7142,7 @@ class Component extends DCLogic {
            colour. Flooring the CUT makes the sweep stop at a coarser pitch, which
            is the same thing sunburst's maxLegible does: fewer, larger openings
            rather than more, finer ones. */
-        const wallI0 = Math.max(px(1.06, 0.55, 2.4), 1.2 * (g.teeth || TEETH_MAX) / TEETH_MAX);
+        const wallI0 = LATTICE_WALL;
         const sdFloor = MIN_CUT + 1.732 * wallI0;
         /* AND THE SEARCH MUST START AT OR ABOVE THE FLOOR. It counts DOWN from the
            dealt cell size, so a floor above that start meant the loop never ran at
@@ -7150,7 +7230,7 @@ class Component extends DCLogic {
       inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
       /* Scales with the wheel, like the hex core's (#62/A4) -- a flat wall is
          a fixed cost against an annulus that varies 3.9x across the train. */
-      const WALLP = Math.max(px(1.06, 0.55, 2.4), 1.2 * (g.teeth || TEETH_MAX) / TEETH_MAX);
+      const WALLP = LATTICE_WALL;
       const rInP = coreIn(hubR), rOutP = coreOut;
       const spanP = rOutP - rInP;
       /* SAME FLOOR, SAME REASON AS isogrid: 3.6 floors the COURSE HEIGHT, but the
@@ -7217,8 +7297,48 @@ class Component extends DCLogic {
          three fit and asked why they were not there. Slot width scales down as
          rows go up so every row keeps solid metal beside it. */
       const depthL = rOutL - rInL;
-      const rowsL = depthL > 24 ? 3 : 2;
-      const wL = Math.min(6, depthL * (rowsL === 3 ? 0.15 : 0.22));
+      /* HELD TO MIN_CUT (CL#138), and here the conversion is the identity: an
+         arc slot is long tangentially and narrow RADIALLY, so `wL` -- its radial
+         width -- is already the narrowest dimension MIN_CUT floors. No wall term
+         and no geometry factor, unlike hexcore's across-the-flats or isogrid's
+         wall inset.
+
+         The old expression could not reach the floor at ANY depth: it was capped
+         at 6 solve units against a MIN_CUT of 7.38 on a desk and 12.23 on a
+         phone, so every slot this family ever cut was under the floor by
+         construction.
+
+         THE ROW COUNT YIELDS TO THE FLOOR, rather than the floor being trimmed
+         to fit the rows. Row centres sit at fixed fractions of the depth, so the
+         pitch between them is what bounds a slot's width -- widen past that and
+         neighbouring rows merge into each other, which is worse than a thin
+         slot and is a failure a still would not obviously show. So the widest
+         legal slot is the row pitch less one wall, and if THAT cannot reach
+         MIN_CUT the family drops a row and tries again: fewer, larger openings,
+         exactly as a lattice that cannot host its cells at size cuts fewer of
+         them. Two rows is the floor of the ladder -- below that it is not a
+         labyrinth -- so a shallow annulus can still fall short, which is
+         reported by the slot simply being as wide as the pitch allows.
+
+         UNPHOTOGRAPHED, AND THAT IS NOT AN OVERSIGHT. labyrinth is retired --
+         it has no CENTRE_FAMILIES entry, so it is never dealt, and
+         `?kind=labyrinth` silently returns an ordinary mix rather than erroring.
+         This is corrected so it is right if it is ever restored, and it is
+         deliberately bounded by its own geometry rather than by a figure chosen
+         by eye, because there is no picture to check a chosen figure against. */
+      const rowFracsL = { 3: [0.2, 0.52, 0.84], 2: [0.3, 0.72] };
+      const widestAt = (rows) => {
+        const f = rowFracsL[rows];
+        return depthL * (f[1] - f[0]) - LATTICE_WALL;
+      };
+      const rowsL = (depthL > 24 && widestAt(3) >= MIN_CUT) ? 3 : 2;
+      /* Aim at the proportional width the family has always used -- that is what
+         makes a deep annulus cut a broader slot than a shallow one, and it is
+         worth keeping -- then floor it at MIN_CUT and cap it at the pitch. The
+         order matters: the cap is applied LAST so a slot can never merge with
+         its neighbour, even on an annulus too shallow to host the floor. */
+      const wantL = depthL * (rowsL === 3 ? 0.15 : 0.22);
+      const wL = Math.min(Math.max(wantL, MIN_CUT), Math.max(widestAt(rowsL), 1));
       const ring = (rr, nn, off, fill2) => {
         for (let k = 0; k < nn; k++) {
           const a0 = off + (k / nn) * 360, sw = (360 / nn) * 0.62;
