@@ -1,0 +1,779 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="noindex">
+<title>Double planetary — wozi</title>
+<!-- WHAT THIS PAGE IS.
+
+     A double (compound) planetary gear set you can spin with a finger. Both
+     rings are GROUNDED, so the sun and the final carrier are the two free
+     ports, and the whole train is one degree of freedom bound by Willis:
+
+         (w_sun - w_carrier) / (w_ring - w_carrier) = -N_ring / N_sun
+
+     with w_ring = 0. The point of the page is that the two free ports sit at
+     opposite ends of a large ratio and REFLECTED INERTIA GOES AS THE SQUARE OF
+     THAT RATIO, so the carrier feels two orders of magnitude heavier than the
+     sun. See README.md in this folder for every number and why it is that
+     number.
+
+     It is standalone by design: it loads nothing from support.js or config.js,
+     and it draws its own gears. The palette tokens are copied from index.html's
+     :root so the two pages read as one site, and they are the only thing shared.
+
+     THE PROJECT RULES THIS PAGE IS HELD TO (CLAUDE.md):
+       - NO CSS animation or transition on anything that turns. One rAF loop
+         integrates one state and every body's transform is derived from it.
+         Independent animation drifts out of mesh within seconds (#3).
+       - Inline styling; no classes for layout. The <style> block below carries
+         palette tokens and the two pseudo-element rules a style attribute
+         cannot reach, exactly as index.html's does.
+       - No hardcoded geometry: radii, orbit distances, tooth pitch and the
+         inertias are all derived from the tooth counts and the module.        -->
+<style>
+:root{
+  /* Copied verbatim from index.html's :root so the two pages are the same site.
+     If those move, these should move with them -- this page cannot read them,
+     because sharing a stylesheet is exactly the coupling it is avoiding. */
+  --ref-bg:#E1E4DD; --ref-muted:#6B7E7C; --ref-bg-dark:#1E2226;
+  --bg:var(--ref-bg); --ink:#20302E; --muted:var(--ref-muted);
+  --hair:#D5DAD6; --chip:#FFFFFF; --accent:#3B7DE8;
+  --shadow:0 1px 2px rgba(20,40,38,.06);
+  --offset:max(14px, env(safe-area-inset-top));
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:var(--ref-bg-dark); --ink:#EEF1F0; --muted:#93A5A3;
+    --hair:#373E3D; --chip:#2A3034; --accent:#7FA9F0;
+    --shadow:0 1px 2px rgba(0,0,0,.35);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:var(--ref-bg-dark); --ink:#EEF1F0; --muted:#93A5A3;
+  --hair:#373E3D; --chip:#2A3034; --accent:#7FA9F0;
+  --shadow:0 1px 2px rgba(0,0,0,.35);
+}
+html,body{margin:0;padding:0;height:100%;background:var(--bg);color:var(--ink);
+  font-family:'Manrope',system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;}
+/* The stage must not scroll or rubber-band under a drag: a fidget is a drag
+   gesture on a full-bleed surface, and the browser's own pan would steal it. */
+body{overscroll-behavior:none;touch-action:none;}
+button:focus-visible,[tabindex]:focus-visible{outline:3px solid var(--accent);outline-offset:3px;}
+</style>
+</head>
+<body>
+
+<!-- The readout is a SIBLING of the stage rather than an overlay on it. An
+     overlaid panel is fine on a desktop and covers a third of a phone held
+     upright, and there is no width at which it is out of the way of a
+     full-bleed drawing -- so it takes its own row and the drawing gets what is
+     left. Same reason the stage is flex:1 rather than 100vh. -->
+<div style="position:fixed;inset:0;display:flex;flex-direction:column;background:var(--bg);overflow:hidden;">
+
+  <main id="stage" style="position:relative;flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center;">
+    <svg id="train" xmlns="http://www.w3.org/2000/svg" role="img"
+         aria-label="A double planetary gear set with both ring gears fixed. Drag the first set to turn the sun, the second to turn the output carrier."
+         style="width:100%;height:100%;display:block;touch-action:none;-webkit-user-select:none;user-select:none;cursor:grab;"></svg>
+
+  </main>
+
+  <!-- The buttons live in the bar, NOT floating over the stage. Floated they
+       sat on top of the first set's label in portrait, and there is no corner of
+       a full-bleed drawing that is free at every aspect ratio. In the bar they
+       are also where a thumb already is on a phone, which is where a fidget's
+       controls belong. -->
+  <div style="flex:0 0 auto;display:flex;gap:6px;flex-wrap:wrap;
+       padding:8px max(14px, env(safe-area-inset-left)) 0;">
+    <button id="flickSun" type="button" title="Flick the sun"
+       style="font:600 11px/1 'Manrope',system-ui,sans-serif;color:var(--muted);background:var(--chip);
+       border:1px solid var(--hair);border-radius:999px;padding:9px 12px;cursor:pointer;box-shadow:var(--shadow);">flick sun</button>
+    <button id="flickCarrier" type="button" title="Flick the output carrier"
+       style="font:600 11px/1 'Manrope',system-ui,sans-serif;color:var(--muted);background:var(--chip);
+       border:1px solid var(--hair);border-radius:999px;padding:9px 12px;cursor:pointer;box-shadow:var(--shadow);">flick carrier</button>
+    <button id="theme" type="button" title="Switch theme" aria-label="Switch theme"
+       style="font:600 11px/1 'Manrope',system-ui,sans-serif;color:var(--muted);background:var(--chip);
+       border:1px solid var(--hair);border-radius:999px;padding:9px 12px;cursor:pointer;box-shadow:var(--shadow);
+       margin-left:auto;">theme</button>
+  </div>
+
+  <!-- Updated on a 250ms timer OUTSIDE the loop, and it reads the integrator's
+       state rather than the DOM, so the instrument cannot change the reading --
+       the lesson index.html's ?hud panel is built around. -->
+  <div id="readout" aria-live="off" style="flex:0 0 auto;display:flex;flex-wrap:wrap;gap:2px 22px;
+       align-items:baseline;border-top:1px solid var(--hair);
+       padding:10px max(14px, env(safe-area-inset-left)) max(10px, env(safe-area-inset-bottom));
+       font:500 12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted);"></div>
+</div>
+
+<script>
+'use strict';
+(function () {
+
+/* ==================================================================== GEARING
+   Tooth counts. Every other length on the page comes off these and MODULE.
+
+   Two constraints hold for each set and both are asserted at load rather than
+   trusted, because a set that violates either cannot be built out of metal and
+   would draw a machine that does not exist:
+     - coaxial:  N_ring = N_sun + 2 * N_planet
+     - equally spaced planets: (N_sun + N_ring) % nPlanets === 0                */
+const MODULE = 1;                 /* every radius is in these units; the SVG
+                                     viewBox is in them too, so "module" and
+                                     "user unit" are the same thing here.      */
+const SETS = [
+  { sun: 24, planet: 18, ring: 60, planets: 3 },   /* stage 1: 1 + 60/24 = 3.500 */
+  { sun: 18, planet: 21, ring: 60, planets: 3 }    /* stage 2: 1 + 60/18 = 4.333 */
+];
+
+/* A carrier is a plate or a spider, not a solid gear blank: it is thinner than
+   the wheels it carries. One number, applied to the disc formula below, rather
+   than a hand-written inertia per carrier. */
+const CARRIER_THICKNESS = 0.35;
+
+/* Moment of inertia of a uniform disc of radius r at constant thickness and
+   density: J = m r^2 / 2 with m proportional to r^2, so J is proportional to
+   r^4. The constant is arbitrary because only RATIOS of inertia matter here --
+   which is exactly why the page can be honest about reflected inertia without
+   inventing a mass in kilograms. */
+const disc = (r) => Math.pow(r, 4);
+const mass = (r) => Math.pow(r, 2);
+
+const pitchR = (teeth) => teeth * MODULE / 2;
+
+/* ------------------------------------------------------------- KINEMATICS
+   Willis, solved once, with the ring held at zero.
+
+   For one set with the ring grounded:
+     w_carrier = w_sun / (1 + N_ring / N_sun)
+   and the planet's own spin follows from the sun-planet external mesh taken in
+   the carrier's rotating frame:
+     (w_sun - w_c) / (w_planet - w_c) = -N_planet / N_sun
+
+   Stage 2's sun is stage 1's carrier -- one shaft, which is what makes this a
+   COMPOUND set rather than two sets standing next to each other. Every speed
+   below is expressed per unit speed of stage 1's sun, so the sun is the
+   generalised coordinate and every other body is a fixed multiple of it. */
+function kinematics(sets) {
+  const out = [];
+  let sun = 1;
+  for (const s of sets) {
+    if (s.ring !== s.sun + 2 * s.planet) throw new Error('set is not coaxial: ' + JSON.stringify(s));
+    if ((s.sun + s.ring) % s.planets) throw new Error('planets do not space equally: ' + JSON.stringify(s));
+    const stageRatio = 1 + s.ring / s.sun;
+    const carrier = sun / stageRatio;
+    const planet = carrier - (sun - carrier) * s.sun / s.planet;
+    /* The ring must come out at exactly zero; if it does not, the algebra above
+       is wrong and everything drawn from it is decorative. */
+    const ringCheck = carrier + (planet - carrier) * s.planet / s.ring;
+    if (Math.abs(ringCheck) > 1e-12) throw new Error('ring is not grounded: ' + ringCheck);
+    /* ASSEMBLY PHASING -- where each wheel's teeth start, so the drawn set
+       MESHES rather than merely having the right tooth counts. gearPath puts a
+       tooth centre at its own angle zero, so at the line of centres two wheels
+       would otherwise both present a tooth and interpenetrate.
+
+       Work in tooth-index coordinates: t(a) = (a - beta) * N / 2pi, material at
+       integers and space at half-integers. The sun keeps beta = 0 and everything
+       else is solved against it, so nothing here is a tuned number.
+
+         sun-planet contact:  sun angle 0, planet local angle pi
+           t_planet(pi) = N_p/2 - beta_p*N_p/2pi must be a half-integer, so
+           beta_p is -pi/N_p for an even planet and 0 for an odd one.
+         planet-ring contact: planet local angle 0, ring angle 0
+           whichever of the two the planet is now presenting there, the ring
+           takes the other. */
+    const planetPhase = s.planet % 2 ? 0 : -Math.PI / s.planet;
+    const ringPhase = s.planet % 2 ? -Math.PI / s.ring : 0;
+    out.push({
+      spec: s, stageRatio, sun, carrier, planet, planetPhase, ringPhase,
+      orbitR: pitchR(s.sun) + pitchR(s.planet)
+    });
+    sun = carrier;
+  }
+  return out;
+}
+const STAGES = kinematics(SETS);
+
+/* Overall reduction, sun to final carrier. The product of the stage ratios --
+   and equal to 1 / (speed of the last carrier), which is how it is taken, so
+   the number quoted on screen is the number the integrator actually uses. */
+const RATIO = 1 / STAGES[STAGES.length - 1].carrier;
+
+/* -------------------------------------------------------- EFFECTIVE INERTIA
+   J_eff = sum over every moving body of J_i * (w_i / w_sun)^2 -- the standard
+   reduction of a fixed-ratio train to one degree of freedom. Grounded rings
+   contribute nothing, because their speed is zero; that is not a simplification,
+   it is what "grounded" means.
+
+   A planet contributes twice: its own spin about its own axis, and its mass
+   carried around the sun at the carrier's speed (parallel axis). Both are real
+   and the orbital term is the larger one at these proportions. */
+const J_EFF = (function () {
+  let j = 0;
+  for (const st of STAGES) {
+    j += disc(pitchR(st.spec.sun)) * st.sun * st.sun;
+    j += st.spec.planets * disc(pitchR(st.spec.planet)) * st.planet * st.planet;
+    j += st.spec.planets * mass(pitchR(st.spec.planet)) * st.orbitR * st.orbitR * st.carrier * st.carrier;
+    j += CARRIER_THICKNESS * disc(st.orbitR) * st.carrier * st.carrier;
+  }
+  return j;
+})();
+
+/* THE TWO FREE PORTS. `gear` is how many turns of the sun one turn of this port
+   is worth, so the sun is 1 and the output carrier is RATIO. Inertia seen at a
+   port is J_EFF * gear^2 -- the square, which is the whole claim the page makes.
+   It is derived here and printed on screen; it is never written down. */
+const PORTS = {
+  sun:     { gear: 1,     label: 'SUN' },
+  carrier: { gear: RATIO, label: 'CARRIER' }
+};
+for (const p of Object.values(PORTS)) p.inertia = J_EFF * p.gear * p.gear;
+
+/* ================================================================== LOSSES
+   The three-term coast-down the main page arrived at over four iterations
+   (CL#127 -> CL#139 -> CL#141), reused as a shape rather than re-derived:
+
+     retarding rate = Coulomb + viscous * |w| + windage * w^2
+
+   Each term earns its place and the failures sit at the ends of one axis:
+     - Coulomb alone is a constant retarding torque, which is literally a
+       friction BRAKE. It ramps down a straight line and stops at a corner.
+     - Viscous/windage alone is an exponential: it never arrives, and the
+       stopping time stops depending on how hard you threw it.
+   Coulomb is kept precisely BECAUSE this page coasts to rest: it is the residue
+   that makes a stop happen in finite time instead of asymptotically.
+
+   DRAG_RANGE is how much harder it retards at the top of the speed range than
+   at rest; WINDAGE_SHARE is how much of the speed-dependent part is the square
+   term. Both are CL#141's shipped figures, and both are shape only -- the
+   overall scale is SOLVED below so the coast takes exactly COAST_RANGE_S. Low
+   windage and a wide range is what "free-feeling" means: little drag at speed,
+   falling steeply as it slows. */
+const DRAG_RANGE = 60;
+const WINDAGE_SHARE = 0.10;
+
+/* The one feel figure. How long the train takes to coast from REF_SPEED to a
+   dead stop. Everything else about the losses is derived from it. */
+const COAST_RANGE_S = 9.0;
+
+/* The speed the coast figure is quoted at, in radians per second AT THE SUN --
+   a firm flick of the sun, which is the fastest thing on the page. Named once
+   so the solver, the readout's "top" and the speed clamp all mean the same
+   thing rather than three similar numbers. */
+const REF_SPEED = 12 * 2 * Math.PI;      /* 12 sun revolutions per second */
+const MAX_SPEED = 3 * REF_SPEED;         /* nothing may be driven past this */
+
+/* The scale, bisected against a Simpson integral of 1/decel, exactly as
+   index.html solves SPINDOWN_K -- the closed form loses precision as the
+   windage share approaches zero. A few hundred multiplications, once, at load.
+
+   Expressed as a DECELERATION rather than a torque, which is legitimate here
+   and not a shortcut: the train is fixed-ratio, so J_eff is a constant, and a
+   retarding torque and a retarding acceleration differ only by that constant.
+   README.md records this. */
+const [COULOMB, VISCOUS, WINDAGE] = (function () {
+  const at = (k, w) =>
+      k * REF_SPEED / (DRAG_RANGE - 1)                 /* Coulomb */
+    + k * (1 - WINDAGE_SHARE) * w                      /* viscous */
+    + k * WINDAGE_SHARE * w * w / REF_SPEED;           /* windage */
+  const timeToRest = (k) => {
+    const n = 200, h = REF_SPEED / n;
+    let s = 1 / at(k, 0) + 1 / at(k, REF_SPEED);
+    for (let i = 1; i < n; i++) s += (i % 2 ? 4 : 2) / at(k, i * h);
+    return s * h / 3;
+  };
+  let lo = 1e-9, hi = 1e4;
+  for (let i = 0; i < 80; i++) {
+    const mid = (lo + hi) / 2;
+    if (timeToRest(mid) > COAST_RANGE_S) lo = mid; else hi = mid;
+  }
+  const k = hi;
+  return [k * REF_SPEED / (DRAG_RANGE - 1), k * (1 - WINDAGE_SHARE), k * WINDAGE_SHARE / REF_SPEED];
+})();
+
+const retard = (w) => COULOMB + VISCOUS * w + WINDAGE * w * w;
+
+/* ================================================================ THE HAND
+   A finger is not a velocity source, it is a compliant grip -- and modelling it
+   as one is the only way the inertia difference can be FELT rather than read.
+   A drag imposes an angle; the grip pulls the body toward that angle with a
+   spring and a damper. The light port snaps to the finger; the heavy port lags
+   behind it and has to be wound up. That lag IS the reflected inertia.
+
+   HAND_FREQ is the undamped natural frequency of grip-on-SUN, so the stiffness
+   is derived from the inertia rather than picked against it: change a tooth
+   count and the sun still tracks the finger the same way. At the carrier the
+   same stiffness gives HAND_FREQ / RATIO, which is the square-law showing up as
+   something your hand can notice. */
+const HAND_FREQ = 60;                          /* rad/s at the sun */
+const HAND_DAMPING = 0.28;                     /* damping ratio, at either port */
+const HAND_STIFFNESS = HAND_FREQ * HAND_FREQ * J_EFF;
+const handDamper = (port) => 2 * HAND_DAMPING * Math.sqrt(HAND_STIFFNESS * port.inertia);
+
+/* ================================================================== DRAWING
+   Gear profiles are generated from tooth count and module. Nothing about a
+   radius, an orbit or a tooth pitch is written down anywhere below.
+
+   Standard proportions: addendum = 1 module, dedendum = 1.25 module, and the
+   tooth occupies half the circular pitch at the pitch circle -- which is a half
+   angle of pi/(2N) regardless of module. The flanks are straightened rather than
+   involute: at the size these draw, the difference is sub-pixel, and a real
+   involute would be geometry the page never uses. */
+const TIP_TAPER = 0.62;    /* tooth half-angle at the tip, as a share of pitch  */
+const ROOT_FLARE = 1.28;   /* ... and at the root                               */
+
+function gearPath(teeth, internal) {
+  const r = pitchR(teeth);
+  const tip  = internal ? r - MODULE        : r + MODULE;
+  const root = internal ? r + 1.25 * MODULE : r - 1.25 * MODULE;
+  const half = Math.PI / (2 * teeth);
+  const hTip = half * TIP_TAPER, hRoot = Math.min(half * ROOT_FLARE, Math.PI / teeth - 1e-4);
+  const pt = (rad, a) => (rad * Math.cos(a)).toFixed(4) + ',' + (rad * Math.sin(a)).toFixed(4);
+  let d = '';
+  for (let i = 0; i < teeth; i++) {
+    const a = i * 2 * Math.PI / teeth;
+    d += (i ? 'L' : 'M') + pt(root, a - hRoot)
+       + 'L' + pt(tip, a - hTip) + 'L' + pt(tip, a + hTip) + 'L' + pt(root, a + hRoot);
+  }
+  return d + 'Z';
+}
+
+const NS = 'http://www.w3.org/2000/svg';
+const el = (tag, attrs) => {
+  const n = document.createElementNS(NS, tag);
+  for (const k in attrs) n.setAttribute(k, attrs[k]);
+  return n;
+};
+
+/* A wheel: the toothed blank, a bore, and one bold radial index mark. The index
+   mark is not decoration -- at speed a smooth disc reads as stationary, and it
+   is the only way an eye can tell a turning wheel from a still one. */
+function wheel(teeth, opts) {
+  const g = el('g', {});
+  const r = pitchR(teeth);
+  /* Outlined in --muted rather than --hair. --hair is a divider weight: on a
+     white blank against a pale ground it left the teeth as a suggestion, and in
+     dark the chip and the page are 12 units apart so the wheel all but vanished.
+     --muted is the firm colour in both themes, held back with stroke-opacity so
+     it does not read as ink. */
+  g.appendChild(el('path', {
+    d: gearPath(teeth, false),
+    fill: opts.fill, stroke: 'var(--muted)', 'stroke-opacity': 0.55,
+    'stroke-width': 0.28, 'stroke-linejoin': 'round'
+  }));
+  g.appendChild(el('circle', {
+    r: r * 0.3, fill: 'var(--bg)', stroke: 'var(--muted)', 'stroke-opacity': 0.45, 'stroke-width': 0.28
+  }));
+  g.appendChild(el('line', {
+    x1: r * 0.3, y1: 0, x2: r - 1.25 * MODULE, y2: 0,
+    stroke: opts.mark, 'stroke-width': 0.75, 'stroke-linecap': 'round'
+  }));
+  return g;
+}
+
+/* The grounded ring: an annulus whose inner boundary is the internal tooth
+   profile, plus hatch ticks around the outside. The ticks are the drawing
+   convention for "this is bolted to the world", and they are the page's only
+   statement of which port is NOT free. */
+function ringGear(teeth) {
+  const g = el('g', {});
+  const r = pitchR(teeth);
+  const outer = r + 3.2 * MODULE;
+  const rim = (rad) => 'M' + rad + ',0A' + rad + ',' + rad + ' 0 1 0 ' + (-rad) + ',0A' + rad + ',' + rad + ' 0 1 0 ' + rad + ',0Z';
+  g.appendChild(el('path', {
+    d: rim(outer) + gearPath(teeth, true),
+    'fill-rule': 'evenodd', fill: 'var(--chip)', 'fill-opacity': 0.55,
+    stroke: 'var(--muted)', 'stroke-opacity': 0.5, 'stroke-width': 0.28
+  }));
+  const ticks = 24;
+  for (let i = 0; i < ticks; i++) {
+    const a = i * 2 * Math.PI / ticks;
+    const c = Math.cos(a), s = Math.sin(a);
+    /* hatch leaning 45 degrees off the radius, the usual ground symbol */
+    const bx = c * outer, by = s * outer;
+    const tx = bx + (c * 1.6 - s * 1.6), ty = by + (s * 1.6 + c * 1.6);
+    g.appendChild(el('line', {
+      x1: bx, y1: by, x2: tx, y2: ty,
+      stroke: 'var(--muted)', 'stroke-opacity': 0.65, 'stroke-width': 0.36, 'stroke-linecap': 'round'
+    }));
+  }
+  return g;
+}
+
+const svg = document.getElementById('train');
+const readout = document.getElementById('readout');
+
+/* Everything that turns, collected once. Each entry knows only its own speed
+   multiple; the loop writes one transform per entry per tick from the single
+   master angle, which is the "one clock" rule. */
+const MOVERS = [];
+const SET_NODES = [];
+let TIE = null, TIE_LABEL = null;
+
+function build() {
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+  MOVERS.length = 0; SET_NODES.length = 0;
+
+  /* The coupling between stage 1's carrier and stage 2's sun, drawn first so it
+     sits behind the wheels. It is one shaft in reality; side by side is a
+     schematic, so the drawing says so with a tie line and with two index marks
+     that visibly turn in lockstep. */
+  TIE = el('line', { stroke: 'var(--hair)', 'stroke-width': 0.4, 'stroke-dasharray': '2 2' });
+  svg.appendChild(TIE);
+  TIE_LABEL = el('text', {
+    'text-anchor': 'middle', fill: 'var(--muted)',
+    style: "font:600 2.2px 'Manrope',system-ui,sans-serif;letter-spacing:.06em"
+  });
+  TIE_LABEL.textContent = 'ONE SHAFT';
+  svg.appendChild(TIE_LABEL);
+
+  STAGES.forEach((st, i) => {
+    const g = el('g', {});
+    svg.appendChild(g);
+    const ring = ringGear(st.spec.ring);
+    ring.setAttribute('transform', 'rotate(' + (st.ringPhase * 180 / Math.PI).toFixed(4) + ')');
+    g.appendChild(ring);
+
+    /* THE PORT THIS SET IS GRABBED BY IS THE ONE DRAWN IN --accent. Set 1's is
+       its sun and set 2's is its carrier, which is what the labels say, so the
+       colour is the label repeated on the part rather than a second scheme. */
+    const grabbed = i === 0 ? 'sun' : 'carrier';
+    const lit = 'var(--accent)', dim = 'var(--muted)';
+
+    /* Carrier: a spider joining the planet axes. Drawn LAST, over the wheels,
+       because a carrier plate is physically over them and because underneath it
+       is completely hidden -- the arms run from the sun's radius to the planet
+       centres, and the planets cover exactly that span. */
+    const carrier = el('g', {});
+    /* The arms start at the sun's tip circle, not at the axis -- a carrier IS
+       journalled around the sun's shaft, and running them to the centre buries
+       the sun's index mark under the hub, which is the one thing that says
+       whether the sun is turning. */
+    const hubR = pitchR(st.spec.sun) + 1.6 * MODULE;
+    let d = '';
+    for (let p = 0; p < st.spec.planets; p++) {
+      const a = p * 2 * Math.PI / st.spec.planets, c = Math.cos(a), s = Math.sin(a);
+      d += 'M' + (hubR * c).toFixed(3) + ',' + (hubR * s).toFixed(3)
+         + 'L' + (st.orbitR * c).toFixed(3) + ',' + (st.orbitR * s).toFixed(3);
+    }
+    const heavy = grabbed === 'carrier';
+    carrier.appendChild(el('circle', {
+      r: hubR, fill: 'none', stroke: heavy ? lit : dim,
+      'stroke-opacity': heavy ? 0.5 : 0.35, 'stroke-width': heavy ? 1.1 : 0.8
+    }));
+    carrier.appendChild(el('path', {
+      d: d, fill: 'none', stroke: heavy ? lit : dim, 'stroke-opacity': heavy ? 0.55 : 0.4,
+      'stroke-width': heavy ? 1.9 : 1.3, 'stroke-linecap': 'round'
+    }));
+    for (let p = 0; p < st.spec.planets; p++) {
+      const a = p * 2 * Math.PI / st.spec.planets;
+      carrier.appendChild(el('circle', {
+        cx: st.orbitR * Math.cos(a), cy: st.orbitR * Math.sin(a), r: 1.1,
+        fill: heavy ? lit : dim, 'fill-opacity': heavy ? 0.7 : 0.5
+      }));
+    }
+    MOVERS.push({ node: carrier, rate: st.carrier });
+
+    /* Planets. Each sits in an orbit group turning at the carrier's rate, and
+       spins inside it at the difference -- two nested transforms, both derived
+       from the same master angle, so a planet cannot drift out of its own orbit.
+
+       A planet moved round to orbit angle theta is the SAME machine with the
+       sun held and the carrier wound on by theta, so its own spin has advanced
+       by theta * (1 + N_s/N_p); inside a group already carrying theta that
+       leaves theta * N_s/N_p. The equal-spacing check in kinematics() is
+       exactly the condition that this also returns the ring to its own zero. */
+    for (let p = 0; p < st.spec.planets; p++) {
+      const theta = p * 2 * Math.PI / st.spec.planets;
+      const orbit = el('g', {});
+      const spin = wheel(st.spec.planet, { fill: 'var(--chip)', mark: dim });
+      orbit.appendChild(spin);
+      g.appendChild(orbit);
+      MOVERS.push({ node: orbit, rate: st.carrier, phase: theta });
+      MOVERS.push({
+        node: spin, rate: st.planet - st.carrier, offsetX: st.orbitR,
+        phase: theta * st.spec.sun / st.spec.planet + st.planetPhase
+      });
+    }
+
+    const sun = wheel(st.spec.sun, { fill: 'var(--chip)', mark: grabbed === 'sun' ? lit : dim });
+    g.appendChild(sun);
+    MOVERS.push({ node: sun, rate: st.sun });
+
+    g.appendChild(carrier);   /* over the wheels, as a carrier plate is */
+
+    /* ONE label per set, above it. Two labels -- a caption over and a hint
+       under -- collided in portrait, where one set's under met the next set's
+       over; there is no gap that fixes that which is not also wasted space in
+       landscape, so there is one label and it says both things. */
+    const cap = el('text', {
+      'text-anchor': 'middle', fill: 'var(--muted)',
+      style: "font:600 2.9px 'Manrope',system-ui,sans-serif;letter-spacing:.09em"
+    });
+    cap.appendChild(document.createTextNode(
+      (i === 0 ? 'SET 1 · ' : 'SET 2 · ') + st.stageRatio.toFixed(3) + ':1 · DRAG FOR '));
+    const strong = el('tspan', { fill: 'var(--accent)', style: 'font-weight:800' });
+    strong.textContent = i === 0 ? 'SUN (light)' : 'CARRIER (heavy)';
+    cap.appendChild(strong);
+    svg.appendChild(cap);
+
+    SET_NODES.push({ g, cap, ring: st.spec.ring });
+  });
+
+  layout();
+}
+
+/* Layout is recomputed on resize rather than fixed, because the two sets sit
+   side by side in landscape and stacked in portrait -- a phone held upright has
+   the room in the other direction. Both centres and the viewBox come off the
+   ring's own outer radius, so a tooth-count change moves them by itself. */
+const CENTRES = [{ x: 0, y: 0 }, { x: 0, y: 0 }];
+function layout() {
+  const R = pitchR(SETS[0].ring) + 3.2 * MODULE;
+  const wide = svg.clientWidth >= svg.clientHeight;
+  /* MARGIN and GAP are separate because they hold different things. The margin
+     holds one line of caption above each set; the gap holds the coupling note,
+     AND in portrait the second set's caption as well -- two things stacked
+     where landscape has one thing lying along the gap. Both come off the ring
+     radius, so a tooth-count change re-spaces the page by itself. */
+  const margin = R * 0.42;
+  const gap = R * (wide ? 0.62 : 0.95);
+  const span = 2 * R + gap;                   /* centre-to-centre */
+  const half = R + margin;
+  CENTRES[0] = { x: half, y: half };
+  CENTRES[1] = wide ? { x: half + span, y: half } : { x: half, y: half + span };
+  svg.setAttribute('viewBox', '0 0 '
+    + (wide ? 2 * half + span : 2 * half) + ' ' + (wide ? 2 * half : 2 * half + span));
+
+  SET_NODES.forEach((n, i) => {
+    n.g.setAttribute('transform', 'translate(' + CENTRES[i].x + ',' + CENTRES[i].y + ')');
+    n.cap.setAttribute('x', CENTRES[i].x);
+    n.cap.setAttribute('y', CENTRES[i].y - R - margin * 0.5);
+  });
+  /* The coupling is drawn only ACROSS THE GAP, not centre to centre: one shaft
+     is the truth, but a line through both sets crosses every wheel on the page
+     and reads as a part rather than as a note. */
+  if (TIE) {
+    const mx = (CENTRES[0].x + CENTRES[1].x) / 2, my = (CENTRES[0].y + CENTRES[1].y) / 2;
+    TIE.setAttribute('x1', wide ? CENTRES[0].x + R : mx);
+    TIE.setAttribute('y1', wide ? my : CENTRES[0].y + R);
+    TIE.setAttribute('x2', wide ? CENTRES[1].x - R : mx);
+    TIE.setAttribute('y2', wide ? my : CENTRES[1].y - R);
+    if (wide) {
+      TIE_LABEL.setAttribute('text-anchor', 'middle');
+      TIE_LABEL.setAttribute('x', mx);
+      TIE_LABEL.setAttribute('y', my - 1.6);
+      TIE_LABEL.setAttribute('transform', '');
+    } else {
+      /* Portrait stacks the note and set 2's caption in one gap: the note takes
+         the TOP of it, hard against set 1, and reads bottom-to-top beside the
+         dashed line. Centring it would put it straight through the caption. */
+      const ay = CENTRES[0].y + R + 1.5;
+      TIE_LABEL.setAttribute('text-anchor', 'end');
+      TIE_LABEL.setAttribute('x', mx);
+      TIE_LABEL.setAttribute('y', ay);
+      TIE_LABEL.setAttribute('transform', 'rotate(-90 ' + mx + ' ' + ay + ') translate(0,-1.8)');
+    }
+  }
+  GRAB_RADIUS = R;
+}
+let GRAB_RADIUS = 0;
+
+/* ================================================================== THE LOOP
+   ONE state: the sun's angle and its rate. Everything drawn is a multiple of
+   the angle, so nothing can drift out of mesh -- there is nothing to drift
+   from. No transition, no CSS animation, no per-body timer (#3). */
+const S = {
+  angle: 0,          /* radians of stage 1's sun */
+  rate: 0,           /* rad/s of the same */
+  grip: null         /* { port, target } while a finger is down */
+};
+
+function applyTransforms() {
+  for (const m of MOVERS) {
+    const a = (S.angle * m.rate + (m.phase || 0)) * 180 / Math.PI;
+    m.node.setAttribute('transform',
+      m.offsetX !== undefined
+        ? 'translate(' + m.offsetX.toFixed(3) + ',0) rotate(' + a.toFixed(3) + ')'
+        : 'rotate(' + a.toFixed(3) + ')');
+  }
+}
+
+let last = 0;
+function step(now) {
+  requestAnimationFrame(step);
+  if (!last) { last = now; return; }
+  const dt = Math.min((now - last) / 1000, 0.05);   /* a backgrounded tab must
+                                                       not integrate a 4s jump */
+  last = now;
+  if (dt <= 0) return;
+
+  /* The hand, as a generalised force. A torque applied at a port maps onto the
+     sun coordinate by dividing by that port's gear ratio, and the port's own
+     angle is the sun's divided by the same -- which is where the SQUARE comes
+     from, without it ever being written as a square. */
+  let accel = 0;
+  if (S.grip) {
+    const p = S.grip.port;
+    const portAngle = S.angle / p.gear;
+    const portRate = S.rate / p.gear;
+    const torque = HAND_STIFFNESS * (S.grip.target - portAngle) / (p.gear * p.gear)
+                 - handDamper(p) * portRate / p.gear;
+    accel = torque / J_EFF;
+  }
+
+  let v = S.rate + accel * dt;
+
+  /* Losses always act, held or free -- a real grip does not switch the bearings
+     off. The clamp is what makes a stop ARRIVE: below one tick's worth of
+     retardation there is nothing left to shed, so it is zero rather than an
+     ever-smaller residue. */
+  const drop = retard(Math.abs(v)) * dt;
+  v = Math.abs(v) <= drop ? 0 : v - Math.sign(v) * drop;
+  if (Math.abs(v) > MAX_SPEED) v = Math.sign(v) * MAX_SPEED;
+
+  S.angle += (S.rate + v) / 2 * dt;             /* trapezoid: the angle is the
+                                                   integral of the rate, and a
+                                                   rectangle rule visibly lags
+                                                   at these decelerations */
+  S.rate = v;
+  applyTransforms();
+}
+
+/* ================================================================== POINTER
+   Touch first: a fidget is a phone thing. Pointer events cover mouse, touch and
+   pen with one path, and the stage sets touch-action:none so a drag is never
+   taken away by the browser's own pan. */
+function svgPoint(ev) {
+  const m = svg.getScreenCTM();
+  if (!m) return null;
+  const inv = m.inverse();
+  const pt = svg.createSVGPoint();
+  pt.x = ev.clientX; pt.y = ev.clientY;
+  return pt.matrixTransform(inv);
+}
+
+/* Which set was touched decides which PORT is grabbed, and the whole disc is
+   live rather than the hub alone -- a 44px target on a phone is the floor, and
+   a sun at these proportions is smaller than that on a small screen. */
+function portAt(p) {
+  for (let i = 0; i < CENTRES.length; i++) {
+    const dx = p.x - CENTRES[i].x, dy = p.y - CENTRES[i].y;
+    if (Math.hypot(dx, dy) <= GRAB_RADIUS) return i === 0 ? PORTS.sun : PORTS.carrier;
+  }
+  return null;
+}
+
+/* Screen y grows downward, so a CCW-positive angle needs y negated. Without
+   that the page turns the opposite way to the finger, which is a bug you can
+   only see and never reason your way to. */
+const angleAt = (p, c) => Math.atan2(-(p.y - c.y), p.x - c.x);
+
+let prevPointerAngle = 0, grabbedCentre = null;
+
+svg.addEventListener('pointerdown', (ev) => {
+  const p = svgPoint(ev);
+  if (!p) return;
+  const port = portAt(p);
+  if (!port) return;
+  const c = port === PORTS.sun ? CENTRES[0] : CENTRES[1];
+  grabbedCentre = c;
+  prevPointerAngle = angleAt(p, c);
+  /* The grip starts wherever the body already is, so grabbing a spinning train
+     does not snap it -- it takes hold of it. */
+  S.grip = { port, target: S.angle / port.gear };
+  svg.setPointerCapture(ev.pointerId);
+  svg.style.cursor = 'grabbing';
+  ev.preventDefault();
+});
+
+svg.addEventListener('pointermove', (ev) => {
+  if (!S.grip || !grabbedCentre) return;
+  const p = svgPoint(ev);
+  if (!p) return;
+  const a = angleAt(p, grabbedCentre);
+  /* Unwrap across the atan2 branch cut, or one lap of the finger reads as a
+     full turn backwards and the train slams the other way. */
+  let d = a - prevPointerAngle;
+  while (d > Math.PI) d -= 2 * Math.PI;
+  while (d < -Math.PI) d += 2 * Math.PI;
+  prevPointerAngle = a;
+  S.grip.target += d;
+  ev.preventDefault();
+});
+
+function release() {
+  S.grip = null; grabbedCentre = null;
+  svg.style.cursor = 'grab';
+}
+svg.addEventListener('pointerup', release);
+svg.addEventListener('pointercancel', release);
+svg.addEventListener('lostpointercapture', release);
+
+/* Keyboard and the two buttons reach the same integrator and nothing else --
+   there is exactly one thing that can set the train in motion, whichever
+   control asks for it. A flick is an impulse at a port: the same impulse at the
+   carrier produces RATIO^2 less speed, which is the claim, demonstrable without
+   a finger. */
+const FLICK_IMPULSE = J_EFF * REF_SPEED * 0.75;    /* a firm flick at the sun */
+function flick(port, sign) {
+  /* An angular impulse L at a port moves that port by L / (J_EFF * gear^2) and
+     therefore moves the sun coordinate by gear times that -- L / (J_EFF * gear).
+     One line, and the square is in it, not asserted beside it. */
+  S.rate += sign * FLICK_IMPULSE / (J_EFF * port.gear);
+  if (Math.abs(S.rate) > MAX_SPEED) S.rate = Math.sign(S.rate) * MAX_SPEED;
+}
+document.getElementById('flickSun').addEventListener('click', () => flick(PORTS.sun, 1));
+document.getElementById('flickCarrier').addEventListener('click', () => flick(PORTS.carrier, 1));
+svg.setAttribute('tabindex', '0');
+svg.addEventListener('keydown', (ev) => {
+  if (ev.key === 'ArrowRight' || ev.key === 'ArrowUp') { flick(PORTS.sun, 1); ev.preventDefault(); }
+  if (ev.key === 'ArrowLeft' || ev.key === 'ArrowDown') { flick(PORTS.sun, -1); ev.preventDefault(); }
+});
+
+/* ================================================================== READOUT */
+/* Monospace and a fixed column width, so a changing digit does not shuffle the
+   line it sits on -- a readout that reflows every tick is unreadable at speed. */
+const cell = (label, value, accent) =>
+    '<span style="display:inline-flex;gap:7px;align-items:baseline;white-space:nowrap;">'
+  + '<span style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;">' + label + '</span>'
+  + '<b style="color:' + (accent || 'var(--ink)') + ';font-variant-numeric:tabular-nums;">' + value + '</b></span>';
+
+function draw() {
+  const sunRps = S.rate / (2 * Math.PI);
+  const state = S.grip ? 'HELD · ' + S.grip.port.label : (S.rate === 0 ? 'AT REST' : 'COASTING');
+  readout.innerHTML =
+      cell('rings', 'FIXED')
+    + cell('stages', STAGES.map((s) => s.stageRatio.toFixed(3)).join(' × '))
+    + cell('sun→carrier', RATIO.toFixed(3) + ':1')
+    + cell('inertia sun', '1.0×')
+    + cell('inertia carrier', (PORTS.carrier.inertia / PORTS.sun.inertia).toFixed(1) + '×', 'var(--accent)')
+    + cell('sun', sunRps.toFixed(2) + ' rev/s')
+    + cell('carrier', (sunRps / RATIO).toFixed(3) + ' rev/s')
+    + cell('state', state, S.rate === 0 && !S.grip ? 'var(--muted)' : 'var(--ink)');
+}
+
+/* ==================================================================== THEME */
+const themeBtn = document.getElementById('theme');
+const ORDER = ['auto', 'light', 'dark'];
+themeBtn.addEventListener('click', () => {
+  const cur = document.documentElement.getAttribute('data-theme') || 'auto';
+  const next = ORDER[(ORDER.indexOf(cur) + 1) % ORDER.length];
+  document.documentElement.setAttribute('data-theme', next);
+  themeBtn.textContent = next === 'auto' ? 'theme' : next;
+});
+
+/* ===================================================================== BOOT */
+build();
+window.addEventListener('resize', layout);
+applyTransforms();
+draw();
+setInterval(draw, 250);
+requestAnimationFrame(step);
+
+})();
+</script>
+</body>
+</html>
