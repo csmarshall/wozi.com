@@ -7,6 +7,43 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#144 — the pop-out menu is a control surface, and the person picker is
+  gone.** (GitHub #118.)
+
+  Charles's call, put to him with the cost attached and taken with it in view.
+
+  The panel now carries two labelled groups — **MACHINE SETTINGS** over the speed
+  slider, **TABLE OF GEARS** over the family list — where before the slider sat
+  under nothing and the household sat between the two. It is 55px shorter.
+
+  **What is lost, stated plainly:** per-person pages are reachable only by
+  subdomain or `?who=<slug>` now, and neither is discoverable by anyone who has
+  not been told. The picker was the only signpost.
+
+  `togPeople` survives as an empty list rather than being deleted. `togSep` reads
+  its length to decide whether the gear entries need a rule above them, and the
+  template renders one tag per entry — an empty list is the honest way to say
+  "nothing here" without unpicking separator logic the new heading now relies on.
+
+  **The test that guarded the old rule now guards the new one.** It asserted the
+  picker drew only on the combined stage — the disclosure guard from #68. That
+  disclosure is now impossible rather than conditional, which is the stronger
+  guarantee, so the assertion became "it stays impossible": `togPeople` must
+  remain an empty list, the slider must still be in the panel, and the heading
+  must still name the group. Confirmed to fail on both regressions — repopulating
+  the list, and removing the heading.
+
+  Read against `STRIPPED_SRC` rather than `SRC`, because the comment above the
+  declaration explains what the picker was and quotes its old shape; checking raw
+  source would match the suite's own prose, which is the #101 trap.
+
+  **Not done here, and still open on #118:** the wear control. `fix/118-machine-
+  settings` carries a wip implementation (CL#128/CL#129, "service hours") from
+  two killed agents, based before CL#132 — 677 lines of `index.html` against a
+  base that predates the flywheel, ghost-palette and `MIN_CUT` rewrites. It is
+  worth salvaging deliberately rather than rebasing blind, and #112 is where that
+  belongs.
+
 - **CL#143 — `cards/` is removed entirely.**
 
   Charles: *"nah - blow away /cards"*, after noting *"I actually think that I had

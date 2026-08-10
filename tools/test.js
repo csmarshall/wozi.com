@@ -694,36 +694,41 @@ test('a hostname matching nothing falls back to the combined stage', () => {
     'an unknown ?who= stops a stage host drawing the combined stage');
 });
 
-test('the person picker is drawn only on the combined stage', () => {
-  /* A PERSONAL LINK MUST NOT ADVERTISE EVERYONE ELSE. charles.wozi.com is
-     Charles's page, and a menu listing every other person on the domain is a
-     disclosure the visitor did not ask for. The existing rule -- hidden while
-     there is one person -- extends to "or while the view is deliberately one
-     person", and both halves have to be in the same condition.
+test('the person picker is retired, and nothing re-introduces it (GitHub #118, CL#144)', () => {
+  /* THIS TEST ASSERTED THE OPPOSITE UNTIL CL#144. The old rule -- draw the
+     picker only on the combined stage -- existed because a personal link must
+     not advertise everyone else on the domain (#68). Charles retired the picker
+     outright instead: the menu became a CONTROL surface, and a list of the
+     household sat oddly beside a speed slider.
 
-     THE LIST IS BUILT, NOT READ. This used to be two regexes over the source of
-     the block, which is a check on the spelling of a condition rather than on
-     what it decides: moving the live test into the comment beside it leaves the
-     suite green while the disclosure ships. The block is a plain IIFE over CONF
-     and STAGE, so it runs here with both handed in. */
-  const src = grabBlock('const togPeople = (function () {', '{', '}') + ')();';
-  const run = (n, mode) => new Function('CONF', 'STAGE', src + '\n return togPeople;')(
-    { PEOPLE: Array.from({ length: n }, (_, k) => ({ slug: 'p' + k, name: 'Person ' + k })) },
-    { mode: mode });
-  eq(run(3, 'all').length, 3, 'the combined stage does not offer every person');
-  eq(run(3, 'all').map(p => p.href).join(','), '?who=p0,?who=p1,?who=p2',
-    'the picker does not link each person by ?who=');
-  eq(run(3, 'solo').length, 0,
-    'a solo page lists every person on the domain — the disclosure #68 exists to stop');
-  eq(run(1, 'all').length, 0, 'the picker draws with nobody to pick');
-  eq(run(1, 'solo').length, 0, 'the picker draws on a one-person solo page');
-  /* NOBODY IS CURRENT on the combined stage: every entry is a link away from
-     what is being looked at, so marking one would tell a screen reader it is
-     viewing a person while the page shows the household. */
-  ok(run(3, 'all').every(p => p.current === 'false'),
-    'the picker marks an entry current on a stage that is showing everyone');
+     The disclosure the old rule guarded is now impossible rather than
+     conditional, which is a stronger guarantee: there is no list to leak. What
+     is asserted instead is that it STAYS impossible, because the block is still
+     there as an empty list and the easy regression is somebody repopulating it.
+
+     THE COST IS REAL AND IS NOT THIS TEST'S TO JUDGE: per-person pages are now
+     reachable only by subdomain or by ?who=<slug>, neither of which is
+     discoverable. That was Charles's call, made with the cost in front of him. */
+  /* STRIPPED_SRC, not SRC: the comment above the declaration explains what the
+     picker WAS and quotes its old shape, so a check against raw source would
+     match its own prose (the #101 trap). */
+  const decl = /const togPeople\s*=\s*([^;]*);/.exec(STRIPPED_SRC);
+  ok(decl, 'the togPeople declaration is gone entirely — this suite can no longer '
+    + 'tell whether the picker came back');
+  ok(/^\[\s*\]$/.test(decl[1].trim()),
+    `togPeople is no longer an empty list — it is "${decl[1].trim().slice(0, 40)}". The `
+    + 'person picker has been re-introduced, and with it the disclosure #68 was filed '
+    + 'about: a personal page listing everyone else on the domain');
+
+  /* The panel must still carry the speed control, which is the whole reason it
+     survives the picker's removal -- it is the only route to that control once
+     the corner stops showing it at 1x. */
+  ok(/aria-label="Gear speed"/.test(SRC),
+    'the speed slider is gone from the panel — retiring the picker has taken the '
+    + 'menu\'s only remaining control with it');
+  ok(/Machine Settings/.test(SRC),
+    'the panel no longer names its settings group, so the slider sits under nothing');
 });
-
 test('the rule between the people and the gears is not a link', () => {
   /* IT WAS ONE, AND IT WAS FAILING ON THE SHIPPED PAGE. The separator used to be
      a menu entry -- an <a> with an empty href and no text -- and the menu

@@ -321,11 +321,11 @@ input[type="range"]:focus{outline:none;}
   <nav aria-label="Table of gears" style="{{ togPanelStyle }}">
     <!-- THE SPEED SLIDER, AT THE TOP (GitHub #108, CL#114). Charles: "if
          someone pops up the menu the slider is at the top" -- above the
-         person picker and the link entries, and drawn unconditionally, unlike
-         either of them: this is the ONLY route to the speed control once the
+         the link entries, under a heading of its own since CL#144 made the
+         panel a control surface and retired the person picker. Drawn
+         unconditionally: this is the ONLY route to the speed control once the
          corner stops showing it at 1x, so it has to be reachable in every
-         state the panel can be in, including a solo host where togPeople is
-         empty and this row is the first thing in the panel.
+         state the panel can be in.
 
          STEPS OVER SPEED_STOPS BY INDEX, NOT CONTINUOUSLY. min=0,
          max=SPEED_STOPS.length-1, step=1 puts one stop per unit of travel no
@@ -340,6 +340,7 @@ input[type="range"]:focus{outline:none;}
          change, so the multiplier and the strobing note belong in
          aria-valuetext, not in aria-label -- putting them in the name would
          re-announce "Gear speed 5x" on every step of a drag. -->
+    <div style="font:700 11px/1 'Manrope',system-ui,sans-serif;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);padding:4px 12px 8px;">Machine Settings</div>
     <div style="{{ speedRowStyle }}">
       <span aria-hidden="true" style="{{ speedReadStyle }}">{{ speedMark }}</span>
       <input type="range" min="0" max="{{ speedMax }}" step="1" value="{{ speedPos }}" title="{{ speedTitle }}" aria-label="Gear speed" aria-valuetext="{{ speedValueText }}" onInput="{{ onSpeedInput }}" onChange="{{ onSpeedCommit }}" style="{{ speedTrackStyle }}" />
@@ -8809,23 +8810,19 @@ class Component extends DCLogic {
        It is its own list rather than the head of the gear list because the rule
        that separates the two has to be a non-link, and the template renders one
        tag per entry. */
-    const togPeople = (function () {
-      const people = CONF.PEOPLE || [];
-      if (!(people.length > 1 && STAGE.mode === 'all')) return [];
-      /* NOBODY IS CURRENT HERE. The block only draws on the combined stage,
-         and on a combined stage every one of these is a link AWAY from what
-         is being looked at -- so marking the spine would say "you are
-         viewing Charles" to a screen reader while the page shows everyone.
-         SPINE is the axis, not the selection, and the two stopped being the
-         same thing when the apex became the whole household -- SELECTED is the
-         name for the other question, and it is null here (GitHub #85). */
-      return people.map(p => ({
-        href: '?who=' + p.slug, label: p.name, current: 'false',
-        style: { display: 'block', padding: '7px 12px', borderRadius: '9px',
-          textDecoration: 'none', font: "700 13px/1.3 'Manrope',system-ui,sans-serif",
-          color: 'var(--ink)', background: 'transparent' }
-      }));
-    })();
+    /* THE PERSON PICKER IS RETIRED (GitHub #118, CL#144). Charles's call, with
+       the cost stated: per-person pages are now reachable only by subdomain
+       (`charles.wozi.com`) or by `?who=<slug>`, and neither is discoverable by
+       anyone who has not been told. That is deliberate -- the menu became a
+       CONTROL surface rather than a navigation one, and a list of the household
+       sat oddly beside a speed slider.
+
+       Kept as an empty list rather than deleted outright because `togSep`
+       reads its length to decide whether the panel needs a rule above the gear
+       entries, and the template renders one tag per entry -- so an empty list
+       is the honest way to say "there is nothing here" without unpicking the
+       separator logic that the settings heading now uses instead. */
+    const togPeople = [];
 
     /* Plain numbers stringified by the template, so 200 reads "200" and 1
        reads "1" -- no trailing zeros padding a one-character readout out to

@@ -107,12 +107,20 @@ constant (`WHO`), so every reader had to know which of the two it meant — the
 analytics beacon wanted the selection and got the spine. See *Invariants* for the
 rest; what belongs here is that **nothing about a hostname chooses a spine.**
 
-**The picker is drawn only on the combined stage.** A personal link must not
-advertise everyone else living on the domain, so the old rule — hidden while
-there is one person — now also hides it while the view is deliberately one
-person. It is stated here because this rulebook has got the host and file model
-wrong once already (#59, `config.js` published but unnamed), and a rule nobody
-writes down is the one that drifts.
+**The person picker is retired** (GitHub #118, CL#144). It listed the household
+in the pop-out menu, and drew only on the combined stage so that a personal
+page could not advertise everyone else on the domain (#68). Charles retired it
+outright: the menu became a **control surface** — `MACHINE SETTINGS` over the
+speed slider, `TABLE OF GEARS` over the list — and a roll of the household sat
+oddly between them.
+
+**The cost is real and was accepted knowingly:** per-person pages are now
+reachable only by subdomain (`charles.wozi.com`) or by `?who=<slug>`, and
+neither is discoverable by anyone who has not been told. `togPeople` survives as
+an empty list rather than being deleted, because `togSep` reads its length to
+decide whether the gear entries need a rule above them; `npm test` asserts it
+STAYS empty, since the easy regression is somebody repopulating it and
+reintroducing the disclosure #68 was filed about.
 
 ## Do not
 
