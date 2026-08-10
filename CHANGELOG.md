@@ -7,6 +7,54 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#142 — one clock, several angles: chains that share no gearing no longer
+  share a flywheel.** (GitHub #122.)
+
+  Charles: *"when I have two chains if I grab one chain/stop/etc the other chain
+  also responds — even though as far as anyone can see they should be two
+  entirely independent chains."*
+
+  The shared root was `_M`. Every wheel's transform came off one master angle, so
+  every input that could reach it — drag, arrow keys, the speed control — moved
+  the whole stage. The config already disagreed: a self-driven root is a separate
+  mesh, CLAUDE.md says it always will be, and `dom_invariants` has been reporting
+  **2 components** all along. The geometry knew; the animation did not.
+
+  **Components are derived exactly as the gate derives them** — union-find over
+  pairs whose centre distance equals the sum of their pitch radii. Deriving it any
+  other way would let the page and its own gate disagree about what "connected"
+  means, which is the #67 class of fault. Ghost idlers are included deliberately,
+  because a bridge run is precisely what makes two chains ONE machine: a chain
+  reached by a bridge shares its parent's flywheel, and only a chain nothing on
+  stage drives gets its own. A refused bridge therefore separates a component by
+  itself, with no extra bookkeeping.
+
+  **"One clock" is preserved, and this is what it actually meant.** There is still
+  one `requestAnimationFrame` loop and one `dt`. The invariant is about wheels
+  that MESH — they must share a clock or their teeth diverge (#3). Two chains that
+  share no gearing do not mesh, so they never had to share an angle, and giving
+  them one is what produced the bug.
+
+  **Per-chain momentum, not per-chain state** (Charles's call). Each mesh gets its
+  own angle and velocity, so a throw or a held hand reaches only the chain under
+  it. The motion toggle and the speed control stay global — the speed control
+  still reaches exactly one thing, which the alternative would have broken.
+
+  Two things went wrong in the making, both worth recording:
+
+  - `_dragging` gated the ENTIRE integrator, so a hand on any wheel froze the
+    page. That is the substance of the fix: the dragged component is skipped, not
+    the loop.
+  - `_M[undefined]` is `undefined`, and `|| 0` turns that into **angle zero**
+    rather than "no change". Ghost outriggers and epicyclic internals are built
+    from objects that predate the tagging, so 38 of the 41 rotating bodies pinned
+    to zero and the page looked frozen when only the trim was. Every read now
+    falls back to component 0 — the spine's — rather than to an angle.
+
+  Verified by holding one chain for 1.2s under a real pointer press: **38 rotating
+  bodies held still, 3 kept turning**. `pixel_regress` is 0px on a solo chain,
+  which is the right answer — one chain is one component and nothing changes.
+
 - **CL#141 — the coast is a declutched flywheel, not a braked one.** (GitHub
   #121, third pass.)
 

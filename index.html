@@ -3521,6 +3521,14 @@ class Component extends DCLogic {
      boot is not charged as a dropped one -- the gap between `last` being seeded
      and the first rAF that clears the budget is a page loading, not a renderer
      falling behind. */
+  /* ONE FLYWHEEL PER MESH (GitHub #122, CL#142), declared here rather than only
+     seeded in startPhysics(): the reset below and the first applyRotation() can
+     both run before startPhysics does, and an undefined array there is a
+     TypeError that stops the loop dead -- caught by verify_motion, which saw the
+     rotation stop advancing. */
+  _M = [];
+  _v = [];
+  _dragComp = null;
   _rafN = 0;
   _tickN = 0;
   _paintN = 0;
@@ -3553,7 +3561,13 @@ class Component extends DCLogic {
     const ang = () => Math.atan2(p.y - cy, p.x - cx) * 180 / Math.PI;
     let last = ang(), lastT = performance.now(), moved = 0;
     this._dragging = true;
-    this._v = 0;
+    /* ONLY THE MESH UNDER THE HAND (GitHub #122, CL#142). `_dragging` used to
+       gate the whole integrator, so holding any wheel froze every chain on the
+       page; and `_v = 0` zeroed the single shared flywheel, so flinging one
+       chain flung them all. Both are now scoped to the component the hit wheel
+       belongs to, which solve() has already worked out. */
+    this._dragComp = hit.comp || 0;
+    this._v[this._dragComp] = 0;
     stage.style.cursor = 'grabbing';
 
     const move = (ev) => {
@@ -3568,8 +3582,8 @@ class Component extends DCLogic {
       /* Convert the wheel you are holding into master (tooth) units. */
       const dM = delta * hit.teeth * hit.dir;
       moved += dM;
-      this._M += dM;
-      this._v = this._v * 0.6 + (dM / dt) * 0.4;
+      this._M[this._dragComp] += dM;
+      this._v[this._dragComp] = this._v[this._dragComp] * 0.6 + (dM / dt) * 0.4;
       this.applyRotation();
     };
     const up = () => {
@@ -3580,10 +3594,12 @@ class Component extends DCLogic {
       /* A flick sets the flywheel spinning; friction pulls it back to idle speed.
          Push against the train and it keeps running the new way. */
       const cap = this.driveCap();
-      const flick = Math.max(-cap, Math.min(cap, this._v));
+      const flick = Math.max(-cap, Math.min(cap, this._v[this._dragComp]));
       if (Math.abs(moved) > 30) this._dirSign = moved < 0 ? -1 : 1;
       else if (Math.abs(flick) > 0.5) this._dirSign = flick < 0 ? -1 : 1;
-      this._v = Math.abs(flick) > 0.15 ? flick : this._dirSign * this.idleRate();
+      this._v[this._dragComp] = Math.abs(flick) > 0.15 ? flick : this._dirSign * this.idleRate();
+      /* Released: this component rejoins the integrator on the next tick. */
+      this._dragComp = null;
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
@@ -4325,8 +4341,25 @@ class Component extends DCLogic {
 
   applyRotation() {
     /* Skip frames where nothing moved enough to see. */
-    if (this._lastM !== undefined && Math.abs(this._M - this._lastM) < 0.05) return;
-    this._lastM = this._M;
+    /* SKIP ONLY WHEN NOTHING MOVED ANYWHERE (GitHub #122). This compared one
+       scalar; with a flywheel per mesh it has to see them all, or a still chain
+       would suppress the write for a turning one.
+
+       Every read of `_M` below falls back to component 0 -- the spine's -- when a
+       rotating body carries no `comp`. Ghost outriggers and epicyclic internals
+       are built from objects that predate the tagging, and indexing `_M` with
+       `undefined` yields 0, which does not read as "stationary" but as PINNED AT
+       ANGLE ZERO: 41 rotating elements on the page, and the first four sampled
+       were exactly those, which is what made the whole page look frozen when only
+       the trim was. */
+    if (this._lastM !== undefined) {
+      let moved = false;
+      for (let c = 0; c < this._M.length; c++) {
+        if (Math.abs((this._M[c] || 0) - (this._lastM[c] || 0)) >= 0.05) { moved = true; break; }
+      }
+      if (!moved) return;
+    }
+    this._lastM = this._M.slice();
     /* THE COUNT OF PASSES THAT ACTUALLY WROTE TRANSFORMS (CL#110), which is not
        the same number as the tick count and is the reason it is counted HERE
        rather than inferred from outside. A tick that arrives with the train
@@ -4345,20 +4378,20 @@ class Component extends DCLogic {
          wheel's phase, or with nothing at all. */
       for (let i = 0; i < gears.length; i++) {
         const el = this._spinEls[gears[i].i];
-        if (el) el.style.transform = 'rotate(' + (gears[i].phase + gears[i].dir * this._M / gears[i].teeth).toFixed(3) + 'deg)';
+        if (el) el.style.transform = 'rotate(' + (gears[i].phase + gears[i].dir * (this._M[gears[i].comp != null ? gears[i].comp : 0] || 0) / gears[i].teeth).toFixed(3) + 'deg)';
       }
     }
     if (this._ghostEls) {
       /* LAYER: parallax — the far plane runs a touch slower than the near one. */
       const lag = this.props.parallax ? 0.78 : 1;
       this._ghostEls.forEach(x => {
-        if (x.el) x.el.style.transform = 'rotate(' + (x.g.phase + x.g.dir * this._M * lag / x.g.teeth).toFixed(3) + 'deg)';
+        if (x.el) x.el.style.transform = 'rotate(' + (x.g.phase + x.g.dir * (this._M[x.g.comp != null ? x.g.comp : 0] || 0) * lag / x.g.teeth).toFixed(3) + 'deg)';
       });
     }
     if (this._chainEls) {
       const PITCH = Math.PI * MODULE;
       this._chainEls.forEach(c => {
-        if (c.el) c.el.style.strokeDashoffset = (-this._M * PITCH / 360 * c.sign).toFixed(2) + 'px';
+        if (c.el) c.el.style.strokeDashoffset = (-(this._M[c.comp != null ? c.comp : 0] || 0) * PITCH / 360 * c.sign).toFixed(2) + 'px';
       });
     }
     /* Planetary internals: sun, carrier and planet spins are all fixed multiples
@@ -4369,13 +4402,13 @@ class Component extends DCLogic {
     if (this._epiEls) {
       for (let i = 0; i < this._epiEls.length; i++) {
         const e = this._epiEls[i];
-        if (e.el) e.el.style.transform = 'rotate(' + (e.base + e.k * (e.g.dir * this._M / e.g.teeth)).toFixed(3) + 'deg)';
+        if (e.el) e.el.style.transform = 'rotate(' + (e.base + e.k * (e.g.dir * (this._M[e.g.comp != null ? e.g.comp : 0] || 0) / e.g.teeth)).toFixed(3) + 'deg)';
       }
     }
   }
 
   startPhysics() {
-    this._M = 0;
+    for (let c = 0; c < this._M.length; c++) this._M[c] = 0;
     this._dirSign = 1;
     /* prefers-reduced-motion (#3): the machine comes to REST through this same
        loop -- the idle target becomes zero, and the flywheel physics settles it
@@ -4405,7 +4438,13 @@ class Component extends DCLogic {
     }
     const startRunning = savedMotion === 'run' ? true
       : savedMotion === 'rest' ? false : !(this._rmq && this._rmq.matches);
-    this._v = (this.props.spinUp === false && startRunning) ? this.idleRate() : 0;
+    /* One flywheel per mesh (GitHub #122). Seeded lazily: solve() has not
+       necessarily run at this point, and a component that appears later simply
+       starts from the same place this would have put it. */
+    const seed = (this.props.spinUp === false && startRunning) ? this.idleRate() : 0;
+    this._v = [];
+    this._M = [];
+    for (let c = 0; c < 8; c++) { this._v[c] = seed; this._M[c] = 0; }
     let last = performance.now();
     const step = (now) => {
       /* Cap the update rate — see tickRate(), which is also what the speed
@@ -4428,13 +4467,27 @@ class Component extends DCLogic {
       /* One expression decides whether to integrate — nothing can latch it asleep. */
       const asleep = document.hidden || this._offscreen === true;
       if (HUD) this.hudTick(gap, asleep);
-      if (!this._dragging && !asleep) {
+      if (!asleep) {
         /* Flywheel: bleed back toward the train's natural pace. */
         /* LAYER: hover drag — attention loads the machine and it slows a little. */
         const load = (this.props.hoverDrag && (this.state.hover || this.state.overStage)) ? 0.4 : 1;
         const target = this.motionActive() ? this._dirSign * this.idleRate() * load : 0;
-        this._v = approachSpeed(this._v, target, dt);
-        this._M += this._v * dt;
+        /* ONE CLOCK, SEVERAL ANGLES (GitHub #122, CL#142). Still one rAF loop and
+           one `dt`, which is what the "one clock" invariant is actually about --
+           wheels that MESH must share a clock or their teeth diverge (#3). Two
+           chains that share no gearing do not mesh, so they do not have to share
+           an angle, and giving them one is what made holding chain 1 stop chain
+           2.
+
+           The chain being dragged is skipped rather than the whole loop being
+           skipped, which is the substance of the fix: `_dragging` used to gate
+           the entire integration, so a hand on ANY wheel froze the page. */
+        const n = this.solve().comps || 1;
+        for (let c = 0; c < n; c++) {
+          if (this._dragComp === c) continue;
+          this._v[c] = approachSpeed(this._v[c] || 0, target, dt);
+          this._M[c] = (this._M[c] || 0) + this._v[c] * dt;
+        }
         this.applyRotation();
       }
       /* Magnetic hub caps: underdamped spring (zeta ~0.5) so a released cap
@@ -4590,7 +4643,7 @@ class Component extends DCLogic {
     document.body.appendChild(box);
     this._hudBox = box;
     this._hudT = performance.now();
-    this._hudM = this._M || 0;
+    this._hudM = (this._M && this._M[0]) || 0;
     this._hudN = { tick: 0, raf: 0, paint: 0 };
     this._hudDrop = 0;
     this._hudCost = 0;
@@ -4618,9 +4671,9 @@ class Component extends DCLogic {
     const ticks = rate(this._tickN, this._hudN.tick);
     const rafs = rate(this._rafN, this._hudN.raf);
     const paints = rate(this._paintN, this._hudN.paint);
-    const degs = (this._M - this._hudM) * 1000 / dtms;
+    const degs = ((this._M[0] || 0) - this._hudM) * 1000 / dtms;
     this._hudT = t0;
-    this._hudM = this._M;
+    this._hudM = this._M[0] || 0;
     this._hudN = { tick: this._tickN, raf: this._rafN, paint: this._paintN };
 
     const nominal = this.tickRate();
@@ -4692,7 +4745,7 @@ class Component extends DCLogic {
     /* The master angle MEASURED, not the multiplier assumed: `degs` is the
        difference in `_M` over wall-clock time between two samples, so a speed
        setting can be confirmed against idleRate() rather than trusted. */
-    put('master', (((this._M % 360) + 360) % 360).toFixed(0) + '° · '
+    put('master', ((((this._M[0] || 0) % 360) + 360) % 360).toFixed(0) + '° · '
       + degs.toFixed(1) + '°/s of ' + (this.idleRate() * 1000).toFixed(1));
     /* One tooth of travel is 360 master-degrees on EVERY wheel -- the tooth
        count cancels -- so there is one tooth-per-tick figure for the whole
@@ -6043,7 +6096,47 @@ class Component extends DCLogic {
        the one run on the page it could cross without anything noticing. */
     const bridges = bridgeRuns.map(s => s.map(p => ({ cx: p.x - minX, cy: p.y - minY })));
     /* The wordmark hangs from the lowest wheel on two cords, clear of every gear. */
-    this._solved = { gears: g, chains: chains, bridgeRuns: bridges, w: maxX - minX, h: maxY - minY };
+    /* WHICH MESH EACH WHEEL BELONGS TO (GitHub #122, CL#142).
+
+       Two chains that share no gearing are two machines, and until now they
+       shared one flywheel: `applyRotation()` wrote every wheel on the page off a
+       single `_M`, so grabbing or holding one chain moved the other. The config
+       already said otherwise -- a self-driven root is a separate mesh, and
+       CLAUDE.md states it always will be -- and so did the geometry.
+
+       Components are derived the SAME WAY tools/dom_invariants.py derives the
+       number it reports: union-find over pairs whose centre distance equals the
+       sum of their pitch radii. Deriving it any other way would let the page and
+       its gate disagree about what "connected" means, which is the class of
+       fault #67 was. Ghost idlers are included, because a bridge run is exactly
+       what makes two chains ONE machine -- a chain reached by a bridge shares
+       its parent's flywheel, and only a chain nothing on stage drives gets its
+       own. A refused bridge therefore separates a component by itself, with no
+       extra bookkeeping, which is the same cascade CL#123 already describes. */
+    const MESH_TOL = 0.5;
+    const parent = g.map((_, i) => i);
+    const find = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+    for (let i = 0; i < g.length; i++) {
+      for (let j = i + 1; j < g.length; j++) {
+        const d = Math.hypot(g[i].cx - g[j].cx, g[i].cy - g[j].cy);
+        if (Math.abs(d - (g[i].r + g[j].r)) < MESH_TOL) {
+          const a = find(i), b = find(j);
+          if (a !== b) parent[a] = b;
+        }
+      }
+    }
+    /* Renumbered to 0..n-1 so the component id can index a dense array of
+       flywheels rather than a sparse map keyed by whichever wheel won the
+       union. */
+    const seen = {};
+    let nComp = 0;
+    g.forEach((w, i) => {
+      const root = find(i);
+      if (seen[root] === undefined) seen[root] = nComp++;
+      w.comp = seen[root];
+    });
+    this._solved = { gears: g, chains: chains, bridgeRuns: bridges, comps: nComp,
+      w: maxX - minX, h: maxY - minY };
     return this._solved;
   }
 
@@ -8772,7 +8865,12 @@ class Component extends DCLogic {
         const dir = e.key === 'ArrowRight' ? 1 : -1;
         this._dirSign = dir;
         const cap = this.driveCap();
-        this._v = Math.max(-cap, Math.min(cap, this._v + dir * 1.6));
+        /* The keyboard names no wheel, so it drives every mesh -- the same
+           reading as the speed control and the motion toggle, which stay global
+           under CL#142's "per-chain momentum, shared settings" split. */
+        for (let c = 0; c < this._v.length; c++) {
+          this._v[c] = Math.max(-cap, Math.min(cap, this._v[c] + dir * 1.6));
+        }
       },
       onStageEnter: () => { if (this.props.hoverDrag) this.setState({ overStage: true }); },
       onStageLeave: () => { if (this.state.overStage) this.setState({ overStage: false }); },

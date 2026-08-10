@@ -1570,7 +1570,11 @@ test('approachSpeed() replaces the fixed 900ms lag — GitHub #106', () => {
      GitHub #101). */
   ok(!/Math\.exp\(-dt \/ 900\)/.test(STRIPPED_SRC),
     'the old fixed-tau easing (Math.exp(-dt / 900)) is still LIVE CODE — #106 is unfixed');
-  ok(/this\._v = approachSpeed\(this\._v, target, dt\)/.test(SRC),
+  /* One flywheel PER MESH since CL#142 (GitHub #122), so the call site is
+     indexed by component. Still asserted as an exact shape rather than loosely,
+     because the point of the check is that step() is where the flywheel moves --
+     but the shape it is asserted against had to follow the code. */
+  ok(/this\._v\[c\] = approachSpeed\(this\._v\[c\] \|\| 0, target, dt\)/.test(SRC),
     'step() does not call approachSpeed() — the flywheel update has moved '
     + 'somewhere this suite is not looking, or was reverted');
   ok(/function approachSpeed\(v, target, dt\)/.test(SRC),
