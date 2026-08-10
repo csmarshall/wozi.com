@@ -128,7 +128,7 @@ jobs:
       - name: Publish HTML
         if: github.event_name != 'pull_request'
         run: |
-          for f in index.html keybase.html; do
+          for f in index.html keybase.html fidget/index.html; do
             aws s3 cp "$f" "$BUCKET/$f" \
               --content-type "text/html; charset=utf-8" \
               --cache-control "public, max-age=300" \
@@ -291,6 +291,12 @@ jobs:
             fail=1
           fi
           check https://wozi.com/assets/icons/github.svg 200 'svg'
+          # /fidget is a standalone page with its own physics loop (#123,
+          # CL#145). Substring rather than exact-match: it carries no
+          # sensitive data and no signature, so byte-identity buys nothing
+          # here -- what matters is that the page arrives and is the fidget
+          # rather than a redirect or an error body.
+          check https://wozi.com/fidget/ 200 'planetary'
           # EXACT MATCH, NOT PRESENCE (#54). keybase.html's body is
           # signature-covered, so a truncated response still returns 200 while
           # the ownership proof silently stops verifying -- a substring check
