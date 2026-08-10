@@ -128,7 +128,7 @@ jobs:
       - name: Publish HTML
         if: github.event_name != 'pull_request'
         run: |
-          for f in index.html keybase.html cards/index.html cards/charles/index.html; do
+          for f in index.html keybase.html; do
             aws s3 cp "$f" "$BUCKET/$f" \
               --content-type "text/html; charset=utf-8" \
               --cache-control "public, max-age=300" \
@@ -161,20 +161,6 @@ jobs:
             --exclude "*" --include "*.svg" \
             --only-show-errors
           aws s3 ls "$BUCKET/assets/icons/" | awk '{print "  assets/icons/" $4}'
-
-      - name: Publish card assets
-        if: github.event_name != 'pull_request'
-        run: |
-          aws s3 cp cards/styles/qrserve.css "$BUCKET/cards/styles/qrserve.css" \
-            --content-type "text/css; charset=utf-8" \
-            --cache-control "public, max-age=86400" --only-show-errors
-          aws s3 cp cards/images/icon.png "$BUCKET/cards/images/icon.png" \
-            --content-type "image/png" \
-            --cache-control "public, max-age=86400" --only-show-errors
-          aws s3 cp cards/charles/contact.vcf "$BUCKET/cards/charles/contact.vcf" \
-            --content-type "text/vcard; charset=utf-8" \
-            --cache-control "public, max-age=300" --only-show-errors
-          echo "  cards/styles/qrserve.css, cards/images/icon.png, cards/charles/contact.vcf"
 
       - name: Publish the SSH public key
         if: github.event_name != 'pull_request'
@@ -305,19 +291,16 @@ jobs:
             fail=1
           fi
           check https://wozi.com/assets/icons/github.svg 200 'svg'
-          check https://wozi.com/cards/ 200 'Charles'
-          # PRESENCE IS NOT ENOUGH HERE (#54). This repo went private because a
-          # second person's real address and mobile were being served from
-          # cards/ -- and a check that only asserts "Charles appears" passes
-          # just as happily if someone else's card comes back alongside his.
-          # The failure mode is a privacy incident, so the assertion is
-          # exact-match rather than substring: what is served must be
-          # byte-identical to what we published. That names nothing sensitive
-          # in this file and catches anything unexpected, not just the one case
-          # we already know about.
-          # keybase.html gets the same treatment for a different reason: its
-          # body is signature-covered, so a truncated response still returns 200
-          # while the ownership proof silently stops verifying.
+          # EXACT MATCH, NOT PRESENCE (#54). keybase.html's body is
+          # signature-covered, so a truncated response still returns 200 while
+          # the ownership proof silently stops verifying -- a substring check
+          # cannot tell those apart.
+          #
+          # cards/ was the other user of this and is gone (CL#143): the pages,
+          # the vCard and their assets are no longer published, and the objects
+          # were removed from the bucket. The exact() helper is kept because
+          # keybase.html needs it and because it is the right shape for anything
+          # whose bytes matter.
           exact() {   # exact <url> <repo-file>
             local got want
             got=$(curl -sS --max-time 20 "$1" | shasum -a 256 | cut -d' ' -f1)
@@ -329,8 +312,6 @@ jobs:
               fail=1
             fi
           }
-          exact https://wozi.com/cards/ cards/index.html
-          exact https://wozi.com/cards/charles/ cards/charles/index.html
           exact https://wozi.com/keybase.html keybase.html
           check https://wozi.com/keybase.html 200 ''
           check https://wozi.com/ssh_public_key 200 'ssh-'

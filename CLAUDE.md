@@ -4,16 +4,24 @@ Static site, no build step. `index.html` is the landing page; `support.js` is th
 runtime it loads. Serve the folder and you are looking at the site.
 
 This repo is the **source of truth** for `s3://wozi.com`, including the parts
-that predate the gear train. It is private, because `cards/` carries a real
-address and mobile number.
+that predate the gear train.
+
+It is private, and the reason it was made private — `cards/` publishing a real
+address and mobile number — **no longer applies**: `cards/` was removed
+entirely in CL#143. What still argues against making it public is **history**,
+not the working tree: the vCard blob and the street address remain reachable in
+the object graph of every past commit, so publishing would expose them despite
+their being gone from HEAD. `legacy/resume-2014.pdf` is also uncleared. Going
+public therefore needs a `git filter-repo` rewrite and a look at that PDF — see
+#113 for the public-mirror alternative that avoids both.
 
 ## What deploys, and what does not
 
 The deploy **names the paths it publishes** rather than excluding the ones it
 does not — a whitelist, so a new file cannot reach the web by being forgotten.
 
-Published: `index.html`, `support.js`, `config.js`, `assets/`, `cards/`,
-`keybase.html`, `ssh_public_key`, `robots.txt`.
+Published: `index.html`, `support.js`, `config.js`, `assets/`, `keybase.html`,
+`ssh_public_key`, `robots.txt`.
 
 `config.js` carries the link table, the people and the palette. It is published,
 and CI asserts it is reachable, serves as `text/javascript` and parses — this
@@ -36,32 +44,25 @@ to the repo copy** — the last of those is the only one that can tell a crawl
 policy from the *right* crawl policy, since a stale object carrying the wrong
 directive returns 200 as happily as the right one.
 
-**Per-page indexing is decided on the page, never here.** Both card pages carry
-`<meta name="robots" content="noindex">`, and `robots.txt` says nothing about
-`cards/`. Two independent reasons, and either alone would settle it:
+**Per-page indexing is decided on the page, never here**, and the rule survives
+the page that motivated it. `cards/` carried `<meta name="robots"
+content="noindex">` and `robots.txt` deliberately said nothing about it; that
+path is gone (CL#143), but the reasoning applies to anything added later:
 
-- **A `Disallow` would break the thing it looks like it is doing.** Disallow
-  stops the fetch, so the crawler never reads the `noindex` — and a URL it is
-  forbidden to fetch can still be listed, bare, from an inbound link. Blocking
-  the crawl is strictly *worse* for keeping a page out of an index than letting
-  it be crawled and told not to index.
-- **`robots.txt` is world-readable, so naming a path advertises it.** `cards/`
-  carries a real address and mobile number. A line pointing at it in the one
-  file every scraper fetches first is a signpost, not a fence.
+- **A `Disallow` breaks the thing it looks like it is doing.** Disallow stops the
+  fetch, so the crawler never reads the `noindex` — and a URL it is forbidden to
+  fetch can still be listed, bare, from an inbound link. Blocking the crawl is
+  strictly *worse* for keeping a page out of an index than letting it be crawled
+  and told not to index.
+- **`robots.txt` is world-readable, so naming a path advertises it.** A line
+  pointing at something sensitive, in the one file every scraper fetches first,
+  is a signpost rather than a fence.
 
 Which leads to the rule that matters more than either: **`robots.txt` is not a
 privacy control and must never be used as one.** It steers well-behaved
 indexers. Address harvesters ignore it entirely, and the live `mailto:` links on
-the combined stage are exactly as harvestable with this file as without it —
-that was considered and declined on its own merits, and nothing here changes it.
+the combined stage are exactly as harvestable with this file as without it.
 Anything that genuinely must not be public does not get published.
-
-The `noindex` tags themselves are gated only in passing: `exact
-https://wozi.com/cards/ cards/index.html` in the deploy compares whole-file
-hashes, so removing one changes the hash and fails the deploy. That is a
-by-product of #54's byte-identity check rather than an assertion anybody wrote
-about indexing, and it hopefully holds, but it is worth knowing it is what is
-holding.
 
 Never published: `legacy/` (the archive of everything retired from the bucket),
 and every document in the repo root — `CLAUDE.md`, `README.md`, `CHANGELOG.md`,

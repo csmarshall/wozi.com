@@ -7,6 +7,47 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#143 — `cards/` is removed entirely.**
+
+  Charles: *"nah - blow away /cards"*, after noting *"I actually think that I had
+  /cards before I realized I could create a vcf inside a QR Code itself"* — a
+  vCard fits inside the QR payload, so a hosted page was never needed for new
+  cards.
+
+  **Stated once, because it is the cost:** #84 recorded that printed cards are in
+  circulation and concluded the path had to stay for them. Removing it means
+  those QR codes stop resolving. Charles made the call with that in front of him.
+
+  Gone from the repo: `cards/index.html`, `cards/charles/index.html`,
+  `cards/charles/contact.vcf`, `cards/images/icon.png`, `cards/styles/qrserve.css`.
+
+  Gone from `deploy.yml`: the two card pages from the HTML publish loop, the
+  whole "Publish card assets" step, the `check https://wozi.com/cards/` liveness
+  assertion, and both `exact` byte-identity assertions.
+
+  **The `exact()` helper is kept**, and the comment above it rewritten. It was
+  introduced for `cards/` under #54, but `keybase.html` needs it for an unrelated
+  reason — its body is signature-covered, so a truncated response still returns
+  200 while the ownership proof silently stops verifying, and a substring check
+  cannot tell those apart.
+
+  **The reason this repo is private has changed, and CLAUDE.md now says so.** It
+  went private because `cards/` published a real address and mobile number; that
+  no longer applies to the working tree. What still argues against publishing is
+  **history** — the vCard blob and the street address remain reachable in the
+  object graph of every past commit, gone from HEAD but not from the repository —
+  plus `legacy/resume-2014.pdf`, which is uncleared because `pdftotext` was
+  unavailable and `strings` under-reports on a compressed PDF.
+
+  The `robots.txt` section kept its reasoning and lost its example: the argument
+  that a `Disallow` is worse than a `noindex`, and that naming a path in a
+  world-readable file advertises it, applies to whatever is added next.
+
+  **The live objects are not touched by this.** The deploy does not pass
+  `--delete`, so `s3://wozi.com/cards/*` continues to serve until removed by
+  hand. That is deliberate — it separates a reversible repo change from an
+  irreversible outward-facing one.
+
 - **CL#142 — one clock, several angles: chains that share no gearing no longer
   share a flywheel.** (GitHub #122.)
 
