@@ -7,6 +7,71 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#139 — the flywheel coasts instead of braking: drag falls as it slows.**
+  (GitHub #121 follow-up.)
+
+  Charles, on the shipped constant-deceleration model once CL#136 let a throw
+  show the whole of it: *"the spindown speed is just weird now — almost as if
+  there is a break on the wheel"*.
+
+  **That reading is exactly right, and it is about the MODEL, not the tuning.** A
+  constant retarding torque is literally what a friction brake applies. Pure
+  Coulomb friction sheds speed at the same rate at 200× as at 1.1×, so the wheel
+  ramps down a straight line and then stops decelerating at a corner. Nothing
+  coasts like that — a flywheel free on its bearings loses most of its drag AS IT
+  SLOWS, so it drops away quickly and then trails off.
+
+  CL#136 did not cause this, it revealed it: while `driveCap()` was 8 a throw only
+  ever showed the first 269ms of that straight line.
+
+  **The model is the standard three-term coast-down an engineer fits to a real
+  rotor** — `decel = Coulomb + viscous·e + windage·e²`, on the gap between the
+  wheel and the speed it is driven at. Windage is air drag on a disc, dominates
+  at speed, and is what gives a hard throw its initial dive. Coulomb is the
+  residue that makes it ARRIVE in finite time, which is CL#127's win over the old
+  fixed-tau exponential and is kept deliberately.
+
+  **Both previous models were wrong at opposite ends of one axis.**
+  `SPINDOWN_DRAG_RANGE` is how much harder it brakes at the ladder's top than at
+  rest, and the two failures sit at its ends: at **1** the terms collapse to a
+  constant and it is CL#127's brake; **very large** kills the Coulomb residue and
+  it is #106's pure exponential, which never arrives and stops depending on how
+  hard you threw it. Measured — a windage-only fit makes a 2× throw take 1200ms
+  against a full-ladder 2400ms, so the throw stops reporting its own strength.
+
+  **15 is a compromise, not a physical constant.** A real flywheel's range is far
+  higher (windage at 200× against bearing Coulomb at rest is easily 100×), but
+  past about 30 the small throws read as sluggish. Realism and #106 pull against
+  each other; this is where they were balanced, and it is the knob to turn.
+
+  Measured on the real page through a real pointer gesture — note the new model
+  coasts LONGER from a WEAKER throw, which is the shape changing rather than the
+  duration being turned up:
+
+  | | hard throw | gentle throw |
+  | --- | --- | --- |
+  | CL#136 (brake) | 1715ms at `_v` −49.4 | 182ms |
+  | this change | **2015ms** at `_v` −40.8 | **465ms** |
+
+  **Only the scale is solved; the shape is chosen.** The two shape figures set
+  the split and the overall scale is bisected at load (Simpson over 1/decel —
+  the closed form loses precision as the windage share goes to zero and threw a
+  domain error when tried) so that a full-ladder transition still takes exactly
+  `SPINDOWN_RANGE_MS`. That keeps CL#136's identity true: a saturating throw is
+  the ladder travelled by hand, so it must take the ladder's own time.
+
+  **The test that asserted the opposite is reversed, not deleted**, and now
+  guards both ends: the rate must fall by more than 3× across the descent (not a
+  brake) AND arrival must stay exact (not an exponential). Confirmed to fail at
+  each end — a drag range of 1.0001 trips the flatness assertion, and 100000
+  trips three tests including #106's own core complaint.
+
+  **`pixel_regress` cannot be 0px for a change to this function, ever**, because
+  `_M` is the integral of `_v` and a different spin-up curve permanently offsets
+  phase. 48,551 / 48,590 / 48,788 px at 90 / 900 / 3000 frames — stable rather
+  than growing, which is what separates a phase offset from a structural break.
+  Structure is held by `dom_invariants` and `verify_motion`, both green.
+
 - **CL#138 — `hexcore` and `labyrinth` are held to `MIN_CUT` too, each by its
   own geometry.** (Follows CL#137.)
 

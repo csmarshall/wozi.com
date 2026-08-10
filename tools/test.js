@@ -1595,18 +1595,29 @@ test('a bigger drop settles more slowly than a smaller one (GitHub #106\'s core 
     + 'not the same or less');
 });
 
-test('the flywheel decelerates at a CONSTANT rate, not one that shrinks near the target', () => {
-  /* The exact shape #106 asks to move away from: an exponential's per-tick
-     step shrinks as `_v` nears its target, which is what concentrates all the
-     visible motion into the first fraction of a second and leaves an
-     imperceptible crawl for the rest. Sampled mid-descent (well clear of
-     both the starting value and the final snap-to-target tick, where a
-     from-rest or arrival tick can legitimately be a partial step) rather than
-     inferred from a settle-time ratio — a ratio over few enough ticks that
-     the size of ONE tick's step is a large fraction of the total gap turned
-     out to be too noisy an instrument for this (a 2x -> 1x drop settles in a
-     single tick almost regardless of the model, which says nothing about
-     whether the rate is constant). */
+test('the flywheel COASTS — drag falls as it slows, and it still arrives (GitHub #121, CL#139)', () => {
+  /* THIS TEST ASSERTED THE OPPOSITE UNTIL CL#139, and the reversal is the
+     point of the ticket rather than a relaxation of it.
+
+     CL#127 replaced a fixed-tau exponential with a CONSTANT deceleration and
+     this test pinned that shape. Charles, on the result once CL#136 let a throw
+     show the whole of it: "the spindown speed is just weird now - almost as if
+     there is a break on the wheel". He was right, and it is a statement about
+     the model: a constant retarding torque IS a brake. Nothing coasts at one
+     flat rate and then stops decelerating at a corner.
+
+     What replaces it is the standard three-term coast-down model an engineer
+     fits to a real rotor — Coulomb + viscous + windage — so the rate RISES with
+     how far the wheel is from the speed it is driven at.
+
+     The two failure modes sit at either end of SPINDOWN_DRAG_RANGE and this
+     test guards both, because they are opposite mistakes:
+       - range -> 1 collapses the terms to a constant. That is the brake again.
+       - range -> infinity kills the Coulomb residue and leaves a pure
+         exponential, which is #106: it never arrives, and settling time stops
+         depending on the size of the drop.
+     So: the rate must genuinely shrink toward the target (not a brake), AND
+     arrival must stay finite (not an exponential). Neither alone is enough. */
   const approachSpeed = loadApproachSpeed();
   const { floor, ceil } = speedSchema();
   const idleRate = (x) => (7200 / grabNumber('BASE_MS')) * x;
@@ -1614,21 +1625,37 @@ test('the flywheel decelerates at a CONSTANT rate, not one that shrinks near the
   let v = idleRate(ceil);
   const target = idleRate(floor);
   const deltas = [];
-  for (let i = 0; i < 30 && v !== target; i++) {
+  for (let i = 0; i < 400 && v !== target; i++) {
     const before = v;
     v = approachSpeed(v, target, dt);
     deltas.push(before - v);
   }
   ok(deltas.length > 10, 'fewer than 10 ticks before settling — not enough of a '
-    + 'mid-descent window to say anything about the shape of the approach');
-  const midWindow = deltas.slice(2, -2); // clear of the first tick and the final snap
-  const first = midWindow[0];
-  midWindow.forEach((d, i) => {
-    ok(Math.abs(d - first) < 1e-6,
-      `tick ${i}'s step (${d}) differs from an earlier mid-descent tick's (${first}) `
-      + '— the deceleration is not constant, which is what an exponential (fixed or '
-      + 'logarithmic tau) looks like from inside this loop');
-  });
+    + 'descent window to say anything about the shape of the approach');
+
+  /* Clear of the first tick and of the final snap-to-target, either of which
+     can legitimately be a partial step. */
+  const mid = deltas.slice(2, -2);
+  const early = mid[0], late = mid[mid.length - 1];
+
+  ok(late < early,
+    `the per-tick step is ${late} late against ${early} early — the retarding rate `
+    + 'does not fall as the wheel slows, which is a constant-rate BRAKE, the exact '
+    + 'thing GitHub #121 was raised about');
+
+  /* Not merely smaller — smaller by enough to read as coasting. The shipped
+     dynamic range is 15, and sampling misses both ends, so this asks for a
+     modest fraction of it rather than the figure itself: a token taper would
+     satisfy `late < early` while still looking like a brake. */
+  ok(early / late > 3,
+    `the rate only falls ${(early / late).toFixed(2)}x across the descent — too flat `
+    + 'to read as a coast; SPINDOWN_DRAG_RANGE has collapsed toward 1');
+
+  /* And the other end: it must still ARRIVE. A pure exponential would run the
+     loop above to its cap without ever hitting target. */
+  ok(v === target,
+    'the flywheel never reached its target — the Coulomb term has been lost and '
+    + 'this is a pure exponential again, which is GitHub #106');
 });
 
 test('the flywheel actually ARRIVES at its target, in finite time (GitHub #106, CL#127)', () => {

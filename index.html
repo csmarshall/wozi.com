@@ -761,12 +761,118 @@ const SPEED_STOPS = (() => {
    opposes motion in either direction at the same magnitude, and a real train
    winds up slowly for the same reason it coasts down slowly. No special case. */
 const SPINDOWN_RANGE_MS = 2400;
-const SPINDOWN_DECEL = ((7200 / BASE_MS) * Math.max(SPEED_CEIL - SPEED_FLOOR, SPEED_FLOOR))
-  / SPINDOWN_RANGE_MS;
+
+/* HOW THE COAST IS SHAPED, as against how long it lasts (GitHub #121, CL#139).
+
+   Charles, on the shipped constant-deceleration model: "the spindown speed is
+   just weird now - almost as if there is a break on the wheel". That reading is
+   exactly right, and it is a statement about the MODEL rather than the tuning: a
+   constant retarding torque IS a brake. Pure Coulomb friction sheds speed at the
+   same rate at 200x as at 1.1x, so the wheel ramps down a straight line and then
+   stops decelerating at a corner. Nothing coasts like that. A flywheel free on
+   its bearings loses most of its drag AS IT SLOWS -- bearing drag and windage
+   both fall with speed -- so it drops away quickly and then trails off.
+
+   CL#136 did not cause this; it revealed it. While driveCap() was 8 a throw only
+   ever showed the first 269ms of that straight line. Once the cap became the
+   ladder's top, a hard throw shows all 2400ms of it.
+
+   So the retarding rate is a sum of the two things a real bearing actually does:
+
+     decel = SPINDOWN_COULOMB + SPINDOWN_VISCOUS * |target - v|
+
+   VISCOUS is drag proportional to how far off the target speed the wheel is --
+   the part that makes it dive early and dawdle late, and the part that was
+   missing. COULOMB is the constant residue that makes it ARRIVE, in finite time,
+   which is CL#127's win over the old fixed-tau exponential and is kept: an
+   exponential alone only ever approaches, and `_v` would carry a residual for
+   ever. Candidate B in CL#127 (tau scaled by octaves) got the shape right too,
+   but needed latched per-transition state and a hand-off in the drag handler;
+   this needs neither, because the rate is read off the CURRENT gap every tick.
+
+   ONE FEEL FIGURE IS ADDED AND THE OTHER IS UNCHANGED. `SPINDOWN_TAU_MS` is the
+   time constant of the viscous part -- the character of the coast. Nothing else
+   is chosen: SPINDOWN_COULOMB is SOLVED so that a full-ladder transition still
+   takes exactly SPINDOWN_RANGE_MS, which is the number CL#127 already exposed
+   and which CL#136 gave a second job (it is also how long the hardest possible
+   throw runs, since a saturating throw IS the ladder travelled by hand). So the
+   two numbers keep their existing meanings and the new one only shapes what
+   happens between the ends.
+
+   Integrating de/dt = -(a + b*e) from e0 to 0 gives t = (1/b) * ln(1 + b*e0/a),
+   so pinning t to SPINDOWN_RANGE_MS at e0 = the ladder span inverts to the `a`
+   below. At the shipped figures the rate starts 3.2x the old flat one and ends
+   5x slower than it, which is the whole of what "coasts" means here. */
+/* HOW HARD IT BRAKES AT THE TOP OF THE LADDER AGAINST AT REST. This is the one
+   number that decides the CHARACTER, and both failures this has had sit at its
+   ends. At 1 the three terms collapse to a constant and it is the brake CL#127
+   shipped. Very large, the Coulomb residue vanishes, and it becomes the pure
+   exponential #106 rejected -- measured: at a dynamic range of 1 a 2x throw
+   takes 70ms and a full-ladder one 2400ms, while a windage-only fit makes them
+   1200ms and 2400ms, so the throw stops telling you how hard you threw it.
+
+   15 is the shipped compromise, and it IS a compromise rather than a physical
+   constant: a real flywheel's range is far higher (windage at 200x against
+   bearing Coulomb at rest is easily 100x), but past about 30 the small throws
+   start to read as sluggish because the tail dominates them. Realism and #106
+   pull against each other here, and this is where they were balanced. */
+const SPINDOWN_DRAG_RANGE = 15;
+/* Of the SPEED-DEPENDENT drag, the share that is windage (proportional to the
+   square of the excess) rather than lubricant shear (proportional to it). Air
+   drag on a disc dominates at speed in any real rotor, which is what gives a
+   hard throw its initial dive. */
+const SPINDOWN_WINDAGE = 0.6;
+const SPINDOWN_SPAN = (7200 / BASE_MS) * Math.max(SPEED_CEIL - SPEED_FLOOR, SPEED_FLOOR);
+
+/* The three coast-down coefficients, SOLVED rather than chosen, so the two
+   figures above set only the shape and `SPINDOWN_RANGE_MS` still sets the
+   duration exactly -- which is what keeps CL#136's identity true: a saturating
+   throw is the ladder travelled by hand, so it must take the ladder's own time.
+
+   Only the overall scale is solved. Its split is fixed by the two constants
+   above, and the time to fall from the ladder's top to rest is the integral of
+   1/decel over the gap, which has no robust closed form across the whole range
+   of shapes (the arctan/log form loses precision as the windage share goes to
+   zero, and threw a domain error when it was tried). Simpson plus bisection is
+   a few hundred multiplications, once, at load. */
+const SPINDOWN_K = (function () {
+  const decelAt = (k, e) =>
+    k * SPINDOWN_SPAN / (SPINDOWN_DRAG_RANGE - 1)          /* Coulomb  */
+    + k * (1 - SPINDOWN_WINDAGE) * e                       /* viscous  */
+    + k * SPINDOWN_WINDAGE * e * e / SPINDOWN_SPAN;        /* windage  */
+  const timeToRest = (k) => {
+    const n = 200, h = SPINDOWN_SPAN / n;
+    let s = 1 / decelAt(k, 0) + 1 / decelAt(k, SPINDOWN_SPAN);
+    for (let i = 1; i < n; i++) s += (i % 2 ? 4 : 2) / decelAt(k, i * h);
+    return s * h / 3;
+  };
+  let lo = 1e-9, hi = 50;
+  for (let i = 0; i < 70; i++) {
+    const mid = (lo + hi) / 2;
+    if (timeToRest(mid) > SPINDOWN_RANGE_MS) lo = mid; else hi = mid;
+  }
+  return hi;
+})();
+const SPINDOWN_COULOMB = SPINDOWN_K * SPINDOWN_SPAN / (SPINDOWN_DRAG_RANGE - 1);
+const SPINDOWN_VISCOUS = SPINDOWN_K * (1 - SPINDOWN_WINDAGE);
+const SPINDOWN_WIND = SPINDOWN_K * SPINDOWN_WINDAGE / SPINDOWN_SPAN;
+
+/* Retarding rate rises with how far the wheel is from the speed it is being
+   driven at, which is the whole of what "coasts" means: drag falls away as it
+   slows, so it dives early and trails off, instead of shedding speed at one
+   flat rate and stopping at a corner. The Coulomb term is what still makes it
+   ARRIVE in finite time -- CL#127's win over the old fixed-tau exponential, and
+   kept deliberately, since an exponential alone only ever approaches and would
+   leave `_v` carrying a residual for ever.
+
+   Symmetric in direction, exactly as before: spin-up is this called with
+   target > v and gets the same magnitudes, because the issue asked for that to
+   be explicit and Coulomb friction opposes motion the same way either way. */
 function approachSpeed(v, target, dt) {
   const diff = target - v;
-  const step = SPINDOWN_DECEL * dt;
-  return Math.abs(diff) <= step ? target : v + Math.sign(diff) * step;
+  const gap = Math.abs(diff);
+  const step = (SPINDOWN_COULOMB + SPINDOWN_VISCOUS * gap + SPINDOWN_WIND * gap * gap) * dt;
+  return gap <= step ? target : v + Math.sign(diff) * step;
 }
 const GHOST_COLORS = ['#9AA6AD', '#A9B4BA', '#8F9BA3', '#B3BCC2'];
 
