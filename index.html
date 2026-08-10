@@ -1801,26 +1801,23 @@ const CENTRE_FAMILIES = [
     variants: [{ arms: 4 }, { arms: 5 }, { arms: 6 }] },
   { type: 'pockets', web: 3.1, hub: 0.22,
     variants: [{ arms: 6 }, { arms: 5 }, { arms: 4 }] },
-  /* RETIRED, not deleted -- Charles does not like how these three read, and the
-     renderers stay intact behind them the way the chain and belt do. Put an
-     entry back in this list and it returns to the deal and to the Table of
-     Gears at once; nothing else needs wiring.
-       spiral    curved spokes
-       iris      iris blades
-       labyrinth labyrinth rotor  (its entry is further down, also commented)
-  { type: 'spiral', web: 2.6, hub: 0.14,
-    variants: [{ arms: 5, sweep: 0.3 }, { arms: 6, sweep: 0.22 }, { arms: 4, sweep: 0.38 }] },
-  { type: 'iris', web: 2.9, hub: 0.2,
-    variants: [{ arms: 6 }, { arms: 8 }, { arms: 10 }] },
-  */
+  /* FOUR FAMILIES ARE RETIRED: spiral (curved spokes), iris (iris blades),
+     honeycomb (ring-course cells) and labyrinth (labyrinth rotor). Charles does
+     not like how they read, and their renderers stay intact in gearSvg the way
+     the chain and belt do -- restoring one is an entry here plus nothing else.
+     Their commented-out entries used to sit in this array and were removed
+     because they read as live code: every source scan counted them, so the
+     picker and the contact sheet were repeatedly reported as "missing" families
+     that were never dealt. A retired family is named here and drawn nowhere.
+
+     NOTE the sharp edge that cost real time: `?kind=labyrinth` does NOT error.
+     dealCentres falls back to the full mix when the name is not in the array, so
+     a retired family silently yields an ordinary deal. */
   { type: 'star', web: 3.0, hub: 0.22,
     variants: [{ arms: 5 }, { arms: 7 }, { arms: 9 }] },
-  /* retired with spiral and iris: the ring-course honeycomb, replaced by the
-     true lattice below. Cells in concentric courses never read as honeycomb,
-     because the walls between courses do not line up with the walls within one.
-  { type: 'honeycomb', web: 3.1, hub: 0.2,
-    variants: [{ arms: 8, cell: 4.2 }, { arms: 8, cell: 5.6 }, { arms: 8, cell: 7.2 }] },
-  */
+  /* honeycomb is retired (see above): cells in concentric courses never read as
+     honeycomb, because the walls between courses do not line up with the walls
+     within one. hexcore below is the true lattice that replaced it. */
   /* A small hub on purpose. The boss is drawn at 1.5x hubR and the core has to
      clear it, so a fat boss eats the very rings that make this design work --
      at hub 0.2 the web had room for barely two. */
@@ -1871,10 +1868,6 @@ const CENTRE_FAMILIES = [
   /* CELL_MIN is the real guard here: a ring target of five would happily grind
      the cells down to specks to reach it, so the floor stops it and the search
      falls back to the most rings a legible cell can manage. */
-  /* retired with spiral and iris, above
-  { type: 'labyrinth', web: 3.2, hub: 0.18,
-    variants: [{ arms: 5 }, { arms: 6 }, { arms: 7 }] },
-  */
   /* `arms` is a CEILING now, not a count (CL#117, GitHub #96): the sunburst
      branch of gearSvg derives the most windows the smallest blank's rInR can
      legibly cut and takes whichever of this and the dealt number is smaller.
@@ -3045,6 +3038,62 @@ const ACCENTS = CONF.ACCENTS || {};
    original in value -- while still taking the chroma out, which was the actual
    complaint. Cheaper and more targeted: fix the thing that was wrong, leave the
    thing that was not. */
+/* THE SMALLEST OPENING THAT STILL READS AS ONE, in PIXELS ON SCREEN.
+
+   A cut has to hold a wall on each side and its own contour and still leave an
+   interior, and whether it manages that is a question about what the eye
+   receives -- so the figure is stated in px and converted per render by px(),
+   exactly as hexcore's cell floor is. Stated in solve units it would be correct
+   at ONE screen size and wrong everywhere else: `--gsfit` measures 1.396 at
+   1440x900 but 0.842 on a phone in landscape and 1.461 at 5K, so a single
+   solve-unit floor is a 1.7x spread in what it actually asks for. That is the
+   trap the hexcore wall fell into (see px() in gearSvg) and this constant was
+   sitting in it.
+
+   THE FIGURE. Measured across four seeds and every wheel: sunburst never cuts
+   below 7.41 solve units and reads at every colour; hexcore sits at 5.61;
+   isogrid reached 3.34 and polariso 2.18, and those two are the ones that
+   muddle. Those are desktop measurements, where S is 1.396 -- so the family
+   that demonstrably works never goes under 7.41 x 1.396 = 10.3px, and that is
+   the requirement. The retired 5.6 was neither: it was taken from hexcore, a
+   family Charles had already complained about, and it was 7.8px on the desk and
+   4.7px on a phone.
+
+   Consequences worth knowing. A phone asks for MORE solve units to make the
+   same 10.3px, so a small screen cuts FEWER, LARGER openings -- which is the
+   intent, since fine detail is exactly what it cannot show. And per the lattice
+   note in CLAUDE.md, the cell search counts DOWN from the dealt size, so a floor
+   above where it starts skips the loop and the fallback takes over; the fallback
+   is floored too. */
+const MIN_CUT_PX = 10.3;
+
+/* Rails, not the mechanism. Over the real range of `--gsfit` (0.842 to 1.461)
+   the conversion lands between 7.05 and 12.23 solve units, so neither of these
+   binds today -- they exist so an unforeseen scale cannot ask for an opening
+   narrower than the one sunburst proved legible, or reserve half the blank for
+   a single cut on some future display. */
+const MIN_CUT_LO = 7.0;
+const MIN_CUT_HI = 12.5;
+
+/* THE WEIGHT EVERY EPICYCLIC CONTOUR IS DRAWN AT. The annulus, the planets and
+   the sun are all the same kind of line -- ft.line at 1px -- and they should
+   read as one drawing. They did not: the ring carried `strokeOpacity: 0.6` and
+   the two teethPath calls simply OMITTED the attribute, so the planets and sun
+   inherited the SVG default of 1 and came out heavier than the ring they run
+   inside. Nobody chose that; one line had it and two did not. Stated once so a
+   fourth reader cannot drift the same way. */
+const EPI_LINE_OP = 0.6;
+
+/* THE PLATE EVERY BRAND MARK IS STRUCK ON. Pale in BOTH themes on purpose:
+   several marks are near-black (GitHub, Threads) and need a light field under
+   them (#22), and that requirement does not change with the page. */
+const BADGE_DISC = '#DFE2DE';
+/* AND THE EDGE THAT SEPARATES IT FROM THE PAGE. One disc now serves both
+   themes, which leaves it at 1.02:1 against a light page -- so where a badge
+   or its expanded pill overlaps the page it has no boundary at all. Dark needs
+   none: the disc is 12.25:1 there. The same element carries both states, so
+   edging it covers the circle and the pill together. */
+
 function flatTones(hex, soft) {
   const n = parseInt(hex.slice(1), 16);
   let c = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
@@ -6248,6 +6297,20 @@ class Component extends DCLogic {
        ten times the metal for a wall nobody asked to be thicker. */
     const px = (want, lo, hi) => Math.min(hi === undefined ? Infinity : hi,
                                           Math.max(lo === undefined ? 0 : lo, want / (S || 1)));
+    /* The cut floor in this render's own units. One conversion, here, rather
+       than px(...) repeated at each of the three lattices that floor against it
+       -- the clamp bounds would then be written three times and could disagree. */
+    const MIN_CUT = px(MIN_CUT_PX, MIN_CUT_LO, MIN_CUT_HI);
+    /* THE WALL EVERY LATTICE LEAVES BETWEEN ITS OPENINGS, in this render's units.
+       1.06px is the thinnest that still reads as a wall rather than a seam;
+       below it the pattern aliases into the grey smear rejected twice. The
+       tooth-count term keeps the wall a fixed SHARE of the annulus, so it does
+       not cost a 13-tooth wheel three times what it costs a 19-tooth one.
+       One home, because this exact expression was written out four times --
+       hexcore's WALLX, isogrid's wallI0, polariso's WALLP and labyrinth's --
+       which is four chances to update three of them. */
+    const LATTICE_WALL = Math.max(px(1.06, 0.55, 2.4),
+                                  1.2 * (g.teeth || TEETH_MAX) / TEETH_MAX);
     const h = React.createElement;
     /* BOTH THEMES ARE FLAT -- Charles's call, 2026-07-30, after a side-by-side
        against the modelled version. This was a `const flat = true` guarding
@@ -6567,7 +6630,7 @@ class Component extends DCLogic {
         ringD += 'A' + ringRoot.toFixed(2) + ' ' + ringRoot.toFixed(2) + ' 0 0 1 ' + PT(ringRoot, c + aR / 2) + ' ';
       }
       ringD += 'Z M' + bore.toFixed(2) + ',0 A' + bore.toFixed(2) + ',' + bore.toFixed(2) + ' 0 1 0 -' + bore.toFixed(2) + ',0 A' + bore.toFixed(2) + ',' + bore.toFixed(2) + ' 0 1 0 ' + bore.toFixed(2) + ',0 Z';
-      post.push(h('path', { key: 'epiring', d: ringD, fillRule: 'evenodd', fill: ft.body, stroke: ft.line, strokeWidth: 1, strokeOpacity: 0.6 }));
+      post.push(h('path', { key: 'epiring', d: ringD, fillRule: 'evenodd', fill: ft.body, stroke: ft.line, strokeWidth: 1, strokeOpacity: EPI_LINE_OP }));
       /* STAR ARRANGEMENT -- the carrier is grounded to the axle, per the
          physics verification (scratchpad/planetary-physics.md: Willis +
          tabulation, cross-checked; precedent ALF 502 turbofan star box,
@@ -6642,8 +6705,12 @@ class Component extends DCLogic {
           h('path', { d: 'M0,0 L' + rad.r.toFixed(2) + ',0', stroke: ft.line, strokeWidth: 3, strokeOpacity: 0.85 }),
           h('g', { transform: 'translate(' + rad.r.toFixed(2) + ',0)' },
             h('g', { ref: epi(kFac, base), style: { transform: 'rotate(' + base.toFixed(2) + 'deg)' } },
-              h('path', { d: this.teethPath(teeth, pitchR, -1, m2), fill: fill, stroke: ft.line, strokeWidth: 1 })),
-            h('circle', { r: 2.4, fill: ft.line })));
+              h('path', { d: this.teethPath(teeth, pitchR, -1, m2), fill: fill, stroke: ft.line, strokeWidth: 1, strokeOpacity: EPI_LINE_OP })),
+            /* The stud end. Same ink as every other contour in the assembly, so it
+               takes the same weight -- it is the one place ft.line is used as a
+               FILL rather than a line, and at full opacity it was the darkest
+               thing in the epicyclic while the ring, planets and sun sat at 0.6. */
+            h('circle', { r: 2.4, fill: ft.line, fillOpacity: EPI_LINE_OP })));
       const planets = [];
       for (let k2 = 0; k2 < NP; k2++) {
         const A = k2 * (360 / NP);
@@ -6653,12 +6720,20 @@ class Component extends DCLogic {
           planets.push(station('i' + k2, { a: A, r: Rc }, Zp1, Rp, kP, baseP1At(A), ft.face));
           planets.push(station('o' + k2, { a: A + dTheta, r: Rc2 }, Zp2, Rp2r, kP2, baseP2At(A), ft.well));
         } else {
-          planets.push(station('pw' + k2, { a: A, r: Rc }, Zp, Rp, kP, basePAt(A), ft.face));
+          /* ONE BLANK, ONE TONE. The ring, the planets and the sun are gears in a single
+             set, on one plane, cut from one piece -- so they take the wheel's own
+             body colour and are told apart by their contours, which is exactly what
+             ft.face's own comment argues for ('in a flat drawing the raised face is
+             told by its outline, not by a tonal jump'). Before this the sun was
+             ft.well and the planets ft.face, 1.42x apart on a yellow wheel, which
+             read as a sun sunk in a pocket. The TWO-ROW rows keep their difference:
+             they counter-rotate, and that is information rather than inheritance. */
+          planets.push(station('pw' + k2, { a: A, r: Rc }, Zp, Rp, kP, basePAt(A), ft.body));
         }
       }
       post.push(h('g', { key: 'epicarrier', ref: epi(kC, baseC), style: { transform: 'rotate(' + baseC.toFixed(2) + 'deg)' } }, planets));
       post.push(h('g', { key: 'episun', ref: epi(kS, baseS), style: { transform: 'rotate(' + baseS.toFixed(2) + 'deg)' } },
-        h('path', { d: this.teethPath(Zs, Rs, -1, m2), fill: ft.well, stroke: ft.line, strokeWidth: 1 })));
+        h('path', { d: this.teethPath(Zs, Rs, -1, m2), fill: ft.body, stroke: ft.line, strokeWidth: 1, strokeOpacity: EPI_LINE_OP })));
     } else if (kind === 'iris') {
       /* Aperture blades: tangential crescents, pointed at both ends. The metal
          between blades is a full-depth curved spoke — nothing floats. */
@@ -6789,10 +6864,41 @@ class Component extends DCLogic {
       /* 1.06px is the thinnest that still reads as a wall rather than a seam;
          below it the lattice aliases into the grey smear rejected twice. Ceiling
          so a 5K display does not spend ten times the metal on it. */
-      const WALLX = Math.max(px(1.06, 0.55, 2.4), 1.2 * (g.teeth || TEETH_MAX) / TEETH_MAX);
-      /* 3.9px is where a cell stops reading as a hexagon and becomes a dot.
-         Was a flat 3.1 units -- 1.58px on a phone, 15.87px on a 5K. */
-      const CELL_MIN = px(3.9, 2.2, 6.0), CELL_MAX = 4.8;
+      const WALLX = LATTICE_WALL;
+      /* HELD TO MIN_CUT LIKE EVERY OTHER LATTICE (CL#138). This was
+         `px(3.9, 2.2, 6.0)` -- hexcore's own empirical floor, measured as "where
+         a cell stops reading as a hexagon and becomes a dot" -- and it is
+         retired because it disagreed with the shared floor and lost.
+
+         THE CONVERSION IS THE WHOLE CALCULATION, and it is not isogrid's. There
+         the cut is inset by a wall on each side, so the pitch has to clear
+         MIN_CUT PLUS the wall. Here `cellX` is the hexagon's CIRCUMRADIUS -- the
+         radius its vertices sit at -- and the wall is additive in `step` below
+         (`cellX + WALLX / sqrt(3)`), so it lives BETWEEN cells and takes nothing
+         off the opening. `cellX` is pure cut.
+
+         What MIN_CUT floors is the opening's NARROWEST dimension, which for a
+         hexagon is across the FLATS, not across the vertices: 2 x inradius =
+         sqrt(3) x circumradius. So sqrt(3) * cellX >= MIN_CUT, and the floor is
+         MIN_CUT / sqrt(3).
+
+         The gap it closes, measured: the old floor allowed 6.8px across the
+         flats at every viewport against a 10.3px requirement -- 34% under, which
+         is the "reads as dots" complaint stated as a number. */
+      const CELL_MIN = MIN_CUT / Math.sqrt(3);
+      /* THE CEILING HAS TO MOVE WITH THE FLOOR OR IT INVERTS IT. It was a flat
+         4.8 solve units, which sat above the old floor on a desk (2.79) and
+         BELOW the new one on a phone in landscape (7.06) -- and a ceiling under
+         the floor collapses the sweep to a single iteration, throwing away the
+         search that picks the size. Expressed as a multiple of the floor it
+         cannot invert at any scale.
+
+         1.7 IS THE ONE JUDGED FIGURE HERE and cannot be derived: it is how much
+         range the search is given, not a property of the geometry. It is taken
+         from the pair that shipped -- 4.8 / 2.79 = 1.72 at the desktop scale
+         those two were written against -- so the search keeps the room it had,
+         now at every scale instead of one. */
+      const CELL_MAX = CELL_MIN * 1.7;
       /* Clear the BOSS, not the hub. The boss disc is drawn at hubR * 1.5 and
          painted over the web, so a lattice that only cleared hubR * 1.1 ran its
          innermost ring underneath it -- half-covered cells, and the ragged inner
@@ -6897,44 +7003,83 @@ class Component extends DCLogic {
          was choosing, 17T to 4.35 with 30.
          Ties on fit go to the LARGER cell, which is the counterweight the last
          version lacked: fit was bounded at both ends, size at neither. */
+      /* THE SHARED FLOOR IS AN AIM, NOT A GATE -- because the alternative is a
+         blank web, and a blank web is worse than a small cell (CL#138).
+
+         hexcore's rings are anchored at the wheel CENTRE, so ring radii land on
+         fixed multiples of the pitch and a ring is wholly in or wholly out.
+         Bigger cells therefore do not degrade gracefully: past a point no ring
+         lands inside the annulus at all and the sweep returns nothing. Measured
+         when MIN_CUT was applied as a hard floor: 1 of 7 wheels went blank on a
+         desk and 3 of 7 on a phone, where MIN_CUT converts to 12.23 solve units
+         and asks for a hexagon 14.1 across.
+
+         So the floor is tried, and if the blank cannot host a single ring at
+         that size the sweep repeats at hexcore's OWN legibility floor -- the
+         `px(3.9, 2.2, 6.0)` that shipped before this change, measured as where a
+         cell stops reading as a hexagon and becomes a dot. That bounds the
+         fallback: this can never draw a cell smaller than what already shipped,
+         and can never leave a web empty that used to be full.
+
+         It is the same trade the shell clearance already makes twenty lines up
+         -- "the clearance is a nicety; having ANY pattern is not" -- applied to
+         the cell floor, and it is why this is a list rather than a constant. */
+      const CELL_FLOORS = [CELL_MIN, px(3.9, 2.2, 6.0)];
       let cellX = 0, bestWaste = Infinity, rOutX = rOutTry[0];
-      for (let attempt = 0; attempt < rOutTry.length && !cellX; attempt++) {
-        rOutX = rOutTry[attempt];
-        bestWaste = Infinity;
-        const seen = [];
-        for (let c = ceiling; c >= CELL_MIN; c -= 0.05) {
-          /* PITCH ADDS THE WALL ACROSS THE FLATS, not across the radius
-             (#62). Two hexagons meet flat-to-flat, and a hexagon's inradius is
-             sqrt3/2 of its circumradius -- so adding WALLX/2 to the
-             circumradius opens a gap of only WALLX * sqrt3/2, 13.4% thinner
-             than asked for. Measured 0.736-1.039 against a nominal 0.85-1.20.
-             Dividing by sqrt3 makes the gap the wall. */
-          const step = c + WALLX / Math.sqrt(3), px = Math.sqrt(3) * step, ry2 = 1.5 * step;
-          const at = (q, r) => [px * (q + r / 2), ry2 * r];
-          const span = Math.ceil(rOutX / step) + 2;
-          let ink0 = Infinity, ink1 = 0, n = 0;
-          for (let k = 0; k <= span; k++) {
-            for (const [q, r] of ringOf(k)) {
-              const P = at(q, r);
-              let v0 = Infinity, v1 = 0, ok = true;
-              for (let v = 0; v < 6; v++) {
-                const va = (90 + 60 * v) * Math.PI / 180;
-                const d = Math.hypot(P[0] + c * Math.cos(va), P[1] + c * Math.sin(va));
-                if (d > rOutX) { ok = false; break; }
-                v0 = Math.min(v0, d); v1 = Math.max(v1, d);
+      for (let fi = 0; fi < CELL_FLOORS.length && !cellX; fi++) {
+        const floorC = CELL_FLOORS[fi];
+        const ceilingF = Math.max(floorC, ceiling);
+        for (let attempt = 0; attempt < rOutTry.length && !cellX; attempt++) {
+          rOutX = rOutTry[attempt];
+          bestWaste = Infinity;
+          const seen = [];
+          /* THE GRID IS ANCHORED AT THE FLOOR, NOT THE CEILING. Written as
+             `for (c = ceilingF; c >= floorC; c -= 0.05)` the set of sizes
+             actually tested depends on where the sweep STARTS, so moving the
+             ceiling silently tests a different set -- and the floor itself is
+             sampled only when the span happens to be a whole number of steps.
+             That is how a 13-tooth wheel went blank at one viewport and not at
+             a neighbouring one with identical rIn/rOut: the only feasible size
+             sat just under the last grid point the ceiling happened to produce.
+             Counting down from the floor samples floorC exactly, every time,
+             and makes the tested set independent of the ceiling. Still walked
+             largest-first, so the "larger cells win ties" rule is unchanged. */
+          const nSteps = Math.max(0, Math.floor((ceilingF - floorC) / 0.05 + 1e-9));
+          for (let si = nSteps; si >= 0; si--) {
+            const c = floorC + si * 0.05;
+            /* PITCH ADDS THE WALL ACROSS THE FLATS, not across the radius
+               (#62). Two hexagons meet flat-to-flat, and a hexagon's inradius is
+               sqrt3/2 of its circumradius -- so adding WALLX/2 to the
+               circumradius opens a gap of only WALLX * sqrt3/2, 13.4% thinner
+               than asked for. Measured 0.736-1.039 against a nominal 0.85-1.20.
+               Dividing by sqrt3 makes the gap the wall. */
+            const step = c + WALLX / Math.sqrt(3), px = Math.sqrt(3) * step, ry2 = 1.5 * step;
+            const at = (q, r) => [px * (q + r / 2), ry2 * r];
+            const span = Math.ceil(rOutX / step) + 2;
+            let ink0 = Infinity, ink1 = 0, n = 0;
+            for (let k = 0; k <= span; k++) {
+              for (const [q, r] of ringOf(k)) {
+                const P = at(q, r);
+                let v0 = Infinity, v1 = 0, ok = true;
+                for (let v = 0; v < 6; v++) {
+                  const va = (90 + 60 * v) * Math.PI / 180;
+                  const d = Math.hypot(P[0] + c * Math.cos(va), P[1] + c * Math.sin(va));
+                  if (d > rOutX) { ok = false; break; }
+                  v0 = Math.min(v0, d); v1 = Math.max(v1, d);
+                }
+                if (!ok || v0 < rInX) continue;
+                n++; ink0 = Math.min(ink0, v0); ink1 = Math.max(ink1, v1);
               }
-              if (!ok || v0 < rInX) continue;
-              n++; ink0 = Math.min(ink0, v0); ink1 = Math.max(ink1, v1);
             }
+            if (!n) continue;
+            seen.push({ c: c, waste: (ink0 - rInX) + (rOutX - ink1) });
           }
-          if (!n) continue;
-          seen.push({ c: c, waste: (ink0 - rInX) + (rOutX - ink1) });
+          if (!seen.length) continue;
+          let best = Infinity;
+          seen.forEach(r => { if (r.waste < best) best = r.waste; });
+          /* among sizes that fit essentially as well, take the LARGEST cell */
+          seen.forEach(r => { if (r.waste <= best + 0.35 && r.c > cellX) { cellX = r.c; bestWaste = r.waste; } });
         }
-        if (!seen.length) continue;
-        let best = Infinity;
-        seen.forEach(r => { if (r.waste < best) best = r.waste; });
-        /* among sizes that fit essentially as well, take the LARGEST cell */
-        seen.forEach(r => { if (r.waste <= best + 0.35 && r.c > cellX) { cellX = r.c; bestWaste = r.waste; } });
       }
       if (cellX) {
         /* THE SIZE is chosen by complete rings above, but the KEEP is exact.
@@ -7015,7 +7160,24 @@ class Component extends DCLogic {
       for (let a2 = 0; a2 < rOutTryI.length && !sideI; a2++) {
         rOutI = rOutTryI[a2];
         const seenI = [];
-        for (let sd = Math.min((g.cv && g.cv.cell) || 7.0, 11.5); sd >= 5.2; sd -= 0.1) {
+        /* THE FLOOR BELONGS ON THE CUT, NOT ON THE PITCH. `sd` is the lattice
+           pitch; the opening is then shrunk about its centroid to leave the wall,
+           so what is actually cut is sd - 1.732*WALL. Floored at a pitch of 5.2
+           that yielded a 3.34-unit opening -- measured -- against a wall of ~1.06
+           and its own 0.35 outline, so the borders were most of the cell and the
+           pattern muddled. sunburst never goes below 7.41 and reads at every
+           colour. Flooring the CUT makes the sweep stop at a coarser pitch, which
+           is the same thing sunburst's maxLegible does: fewer, larger openings
+           rather than more, finer ones. */
+        const wallI0 = LATTICE_WALL;
+        const sdFloor = MIN_CUT + 1.732 * wallI0;
+        /* AND THE SEARCH MUST START AT OR ABOVE THE FLOOR. It counts DOWN from the
+           dealt cell size, so a floor above that start meant the loop never ran at
+           all and the fallback took over -- the floor was applied to a search that
+           did not execute. Measured: min opening moved only 3.34 -> 4.12 and the
+           opening COUNT went up, the opposite of fewer-and-larger. */
+        const sdStart = Math.max(sdFloor, Math.min((g.cv && g.cv.cell) || 7.0, 11.5));
+        for (let sd = sdStart; sd >= sdFloor; sd -= 0.1) {
           const pt = (i3, j3) => [sd * (i3 + j3 / 2), sd * (Math.sqrt(3) / 2) * j3];
           const nn = Math.ceil(rOutI / sd) + 3;
           let lo3 = Infinity, hi3 = 0, cnt = 0;
@@ -7042,7 +7204,10 @@ class Component extends DCLogic {
         seenI.forEach(r3 => { if (r3.waste < bw3) bw3 = r3.waste; });
         seenI.forEach(r3 => { if (r3.waste <= bw3 + 0.5 && r3.s > sideI) sideI = r3.s; });
       }
-      if (!sideI) sideI = Math.max(5.6, (g.cv && g.cv.cell) || 7.0);
+      /* The fallback obeys the same floor -- it was the path actually taken when the
+         sweep could not run, so leaving it at 5.6 pitch reintroduced the fine cell. */
+      if (!sideI) sideI = Math.max(MIN_CUT + 1.732 * Math.max(px(1.06, 0.55, 2.4),
+        1.2 * (g.teeth || TEETH_MAX) / TEETH_MAX), (g.cv && g.cv.cell) || 7.0);
       const ptI = (i2, j2) => [sideI * (i2 + j2 / 2), sideI * (Math.sqrt(3) / 2) * j2];
       const nI = Math.ceil(rOutI / sideI) + 3;
       for (let j2 = -nI; j2 <= nI; j2++) {
@@ -7092,10 +7257,15 @@ class Component extends DCLogic {
       inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
       /* Scales with the wheel, like the hex core's (#62/A4) -- a flat wall is
          a fixed cost against an annulus that varies 3.9x across the train. */
-      const WALLP = Math.max(px(1.06, 0.55, 2.4), 1.2 * (g.teeth || TEETH_MAX) / TEETH_MAX);
+      const WALLP = LATTICE_WALL;
       const rInP = coreIn(hubR), rOutP = coreOut;
       const spanP = rOutP - rInP;
-      const target = Math.max(3.6, (g.cv && g.cv.cell) || 5.0);
+      /* SAME FLOOR, SAME REASON AS isogrid: 3.6 floors the COURSE HEIGHT, but the
+         cell is then shrunk by 1.732*WALLP to leave the wall, so what is actually
+         cut was ~1.8-2.2 units -- measured 2.18, the finest opening on the page and
+         the one that muddles worst. Floor the CUT and let the course grow, which
+         yields fewer, taller courses rather than more, finer ones. */
+      const target = Math.max(MIN_CUT + 1.732 * WALLP, (g.cv && g.cv.cell) || 5.0);
       const nC = Math.max(1, Math.round(spanP / target));
       const hC = spanP / nC;
       const XY = (rad, a) => [rad * Math.cos(a), rad * Math.sin(a)];
@@ -7154,8 +7324,48 @@ class Component extends DCLogic {
          three fit and asked why they were not there. Slot width scales down as
          rows go up so every row keeps solid metal beside it. */
       const depthL = rOutL - rInL;
-      const rowsL = depthL > 24 ? 3 : 2;
-      const wL = Math.min(6, depthL * (rowsL === 3 ? 0.15 : 0.22));
+      /* HELD TO MIN_CUT (CL#138), and here the conversion is the identity: an
+         arc slot is long tangentially and narrow RADIALLY, so `wL` -- its radial
+         width -- is already the narrowest dimension MIN_CUT floors. No wall term
+         and no geometry factor, unlike hexcore's across-the-flats or isogrid's
+         wall inset.
+
+         The old expression could not reach the floor at ANY depth: it was capped
+         at 6 solve units against a MIN_CUT of 7.38 on a desk and 12.23 on a
+         phone, so every slot this family ever cut was under the floor by
+         construction.
+
+         THE ROW COUNT YIELDS TO THE FLOOR, rather than the floor being trimmed
+         to fit the rows. Row centres sit at fixed fractions of the depth, so the
+         pitch between them is what bounds a slot's width -- widen past that and
+         neighbouring rows merge into each other, which is worse than a thin
+         slot and is a failure a still would not obviously show. So the widest
+         legal slot is the row pitch less one wall, and if THAT cannot reach
+         MIN_CUT the family drops a row and tries again: fewer, larger openings,
+         exactly as a lattice that cannot host its cells at size cuts fewer of
+         them. Two rows is the floor of the ladder -- below that it is not a
+         labyrinth -- so a shallow annulus can still fall short, which is
+         reported by the slot simply being as wide as the pitch allows.
+
+         UNPHOTOGRAPHED, AND THAT IS NOT AN OVERSIGHT. labyrinth is retired --
+         it has no CENTRE_FAMILIES entry, so it is never dealt, and
+         `?kind=labyrinth` silently returns an ordinary mix rather than erroring.
+         This is corrected so it is right if it is ever restored, and it is
+         deliberately bounded by its own geometry rather than by a figure chosen
+         by eye, because there is no picture to check a chosen figure against. */
+      const rowFracsL = { 3: [0.2, 0.52, 0.84], 2: [0.3, 0.72] };
+      const widestAt = (rows) => {
+        const f = rowFracsL[rows];
+        return depthL * (f[1] - f[0]) - LATTICE_WALL;
+      };
+      const rowsL = (depthL > 24 && widestAt(3) >= MIN_CUT) ? 3 : 2;
+      /* Aim at the proportional width the family has always used -- that is what
+         makes a deep annulus cut a broader slot than a shallow one, and it is
+         worth keeping -- then floor it at MIN_CUT and cap it at the pitch. The
+         order matters: the cap is applied LAST so a slot can never merge with
+         its neighbour, even on an annulus too shallow to host the floor. */
+      const wantL = depthL * (rowsL === 3 ? 0.15 : 0.22);
+      const wL = Math.min(Math.max(wantL, MIN_CUT), Math.max(widestAt(rowsL), 1));
       const ring = (rr, nn, off, fill2) => {
         for (let k = 0; k < nn; k++) {
           const a0 = off + (k / nn) * 360, sw = (360 / nn) * 0.62;
@@ -7316,6 +7526,18 @@ class Component extends DCLogic {
         h('path', { d: path + ' ' + holes.join(' '), fillRule: 'evenodd', fill: 'url(#' + id + 'f)', stroke: this.state.theme === 'dark' ? ft.line : ft.edge, strokeWidth: this.state.theme === 'dark' ? 1.6 : 1.1, strokeLinejoin: 'round' }),
         inner,
         h('circle', { r: faceR, fill: 'none', stroke: 'var(--edge)', strokeWidth: 1, strokeOpacity: 0.4 })),
+      (function () {
+        if (!holes.length || this.state.theme === 'dark') return null;
+        const feat = (2 * wellR) / Math.sqrt(holes.length);
+        const FLOOR = 0.35;
+        const raw = feat * 0.030;
+        const w = Math.max(FLOOR, Math.min(1.6, raw));
+        const short = Math.max(0, Math.min(1, (FLOOR - raw) / FLOOR));
+        const op = Math.min(1, 0.60 + 0.40 * Math.sqrt(short));
+        return h('path', { key: 'cutedge', d: holes.join(' '), fill: 'none',
+          stroke: ft.line, strokeWidth: w, strokeOpacity: op,
+          strokeLinejoin: 'round' });
+      }).call(this),
       post,
       h('circle', { r: hubR, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2 }),
       h('circle', { r: Math.max(3, hubR * 0.4), fill: p[3], opacity: 0.5 }),
@@ -7959,7 +8181,15 @@ class Component extends DCLogic {
              into a grey puddle on a pale one. */
           background: this.state.theme === 'dark'
             ? 'radial-gradient(closest-side, rgba(10,20,26,.26) 0%, rgba(10,20,26,.20) 58%, rgba(10,20,26,.08) 80%, rgba(10,20,26,0) 100%)'
-            : 'radial-gradient(closest-side, rgba(24,34,30,.15) 0%, rgba(24,34,30,.11) 58%, rgba(24,34,30,.04) 80%, rgba(24,34,30,0) 100%)'
+            /* NO CAST SHADOW IN LIGHT MODE. The layer paints a soft dark halo under
+               each wheel, and it shows through the openings as well as the tooth
+               gaps -- measured, a cut read 22 units darker than the page beside the
+               gear, so what a hole showed was never the page. On a pale page that
+               reads as grey wash inside every centre. Dark mode keeps its halo,
+               where the wheel is lighter than the page and the shadow does the job
+               it was written for. The badge disc keeps its own 0 3px 10px lift, so
+               the page still reads as layered. */
+            : 'none'
         } }))),
       /* A viewBox, so chainEl() can keep emitting solve-unit path data and pitch
          dash arrays while the element it lands in is already at display size.
@@ -8177,9 +8407,18 @@ class Component extends DCLogic {
              contrast. Dark mode's #DFE2DE is untouched: it already clears
              12.2:1 against #1E2226, and the complaint in #35 was about light
              mode specifically. */
-          background: this.state.theme === 'dark' ? '#DFE2DE' : '#CCCEC9',
+          /* ONE DISC, BOTH THEMES. It was a per-theme pair, and the light value had
+             drifted twice (#35): #FFFFFF glared, #EDEFEA landed at 1.05:1 against
+             the page and vanished, then #CCCEC9 went the other way. But the disc
+             sits on a WHEEL, never on the page, so page contrast was the wrong
+             thing to tune against -- and #CCCEC9 measured 1.07:1 against a yellow
+             wheel, which is why it read as grime on warm colours. #DFE2DE clears
+             1.30:1 there, and improves the marks it exists to carry: GitHub's
+             near-black goes 11.28 -> 13.69, Threads' 13.24 -> 16.07, both far above
+             the 4.5:1 floor. One value, so there is no second copy to drift. */
+          background: BADGE_DISC,
           color: on ? 'var(--accent)' : 'var(--ink)',
-          border: '1px solid rgba(20,30,35,.14)', boxShadow: '0 3px 10px rgba(8,16,20,.28)', zIndex: 5, cursor: 'pointer',
+          border: '1px solid ' + (this.state.theme === 'dark' ? 'rgba(20,30,35,.14)' : 'rgba(20,30,35,.40)'), boxShadow: '0 3px 10px rgba(8,16,20,.28)', zIndex: 5, cursor: 'pointer',
           transform: 'translate(-50%,-50%)' + (bo ? ' translate(' + bo.x.toFixed(1) + 'px,' + bo.y.toFixed(1) + 'px)' : '') + ' scale(' + (on ? 1.06 : 1) + ')',
           transition: 'transform .22s cubic-bezier(.34,1.56,.64,1), color .2s ease, '
             + 'width .26s cubic-bezier(.22,1,.36,1), left .26s cubic-bezier(.22,1,.36,1)'

@@ -7,6 +7,104 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#138 — `hexcore` and `labyrinth` are held to `MIN_CUT` too, each by its
+  own geometry.** (Follows CL#137.)
+
+  Charles: *"let's hold hexcore and labyrinth to the floor too — how do we
+  calculate that"*.
+
+  **The conversion is the whole calculation, and it is different per family.**
+  `MIN_CUT` floors the opening's NARROWEST dimension, so each family needs its
+  own map from its size parameter to that width:
+
+  | family | parameter | narrow dimension | floor |
+  | --- | --- | --- | --- |
+  | isogrid, polariso | lattice pitch | pitch less a wall each side | `MIN_CUT + 1.732 * WALL` |
+  | hexcore | `cellX`, the CIRCUMRADIUS | across the FLATS = `sqrt(3) * cellX` | `MIN_CUT / sqrt(3)` |
+  | labyrinth | `wL`, radial slot width | already the narrow one | `MIN_CUT` |
+
+  hexcore is not isogrid's case: its wall is ADDITIVE in `step`
+  (`cellX + WALLX / sqrt(3)`), so it sits between cells and takes nothing off the
+  opening — `cellX` is pure cut, and the only correction needed is flats rather
+  than vertices. The gap this closes, measured: the old floor allowed **6.8px
+  across the flats at every viewport against a 10.3px requirement, 34% under**,
+  which is the "reads as dots" complaint as a number.
+
+  labyrinth's cap of 6 solve units was below `MIN_CUT` at every viewport, so
+  every slot it ever cut was under the floor by construction.
+
+  **The floor had to become an AIM for hexcore, not a gate.** Its rings are
+  anchored at the wheel centre, so ring radii land on fixed multiples of the
+  pitch and a ring is wholly in or wholly out — cells do not degrade gracefully,
+  they stop fitting. Applied as a hard floor it emptied **1 of 7 wheels on a desk
+  and 3 of 7 on a phone**, measured by `scratchpad/hexcore_census.py`, which
+  counts cut paths off the rendered DOM across four seeds and four viewports. The
+  sweep now retries at hexcore's own legibility floor, which bounds the fallback
+  at what already shipped: never a smaller cell than before, never a web that used
+  to be full and is now empty. Final census: **no blank web introduced anywhere**.
+
+  **A separate bug the census exposed, and the more interesting one.** The sweep
+  was `for (c = ceiling; c >= floor; c -= 0.05)`, which anchors the tested sizes
+  to where it STARTS — so moving the ceiling silently tests a different set, and
+  the floor itself is sampled only when the span happens to be a whole number of
+  steps. A 13-tooth wheel went blank at one viewport and not at a neighbouring
+  one with IDENTICAL `rIn`/`rOut`, because the only feasible size sat just under
+  the last grid point that ceiling produced. Counting down from the floor makes
+  the tested set independent of the ceiling and always samples the floor exactly.
+  This was latent before this change and would have surfaced on any ceiling edit.
+
+  **`CELL_MAX` had to move with the floor or invert it.** A flat 4.8 solve units
+  sat above the old floor on a desk (2.79) and BELOW the new one on a phone in
+  landscape (7.06), and a ceiling under the floor collapses the sweep to one
+  iteration. It is now `CELL_MIN * 1.7` — and 1.7 is the one judged figure here,
+  taken from the ratio the shipped pair expressed at desktop (4.8 / 2.79), since
+  how much range the search gets is not a property of the geometry.
+
+  **`LATTICE_WALL`** is added as the one home for the wall between openings: the
+  same expression was written out four times.
+
+  **labyrinth is corrected but unphotographed, and that is not an oversight.** It
+  is retired — no `CENTRE_FAMILIES` entry, and `?kind=labyrinth` silently returns
+  an ordinary mix rather than erroring — so there is no picture to check a chosen
+  figure against. It is therefore bounded by its own row pitch (widen past that
+  and neighbouring rows merge) and drops a row when the floor will not fit, rather
+  than by any number picked by eye.
+
+- **CL#137 — `MIN_CUT` is stated in pixels, and set from the family that works
+  rather than the one that was complained about.** (Follows CL#133.)
+
+  Two faults in one constant, found while checking CL#133's claim that a lattice
+  floors its pitch from `MIN_CUT`.
+
+  **The units were wrong.** `MIN_CUT = 5.6` was in solve units, and whether a cut
+  reads is a question about what reaches the eye. `--gsfit` measures 1.396 at
+  1440x900, 0.842 on a phone in landscape and 1.461 at 5K, so one solve-unit
+  floor is a 1.7x spread in what it actually asks for: 7.8px on the desk, 4.7px
+  on a phone. That is exactly the trap the hexcore wall floor fell into and that
+  `px()` was written for — this constant was simply never converted. It is now
+  `MIN_CUT_PX = 10.3`, converted per render.
+
+  **The figure was wrong too, and taken from the wrong witness.** 5.6 came from
+  hexcore, a family Charles had already complained about. The family that reads
+  at every colour is sunburst, and across four seeds and every wheel it never
+  cuts below 7.41 solve units — measured on the desk, where S is 1.396, so
+  10.3px is the requirement the working family actually meets.
+
+  A phone therefore asks for MORE solve units to make the same 10.3px, and cuts
+  fewer, larger openings. That is the intent, not a side effect: fine detail is
+  precisely what a small screen cannot show.
+
+  `MIN_CUT_LO`/`MIN_CUT_HI` (7.0 and 12.5 units) are rails, not the mechanism —
+  over the real range of `--gsfit` the conversion lands between 7.05 and 12.23,
+  so neither binds today.
+
+  **What this does NOT fix.** `hexcore` and `labyrinth` have their own sizing and
+  are still not held to the floor, so hexcore reading as round cells rather than
+  hexagons is untouched and open. The hexcore row on the comparison sheet does
+  move, and that is the deal shifting rather than the floor acting: changing the
+  cell count changes RNG consumption, so a before/after pair is not guaranteed to
+  be the same tooth count or colour. Sheet: `scratchpad/mincut_sheet.py`.
+
 - **CL#136 — a thrown wheel coasts for as long as the throw deserves, because
   the ceiling on a throw is now the machine's, not a remembered 8.**
   (GitHub #121.)
@@ -77,6 +175,132 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
   viewports.
 
 ### Changed
+
+- **CL#135 — one badge disc for both themes, and an edge so it has a boundary.**
+
+  Charles, on a light stage: *"why do the plates for the icon/links look sort of
+  dirty as compared to the background?"*, then *"I like the disc in light mode
+  matching dark mode... but could we give a slight border/edge to the disc in
+  light mode - both when in a circle and when expanded"*.
+
+  **It was tuned against the wrong thing.** The disc was a per-theme pair and the
+  light value had drifted twice already (#35): `#FFFFFF` glared, `#EDEFEA` landed
+  at 1.05:1 against the page and vanished, and `#CCCEC9` went the other way. Each
+  move was judged against the PAGE — but the disc sits on a WHEEL and never
+  touches the page. Measured against one: `#CCCEC9` is **1.07:1** on a yellow
+  wheel, which is why it read as grime on warm colours. `#DFE2DE` clears
+  **1.30:1** there, and improves the marks the plate exists to carry — GitHub's
+  near-black 11.28 → **13.69**, Threads' 13.24 → **16.07**, both far above the
+  4.5:1 floor #22 set. `BADGE_DISC` states it once, so there is no second copy to
+  drift, and the file keeps one fewer theme conditional.
+
+  **Which leaves it at 1.02:1 against a light page**, so wherever a badge or its
+  expanded pill overlaps the background it has no boundary at all. The existing
+  `1px solid rgba(20,30,35,.14)` was the same in both themes and far too faint to
+  serve: `#c3c7c4`, 1.33:1 against the page. Light now takes `.40` — `#8e9493`,
+  **2.40:1** — and dark keeps `.14`, since its disc is 12.25:1 against its page
+  and needs nothing.
+
+  **One element carries both states.** The circle and the expanded pill are the
+  same node — the pill is that node with a width/left transition — so edging it
+  covers both, and they cannot drift apart later.
+
+- **CL#134 — the epicyclic is one part, so it reads at one weight and one tone.**
+
+  Charles, on a light-mode planetary: *"why do the planets have a thicker/more
+  defined border than the ring of teeth that they run in?"*, then *"the sun gear
+  is noticeably darker than the planets"*, then *"why don't the ring, planets and
+  body all end up the same color?!"*
+
+  **The weight was an omission, not a choice.** The annulus carried
+  `strokeOpacity: 0.6`; the planet and sun `teethPath` calls simply left the
+  attribute out and inherited SVG's default of 1, so the parts came out heavier
+  than the ring they run inside. The stud was worse again -- `fill: ft.line` at
+  full opacity, the one place the contour ink is used as a FILL rather than a
+  line, which made it the darkest thing in the assembly. `EPI_LINE_OP` states the
+  figure once and the ring, planets, sun and stud all read it, in both themes.
+
+  **The tone was inheritance.** Planets were `ft.face` (7% toward white) and the
+  sun `ft.well` (13% toward black) -- 1.42x apart on a yellow wheel, 1.51x on a
+  blue one -- so the sun read as sunk in a pocket. Nothing defended it: the one
+  comment about differing fills is about the TWO-ROW case, where the rows
+  counter-rotate and identical fills "would hide the one thing worth seeing".
+  A single-row planetary has no second row, so the justification never applied.
+  Ring, planets and sun now all take `ft.body`, and are told apart by their
+  contours -- which is what `ft.face`'s own comment argues for: "in a flat
+  drawing the raised face is told by its outline, not by a tonal jump."
+
+  **The two-row rows keep their difference.** On `ravigneaux` the inner and outer
+  rows stay `ft.face` and `ft.well`, because there the tonal split carries
+  information rather than inheritance.
+
+  The carrier arm is deliberately left heavier (`strokeWidth: 3`,
+  `strokeOpacity: 0.85`): its own comment says the load path "is drawn, not
+  implied", which is a stated decision rather than an omission.
+
+- **CL#133 — a cut opening is only as legible as what shows through it, and in
+  light mode that was the page plus a shadow.** (GitHub #120.)
+
+  Charles, on the shipped light stage: *"the gear centers for a number of them
+  become washed out as the outer gear color goes lighter"*, then, marking 51 of
+  150 cells on a family x colour matrix, *"look at any light colored gear in
+  light mode - their internals are hardly discernable"*.
+
+  **Openings are CUT, not drawn.** Every family but the two epicyclics appends
+  its openings to the wheel's own path under `fillRule: 'evenodd'`, so the
+  material is removed and what shows inside is whatever is behind. A cut's
+  contrast is therefore `body vs page` — 1.33:1 on the palest wheel in light
+  against 4.74–9.54 in dark. `planetary` and `ravigneaux` cut nothing; they draw
+  their ring and teeth in `ft.line`, 40% toward black from the wheel's own
+  colour, and were the only two families marked 0/10 at every colour. That is
+  the whole asymmetry, and the fix is to give the cut families the contour the
+  drawn ones always had.
+
+  **Proportional on both axes, no per-family table.** Colour is `ft.line`, so a
+  pale wheel gets a line 40% darker than itself and Harper's chain gets a purple
+  one. Width is a fraction of the opening — measured, opening size spans 5.6x
+  across the families (34.6 units on `spokes`, 6.2 on `isogrid`), and a flat 1px
+  read as a contour on `sunburst` while flooding `isogrid` into speckle. Opacity
+  ramps only where the width has bottomed out on the aliasing floor, which is
+  the one axis that cannot thicken a lattice.
+
+  **`MIN_CUT` — the floor was on the wrong quantity.** `isogrid` floors its
+  lattice PITCH at 5.2, then shrinks each cell by `1.732 * WALL` to leave the
+  wall, so what was actually cut measured **3.34** units; `polariso` reached
+  **2.18**. At that size the walls and the contour are most of the cell. The
+  floor now sits on the CUT and the pitch is derived from it, which makes the
+  sweep stop coarser: `isogrid` 108 openings -> 60, `polariso` 120 -> 72,
+  `polarbrick` 90 -> 36. Fewer and larger, which is exactly what `sunburst`'s
+  `maxLegible` already does — and `sunburst`, which never cuts below 7.41, was
+  never the complaint.
+
+  Two corrections on the way: flooring the sweep did nothing at first because it
+  counts DOWN from the dealt cell size, so a floor above that start meant the
+  loop never ran and the fallback took over — the min moved 3.34 -> 4.12 and the
+  opening COUNT went UP. The fallback needed the floor too.
+
+  **And light mode no longer casts a wheel shadow.** The shared layer paints a
+  halo under each wheel and shows through the openings as well as the tooth
+  gaps: measured, a cut read **22 units darker** than the page beside the gear,
+  so a hole never showed the page. Charles: *"there should be no adjustment to
+  what is visible as the background behind the gear"*. With it off the interiors
+  measure bit-identical to `--ref-bg`. Dark keeps its halo, where the wheel is
+  lighter than the page and the shadow does what it was written for; the badge
+  disc keeps its own lift, so the page still reads as layered.
+
+  **Things measured and discarded**, each of which looked right until it was
+  photographed: darkening the wheel BODY (aimed at `shades()`, which does not
+  paint the body — rendered luminance moved +0.009); a `LIGHT_BODY_FLOOR` solved
+  against wheel-vs-page (a +0.224 predictor, where family was +0.275); a uniform
+  tint inside each opening (the contrast curve is V-shaped and 0.16 sits at its
+  bottom, taking the yellow from 1.33:1 to 1.03:1); and a clipped, offset "inner
+  shadow" that turned out to be that same tint, since a 2.2px drop on a 30px ray
+  overlaps 93% of itself.
+
+  Placement mattered more than any of the tuning: the contour must be drawn
+  OUTSIDE the clipped group. Inside it the clip is `path + holes` with evenodd,
+  so a stroke on a hole boundary loses its inner half — deepening the ink from
+  0.78 to 0.96 measured 0.43% dark pixels against shipped's 0.42%.
 
 - **CL#132 — a self-driven root gets its leading escape run, because the rule
   withholding it was written about bridges.** (GitHub #116 follow-up.)

@@ -261,6 +261,83 @@ widening `tools/devices.py`'s safe-area selector to see the slider at all
 (GitHub #108) — the panel's own overflow was invisible to that harness before
 there was a form control inside it worth measuring.
 
+**A cut opening is only as legible as what shows through it** (CL#133). Every
+family but `planetary` and `ravigneaux` appends its openings to the wheel's own
+path under `fillRule: 'evenodd'`, so the material is REMOVED and a cut shows
+whatever is behind — the page. Its contrast is therefore `body vs page`: 1.33:1
+on the palest wheel in light against 4.74–9.54 in dark. The epicyclics cut
+nothing and DRAW their ring and teeth in `ft.line`, which is why they read at
+every colour and the cut families did not. Every cut now gets that same contour:
+`ft.line` for the ink, a fraction of the opening for the width, and opacity
+raised only where the width has bottomed out on the aliasing floor. **Draw it
+OUTSIDE the clipped group** — inside, the clip is `path + holes` with evenodd and
+a stroke on a hole boundary loses its inner half.
+
+**`MIN_CUT` floors the CUT, never the pitch** (CL#133). A lattice floors its
+pitch and then shrinks each cell by `1.732 * WALL` to leave the wall, so a 5.2
+pitch cut a 3.34-unit opening and `polariso` reached 2.18 — at that size the
+walls and the contour are most of the cell. The pitch floor is derived from
+`MIN_CUT`, so a blank that cannot host cells at that size cuts FEWER, LARGER
+ones. That is what `sunburst`'s `maxLegible` has always done, and `sunburst` was
+never the complaint. Note the search counts DOWN from the dealt cell size, so a
+floor above its start silently skips the loop and the fallback takes over — the
+fallback needs the floor too.
+
+**`MIN_CUT` is stated in PIXELS and converted by `px()`** (CL#137). It was 5.6
+solve units, which is one number meaning 7.8px on a desk and 4.7px on a phone —
+the "correct at exactly one screen size" trap `px()` exists for. It is
+`MIN_CUT_PX = 10.3`, taken from the family that works: `sunburst` never cuts
+below 7.41 solve units, measured where `--gsfit` is 1.396. The retired 5.6 came
+from `hexcore`, a family Charles had already complained about. A phone therefore
+asks for MORE solve units to make the same 10.3px and cuts fewer, larger
+openings — that is the intent, not a side effect.
+
+**Every family is held to it now, and the conversion is per-family** (CL#138).
+`MIN_CUT` floors the opening's NARROWEST dimension, so each family needs its own
+map from its size parameter to that width, and they are not interchangeable:
+
+- `isogrid`/`polariso` — the cut is inset by a wall each side, so the pitch must
+  clear `MIN_CUT + 1.732 * WALL`. Subtractive.
+- `hexcore` — `cellX` is the hexagon's CIRCUMRADIUS and the wall is additive in
+  `step`, so `cellX` is pure cut. The narrow dimension is across the FLATS, not
+  the vertices: `sqrt(3) * cellX >= MIN_CUT`, so the floor is `MIN_CUT / sqrt(3)`.
+- `labyrinth` — an arc slot is long tangentially and narrow RADIALLY, so its
+  `wL` already IS the narrow dimension and the floor applies directly. Its old
+  cap of 6 units sat below `MIN_CUT` at every viewport, so every slot it ever cut
+  was under the floor by construction. **Retired and unphotographable** — no
+  `CENTRE_FAMILIES` entry, and `?kind=labyrinth` silently deals an ordinary mix —
+  so it is bounded by its own row pitch rather than by any figure chosen by eye.
+
+**The floor is an AIM for `hexcore`, not a gate, and a blank web is the reason.**
+Its rings are anchored at the wheel centre, so radii land on fixed multiples of
+the pitch and a ring is wholly in or wholly out — cells do not degrade
+gracefully, they stop fitting. Applied as a hard floor it emptied 1 of 7 wheels
+on a desk and 3 of 7 on a phone. So the sweep retries at `hexcore`'s own
+legibility floor (`px(3.9, 2.2, 6.0)`, where a cell stops reading as a hexagon),
+which bounds the fallback at what already shipped: never a smaller cell than
+before, never a web that used to be full and is now empty. Same trade the shell
+clearance makes — *having any pattern is not a nicety*.
+
+**The sweep grid is anchored at the FLOOR, never the ceiling** (CL#138). Written
+as `for (c = ceiling; c >= floor; c -= 0.05)` the set of sizes actually tested
+depends on where it STARTS, so moving the ceiling silently tests a different set
+and the floor is sampled only when the span is a whole number of steps. A
+13-tooth wheel went blank at one viewport and not at a neighbouring one with
+identical `rIn`/`rOut` because the only feasible size sat just under the last
+grid point the ceiling happened to produce. Count down from the floor.
+
+**`LATTICE_WALL` is the one home for the wall between openings.** The expression
+`max(px(1.06, 0.55, 2.4), 1.2 * teeth / TEETH_MAX)` was written out four times —
+`WALLX`, `wallI0`, `WALLP` and labyrinth's — which is four chances to update
+three of them.
+
+**Light mode casts no wheel shadow** (CL#133). The shared layer shows through the
+openings as well as the tooth gaps, so a cut measured 22 units darker than the
+page beside the gear and never showed the page at all. Off in light, kept in
+dark, where the wheel is lighter than the page and the halo does what it was
+written for. The badge disc keeps its own `0 3px 10px`, so the page still reads
+as layered.
+
 **Lighting from directly above.** All shading is symmetric about the vertical
 axis: vertical body gradients, radial highlights at 50% horizontally, specular
 arc centred on the bottom, cast shadows straight down. Any diagonal or corner
@@ -512,6 +589,14 @@ This matters most for one class of edit: `MODULE`, any `TOOTH_*`, `BAND_*`,
 bigger bore makes gear sets reachable that nothing has ever measured. Change one
 and re-run the suite before pushing.
 
+
+**A 0px pixel gate can mean "not tested", not "unchanged".** The default deal is
+seven wheels drawn from eleven families, so a change confined to one family has
+about an even chance of not appearing in the shot at all. CL#138 rebuilt
+`hexcore` and `pixel_regress` reported **0px differ** at both viewports; the same
+run with `--query '?who=charles&kind=hexcore'` reported **27,069**. When a change
+targets a family, force it with `kind=` or the gate is agreeing with you about a
+picture it never took.
 
 **The pixel gate photographs the combined stage.** `tools/pixel_regress.py`
 serves on `127.0.0.1`, which is a `STAGE_HOSTS` name, so its default shot is
