@@ -145,22 +145,50 @@ by it, the flywheel eases to the new target, and every wheel follows because not
 one of them is animated on its own. Moving *where* the control is drawn must
 never give it a second job.
 
-**The flywheel decelerates at a constant rate, not a constant time constant**
-(GitHub #106, CL#127). `approachSpeed(v, target, dt)` is the one function
-`step()` calls to move `_v` toward whatever `target` `idleRate()` and
+**The flywheel COASTS: drag falls as it slows, and it still arrives** (GitHub
+#106 → #121, CL#127 → CL#139). `approachSpeed(v, target, dt)` is the one
+function `step()` calls to move `_v` toward whatever `target` `idleRate()` and
 `motionActive()` computed that tick — spin-up and spin-down both, no direction
-special-case, because Coulomb friction opposes motion the same way in either
-direction and a real train winds up slowly for the same reason it coasts down
-slowly. It used to be a first-order lag at a fixed 900ms time constant, which
-is viscous drag on a flywheel with no mass: settling time was independent of
-the SIZE of the jump, so 200× → 1× and 2× → 1× took the same ~4.5s and the big
-drop read as over almost at once. `SPINDOWN_DECEL` is derived from
-`SPINDOWN_RANGE_MS` (the one tunable feel figure — how long the flywheel takes
-to cross the whole `SPEED_CEIL`↔`SPEED_FLOOR` ladder) divided by the ladder's
-own span, never a hand-picked master-deg/ms², so a ladder change cannot desync
-the feel from the number that defines it. `SPINDOWN_RANGE_MS` is a placeholder
-for Charles's call, captured against two other candidates rather than asserted
-as the only one built — see CL#127.
+special-case.
+
+The retarding rate is the standard three-term coast-down model an engineer fits
+to a real rotor, acting on the gap between the wheel and the speed it is driven
+at: **Coulomb + viscous + windage**. Windage (the square term) is air drag on a
+disc and dominates at speed — it is what gives a hard throw its initial dive.
+Coulomb is the constant residue that makes the wheel ARRIVE in finite time.
+
+**Both previous models were wrong at opposite ends, and `SPINDOWN_DRAG_RANGE`
+is the axis between them.** It is how much harder the wheel brakes at the top of
+the ladder than at rest:
+
+- **At 1** the terms collapse to a constant. That is CL#127's model, and it is a
+  *brake* — a constant retarding torque is literally what a friction brake
+  applies. Charles: *"almost as if there is a break on the wheel."* Nothing
+  coasts at one flat rate and then stops decelerating at a corner.
+- **Very large** the Coulomb residue vanishes and it becomes the pure
+  exponential #106 rejected: it never truly arrives, and settling time stops
+  depending on how hard you threw it. Measured — a windage-only fit makes a 2×
+  throw take 1200ms against a full-ladder throw's 2400ms, so the throw stops
+  telling you how hard you threw it.
+
+15 is a **compromise, not a physical constant**. A real flywheel's range is far
+higher (windage at 200× against bearing Coulomb at rest is easily 100×), but
+past about 30 small throws read as sluggish. Realism and #106 pull against each
+other and this is where they were balanced.
+
+**Only the scale is solved; the shape is chosen.** `SPINDOWN_DRAG_RANGE` and
+`SPINDOWN_WINDAGE` set the split, and the overall scale is bisected at load so a
+full-ladder transition still takes exactly `SPINDOWN_RANGE_MS`. That is what
+keeps CL#136's identity true — a saturating throw *is* the ladder travelled by
+hand, so it must take the ladder's own time. `SPINDOWN_RANGE_MS` remains the
+duration figure and is still a placeholder for Charles's call.
+
+**The pixel gate cannot be 0px for a change to this function, ever.** `_M` is
+the integral of `_v`, so a different spin-up curve permanently offsets
+accumulated phase. CL#139 measured 48,551 / 48,590 / 48,788 px at 90 / 900 /
+3000 frames — stable, not growing, which is the check that distinguishes a phase
+offset from something structural. Use `dom_invariants` and `verify_motion` for
+structure here.
 
 **The speed that strobes is derived; the speed the control stops at is chosen.**
 Keep those apart. A wheel's angle is `_M / teeth` and its pitch is `360 / teeth`,
