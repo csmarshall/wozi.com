@@ -768,7 +768,7 @@ const SPEED_STOPS = (() => {
    function called with target > v instead of target < v -- Coulomb friction
    opposes motion in either direction at the same magnitude, and a real train
    winds up slowly for the same reason it coasts down slowly. No special case. */
-const SPINDOWN_RANGE_MS = 2400;
+const SPINDOWN_RANGE_MS = 15000;
 
 /* HOW THE COAST IS SHAPED, as against how long it lasts (GitHub #121, CL#139).
 
@@ -819,17 +819,24 @@ const SPINDOWN_RANGE_MS = 2400;
    takes 70ms and a full-ladder one 2400ms, while a windage-only fit makes them
    1200ms and 2400ms, so the throw stops telling you how hard you threw it.
 
-   15 is the shipped compromise, and it IS a compromise rather than a physical
-   constant: a real flywheel's range is far higher (windage at 200x against
-   bearing Coulomb at rest is easily 100x), but past about 30 the small throws
-   start to read as sluggish because the tail dominates them. Realism and #106
-   pull against each other here, and this is where they were balanced. */
-const SPINDOWN_DRAG_RANGE = 15;
+   60 is Charles's call from four candidates spun by hand on the real page
+   (CL#141). It went UP from 15 because 15 still read as "an artificial brake":
+   the earlier pairing leaned on windage, which sheds the FASTEST part of a
+   throw first, so a hard spin dumped most of its speed inside a second. What he
+   asked for is the opposite -- "if you walked up to the gears on the table with
+   a clutch so you could spin them freely ... a gratifying spin that ended up
+   slowly and naturally returning back to the same speed". That is low drag that
+   FALLS steeply as the wheel slows, which is a wide range and little windage. */
+const SPINDOWN_DRAG_RANGE = 60;
 /* Of the SPEED-DEPENDENT drag, the share that is windage (proportional to the
-   square of the excess) rather than lubricant shear (proportional to it). Air
-   drag on a disc dominates at speed in any real rotor, which is what gives a
-   hard throw its initial dive. */
-const SPINDOWN_WINDAGE = 0.6;
+   square of the excess) rather than bearing drag (proportional to it).
+
+   LOW, and that is the correction CL#141 made. Air drag on a disc only dominates
+   at genuinely high rpm; at the speeds this train runs, bearing losses do. A
+   high windage share also fights the thing being asked for, because the square
+   term bites hardest exactly where a thrown wheel is fastest -- it takes the
+   gratifying part of the spin away first. */
+const SPINDOWN_WINDAGE = 0.10;
 const SPINDOWN_SPAN = (7200 / BASE_MS) * Math.max(SPEED_CEIL - SPEED_FLOOR, SPEED_FLOOR);
 
 /* The three coast-down coefficients, SOLVED rather than chosen, so the two

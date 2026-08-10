@@ -1625,7 +1625,13 @@ test('the flywheel COASTS — drag falls as it slows, and it still arrives (GitH
   let v = idleRate(ceil);
   const target = idleRate(floor);
   const deltas = [];
-  for (let i = 0; i < 400 && v !== target; i++) {
+  /* The tick budget is DERIVED from the coast the page actually ships, not a
+     round number: CL#141 took SPINDOWN_RANGE_MS to 15000, and a fixed 400 ticks
+     at 30Hz is only 13.3s -- the loop ran out before the flywheel arrived and
+     the test reported a lost Coulomb term, which was a statement about the
+     budget rather than about the model. Doubled for headroom. */
+  const budget = Math.ceil(grabNumber('SPINDOWN_RANGE_MS') / dt) * 2;
+  for (let i = 0; i < budget && v !== target; i++) {
     const before = v;
     v = approachSpeed(v, target, dt);
     deltas.push(before - v);
@@ -1718,7 +1724,12 @@ test('how long a throw can coast is the ladder\'s own crossing time (GitHub #121
   const dt = 0.5;
   const ticks = ticksToSettle(approachSpeed, at1x.driveCap(), at1x.idleRate(), dt);
   const coastMs = ticks * dt;
-  ok(Math.abs(coastMs - rangeMs) <= dt * 2,
+  /* Tolerance scales with the quantity being measured. `dt * 2` is 1ms, which is
+     0.04% of a 2400ms coast and a reasonable bound there, but the same absolute
+     figure against CL#141's 15000ms asks the tick-quantised sum to land within
+     0.007% -- tighter than the integration itself, and it failed by 1.5ms on a
+     model that had not changed. 0.1% or two ticks, whichever is larger. */
+  ok(Math.abs(coastMs - rangeMs) <= Math.max(dt * 2, rangeMs * 0.001),
     `a saturating throw at ${floor}x coasts ${coastMs.toFixed(1)}ms, but the ladder's own `
     + `crossing time is ${rangeMs}ms — driveCap() and SPINDOWN_DECEL are no longer `
     + 'derived from the same span, so the hardest throw and a full slider sweep have '

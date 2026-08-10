@@ -7,6 +7,56 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#141 — the coast is a declutched flywheel, not a braked one.** (GitHub
+  #121, third pass.)
+
+  Charles, after CL#139: *"it still feels like grabbing and spinning the gears
+  there is an artificial break on the gears — I want it so you have SOME gradual
+  slowdown — but more like if you walked up to the gears on the table with a
+  clutch so you could spin them freely, that if you grabbed a gear chain and spun
+  it you could get a gratifying spin that ended up slowly and naturally returning
+  back to the same speed, but in whatever direction you spin the chain."*
+
+  **CL#139 fixed the shape and still had the balance wrong.** It leaned on
+  windage at 0.60, and the square term bites hardest exactly where a thrown wheel
+  is FASTEST — so a hard spin dumped most of its speed inside the first second
+  and the gratifying part of the throw was gone before it started. Low windage
+  and a wide dynamic range is the opposite trade: little drag at speed, falling
+  steeply as the wheel slows.
+
+  Four candidates were staged as servable pages and spun by hand on the real
+  page rather than judged from a plot. Charles picked C.
+
+  | | range | drag range | windage | real throw | ladder |
+  | --- | --- | --- | --- | --- | --- |
+  | A (CL#139) | 2400 | 15 | 0.60 | 2.1s | 2.4s |
+  | B | 8000 | 30 | 0.20 | 7.1s | 8.0s |
+  | D | 11000 | 40 | 0.15 | 9.9s | 11.0s |
+  | **C — shipped** | **15000** | **60** | **0.10** | **13.6s** | **15.0s** |
+
+  A real hand throw was measured at `_v` 40–52 this session, so the "real throw"
+  column is taken at 45 rather than at the saturating value.
+
+  **How physical is it, honestly?** The character is: drag that falls steeply
+  with speed, a long tail, a definite stop. The magnitude is a design choice — a
+  cast-iron flywheel on good bearings coasts for minutes, not seconds. What makes
+  13.6s defensible is that this is a geared TRAIN, not a bare flywheel, and every
+  mesh adds friction; a multi-gear train damps out far faster than a single
+  wheel.
+
+  Direction already behaved as asked and is unchanged: `up()` flips `_dirSign`
+  when the drag moved more than 30 master-degrees, so the train settles back to
+  its normal pace in whichever direction it was spun.
+
+  **Two test bounds were derived rather than widened.** The shape test's tick
+  budget was a fixed 400, which is 13.3s at 30Hz — it ran out before a 15s coast
+  arrived and reported a lost Coulomb term, a statement about the budget and not
+  about the model; it now comes off `SPINDOWN_RANGE_MS`. CL#136's identity
+  tolerance was `dt * 2`, i.e. 1ms: fine as 0.04% of 2400ms, far tighter than the
+  integration itself at 15000ms. Now 0.1% or two ticks, whichever is larger. Both
+  guards were re-confirmed to fire at each end — a drag range of 1.0001 trips the
+  brake assertion, 200000 trips the arrival one.
+
 - **CL#140 — the two themes' ghost palettes are reflections of each other.**
 
   Charles: *"in light mode the gears stick out as they are dark on a light
