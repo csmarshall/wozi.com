@@ -7,6 +7,58 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#140 — the two themes' ghost palettes are reflections of each other.**
+
+  Charles: *"in light mode the gears stick out as they are dark on a light
+  background"*, and then the question that produced the actual design: *"why is
+  it that the colour palette for light mode ghost gears isn't the reverse of what
+  dark mode is?"*
+
+  **There was no reason.** `GHOST_COLORS` is ONE list of greys, and each theme
+  applied its own ad-hoc factor — 0.78 toward black in dark, 0.55 in light —
+  tuned independently, neither derived from the other. In CIE L\*, dark ghosts sit
+  **+7.99 above** their page while light ghosts sat **−22.21 below** theirs: 2.8×
+  further out. That is the complaint, measured.
+
+  The rule is now one line: **a ghost sits the same distance from its page in
+  both themes, on the side that page allows** — above a dark ground, below a pale
+  one. `GHOST_OFFSET_L` is read off the shipped dark treatment, so dark stays the
+  reference and light is its reflection; nothing is hand-picked, and a change to
+  `GHOST_COLORS`, to either ground, or to the dark factor re-derives.
+
+  | | offset from page | spread |
+  | --- | --- | --- |
+  | dark, unchanged | **+7.99** | 2.03 |
+  | light, before | −22.21 | 3.17 |
+  | light, first attempt (APCA match) | −2.57 | 1.53 |
+  | light, shipped (L\* mirror) | **−7.98** | 1.99 |
+
+  **The first attempt matched APCA and was wrong, which is worth recording.**
+  Matching perceptual contrast sounds stricter, but APCA is polarity-weighted, so
+  equal Lc does *not* put the two themes at equal distance — light landed at a
+  third of dark's offset, over-correcting. Worse, it compressed the four greys
+  toward the page and took their spread with them (2.03 → 1.53), so they stopped
+  being four tones and became a wash. Charles: *"that looks odd to me."* The
+  mirror preserves the spread because it moves each grey by the same rule rather
+  than collapsing them onto a point.
+
+  **Why the colour and not the layer alpha, also tried first.** Lowering
+  `ghostOpacity()` is identical arithmetic for a wheel and *not* identical for the
+  datum, which is drawn INSIDE that group (#81) so the layer is a ceiling on it.
+  At the matching alpha `datumInk()`'s lift ran past black, clamped 12 units
+  short, and the dark scribe solved to no harder than a ghost wheel — the weight
+  the mock proves it disappears at. **Colour touches the wheels; alpha touches
+  everything in the layer.**
+
+  `--ref-bg-dark` joins `--ref-bg` in `:root`, deliberately not overridden, so
+  both grounds are readable from either theme — the mirror reads one against the
+  other, and a value that only exists while its own theme is active cannot be
+  reflected. The dark block points `--bg` at it, the shape light has always had.
+  `tools/test.js`'s `cssVar()` learned to resolve one `var()` indirection as a
+  result: it reads the CSS as text, and without that it reported *"datumInk did
+  not return a colour for --muted from a palette that declares it"* — true about
+  the test, false about the page.
+
 - **CL#139 — the flywheel coasts instead of braking: drag falls as it slows.**
   (GitHub #121 follow-up.)
 

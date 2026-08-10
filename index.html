@@ -54,6 +54,14 @@
      is a light-theme pass rather than one token. Measured, not estimated;
      variants and contrast tables were photographed before this was picked. */
   --ref-bg:#E1E4DD; --ref-muted:#6B7E7C;
+  /* The DARK page colour, declared here rather than only inside the dark block
+     and deliberately NOT overridden, exactly as --ref-bg is not. Both themes'
+     grounds have to be readable from EITHER theme, because the ghost alpha is
+     solved by matching one theme's prominence against the other's and a value
+     that only exists while its own theme is active cannot be matched against
+     (CL#140). One home each: the dark block below uses this rather than
+     repeating the hex. */
+  --ref-bg-dark:#1E2226;
   --bg:var(--ref-bg); --ink:#20302E; --muted:var(--ref-muted); --hair:#D5DAD6; --chip:#FFFFFF;
   --accent:#3B7DE8; --shadow:0 1px 2px rgba(20,40,38,.06);
   /* THE METAL AND BRASS RAMPS, kept as a comment rather than as declarations
@@ -128,7 +136,7 @@
 :root[data-theme="dark"]{
   /* --ref-bg and --ref-muted are deliberately NOT overridden here: they are the
      reference palette the datum's alpha is solved against, not a theme colour. */
-  --bg:#1E2226; --ink:#EEF1F0; --muted:#93A5A3; --hair:#373E3D; --chip:#2A3034;
+  --bg:var(--ref-bg-dark); --ink:#EEF1F0; --muted:#93A5A3; --hair:#373E3D; --chip:#2A3034;
   --accent:#7FA9F0; --shadow:0 1px 2px rgba(0,0,0,.35);
   /* metal/brass ramps: see the light-mode block above (#57) */
   --edge:rgba(0,0,0,.6); --gloss:rgba(255,255,255,.38);
@@ -875,6 +883,122 @@ function approachSpeed(v, target, dt) {
   return gap <= step ? target : v + Math.sign(diff) * step;
 }
 const GHOST_COLORS = ['#9AA6AD', '#A9B4BA', '#8F9BA3', '#B3BCC2'];
+
+/* WHY THE DATUM'S REFERENCE ALPHA IS THE GHOST LAYER'S, AND MUST BE.
+
+   CL#140 tried to split these into two constants on the grounds that they were
+   the same NUMBER and not the same fact. That was wrong, and the arithmetic says
+   why: since #81 the datum is drawn INSIDE the ghost layer -- the only place a
+   wheel at ghost alpha can occlude it -- so it is composited at that layer's
+   alpha and CANNOT be painted harder than it. datumInk() compensates by lifting
+   the colour by datumOpacity()/ghostOpacity(), and with a 0.46 target inside a
+   0.188 layer that lift runs past black, clamps, and lands 12 units short of the
+   tone the solve asked for.
+
+   So the layer's alpha is a CEILING on the mark, not a coincidence beside it.
+   The whole background assembly recedes together, which is also the honest
+   reading: the datum is part of that assembly, not an annotation on top of it. */
+
+/* THE TWO THEMES ARE REFLECTIONS OF EACH OTHER ABOUT THEIR OWN PAGE (CL#140).
+
+   Charles: "why is it that the colour palette for light mode ghost gears isn't
+   the reverse of what dark mode is". There was no reason. GHOST_COLORS is ONE
+   list of greys and each theme applied its own ad-hoc factor -- 0.78 toward
+   black in dark, 0.55 in light -- tuned independently and neither derived from
+   the other. Measured in CIE L*, dark ghosts sit +7.99 ABOVE their page while
+   light ghosts sat -22.21 BELOW theirs: 2.8x further out, which is exactly the
+   "they stick out" complaint.
+
+   The rule now is one line: a ghost sits the same DISTANCE from its page in both
+   themes, on the side that page allows -- above a dark ground, below a pale one.
+
+   WHY L* AND NOT THE APCA MATCH THAT WAS TRIED FIRST. Matching perceptual
+   contrast sounds stricter and is the wrong instrument here: APCA is
+   polarity-weighted, so equal Lc does NOT put the two themes at equal distance.
+   Solved that way light landed at -2.57 against dark's +7.99 -- a third of the
+   offset, over-correcting the complaint -- and, worse, it compressed the four
+   greys toward the page and their spread with them (2.03 -> 1.53 L*), so they
+   stopped being four tones and became a wash. That is what Charles saw as "odd".
+   The mirror preserves the spread because it moves each grey by the same rule
+   rather than collapsing them onto a point.
+
+   GHOST_OFFSET_L is DERIVED from the dark palette as it ships, so dark stays the
+   reference and light is its reflection. Nothing here is hand-picked, and a
+   change to GHOST_COLORS, to either ground, or to the dark tone factor
+   re-derives instead of stranding a figure. */
+const GHOST_DIM_DARK = 0.78;
+const GHOST_ALPHA_LAYER = { dark: 0.17, light: 0.46 };
+function lstarOf(c) {
+  const f = (u) => { u /= 255; return u <= 0.04045 ? u / 12.92 : Math.pow((u + 0.055) / 1.055, 2.4); };
+  const Y = 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2]);
+  return Y > 0.008856 ? 116 * Math.pow(Y, 1 / 3) - 16 : 903.3 * Y;
+}
+const GHOST_GROUNDS = (function () {
+  const read = (tok, fallback) => {
+    try {
+      const v = getComputedStyle(document.documentElement).getPropertyValue(tok).trim();
+      if (!/^#[0-9a-fA-F]{6}$/.test(v)) return fallback;
+      const n = parseInt(v.slice(1), 16);
+      return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+    } catch (e) { return fallback; }
+  };
+  return { light: read('--ref-bg', [225, 228, 221]), dark: read('--ref-bg-dark', [30, 34, 38]) };
+})();
+
+/* Per ghost colour, how far its DARK rendering sits above the dark page in L*.
+   Read off the shipped dark treatment rather than declared, so dark is the
+   single source of truth for the pair. */
+const GHOST_OFFSET_L = GHOST_COLORS.map((hex) => {
+  const n = parseInt(hex.slice(1), 16);
+  const g = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  const D = GHOST_GROUNDS.dark, a = GHOST_ALPHA_LAYER.dark;
+  const painted = g.map(v => v * GHOST_DIM_DARK);
+  const composited = painted.map((v, i) => v * a + D[i] * (1 - a));
+  return lstarOf(composited) - lstarOf(D);
+});
+
+/* The light paint that puts each ghost the SAME distance BELOW the pale page,
+   after the layer's own alpha has been charged. Scaling along the line from the
+   page to the grey keeps the hue the palette chose and leaves one unknown, and
+   composited L* is monotonic in it, so a short bisection is exact enough and
+   needs no seed. Falls back to the grey untouched if the solve cannot run. */
+const GHOST_LIGHT_PAINT = GHOST_COLORS.map((hex, i) => {
+  const n = parseInt(hex.slice(1), 16);
+  const g = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  const L = GHOST_GROUNDS.light, a = GHOST_ALPHA_LAYER.light;
+  const target = lstarOf(L) - GHOST_OFFSET_L[i];
+  const compositedAt = (s) => {
+    const paint = g.map((v, k) => L[k] + s * (v - L[k]));
+    return lstarOf(paint.map((v, k) => v * a + L[k] * (1 - a)));
+  };
+  if (!(target > 0)) return hex;
+  let lo = 0, hi = 4;
+  for (let k = 0; k < 40; k++) { const mid = (lo + hi) / 2; if (compositedAt(mid) > target) lo = mid; else hi = mid; }
+  const paint = g.map((v, k) => Math.max(0, Math.min(255, Math.round(L[k] + hi * (v - L[k])))));
+  return '#' + paint.map(v => v.toString(16).padStart(2, '0')).join('');
+});
+
+/* Perceptual lightness contrast (APCA Lc), polarity-aware, used only to match
+   the ghost layer across the two themes -- see ghostOpacity(). Deliberately NOT
+   WCAG's contrast ratio: the ratio is symmetric, and on the shipped pair it
+   reports 1.29 light against 1.38 dark, which says "already matched" about a
+   pair the eye reads as 3.4x apart. The text-legibility clamp APCA normally
+   applies below Lc 10 is omitted on purpose: these are large filled bodies, not
+   glyphs, and clamping made every dark reading collapse to zero. */
+function apcaLc(fg, bg) {
+  const chan = (h) => { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+  const Y = (c) => {
+    const y = 0.2126 * Math.pow(c[0] / 255, 2.4) + 0.7152 * Math.pow(c[1] / 255, 2.4)
+      + 0.0722 * Math.pow(c[2] / 255, 2.4);
+    return y < 0.022 ? y + Math.pow(0.022 - y, 1.414) : y;
+  };
+  const f = typeof fg === 'string' ? chan(fg) : fg, b = typeof bg === 'string' ? chan(bg) : bg;
+  const Yf = Y(f), Yb = Y(b);
+  return Math.abs(Yb > Yf
+    ? ((Math.pow(Yb, 0.56) - Math.pow(Yf, 0.57)) * 1.14 - 0.027) * 100
+    : ((Math.pow(Yb, 0.65) - Math.pow(Yf, 0.62)) * 1.14 + 0.027) * 100);
+}
+
 
 /* ONE WAY TO WRITE A POLAR POINT. There were seven copies of this formula --
    P, PT, at, XY+f2, a second P, and two arc builders that differed only in a
@@ -6112,6 +6236,13 @@ class Component extends DCLogic {
      and an idler drawn without it came out around 5.5:1 against the pale page --
      darker and higher in contrast than any of the linked wheels the machine is
      actually about, which is the opposite of what a ghost is for. */
+  /* THE GHOST LAYER'S ALPHA, AND IT IS ALSO THE DATUM'S CEILING. Since #81 the
+     mark is drawn INSIDE this group, so it can never be painted harder than the
+     layer -- which is why the ghost wheels are made less prominent by fading
+     their COLOUR (see dimK in ghostSvg) rather than by lowering this. Lowering
+     it was tried for CL#140 and took the datum with it: at 0.188 the dark scribe
+     solved to no harder than a ghost wheel, the weight the mock proves it
+     disappears at. Colour touches the wheels; alpha touches everything. */
   ghostOpacity(theme) { return (theme || this.state.theme) === 'dark' ? 0.17 : 0.46; }
 
   /* HOW HEAVY ONE WHEEL IS DRAWN, in one place, because two layers have to agree
@@ -6304,8 +6435,32 @@ class Component extends DCLogic {
        faintest thing on screen, which is what Charles saw. At 0.55 they sit near
        2.0:1: plainly there, still under the linked wheels, and still grey against
        colour so the hierarchy is carried by hue as well as by tone. */
-    const dimK = this.state.theme === 'dark' ? 0.78 : 0.55;
-    const dim = (hex) => { const n = parseInt(hex.slice(1), 16); const c = [(n >> 16) & 255, (n >> 8) & 255, n & 255]; return '#' + c.map(v => Math.round(v * dimK).toString(16).padStart(2, '0')).join(''); };
+    /* LIGHT IS DARK'S MIRROR, not its own tuning (CL#140).
+
+       Dark keeps multiplying toward black at GHOST_DIM_DARK, exactly as it
+       shipped. Light no longer has a factor of its own at all: each grey is
+       replaced by the paint that puts it the SAME L* distance BELOW the pale
+       page as its dark rendering sits ABOVE the dark one -- see
+       GHOST_LIGHT_PAINT. The old 0.55 toward black put them 2.8x further out
+       than that, which is what read as sticking out.
+
+       WHY THE COLOUR AND NOT THE LAYER ALPHA, which was tried first. Lowering
+       ghostOpacity() is identical arithmetic for a wheel and NOT identical for
+       the datum, which is drawn inside this group (#81) and is capped by it: at
+       the matching alpha the dark scribe solved to no harder than a ghost wheel,
+       the weight the mock proves it disappears at. Colour touches the wheels;
+       alpha touches everything in the layer. */
+    const isDark = this.state.theme === 'dark';
+    const mirrored = (hex) => {
+      const i2 = GHOST_COLORS.indexOf(hex);
+      return i2 < 0 ? hex : GHOST_LIGHT_PAINT[i2];
+    };
+    const dim = (hex) => {
+      if (!isDark) return mirrored(hex);
+      const n = parseInt(hex.slice(1), 16);
+      const c = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+      return '#' + c.map(v => Math.round(v * GHOST_DIM_DARK).toString(16).padStart(2, '0')).join('');
+    };
     const ft = flatTones(dim(g.color || '#9AA6AD'));
     const size = (g.ro + 4) * 2, r = g.r;
     const path = this.teethPath(g.teeth, r);

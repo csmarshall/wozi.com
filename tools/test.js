@@ -3531,7 +3531,19 @@ const CSS_ROOT = SRC.slice(SRC.indexOf(':root{'), SRC.indexOf('@supports (top:en
 const CSS_DARK = SRC.slice(SRC.indexOf(':root[data-theme="dark"]{'), SRC.indexOf('html,body{'));
 function cssVar(block, name) {
   const m = new RegExp('(?:^|[;{\\s])' + name + '\\s*:\\s*([^;]+);').exec(block);
-  return m ? m[1].trim() : null;
+  if (!m) return null;
+  const raw = m[1].trim();
+  /* RESOLVE ONE var() INDIRECTION, because the stylesheet uses them and a browser
+     would. CL#140 gave the dark page colour a home in :root as --ref-bg-dark so
+     BOTH grounds are readable from either theme -- the light ghost fade is solved
+     by matching one against the other -- and pointed the dark block's --bg at it,
+     the same shape light has always had with --ref-bg. This harness reads the CSS
+     as TEXT, so without this it handed 'var(--ref-bg-dark)' to rgbOf(), got null,
+     and reported "datumInk did not return a colour for --muted from a palette
+     that declares it": a true statement about the test and a false one about the
+     page. */
+  const ref = /^var\(\s*(--[\w-]+)\s*\)$/.exec(raw);
+  return ref ? cssVar(CSS_ROOT, ref[1]) : raw;
 }
 const TOKENS = {
   light: { '--ref-bg': cssVar(CSS_ROOT, '--ref-bg'), '--ref-muted': cssVar(CSS_ROOT, '--ref-muted'),
