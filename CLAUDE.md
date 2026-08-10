@@ -201,9 +201,23 @@ Never hand-write a stop list.
 
 `tickRate()` is the one home for the update rate — `step()`'s frame budget and
 `strobeSpeed()` are both computed from it. `driveCap()` is the one home for how
-hard a flick or an arrow key may drive the flywheel: it is `max(8, idleRate())`,
-because a fixed 8 stopped being a ceiling and became a *brake* once the idle rate
-could reach 68.6 at 200×.
+hard a flick or an arrow key may drive the flywheel.
+
+**`driveCap()` is a property of the machine, not of the current setting, and it
+decides how long a throw coasts** (GitHub #121, CL#136). It is
+`rateAt(SPEED_CEIL)` — the fastest the train can be *asked* to run, so a hand may
+wind it up that far and no further. It was `max(8, idleRate())`, and the reason
+that had to go is the part worth remembering: **once CL#127 made the flywheel
+decelerate at a constant rate, the coast became exactly `(driveCap() -
+idleRate()) / SPINDOWN_DECEL`**, so a cap written as a bound on *speed* silently
+became the only thing bounding *duration*. At 1× it was 8, and 8 → 0.343 is
+269ms — for the hardest throw expressible, not just a gentle one. Deriving it
+from the ladder's top makes the hardest throw take exactly `SPINDOWN_RANGE_MS`,
+because it **is** the ladder travelled by hand instead of by the slider, and
+makes the coast proportional to effort. `rateAt(mult)` is the one home for the
+1× rate that both it and `idleRate()` are built on. Do not reintroduce a
+constant here: a number chosen for the cap is a number chosen for the coast, and
+nothing in the file will say so.
 
 **The speed control lives in the pop-out menu now, not the corner row** (GitHub
 #108, CL#114). The corner row is back to three permanent buttons — theme,
