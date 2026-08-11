@@ -7,6 +7,81 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Added
 
+- **CL#154 — three fidget-style layers ported to the landing page, each its
+  own live checkbox.** (GitHub #125.)
+
+  Charles picked items 1 (timing marks), 2 (line-drawn tooth profiles) and 3
+  (rim ticks) from #125's own analysis — never item 4 (carriers, correctly
+  excluded, the direct-mesh train has none) or item 5 (monochrome + accent,
+  which the ticket itself flagged as replacing CL#140's per-chain palette
+  system rather than extending it).
+
+  **Timing marks** are one bold radial spoke per wheel with a punch-mark dot
+  at its tip, rotating for free under the wheel's own existing transform (the
+  one-clock rule costs nothing here, since it adds no clock of its own). A
+  first pass reached out to the tooth root to escape the cluttered inner
+  disc, and Charles caught the real problem with it on review: reaching that
+  far crossed the engraving band's own radial span, and a scored index line
+  on a real part would not run uninterrupted through a separately-machined
+  rim feature, whether or not it visually crossed the lettering itself.
+  Confined back to the well and made legible within it instead — a heavier
+  stroke plus the punch-mark dot — which is what actually reads as a real
+  machining mark rather than a longer one crossing something it should not
+  have.
+
+  **Line-drawn tooth profiles** turned out to be mostly already true — this
+  page's teeth were never a plain filled silhouette, they already carry a
+  stroke. What fidget's version actually has that this page's didn't is a
+  *crisper* stroke: `toothStrokeW` scales the existing per-theme stroke
+  width (already `1.6`/`1.1`) by a new `LINEWORK_STROKE_MUL`, gated behind
+  `lineWork`, rather than adding a second overlapping stroke — tried once and
+  discarded, since two strokes on the same edge read as smeared rather than
+  crisper.
+
+  **Knurled rim ticks** are a ring of `g.teeth` hatch marks — one per tooth
+  rather than fidget's fixed 24, so density scales with the wheel rather than
+  reading coarse on a big wheel and dense on a small one — sitting inside
+  `faceR`, the one radius every wheel kind already guarantees is solid metal.
+  Because that radius sits inside the engraving band by construction (`faceR`
+  collapses to `bandIn` exactly when the band is reserved), the ticks have a
+  *structural* guarantee of clearing the lettering, not merely an angular
+  one like the timing mark's.
+
+  **All three are independently gated** behind new `timing`/`lineWork`/
+  `knurl` props (`data-props` schema, "Layers" section, `default:false` —
+  the same pattern `character`/`engravedRims` already use) and **live
+  checkboxes in Machine Settings**, added on Charles's own request so each
+  could be judged by eye and toggled without a screenshot round-trip per
+  change. `layerOn(key)` is the one home for "state overrides the schema
+  default" — the same fallback `speedFactor()` already models for speed —
+  read by both `gearSvg()` and the checkbox list's own `checked` binding.
+  `a11y_audit.py` caught two real defects in the first checkbox pass before
+  they shipped: a 15px hit box under the WCAG 2.5.8 floor every other control
+  on this page holds to, and no accessible name reaching the input despite
+  the visible label text beside it — both fixed (24px boxes, explicit
+  `aria-label`), confirmed by a clean re-run.
+
+  Built in parallel by two independent agents (line-drawn teeth; rim ticks)
+  working the same file concurrently, reconciled by hand afterward — no
+  collisions, confirmed by diff inspection and a full re-run of every gate
+  against the combined result.
+
+  `npm test` 119/0, `pixel_regress` 0px both scopes at every prop's default,
+  `dom_invariants`/`verify_motion`/`pill_clip`/`a11y_audit.py` all green,
+  live-click-tested (a real DOM `.click()` on the checkbox, not just a state
+  assertion) to confirm the toggle actually re-renders.
+
+  `devices.py` caught a real one too: three checkbox rows stacked in the
+  Machine Settings panel pushed the last past the safe-area rectangle by
+  12px on the shortest landscape phone profile (iPhone 13/14) — the panel's
+  own `max-height`/`overflow-y:auto` (CL#114) keeps it visually clipped, but
+  `getBoundingClientRect()` still reports a control's flow position
+  regardless of scroll, and devices.py measures every real `<input>` on the
+  page for exactly that reason. Fixed by tightening the rows' own padding
+  (5px → 2px — the 24px checkbox itself is a WCAG floor and cannot shrink,
+  so padding was the only slack); re-run confirmed 2px of clearance instead
+  of −12px, with every other device profile unaffected.
+
 - **CL#153 — Wear, a second slider beside Speed in Machine Settings.** (GitHub
   #112, closing GitHub #5.)
 

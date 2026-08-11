@@ -377,6 +377,17 @@ input[type="range"]:focus{outline:none;}
       <span aria-hidden="true" style="{{ wearReadStyle }}">{{ wearMark }}</span>
       <input type="range" min="0" max="{{ wearMax }}" step="1" value="{{ wearPos }}" title="{{ wearTitle }}" aria-label="Wear" aria-valuetext="{{ wearValueText }}" onInput="{{ onWearInput }}" onChange="{{ onWearCommit }}" style="{{ wearTrackStyle }}" />
     </div>
+    <!-- The three #125 style layers, as checkboxes rather than sliders --
+         each is binary (on/off), so a range control would be the wrong
+         shape for it. Charles's own ask (2026-08-11): a way to flip each on
+         and off live and judge it by eye without a round-trip through a
+         screenshot each time. -->
+    <sc-for list="{{ styleToggles }}" as="st">
+      <label style="{{ st.rowStyle }}">
+        <input type="checkbox" checked="{{ st.checked }}" aria-label="{{ st.ariaLabel }}" onChange="{{ st.onChange }}" style="{{ st.boxStyle }}" />
+        <span>{{ st.label }}</span>
+      </label>
+    </sc-for>
     <div aria-hidden="true" style="{{ togSepStyle }}"></div>
     <div style="font:700 11px/1 'Manrope',system-ui,sans-serif;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);padding:4px 12px 8px;">Table of Gears</div>
     <sc-for list="{{ togPeople }}" as="pp">
@@ -449,7 +460,7 @@ input[type="range"]:focus{outline:none;}
      is a historical record of that one session, not a running description of
      HEAD, and was never updated (nor should it be) as later real commits moved
      these values on. Read this comment block, not that file, for what is live. -->
-<script type="text/x-dc" data-dc-script data-props="{&quot;domain&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Wordmark&quot;},&quot;frameRate&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[60,30,24,20],&quot;default&quot;:30,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;spinUp&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;engravedRims&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;parallax&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;character&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;hoverDrag&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;speed&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;min&quot;:1,&quot;max&quot;:200,&quot;step&quot;:1,&quot;default&quot;:1,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;gearScale&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;min&quot;:0.5,&quot;max&quot;:1.3,&quot;step&quot;:0.05,&quot;default&quot;:1,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;options&quot;:[&quot;#5F686E&quot;,&quot;#E8483A&quot;,&quot;#3B7DE8&quot;,&quot;#F4B32B&quot;,&quot;#1FA463&quot;],&quot;default&quot;:&quot;#5F686E&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;shuffle&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Gears&quot;}}">
+<script type="text/x-dc" data-dc-script data-props="{&quot;domain&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Wordmark&quot;},&quot;frameRate&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[60,30,24,20],&quot;default&quot;:30,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;spinUp&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;engravedRims&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;parallax&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;character&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;timing&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;lineWork&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;knurl&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;hoverDrag&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;speed&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;min&quot;:1,&quot;max&quot;:200,&quot;step&quot;:1,&quot;default&quot;:1,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;gearScale&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;min&quot;:0.5,&quot;max&quot;:1.3,&quot;step&quot;:0.05,&quot;default&quot;:1,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;options&quot;:[&quot;#5F686E&quot;,&quot;#E8483A&quot;,&quot;#3B7DE8&quot;,&quot;#F4B32B&quot;,&quot;#1FA463&quot;],&quot;default&quot;:&quot;#5F686E&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;shuffle&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Gears&quot;}}">
 /* ?seed=8231 — DRAW THE SAME MACHINE TWICE.
 
    Every wheel on this page is dealt. Twelve bare `Math.random()` calls below
@@ -3601,7 +3612,12 @@ class Component extends DCLogic {
   /* `speed` is null until the slider, the corner reset, or localStorage says
      otherwise, so the shipped prop default stays the answer while nobody has
      chosen one. */
-  state = { theme: 'light', hover: null, icons: {}, ghosts: [], motion: null, tog: false, speed: null, wear: 0 };
+  /* timing/lineWork/knurl start `null`, meaning "untouched -- read the schema
+     default", exactly the same convention speed/wear use against their own
+     props fallback. `null` and `false` must stay distinct here: a Charles
+     toggle to OFF has to override a schema default of true. */
+  state = { theme: 'light', hover: null, icons: {}, ghosts: [], motion: null, tog: false, speed: null, wear: 0,
+    timing: null, lineWork: null, knurl: null };
   _badgeOff = {};   /* badgeKey -> {x,y,vx,vy} spring state for the magnetic hub caps */
   _badgeEl = {};    /* badgeKey -> the cap element that key's spring writes to */
   _spinEls = [];
@@ -3758,6 +3774,11 @@ class Component extends DCLogic {
      a stop: a prop override is entitled to any value its schema allows, and
      only the SLIDER needs to sit on a declared stop. */
   speedFactor() { return this.state.speed ?? this.props.speed ?? SPEED_FLOOR; }
+  /* ONE HOME FOR "IS THIS #125 STYLE LAYER ON", read by both gearSvg() and
+     the Machine Settings checkbox that toggles it (GitHub #125) -- state
+     wins once Charles has actually flipped a control, exactly the fallback
+     speedFactor() already models for speed. */
+  layerOn(key) { return this.state[key] ?? this.props[key]; }
 
   /* Which stop the slider is standing on — the nearest declared one, so a value
      the stops no longer contain (a stale localStorage entry, a prop set between
@@ -4561,6 +4582,17 @@ class Component extends DCLogic {
     if (savedWear >= 0 && savedWear <= 1) {
       this.setState({ wear: savedWear });
     }
+    /* The three #125 style checkboxes (timing/lineWork/knurl), restored the
+       same way -- 'true'/'false' strings rather than a number, so the
+       bounds check is just "is this one of the two strings the checkbox
+       itself can write", not a range. Anything else (never set, or a
+       tampered value) leaves state at its `null` default, which reads the
+       schema's own default per wheel exactly as an untouched control should. */
+    ['timing', 'lineWork', 'knurl'].forEach((key) => {
+      let saved = null;
+      try { saved = localStorage.getItem('wozi-' + key); } catch (e) {}
+      if (saved === 'true' || saved === 'false') this.setState({ [key]: saved === 'true' });
+    });
     const startRunning = savedMotion === 'run' ? true
       : savedMotion === 'rest' ? false : !(this._rmq && this._rmq.matches);
     /* One flywheel per mesh (GitHub #122). Seeded lazily: solve() has not
@@ -6826,6 +6858,14 @@ class Component extends DCLogic {
   }
 
   gearSvg(g, S) {
+    /* THE THREE #125 LAYERS READ LIVE STATE OVER THE SCHEMA DEFAULT, the same
+       pattern speedFactor() already uses for speed -- state.X is the toggle
+       in the Machine Settings panel, and it stays undefined until Charles
+       has actually flipped one, so an untouched control still shows exactly
+       the schema's own default rather than silently becoming its opposite. */
+    const timingOn = this.layerOn('timing');
+    const lineWorkOn = this.layerOn('lineWork');
+    const knurlOn = this.layerOn('knurl');
     /* EVERY LEGIBILITY FLOOR IN HERE IS A RENDERED-PIXEL INTENT (#61).
        They were written in solve units, and S -- the scale this function is
        handed -- varies by a FACTOR OF TEN across real viewports: 0.51 on a small
@@ -8060,6 +8100,23 @@ class Component extends DCLogic {
       }
       inner.push(h('circle', { key: 'boss', r: hubR * BOSS_MUL, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
     }
+    /* LAYER: lineWork (GitHub #125, ported from /fidget's line-drawn tooth
+       profiles). fidget outlines its teeth in a plain, thin, low-opacity
+       stroke over a flat fill with no shading at all. This page already
+       strokes the same edge below -- dark gets ft.line, light gets ft.edge,
+       flatTones()'s deliberate split that keeps light mode from reading as
+       a sticker (Charles's diagnosis, see flatTones' own comment) -- but
+       under a body gradient, a specular arc and a boss disc, that stroke was
+       tuned to sit UNDER the shading rather than to lead the eye the way
+       fidget's does. lineWork does not touch that colour split, and it does
+       not add a second stroke on the same edge either: doubling the paint on
+       one edge was tried and read as smeared rather than crisper, not the
+       improvement it looked like on paper. It only firms up the width of the
+       SAME line, as a multiple of the width the page already draws per
+       theme, so a future retune of that base width carries through without
+       a second number to keep in step. Off by default -- Charles's call. */
+    const LINEWORK_STROKE_MUL = 1.5;
+    const toothStrokeW = (this.state.theme === 'dark' ? 1.6 : 1.1) * (lineWorkOn ? LINEWORK_STROKE_MUL : 1);
     /* The BOX is scaled, the viewBox is not: every path, gradient and engraving
        below is authored in module units and stays there, while the element that
        reaches the compositor is already the size it will be seen at (#37). */
@@ -8092,7 +8149,7 @@ class Component extends DCLogic {
         holes.length ? h('clipPath', { id: id + 'c', clipPathUnits: 'userSpaceOnUse' },
           h('path', { d: path + ' ' + holes.join(' '), clipRule: 'evenodd' })) : null),
       h('g', holes.length ? { clipPath: 'url(#' + id + 'c)', clipRule: 'evenodd' } : null,
-        h('path', { d: path + ' ' + holes.join(' '), fillRule: 'evenodd', fill: 'url(#' + id + 'f)', stroke: this.state.theme === 'dark' ? ft.line : ft.edge, strokeWidth: this.state.theme === 'dark' ? 1.6 : 1.1, strokeLinejoin: 'round' }),
+        h('path', { d: path + ' ' + holes.join(' '), fillRule: 'evenodd', fill: 'url(#' + id + 'f)', stroke: this.state.theme === 'dark' ? ft.line : ft.edge, strokeWidth: toothStrokeW, strokeLinejoin: 'round' }),
         inner,
         h('circle', { r: faceR, fill: 'none', stroke: 'var(--edge)', strokeWidth: 1, strokeOpacity: 0.4 })),
       (function () {
@@ -8110,6 +8167,92 @@ class Component extends DCLogic {
       post,
       h('circle', { r: hubR, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2 }),
       h('circle', { r: Math.max(3, hubR * 0.4), fill: p[3], opacity: 0.5 }),
+      /* LAYER: timing (GitHub #125, ported from /fidget's index mark). One bold
+         radial spoke, drawn at the wheel's own angle 0 -- it rotates for free
+         with the same transform every other element in this SVG already turns
+         under, so it costs nothing against the one-clock rule (CLAUDE.md's
+         first invariant) despite touching no clock of its own.
+
+         NEVER REACHES PAST `wellR`, AND THAT IS THE POINT (Charles, 2026-08-11,
+         reviewing the first pass: a mark reaching the root crossed the band's
+         own radial span, and a scored index line on a real part would not run
+         uninterrupted through a raised, separately-machined rim feature --
+         even though it never crossed the LETTERING itself, since fidget's own
+         wheels carry no band at all, porting its full-length reach here reads
+         as a mark cut through metal it should have stopped short of. A first
+         pass tried reaching `rootR` (the same radius teethPath() derives its
+         root circle from) specifically to escape the cluttered inner disc --
+         the right problem, the wrong fix. Confined back to the well, made
+         legible within it instead: a heavier stroke and a punch-mark dot at
+         the tip, which is what actually made the short version read as a
+         real machining mark rather than a longer one crossing something it
+         should not have.
+
+         OFF BY DEFAULT, gated behind `timing` like `character` -- a new prop
+         in the same "Layers" section, reviewed by photograph before it is
+         ever the shipped default, exactly as CLAUDE.md's SHOW-DONT-DESCRIBE
+         rule asks for a tuned visual choice. */
+      timingOn ? h('g', { key: 'timing' }, [
+        h('line', { x1: hubR * BOSS_MUL, y1: 0, x2: wellR, y2: 0,
+          stroke: p[3], strokeWidth: (m * 0.22).toFixed(2), strokeLinecap: 'round', strokeOpacity: 0.9 }),
+        h('circle', { cx: wellR, cy: 0, r: (m * 0.28).toFixed(2), fill: p[3], opacity: 0.9 })
+      ]) : null,
+      /* LAYER: knurl (GitHub #125, ported from /fidget's grounded-ring hatch
+         marks). fidget draws its ticks OUTSIDE the ring gear's tip, in clear
+         space beyond the teeth -- space this page does not have, since a
+         ghost/background layer sits there instead of nothing. What ports is
+         the VISUAL DEVICE, not fidget's meaning: fidget's hatches are the
+         drawing convention for "this is bolted to the world", and this page
+         has no grounded/free distinction for them to mark. Here they are pure
+         texture -- a ring reading as a knurled or machined register, per the
+         issue's own framing.
+
+         RADIUS is inside faceR, the boundary of the raised face disc every
+         wheel kind already draws solid from wellR outward (the cut pattern
+         never reaches past wellR, by every family's own clearance rule
+         above). That annulus is the one radius on EVERY wheel, of every kind
+         and at every size, that is guaranteed clear of both the web pattern
+         and the band: faceR collapses to bandIn exactly when the band is
+         reserved (`marked`, see above), so a tick that never crosses faceR
+         can never enter the band's own radial span at all -- a stronger
+         guarantee than the timing mark's angle-based one just above, which
+         shares the band's radius and stays clear only because it shares no
+         angle with the lettering.
+
+         COUNT is g.teeth itself, not fidget's hardcoded 24: a knurl or spline
+         count is a property of the part it is cut into, and teeth is the one
+         per-wheel count already in scope, so the ring reads coarser on a
+         13-tooth wheel and finer on a 19-tooth one exactly as a shared pitch
+         would predict, rather than every wheel wearing the same fixed count
+         regardless of size.
+
+         LENGTH is capped two ways so it can never overflow the room it has to
+         stand in: never more than KNURL_LEN_MUL modules -- a proportion
+         chosen to read like fidget's own hatches did, the one judged figure
+         here and not a measurement of anything -- and never more than half of
+         whatever wellR-to-faceR actually leaves on THIS wheel, since that gap
+         shrinks toward zero on the tightest blanks the same way the lattice
+         walls above do.
+
+         OFF BY DEFAULT, gated behind `knurl` in the same "Layers" section as
+         `timing`, `lineWork` and `engravedRims`. */
+      knurlOn ? h('g', { key: 'knurl' }, (function () {
+        const KNURL_LEN_MUL = 0.6;
+        const KNURL_LEAN = Math.PI / 4; /* fidget's own "usual ground symbol" angle */
+        const len = Math.min(m * KNURL_LEN_MUL, Math.max(0, faceR - wellR) * 0.5);
+        const ticks = [];
+        for (let i = 0; i < g.teeth; i++) {
+          const a = i * 2 * Math.PI / g.teeth;
+          const bx = Math.cos(a) * faceR, by = Math.sin(a) * faceR;
+          const lx = Math.cos(a + KNURL_LEAN), ly = Math.sin(a + KNURL_LEAN);
+          ticks.push(h('line', {
+            key: i, x1: bx, y1: by, x2: bx - lx * len, y2: by - ly * len,
+            stroke: ft.line, strokeOpacity: 0.65,
+            strokeWidth: (m * 0.05).toFixed(2), strokeLinecap: 'round'
+          }));
+        }
+        return ticks;
+      })()) : null,
       /* LAYER: engraved rims — stamped into the solid band just inside the tooth roots,
          cut shadow above and highlight below so it reads as struck metal, not overlaid text. */
       this.props.engravedRims && eng.handle ? h('g', { key: 'eng' }, [{ dy: 0, col: FLAT_INK, op: ENGRAVE_ALPHA }].map((L, li) => h('text', {
@@ -9499,6 +9642,38 @@ class Component extends DCLogic {
           backgroundRepeat: 'no-repeat'
         };
       })(),
+      /* THE THREE #125 STYLE LAYERS, as a live checkbox list (Charles's own
+         ask, 2026-08-11) rather than round-tripping a screenshot per change.
+         `checked` reads through layerOn(), the same method gearSvg() calls
+         to decide what to draw -- one home for "state over schema default",
+         not two copies of the same fallback rule. */
+      styleToggles: [
+        { key: 'timing', label: 'Timing marks' },
+        { key: 'lineWork', label: 'Line-drawn teeth' },
+        { key: 'knurl', label: 'Knurled rim' }
+      ].map((t) => ({
+        label: t.label,
+        ariaLabel: t.label,
+        checked: this.layerOn(t.key),
+        onChange: (e) => {
+          const next = e.target.checked;
+          try { localStorage.setItem('wozi-' + t.key, String(next)); } catch (err) {}
+          this.setState({ [t.key]: next });
+        },
+        /* PADDING TIGHTENED FROM 5px TO 2px (GitHub #125, caught by
+           devices.py): the 24px checkbox is a WCAG floor and cannot shrink,
+           so padding is the only slack this row has, and three of them
+           stacked in the panel pushed the last past the safe-area rectangle
+           by 12px on the shortest landscape phone profile (iPhone 13/14).
+           Confirmed by re-running devices.py after the change. */
+        rowStyle: { display: 'flex', alignItems: 'center', gap: '8px', padding: '2px 12px',
+          font: "600 13px/1.3 'Manrope',system-ui,sans-serif", color: 'var(--ink)', cursor: 'pointer' },
+        /* 24px, the WCAG 2.5.8 floor every other control on this page holds
+           to (the same figure the range-input thumb's own comment cites) --
+           caught by a11y_audit.py reporting "3 interactive targets under
+           24x24px" against the 15px this shipped with first. */
+        boxStyle: { width: '24px', height: '24px', margin: 0, accentColor: 'var(--accent)', cursor: 'pointer' }
+      })),
       toggleMotion: () => {
         const next = this.motionActive() ? 'rest' : 'run';
         try { localStorage.setItem('wozi-motion', next); } catch (e) {}
