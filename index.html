@@ -196,7 +196,17 @@ a:focus-visible,button:focus-visible,input:focus-visible,[tabindex]:focus-visibl
    thumb is the thing being touched; the `<input>` itself is given an explicit
    `height` of `--btn` (44px, the same touch target every corner button uses)
    so the HIT AREA is larger than the VISIBLE thumb on purpose -- measure both
-   and say which one you measured, because they are not the same box. */
+   and say which one you measured, because they are not the same box.
+
+   THE BARE input[type="range"] SELECTOR IS SAFE WITH MORE THAN ONE CONTROL
+   (GitHub #112 added Wear beside Speed), NOT BECAUSE THERE IS ONLY ONE, but
+   because --thumb-color is set INLINE on each element -- the shared
+   ::-webkit-slider-thumb/::-moz-range-thumb rule below reads whichever value
+   the element it is painting actually carries, rather than styling every
+   range input identically. A range input added without its own --thumb-color
+   would silently fall back to var(--muted) and share a track colour that was
+   never a deliberate match; tools/test.js asserts every one on the page sets
+   it. */
 input[type="range"]{
   --trk:4px; --thumb:24px;
   -webkit-appearance:none; appearance:none;
@@ -358,6 +368,14 @@ input[type="range"]:focus{outline:none;}
     <div style="{{ speedRowStyle }}">
       <span aria-hidden="true" style="{{ speedReadStyle }}">{{ speedMark }}</span>
       <input type="range" min="0" max="{{ speedMax }}" step="1" value="{{ speedPos }}" title="{{ speedTitle }}" aria-label="Gear speed" aria-valuetext="{{ speedValueText }}" onInput="{{ onSpeedInput }}" onChange="{{ onSpeedCommit }}" style="{{ speedTrackStyle }}" />
+    </div>
+    <!-- Wear (GitHub #112, #5): a second control in the same group, same
+         input/change split as speed's -- see the comments beside onWearInput
+         and wearTrackStyle in renderVals(). Zero is the shipped default and
+         looks like today's page exactly; every other position is opt-in. -->
+    <div style="{{ wearRowStyle }}">
+      <span aria-hidden="true" style="{{ wearReadStyle }}">{{ wearMark }}</span>
+      <input type="range" min="0" max="{{ wearMax }}" step="1" value="{{ wearPos }}" title="{{ wearTitle }}" aria-label="Wear" aria-valuetext="{{ wearValueText }}" onInput="{{ onWearInput }}" onChange="{{ onWearCommit }}" style="{{ wearTrackStyle }}" />
     </div>
     <div aria-hidden="true" style="{{ togSepStyle }}"></div>
     <div style="font:700 11px/1 'Manrope',system-ui,sans-serif;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);padding:4px 12px 8px;">Table of Gears</div>
@@ -576,6 +594,16 @@ const TOOTH_THICK = 0.495; /* tooth thickness at the pitch circle, as a fraction
    deliberately clear further out (1.55, 1.6) are their own choice and are
    not this constant. */
 const BOSS_MUL = 1.5;
+/* The wear control's two marked wheels are never the same severity (GitHub
+   #112, #5) -- the spine's smallest-tooth wheel always reads a shallower
+   scuff than its largest-tooth wheel's full fracture, at whatever position
+   the slider sits. This is the ratio between them, carried over unchanged
+   from the fixed constant (SCUFF_SEV = 0.50) a design sweep picked before
+   the slider existed: the slider's top position reproduces that exact
+   original pair, and every position below it scales the same pair down
+   together. A ratio, not an absolute severity, is what survives turning a
+   chosen constant into a live control. */
+const WEAR_SCUFF_RATIO = 0.5;
 /* Depth of the engraving band, in modules — uniform on every wheel. Module-based
    rather than a fraction of the radius, which is what keeps the band exactly as
    wide on a 13-tooth blank as on a 19-tooth one.
@@ -3573,7 +3601,7 @@ class Component extends DCLogic {
   /* `speed` is null until the slider, the corner reset, or localStorage says
      otherwise, so the shipped prop default stays the answer while nobody has
      chosen one. */
-  state = { theme: 'light', hover: null, icons: {}, ghosts: [], motion: null, tog: false, speed: null };
+  state = { theme: 'light', hover: null, icons: {}, ghosts: [], motion: null, tog: false, speed: null, wear: 0 };
   _badgeOff = {};   /* badgeKey -> {x,y,vx,vy} spring state for the magnetic hub caps */
   _badgeEl = {};    /* badgeKey -> the cap element that key's spring writes to */
   _spinEls = [];
@@ -4522,6 +4550,17 @@ class Component extends DCLogic {
     if (savedSpeed >= SPEED_STOPS[0] && savedSpeed <= SPEED_STOPS[SPEED_STOPS.length - 1]) {
       this.setState({ speed: savedSpeed });
     }
+    /* Wear rides along beside speed, the same way (GitHub #112). Bounded to
+       [0, 1] rather than trusted, for the same reason: a tampered or stale
+       entry outside the control's own range should be discarded, not carried
+       into a render as a value the slider itself could never produce. Unlike
+       speed, there is no "nearest stop" to snap a between-value to -- wear is
+       continuous, so a value that survives the bounds check is kept exactly. */
+    let savedWear = NaN;
+    try { savedWear = parseFloat(localStorage.getItem('wozi-wear')); } catch (e) {}
+    if (savedWear >= 0 && savedWear <= 1) {
+      this.setState({ wear: savedWear });
+    }
     const startRunning = savedMotion === 'run' ? true
       : savedMotion === 'rest' ? false : !(this._rmq && this._rmq.matches);
     /* One flywheel per mesh (GitHub #122). Seeded lazily: solve() has not
@@ -5025,6 +5064,11 @@ class Component extends DCLogic {
       this._idlerN = idle;
       this._solved = null;
       this._escKey = null;
+      /* Which wheels wear marks land on is a property of THIS solve (GitHub
+         #112) -- invalidated in the same breath as _solved so the choice is
+         re-made exactly when the train it was chosen from changes, never on
+         a wear-slider drag alone. */
+      this._wearWheels = null;
       this.forceUpdate();
     }
     const solved = this.solve();
@@ -6235,6 +6279,30 @@ class Component extends DCLogic {
     return this._solved;
   }
 
+  /* WHICH TWO WHEELS THE WEAR CONTROL MARKS, memoized alongside `_solved`
+     (GitHub #112). The largest and smallest tooth count OF THE SPINE only --
+     a wheel does not change which extreme it is because a slider moved, and
+     this is what keeps that true: read once per solve, never re-chosen on a
+     drag. Idlers and ghosts are excluded (`role === 'link'`) -- a wear mark
+     is content, like the engraving, not decoration.
+
+     A SPINE OF ONE WHEEL MARKS ONLY THAT WHEEL, at the "largest" severity.
+     Largest and smallest would otherwise both resolve to the same physical
+     wheel, and there is no sensible way to paint two different depths of
+     fracture onto one tooth blank. */
+  wearWheels() {
+    if (this._wearWheels) return this._wearWheels;
+    const solved = this.solve();
+    let maxI = null, minI = null, maxT = -1, minT = Infinity;
+    solved.gears.forEach(g => {
+      if (g.role !== 'link' || g.person !== SPINE_SLUG) return;
+      if (g.teeth > maxT) { maxT = g.teeth; maxI = g.i; }
+      if (g.teeth < minT) { minT = g.teeth; minI = g.i; }
+    });
+    this._wearWheels = { maxI: maxI, minI: maxI === minI ? null : minI };
+    return this._wearWheels;
+  }
+
   /* Geometry for the two engraved lines. Font size is a fixed fraction of the band, so it
      is identical on every wheel; the arc sweep is then derived from the actual text length
      and the band's circumference, shrinking the type only if a long handle would not fit. */
@@ -6347,7 +6415,7 @@ class Component extends DCLogic {
      TOOTH_* constants alone, never of the web style bolted to the same wheel.
      The parameter used to be in this signature and was never read (#57), which
      invited exactly the wrong idea -- that a profile could change the teeth. */
-  teethPath(n, r, chipIdx, mod) {
+  teethPath(n, r, chipIdx, mod, chipSev) {
     const m = mod || MODULE;
     const ro = r + m * TOOTH_ADD, rr = Math.max(TOOTH_ROOT_MIN, r - m * TOOTH_DED), a = 2 * Math.PI / n;
     const phi = TOOTH_PA * Math.PI / 180, rb = r * Math.cos(phi);
@@ -6378,20 +6446,37 @@ class Component extends DCLogic {
       if (rStart > rFil) d += 'L' + P(rStart, c - hRoot) + ' ';
       if (i === chipIdx) {
         /* A chipped tooth: still there, but the crown has fractured away along a
-           jagged face rather than vanishing cleanly. */
+           jagged face rather than vanishing cleanly.
+
+           THE FOUR FRACTIONS BELOW (0.44/0.52/0.70/0.93) ARE THE AUTHORED
+           SHAPE OF A FULL FRACTURE (GitHub #112), and `chipSev` (0-1) scales
+           how far up the tooth it reaches, not the shape itself -- a light
+           scuff is a shallow version of the same crack, not a different one.
+           `fTop` stays fixed at the tip: even a faint mark nicks the very top
+           first. `fBot` slides from `fTop` (chipSev 0, a zero-height notch --
+           gated to never actually render at the call site) down to 0.44
+           (chipSev 1, today's shipped shape) as severity rises, and the two
+           interior jag points are carried along at the SAME relative position
+           within [fBot, fTop] they hold within [0.44, 0.93] today, so the
+           crack's silhouette does not distort as it grows, only its reach
+           does. */
         const H = ro - rStart, lvl = (f) => rStart + H * f;
+        const sev = chipSev === undefined ? 1 : chipSev;
+        const fTop = 0.93, fBot = fTop - sev * (fTop - 0.44);
+        const relIn = (f) => fBot + (f - 0.44) / (fTop - 0.44) * (fTop - fBot);
+        const breakAt = relIn(0.62), j1 = relIn(0.52), j2 = relIn(0.70), j3 = fBot;
         for (let s = 1; s <= STEPS; s++) {
           const R = flank[s];
-          if (R > lvl(0.62)) break;
+          if (R > lvl(breakAt)) break;
           d += 'L' + P(R, c - half(R)) + ' ';
         }
-        d += 'L' + P(lvl(0.93), c - half(lvl(0.93)) * 0.5) + ' ';
-        d += 'L' + P(lvl(0.52), c - half(lvl(0.52)) * 0.2) + ' ';
-        d += 'L' + P(lvl(0.70), c + half(lvl(0.70)) * 0.35) + ' ';
-        d += 'L' + P(lvl(0.44), c + half(lvl(0.44)) * 0.8) + ' ';
+        d += 'L' + P(lvl(fTop), c - half(lvl(fTop)) * 0.5) + ' ';
+        d += 'L' + P(lvl(j1), c - half(lvl(j1)) * 0.2) + ' ';
+        d += 'L' + P(lvl(j2), c + half(lvl(j2)) * 0.35) + ' ';
+        d += 'L' + P(lvl(j3), c + half(lvl(j3)) * 0.8) + ' ';
         for (let s = STEPS; s >= 1; s--) {
           const R = flank[s];
-          if (R > lvl(0.44)) continue;
+          if (R > lvl(j3)) continue;
           d += 'L' + P(R, c + half(R)) + ' ';
         }
       } else {
@@ -6793,8 +6878,26 @@ class Component extends DCLogic {
        relative position would read as a pattern, which is the one thing damage
        must not do. The stride is coprime with nothing in particular — it only has
        to avoid landing in the same place twice running. */
-    const chip = this.props.character ? (g.i * 5 + 3) % g.teeth : -1;
-    const path = this.teethPath(g.teeth, r, chip);
+    /* LAYER: wear (GitHub #112, #5). The live control's own two marked wheels
+       -- the spine's largest and smallest tooth counts, chosen once per
+       solve() by wearWheels() and never re-chosen by the slider. The
+       largest-tooth wheel tracks the slider directly; the smallest tracks it
+       scaled by WEAR_SCUFF_RATIO, so the two marks are always the same
+       relative depths apart that the fixed SCUFF_SEV=0.50 constant used to
+       hard-code -- the slider's top position is exactly that constant's old
+       shipped pair, and every position below it is the same pair scaled down
+       together, down to nothing at 0. `character`, a separate all-wheel
+       debug flag, still overrides both when it is on. */
+    const wear = this.state.wear || 0;
+    let wearChip = -1, wearSev = 1;
+    if (wear > 0) {
+      const ww = this.wearWheels();
+      if (g.i === ww.maxI) { wearChip = (g.i * 5 + 3) % g.teeth; wearSev = wear; }
+      else if (g.i === ww.minI) { wearChip = (g.i * 5 + 3) % g.teeth; wearSev = wear * WEAR_SCUFF_RATIO; }
+    }
+    const chip = this.props.character ? (g.i * 5 + 3) % g.teeth : wearChip;
+    const chipSev = this.props.character ? 1 : wearSev;
+    const path = this.teethPath(g.teeth, r, chip, undefined, chipSev);
     /* Every wheel carries the same engraving band: a solid annulus one module deep just
        inside the tooth roots. The web is held clear of it so nothing is ever cut through
        the lettering, and because MODULE is shared the band is identical on all wheels. */
@@ -9077,6 +9180,14 @@ class Component extends DCLogic {
     const speedNow = this.speedFactor();
     const speedPos = this.speedIndex();
     const speedStrobes = this.speedStrobes(speedNow);
+    /* WEAR (GitHub #112, #5). Continuous, not a ladder -- there is no strobe
+       floor and no benchmark stops to reach past, so this is a plain
+       percentage rather than an index into a stop list. 0-100 in integer
+       steps reads naturally as a percentage in the accessible name and never
+       needs the 1-2-5 preferred-number treatment SPEED_STOPS earns for a
+       multiplier that spans two orders of magnitude. */
+    const wearNow = this.state.wear ?? 0;
+    const wearPos = Math.round(wearNow * 100);
     /* Fraction of the TRACK, not of the multiplier: the thumb travels over
        stop INDICES (see the markup, and CL#96's invariant against a
        continuous control), so the fill is positioned by index too. One stop
@@ -9088,9 +9199,12 @@ class Component extends DCLogic {
        usable travel is (100% - --thumb). --thumb is declared in the <style>
        block and read here, so the paint and the control cannot disagree
        about its size. */
-    const speedAt = (i) => 'calc(var(--thumb) / 2 + '
-      + (speedSpan ? (i / speedSpan) * 100 : 0).toFixed(4) + '% - var(--thumb) * '
-      + (speedSpan ? i / speedSpan : 0).toFixed(6) + ')';
+    /* GENERIC OVER ANY (position, span) PAIR, not specific to SPEED_STOPS
+       (GitHub #112) -- wear's plain 0-100 range reuses this rather than
+       restating the same thumb-centring arithmetic a second time. */
+    const speedAt = (i, span) => 'calc(var(--thumb) / 2 + '
+      + (span ? (i / span) * 100 : 0).toFixed(4) + '% - var(--thumb) * '
+      + (span ? i / span : 0).toFixed(6) + ')';
 
     return {
       gearArt: gearArt,
@@ -9238,6 +9352,25 @@ class Component extends DCLogic {
         try { localStorage.setItem('wozi-speed', String(next)); } catch (err) {}
         if (next !== this.state.speed) this.setState({ speed: next });
       },
+      /* SAME SPLIT AS SPEED: `input` drives the machine live while the thumb
+         moves, `change` is the only thing that persists. Wear is not on the
+         flywheel's own integrator, so there is no coast to carry it -- the
+         marks simply redraw at the new depth on the next render, which
+         setState already gives for free. */
+      onWearInput: (e) => {
+        const next = Math.max(0, Math.min(100, +e.target.value)) / 100;
+        if (next !== this.state.wear) this.setState({ wear: next });
+      },
+      onWearCommit: (e) => {
+        const next = Math.max(0, Math.min(100, +e.target.value)) / 100;
+        try { localStorage.setItem('wozi-wear', String(next)); } catch (err) {}
+        if (next !== this.state.wear) this.setState({ wear: next });
+      },
+      wearMax: 100,
+      wearPos: wearPos,
+      wearTitle: 'Wear ' + wearPos + '%',
+      wearValueText: wearPos + '%',
+      wearMark: wearPos + '%',
       /* ONE TAP BACK TO NORMAL, not a step through the ladder -- the corner
          control's whole job now (GitHub #108). It reaches the exact same
          state key the slider does, at the ladder's floor: speedFactor()
@@ -9333,7 +9466,30 @@ class Component extends DCLogic {
          on it (GitHub #69's A/B finding). */
       speedTrackStyle: (function () {
         const fill = speedStrobes ? 'var(--accent)' : 'var(--muted)';
-        const at = speedAt(speedPos);
+        const at = speedAt(speedPos, speedSpan);
+        return {
+          flex: '1 1 auto',
+          '--thumb-color': fill,
+          backgroundImage: 'linear-gradient(90deg,' + fill + ' 0 ' + at + ',var(--hair) ' + at + ' 100%)',
+          backgroundSize: '100% var(--trk)',
+          backgroundPosition: 'center',
+          backgroundRepeat: 'no-repeat'
+        };
+      })(),
+      /* SAME ROW/READOUT SHAPE AS SPEED'S, minus the strobe colour switch --
+         wear has no benchmark stops to warn about, so its fill is always
+         --muted. speedAt() is reused rather than restated: it is generic
+         over any (position, span) pair, not specific to SPEED_STOPS. */
+      wearRowStyle: { display: 'flex', alignItems: 'center', gap: '10px', padding: '6px 12px 8px' },
+      wearReadStyle: {
+        flex: '0 0 auto', textAlign: 'right', minWidth: '4ch',
+        color: 'var(--muted)',
+        font: "700 var(--icon)/1 'Manrope',system-ui,sans-serif",
+        fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.02em'
+      },
+      wearTrackStyle: (function () {
+        const fill = 'var(--muted)';
+        const at = speedAt(wearPos, 100);
         return {
           flex: '1 1 auto',
           '--thumb-color': fill,

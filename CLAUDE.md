@@ -328,6 +328,36 @@ the slider must be reachable in every state the corner row can be in —
 including a solo host (`?who=<slug>`), where the person picker is deliberately
 absent and the slider is the first thing in the panel regardless.
 
+**Wear is a second live control in Machine Settings, beside Speed** (GitHub
+#112, GitHub #5). It marks exactly two wheels — the spine's own largest- and
+smallest-tooth-count linked wheels, chosen once per solve by `wearWheels()`
+and never re-chosen by the slider, so which wheel is marked cannot change
+mid-drag. The largest tracks the slider directly; the smallest tracks it
+scaled by `WEAR_SCUFF_RATIO` (0.5), so the two marks are always the same
+relative depths apart that a fixed `SCUFF_SEV = 0.50` constant used to
+hard-code before the slider existed — the slider's top position reproduces
+that exact original pair, and the slider's own zero position is today's
+shipped default exactly: `character:false` has kept every fracture invisible
+since CL#16, and Wear at 0 changes nothing about that.
+
+**The fracture geometry is one shape, scaled by severity, not two shapes.**
+`teethPath()`'s `chipIdx`/`chipSev` parameters are the one home for a chipped
+tooth, read by both Wear and the older `character` debug flag (which still
+chips every wheel on the train uniformly when it is on, and still wins if
+both are — the two are independent selections over the same primitive, not
+two competing features). `chipSev` scales how far up the tooth the authored
+fracture (fixed fractions 0.44 through 0.93 of the addendum) reaches, not the
+shape itself: a light scuff is a shallow version of the same crack, never a
+different one.
+
+**It is deliberately subtle, and that is not a bug to chase.** A single
+fractured tooth at full severity on a real wheel is legible only on close
+inspection — one tooth's tip shortened among a dozen or more identical ones —
+which is exactly the point GitHub #5 asked for: *"a scuff, a burr, or a worn
+tooth face... would reward a closer look,"* explicitly not a change obvious
+at a glance. Confirmed by screenshot at 8× crop, not by eye at normal scale,
+before treating an apparently-unchanged render as a failure.
+
 **The pop-out panel is capped and scrollable, because centred-and-overflowing
 loses content off both edges equally.** `togPanelStyle` sits at `top:50%`
 with `transform:translateY(-50%)` and, until CL#114, no limit on its own

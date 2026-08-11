@@ -1504,15 +1504,31 @@ test('the thumb colour is state-driven through a CSS custom property, not a stat
     + 'rule above has nothing state-driven to read');
 });
 
-test('there is exactly one range input on the page', () => {
-  /* The <style> block's own comment claims this, and it is what makes a bare
-     element-type selector (no class) safe here — see the CSS comment above
-     input[type="range"]. If a second range input is ever added, that selector
-     starts styling two different controls identically without anyone deciding
-     it should. */
+test('every range input on the page carries its own --thumb-color', () => {
+  /* Was "there is exactly one range input" -- true until GitHub #112 added a
+     second (Wear, beside Speed in the same settings group). The bare
+     input[type="range"] selector is still safe with two, but for a different
+     reason than "there's only one": --thumb-color is a custom property set
+     INLINE on each element, so the shared ::-webkit-slider-thumb/
+     ::-moz-range-thumb rule reads a different value per control rather than
+     styling both identically by accident. This asserts THAT is still true --
+     a third range input with no --thumb-color of its own would silently fall
+     back to var(--muted) and read as broken rather than as a decision. */
   const count = (SRC.match(/<input type="range"/g) || []).length;
-  eq(count, 1, 'more than one <input type="range"> found — the pseudo-element '
-    + 'rules for it are no longer provably scoped to a single control');
+  eq(count, 2, 'expected exactly two range inputs (Speed, Wear) — a new one '
+    + 'changes what this test and the CSS comment above input[type="range"] '
+    + 'both need to say');
+  const inputs = SRC.match(/<input type="range"[^>]*>/g) || [];
+  inputs.forEach(tag => {
+    const m = tag.match(/style="\{\{\s*(\w+)\s*\}\}"/);
+    ok(m, 'a range input has no style binding to check for --thumb-color: ' + tag);
+    const styleName = m[1];
+    const re = new RegExp(styleName + ':\\s*\\([\\s\\S]*?\\}\\)\\(\\)');
+    const block = SRC.match(re);
+    ok(block && /--thumb-color/.test(block[0]),
+      styleName + ' does not set --thumb-color — it will silently share var(--muted) '
+      + 'with every other range input on the page');
+  });
 });
 
 /* ---- 0d. the flywheel's approach to a new target speed (GitHub #106, CL#127)

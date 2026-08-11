@@ -5,6 +5,59 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ## Unreleased
 
+### Added
+
+- **CL#153 — Wear, a second slider beside Speed in Machine Settings.** (GitHub
+  #112, closing GitHub #5.)
+
+  Turns the fixed `SCUFF_SEV = 0.50` constant a design sweep chose before any
+  control existed into a live 0-100% range, following through on Charles's
+  own reasoning on #112: a control does not weaken CLAUDE.md's rule against
+  drifting constants, it dissolves the problem the rule is about — the value
+  stops being a hidden number with a story attached and becomes a declared
+  default plus a live range anyone can move and see.
+
+  **Marks exactly two wheels — the spine's own largest- and smallest-tooth
+  linked wheels** — chosen once per solve by the new `wearWheels()`, memoized
+  alongside `_solved` so which wheel is marked cannot change mid-drag. The
+  largest tracks the slider directly; the smallest tracks it scaled by the
+  new `WEAR_SCUFF_RATIO` (0.5) — the slider's top position reproduces the
+  exact fixed pair that shipped before, every position below it scales that
+  same pair down together, and **0 is today's shipped default exactly**:
+  `character:false` has kept every fracture invisible since CL#16, and this
+  changes nothing about that. `npm test`/`pixel_regress` confirm 0px/0-diff
+  at Wear's default.
+
+  **`teethPath()`'s existing `chipIdx` fracture geometry gained a `chipSev`
+  parameter (0-1) rather than a second shape.** The authored fracture (fixed
+  fractions 0.44 through 0.93 of the addendum, unchanged) is scaled by how
+  far up the tooth it reaches, not redrawn — a light scuff is a shallow
+  version of the same crack, never a different one. `chipSev` defaults to 1,
+  so the pre-existing `character` debug flag (which chips every wheel
+  uniformly, and still overrides Wear's selective two when both are on)
+  renders byte-identically to before this change.
+
+  **It is genuinely subtle, on purpose** — confirmed by an 8× crop, not by
+  eye at normal scale, after an initial full-page screenshot looked
+  unchanged and needed real debugging (not a rendering bug: `wearWheels()`
+  had a real one, `g.person !== SPINE` compared a string against the whole
+  person object CHAIN_TREE actually stores, always false — fixed to compare
+  against `SPINE_SLUG`) to distinguish "not rendering" from "rendering, but a
+  single fractured tooth among a dozen-plus identical ones is meant to
+  reward a closer look," which is the literal ask on #5.
+
+  Also documents the wear layer in CLAUDE.md, per #112's own "meanwhile" ask
+  — nothing had ever said the fracture existed, that `character` gated it, or
+  that it had been invisible since CL#16.
+
+  `a11y_audit.py`/`devices.py` already select `input:not([type="hidden"])`
+  rather than `button` alone (CL#114's speed-slider widening), so the new
+  range input is covered with no gate changes. `tools/test.js`'s "exactly one
+  range input" invariant is now "every range input carries its own
+  `--thumb-color`" — still safe for the shared `::-webkit-slider-thumb`/
+  `::-moz-range-thumb` rule with two controls, for a different reason than
+  "there's only one." `npm test` 119/0.
+
 ### Fixed
 
 - **CL#152 — the datum plate clears the metal it is drawn near, and searches
