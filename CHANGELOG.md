@@ -7,6 +7,68 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#152 — the datum plate clears the metal it is drawn near, and searches
+  for a clean spot before giving up.** (GitHub #88, #109, #110 — CL#108
+  re-landed against the current mesh/ghost/flywheel code, then taken further
+  than CL#108 ever went.)
+
+  CL#108 gave the plate two candidate seats — its natural side and the mirror
+  — and picked whichever cleared the surrounding metal, or the less-bad of
+  the two when neither did. It was reverted the same day: it deployed red,
+  `verify_motion` reporting 20× React error #185 ("maximum update depth
+  exceeded"), traced at the time to a suspected circular dependency between
+  the plate's seat and the escape-ghost solve. **That cycle does not exist on
+  current `main`** — the stage's own size is `solved.w * S` /
+  `solved.h * S`, fixed before any ghost or datum geometry runs, so nothing
+  the plate does can feed back into what `fitEscapes()` measures. Confirmed
+  empirically, not just by inspection: `verify_motion` against the combined
+  stage reports 0 console errors with the re-landed code in place.
+
+  **Re-landing CL#108's own design surfaced a second, more specific problem.**
+  It only ever evaluates two FIXED points along the run, one per side; when a
+  wheel happens to sit on both of them — common for a short chain like
+  Harper's, surrounded by much larger background ghosts — there is no third
+  option, and the "less-bad of two bad choices" fallback drew a background
+  tooth straight across the "Harper" label, into the last letter. Confirmed
+  live: at one seed/viewport this shipped with a −21.7px overlap and no
+  warning strong enough to say so.
+
+  **The fix searches for a genuinely clean point along the run before ever
+  falling back**, and it solves for that point exactly rather than sampling
+  for it: because the plate's run direction and its normal are perpendicular
+  unit vectors, a wheel's distance to the run's *own axis* never changes as
+  the seat slides along it — only the distance along the run does. That
+  collapses "which positions does this wheel block" from a 2D question to
+  exact 1D interval algebra (`plateExcluded()`), and the nearest clean point
+  outside every wheel's excluded interval is then a direct lookup
+  (`plateNearestClean()`), not a stepped search. Verified across 8 seeds at
+  1440×900: before this, 7 of 8 warned about a crowded seat, several with
+  real overlap; after, 0 of 8 warn, and "Harper" now sits with visible air on
+  both sides of the box.
+
+  `metal` — every wheel the stage draws, linked and idler and ghost alike —
+  is built once per render and threaded through `datumLayer()` into
+  `plateSeat()`, the same shape CL#108 used. A still-crowded seat (nothing
+  clears anywhere in the window) still warns once per chain to the console
+  rather than being hidden, the same rule a crossing bridge or overlapping
+  chains already answer to.
+
+  `tools/test.js` extracts `plateSeat`/`plateAir`/`plateExcluded`/
+  `plateNearestClean`/`datumLayer` the same way it already extracted
+  `plateMetrics`/`plateMargin` — a lifted function calling a method the
+  harness never gave it throws, which is what caught every signature change
+  here before a screenshot did. A new test asserts the metal-clearance rule
+  directly (a plate gives way to a crowded side even at zero slide cost, a
+  plate crowded on *both* sides still warns and reports itself uncrowded,
+  and a clean plate stays silent) — mutation-tested by reverting the
+  side-selection comparator to slide-only and confirming the new test catches
+  it by name. `npm test` 119/0. `pixel_regress` 0px at the suite's default
+  seed (expected — CLAUDE.md's own warning about 0px meaning "not tested"
+  applies here: the default seed does not happen to crowd anyone's plate),
+  confirmed instead at the seed that does (14,978px, matching exactly what
+  moved). `dom_invariants`, `verify_motion`, `pill_clip`, `escape_mesh.py` all
+  green and unaffected.
+
 - **CL#151 — the favicon is a "w" in the page's own font, not a generic blue
   dot, and `/favicon.ico` is a real file instead of a 403.** (GitHub #119.)
 

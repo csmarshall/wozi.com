@@ -3474,20 +3474,37 @@ function datumRunsOn(solved, axisRot, spineSlug, ghosts, sites, plates, S) {
    the same way the page hands it in. Warnings are captured rather than printed:
    "neither side fits" is a reported state, and a test that could not see it
    could not tell it from a silent give-up. */
-function plateSeatOn(vpBox, r, S, pw, ph, past, box) {
+function plateSeatOn(vpBox, r, S, pw, ph, past, box, metal) {
   const metrics = new Function('MODULE',
     'return function ' + grabBlock('  plateMetrics(s) {', '{', '}') + ';')(page.MODULE);
   const margin = new Function('return function ' + grabBlock('  plateMargin(s) {', '{', '}') + ';')();
+  /* plateSeat() now calls this.plateAir() and this.datumClear() (GitHub #88,
+     CL#108 re-landed), so both are extracted onto the ctx the same way
+     plateMetrics/plateMargin already were -- a lifted function calling a
+     method the harness never gave it throws, which is exactly the shape of
+     extraction failure this file's own docstring warns about. */
+  const air = new Function('MODULE',
+    'return function ' + grabBlock('  plateAir(O, at, r, pw, ph, metal) {', '{', '}') + ';')(page.MODULE);
+  const clear = new Function('MODULE', 'PLATE_TOP_CLEAR',
+    'return function ' + grabBlock('  datumClear(S) {', '{', '}') + ';')(
+    page.MODULE, page.PLATE_TOP_CLEAR);
+  /* plateSeat() now searches for an exact clean window before falling back
+     to the single unsearched point (GitHub #88/#109/#110 follow-up) -- both
+     helpers it calls on `this` are extracted the same way plateAir/datumClear
+     already are. */
+  const excl = new Function('return function ' + grabBlock('  plateExcluded(O, r, pw, ph, metal, air) {', '{', '}') + ';')();
+  const nearest = new Function('return function ' + grabBlock('  plateNearestClean(want, lo, hi, excluded) {', '{', '}') + ';')();
   const seat = new Function('PLATE_START_ALONG',
-    'return function ' + grabBlock('  plateSeat(r, S, pw, ph, past, box) {', '{', '}') + ';')(
+    'return function ' + grabBlock('  plateSeat(r, S, pw, ph, past, box, metal) {', '{', '}') + ';')(
     page.PLATE_START_ALONG);
   const clip = new Function('return function ' + grabBlock('  slabClip(px, py, dx, dy, box) {', '{', '}') + ';')();
   const warns = [];
-  const ctx = { _vpBox: vpBox, plateMetrics: metrics, plateMargin: margin, slabClip: clip };
+  const ctx = { _vpBox: vpBox, plateMetrics: metrics, plateMargin: margin, slabClip: clip,
+    plateAir: air, datumClear: clear, plateExcluded: excl, plateNearestClean: nearest };
   const real = console.warn;
   console.warn = (m) => warns.push(m);
   try {
-    const out = seat.call(ctx, r, S, pw, ph, past === undefined ? 0 : past, box || vpBox);
+    const out = seat.call(ctx, r, S, pw, ph, past === undefined ? 0 : past, box || vpBox, metal || []);
     return { seat: out, warns: warns, pad: margin.call(ctx, S) };
   } finally { console.warn = real; }
 }
@@ -3509,7 +3526,7 @@ function seatSlugs(solved) {
    other mention of the word. `datum` appears in chainAxes' rationale first. */
 const DATUM_SRC = SRC.slice(SRC.indexOf('  datumRuns(solved, ghosts, S) {'),
   SRC.indexOf('  fitEscapes() {'));
-const DATUM_DRAW = SRC.slice(SRC.indexOf('  datumLayer(solved, S, box) {'),
+const DATUM_DRAW = SRC.slice(SRC.indexOf('  datumLayer(solved, S, box, metal) {'),
   SRC.indexOf('  renderVals() {'));
 /* Bounded at datumInk() rather than at ghostSvg(), because the two methods sit
    next to each other and the rule below is about ONE of them. datumOpacity() may
@@ -3887,6 +3904,47 @@ test('the plate seats on the side the page has room for, and the ticks follow it
   ticks.forEach(t => ok(/out \* MAJOR/.test(t),
     'a tick is struck at a fixed sign (' + t + '), so a mirrored datum draws its '
     + 'ticks into the wheels it is meant to clear'));
+});
+
+test('a plate gives way to the metal, even when that costs more slide', () => {
+  /* GitHub #88, CL#108 (re-landed against the current mesh/ghost/flywheel
+     code, after CL#108 itself was reverted for an unrelated render loop --
+     see CHANGELOG). A plate that only ever chose the side with less slide
+     could still choose a side a wheel sits on top of; this is the rule that
+     stops it. */
+  const r = { person: 'p', plate: 'P', ux: 1, uy: 0, nx: 0, ny: 1,
+    o: { x: 0, y: 0 }, alt: { x: 0, y: -20 }, stations: [], d0: 0, d1: 0 };
+  const pw = 40, ph = 10, S = 1;
+  const wide = { x0: -100, y0: -100, x1: 100, y1: 100 };
+  /* A wheel sitting exactly on the natural side's seat point (oy=0, at the
+     figure's own distance in from the start), with the alternate side clear.
+     Only the metal-clearance rule can move this seat -- the viewport alone
+     has room on both sides, so a seat measured by slide/window fit picks the
+     natural side every time. */
+  const naturalAt = wide.x0 + page.PLATE_START_ALONG + pw / 2;
+  const onNaturalSide = [{ x: naturalAt, y: 0, r: 5 }];
+  const A = plateSeatOn(wide, r, S, pw, ph, 0, wide, onNaturalSide);
+  eq(A.seat.side, -1, 'a plate stayed on a crowded side that costs it nothing '
+    + 'in slide, over an alternate side that is clear');
+  eq(A.seat.clean, true, 'the seat that was chosen still reports itself as crowded');
+  /* WHEN NEITHER SIDE CLEARS ANYWHERE IN ITS WINDOW, THE ROOMIER ONE WINS AND
+     IT WARNS -- the same shape of rule as a crossing bridge or overlapping
+     chains: absent is worse than crowded, but crowded is reported, never
+     hidden. A wheel this large excludes the whole finite window on its own
+     side regardless of where the search would otherwise land -- the point is
+     to prove the "genuinely nowhere clean" fallback still fires, which one
+     small wheel no longer does now that plateSeat searches around it. */
+  const onBothSides = [{ x: naturalAt, y: 0, r: 1000 }, { x: naturalAt, y: -20, r: 1000 }];
+  const B = plateSeatOn(wide, r, S, pw, ph, 0, wide, onBothSides);
+  eq(B.seat.clean, false, 'a plate crowded on both sides reports itself as clean');
+  eq(B.warns.length, 1, 'a plate crowded on both sides warns about it');
+  ok(/no uncrowded seat/.test(B.warns[0]), 'the warning does not say the seat is crowded');
+  /* A CLEAN SEAT IS SILENT, exactly as it was before this rule existed --
+     nothing about a plate that already had room to spare should start
+     warning just because the metal it is compared against is now published. */
+  const C = plateSeatOn(wide, r, S, pw, ph, 0, wide, []);
+  eq(C.seat.clean, true, 'a plate with no metal to clear reports itself as crowded');
+  eq(C.warns.length, 0, 'a plate with no metal nearby warns about crowding anyway');
 });
 
 test('the datum plate defaults to the person name, untransformed', () => {

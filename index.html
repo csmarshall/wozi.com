@@ -8221,7 +8221,97 @@ class Component extends DCLogic {
     return [isFinite(lo) ? lo : 0, isFinite(hi) ? hi : 0];
   }
 
-  plateSeat(r, S, pw, ph, past, box) {
+  /* THE AIR BETWEEN A PLATE SEATED AT `at` AND THE NEAREST DRAWN TOOTH, in
+     rendered pixels, negative where a wheel laps over the placard (GitHub
+     #88, CL#108, re-landed against the current mesh/ghost/flywheel code).
+
+     THE PLATE IS A ROTATED RECTANGLE AND A WHEEL IS A CIRCLE, so the distance
+     is exact rather than sampled: resolve the wheel's centre onto the
+     plate's own two axes -- the run and its normal, which the seat already
+     carries -- and what is left outside the half-extents on each is the
+     corner-to-centre offset. `Math.hypot` of the two closes it, and the tip
+     radius comes off last. A centre inside the rectangle gives zero on both
+     axes and hands back minus the radius, which is the right answer for a
+     wheel sitting on top of the mark.
+
+     THE TIP RADIUS, NOT THE PITCH RADIUS, for the same reason datumRuns()
+     stands the line off `g.ro`: the gap a viewer sees is to the teeth, not
+     to the circle they are cut on -- `metal`'s own `.r` is already `g.ro * S`
+     for exactly this reason (see its construction in render()). */
+  plateAir(O, at, r, pw, ph, metal) {
+    const cx = O.ox + r.ux * at, cy = O.oy + r.uy * at;
+    let air = Infinity;
+    for (let i = 0; i < metal.length; i++) {
+      const m = metal[i];
+      const along = Math.abs((m.x - cx) * r.ux + (m.y - cy) * r.uy) - pw / 2;
+      const across = Math.abs((m.x - cx) * r.nx + (m.y - cy) * r.ny) - ph / 2;
+      const d = Math.hypot(Math.max(0, along), Math.max(0, across)) - m.r;
+      if (d < air) air = d;
+    }
+    return air;
+  }
+
+  /* THE `at` VALUES ALONG ONE SIDE'S RUN WHERE THE PLATE WOULD OVERLAP SOME
+     WHEEL, SOLVED EXACTLY (GitHub #88/#109/#110, follow-up to CL#108's
+     re-landing). CL#108 tried exactly one position per side -- clamped
+     straight from where the mark starts -- and fell back to whichever side
+     overlapped LESS when both did, which is what let a background tooth cut
+     across "Harper" at #109's own crowded viewport: neither of the two fixed
+     points it tried was ever clear, and nothing else was tried.
+
+     THE ACROSS-AXIS DISTANCE TO A WHEEL DOES NOT DEPEND ON `at`, because `u`
+     and `n` are perpendicular unit vectors: sliding the plate along the run
+     moves it parallel to the wheel, never closer to or further from its own
+     line across the run. That collapses "which positions does this wheel
+     block" from a 2D search to exact 1D interval algebra -- solve
+     `hypot(along, across) = air + wheel radius` for `along` with `across`
+     fixed, and the blocked band is `|D - at| <= alongMax + pw/2` around the
+     wheel's own projected position `D`. Exact, not sampled -- the same
+     preference this file states everywhere else a search could otherwise
+     stand in for algebra. */
+  plateExcluded(O, r, pw, ph, metal, air) {
+    const out = [];
+    for (let i = 0; i < metal.length; i++) {
+      const m = metal[i];
+      const dx = m.x - O.ox, dy = m.y - O.oy;
+      const D = dx * r.ux + dy * r.uy;
+      const across = Math.max(0, Math.abs(dx * r.nx + dy * r.ny) - ph / 2);
+      const R = air + m.r;
+      if (across >= R) continue;   /* already clear on the across axis alone */
+      const alongMax = Math.sqrt(Math.max(0, R * R - across * across));
+      const half = alongMax + pw / 2;
+      out.push([D - half, D + half]);
+    }
+    out.sort((a, b) => a[0] - b[0]);
+    const merged = [];
+    out.forEach(iv => {
+      const last = merged[merged.length - 1];
+      if (last && iv[0] <= last[1]) last[1] = Math.max(last[1], iv[1]);
+      else merged.push(iv.slice());
+    });
+    return merged;
+  }
+
+  /* THE POINT CLOSEST TO `want`, WITHIN [lo, hi], THAT NO EXCLUDED INTERVAL
+     COVERS -- or null if the whole span is blocked. `want` is clamped into
+     the window first, exactly as the un-searched version always did, so a
+     clean want stays exactly where it always seated. */
+  plateNearestClean(want, lo, hi, excluded) {
+    const w = Math.max(lo, Math.min(hi, want));
+    let inside = null;
+    for (let i = 0; i < excluded.length; i++) {
+      if (w >= excluded[i][0] && w <= excluded[i][1]) { inside = excluded[i]; break; }
+    }
+    if (!inside) return w;
+    const down = inside[0] - 1e-6, up = inside[1] + 1e-6;
+    const downOk = down >= lo, upOk = up <= hi;
+    if (!downOk && !upOk) return null;
+    if (!downOk) return up;
+    if (!upOk) return down;
+    return (w - down) <= (up - w) ? down : up;
+  }
+
+  plateSeat(r, S, pw, ph, past, box, metal) {
     const nat = { ox: r.o.x * S, oy: r.o.y * S };
     /* THE PLATE'S NEAR EDGE IS WHAT THE FIGURE MEASURES TO, so half the plate's
        measured width is carried here: what the eye compares is the gap between
@@ -8269,6 +8359,24 @@ class Component extends DCLogic {
       return lo <= hi ? [lo, hi] : null;
     };
     const alt = { ox: r.alt.x * S, oy: r.alt.y * S, side: -1 };
+    /* HOW MUCH AIR A SEAT HAS TO KEEP FROM THE METAL (GitHub #88, CL#108): the
+       air the mark already stands off it. datumClear() is that distance --
+       what is left of the owner's PLATE_TOP_CLEAR once the plate's own
+       half-height is paid for -- so there is one home for "how close this
+       mark comes to a tooth", whichever axis it is measured on. It answers in
+       solve units because datumRuns() places lines in them; the seat is
+       solved in rendered pixels, so it is multiplied straight back. */
+    const air = this.datumClear(S) * S;
+    /* WHICH OF TWO SEATS IS THE BETTER ONE. A seat that clears the metal beats
+       one that does not, whatever it costs in slide -- a plate with a
+       background wheel drawn across it is not a placement, it is the mark
+       failing. Among seats that clear, the smaller slide wins and the
+       comparison is strict, so the natural side keeps every tie exactly as it
+       did before this rule existed; among seats that do not, the roomier one
+       wins, because when the composition cannot be made clean the least
+       crowded plate is the one to draw. */
+    const beats = (c, b) => (c.clean !== b.clean ? c.clean
+      : c.clean ? c.slide < b.slide : c.air > b.air);
     let best = null;
     /* `side` travels with the origin because the ticks are struck along the
        normal, and on the mirrored origin the normal points AT the wheels: a
@@ -8306,13 +8414,20 @@ class Component extends DCLogic {
          on the machine seats that chain's plate within a wheel's radius of the
          one wheel it owns -- which is the complaint, restated at 25px. */
       const want = from(Math.max(startOf(O), this.slabClip(O.ox, O.oy, r.ux, r.uy, vp)[0]));
-      const at = Math.max(iv[0], Math.min(iv[1], want));
+      /* THE UNSEARCHED POSITION, AND WHAT IT COSTS: kept as the fallback for
+         when no point in this window clears the metal at all, and as what
+         `slide` is measured against either way -- the figure this file states
+         is a preference for the mark's OWN position, not for wherever a
+         search happens to land it. */
+      const naiveAt = Math.max(iv[0], Math.min(iv[1], want));
+      const excluded = this.plateExcluded(O, r, pw, ph, metal, air);
+      const cleanAt = this.plateNearestClean(want, iv[0], iv[1], excluded);
+      const at = cleanAt === null ? naiveAt : cleanAt;
       const slide = Math.abs(at - want);
-      /* Strictly smaller, so the natural side keeps every tie -- including the
-         zero-slide tie, which is the case that must not move. */
-      if (!best || slide < best.slide) {
-        best = { ox: O.ox, oy: O.oy, at: at, slide: slide, side: O.side || 1 };
-      }
+      const gap = this.plateAir(O, at, r, pw, ph, metal);
+      const cand = { ox: O.ox, oy: O.oy, at: at, slide: slide, side: O.side || 1,
+        air: gap, clean: gap >= air };
+      if (!best || beats(cand, best)) best = cand;
     });
     if (!best) {
       if (!this._plateWarned) this._plateWarned = {};
@@ -8322,6 +8437,20 @@ class Component extends DCLogic {
           + 'datum plate — the mark is drawn where it falls');
       }
       return { ox: nat.ox, oy: nat.oy, at: from(startOf(nat)), side: 1 };
+    }
+    /* A CROWDED PLATE IS ANNOUNCED, NOT HIDDEN -- the same rule the crossing
+       bridge and the chain-overlap pass already answer to. Both sides were
+       measured against every wheel on the stage and neither cleared, so the
+       roomier one is drawn and the console is the only place that says the
+       composition fell short of what this rule asks for. Once per chain. */
+    if (!best.clean) {
+      if (!this._crowdWarned) this._crowdWarned = {};
+      if (!this._crowdWarned[r.person]) {
+        this._crowdWarned[r.person] = true;
+        console.warn('wozi: chain "' + r.person + '" has no uncrowded seat for its datum '
+          + 'plate — nearest wheel ' + best.air.toFixed(1) + 'px, wanted ' + air.toFixed(1)
+          + 'px, both sides tried');
+      }
     }
     return best;
   }
@@ -8347,7 +8476,7 @@ class Component extends DCLogic {
      the edge of it and a little past, which is what makes it leave the drawing
      the way a scribed datum runs past the parts it references -- derived from
      what is actually on stage rather than from a guessed length. */
-  datumLayer(solved, S, box) {
+  datumLayer(solved, S, box, metal) {
     const h = React.createElement;
     const runs = this.datumRuns(solved, this.state.ghosts, S);
     if (!runs.length) return null;
@@ -8398,7 +8527,7 @@ class Component extends DCLogic {
          the other side, because the seat measures from where the LINE starts and
          the line starts a run-out beyond the clip below (#95). Two copies of
          either would put the plate a little way off the end of its own mark. */
-      const seat = this.plateSeat(r, S, pw, PLATE_H, PAST, box);
+      const seat = this.plateSeat(r, S, pw, PLATE_H, PAST, box, metal);
       const ox = seat.ox, oy = seat.oy;
       /* OUTBOARD IS WHICHEVER WAY THE MARK WAS LAID. Every tick is struck along
          the normal, away from the assembly the line references -- and the
@@ -8524,6 +8653,20 @@ class Component extends DCLogic {
        move into an inner one that carries the parallax transform. Both parts
        matter and for different reasons -- see the two comments below. */
     const _gl = this.state.ghosts || [];
+    /* EVERY WHEEL THE STAGE DRAWS, as a tip circle in rendered pixels: the
+       linked gears, the idlers that carry a bridge or an origin run, and the
+       escape runs' ghosts (GitHub #88, CL#108, re-landed). plateSeat() spends
+       the side it seats a datum plate on against this -- the marks may not
+       move any of them, so the plate is what has to give way.
+       ONE LIST FOR ALL THREE KINDS, because a plate is crowded by whatever is
+       drawn over it, whichever kind it is: the escape run leaves along its
+       own chain's axis and the mark is laid alongside that axis, so the two
+       arrive at the same edge of the page, but a mark near the gap between
+       two chains has an idler and the other chain's gears in reach too.
+       Built once, outside plateSeat's own per-chain loop, since it is a
+       property of the stage and every mark on it is measured against the
+       same metal. */
+    const metal = solved.gears.concat(_gl).map(g => ({ x: g.cx * S, y: g.cy * S, r: g.ro * S }));
     let _gx0 = 0, _gy0 = 0, _gx1 = solved.w * S, _gy1 = solved.h * S;
     /* GHOST_BOX_PAD is the margin this box has always carried on top of the
        true addendum -- the two used to be a single number, 1.25, which read
@@ -8549,7 +8692,7 @@ class Component extends DCLogic {
        time it was measured. One direction only: wheels bound the line, the line
        does not bound the wheels. */
     const _wheels = { x0: _gx0, y0: _gy0, x1: _gx1, y1: _gy1 };
-    const datum = this.datumLayer(solved, S, _wheels);
+    const datum = this.datumLayer(solved, S, _wheels, metal);
     /* Widen the LAYER, not the wheels' box, so the group's surface holds the
        whole mark in WebKit too -- the same rule as #21, applied to the thing
        that just moved inside it. */
