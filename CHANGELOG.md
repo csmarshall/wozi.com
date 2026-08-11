@@ -7,6 +7,27 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#149 — `hubR * 1.5` gets one home: `BOSS_MUL`.** (GitHub #95.)
+
+  Ten boss circles and three pattern-start clearances (`spokes`, `sunburst`'s
+  `rInR`, and one more) all wrote the same fact — "where the boss disc's edge
+  sits" — as the same bare literal. The `hexcore` comment already stated why
+  that matters: a lattice that cleared less than the boss ran its innermost
+  ring underneath the boss's own fill. Ten call sites move with a single edit
+  now; three clearance sites no longer can silently stop agreeing with them.
+
+  `tools/test.js` read two of those thirteen sites by exact string/regex
+  match on the literal `1.5`, so the rename would have broken its own
+  extraction rather than the page — fixed to resolve `BOSS_MUL` from
+  `index.html` the same way it already reads every other page constant,
+  rather than either hardcoding the new name or leaving the old literal in
+  place to keep the harness quiet.
+
+  Deliberately untouched: `1.55`/`1.6`/`1.32`/`1.3`/`1.35`, which are each
+  family's own choice to clear the boss by a further margin, not instances of
+  this fact. `npm test` 118/0, `pixel_regress` 0px on both scopes — a pure
+  rename has no visible effect by construction.
+
 - **CL#148 — `tools/escape_mesh.py` (GitHub #117) is now wired into CI, not
   just written.** The harness itself already existed and already passed — 4
   runs, 17 ghosts, 17 meshes measured, worst residual 0.0144px of a 0.35px

@@ -4799,8 +4799,9 @@ test('no sunburst window falls below its own legibility floor, on the smallest b
     'could not read the sunburst family entry out of CENTRE_FAMILIES -- the extraction is broken, not the page');
 
   const fn = new Function('hubR', 'wellR', 'g', 'S',
-    grabDecl('const px = (want, lo, hi) =>') + '\n'
-    + grabDecl('const rInR = Math.max(hubR * 1.5, 9)') + '\n'
+    'const BOSS_MUL = ' + grabNumber('BOSS_MUL') + ';\n'
+    + grabDecl('const px = (want, lo, hi) =>') + '\n'
+    + grabDecl('const rInR = Math.max(hubR * BOSS_MUL, 9)') + '\n'
     + grabDecl('const winMin =') + '\n'
     + grabDecl('const maxLegible =') + '\n'
     + grabDecl('const nR =') + '\n'
@@ -5574,12 +5575,16 @@ test('a kidney slot keeps its width-to-length proportion across the whole dealt 
     return { web: +m[1], hub: +m[2] };
   }
   function callSiteFor(kind) {
+    /* The hub multiplier is a bare number OR the named constant BOSS_MUL
+       (GitHub #95) -- either is read here rather than assumed, so renaming
+       what the call site passes cannot silently stop being checked. */
     const re = kind === 'spokes'
-      ? /slots\(arms,\s*hubR\s*\*\s*([0-9.]+),\s*wellR,\s*([0-9.]+),\s*([0-9.]+)\)/
-      : /slots\(g\.arms,\s*hubR\s*\*\s*([0-9.]+),\s*wellR,\s*([0-9.]+),\s*([0-9.]+)\)/;
+      ? /slots\(arms,\s*hubR\s*\*\s*([0-9.]+|BOSS_MUL),\s*wellR,\s*([0-9.]+),\s*([0-9.]+)\)/
+      : /slots\(g\.arms,\s*hubR\s*\*\s*([0-9.]+|BOSS_MUL),\s*wellR,\s*([0-9.]+),\s*([0-9.]+)\)/;
     const m = gearSvgSrc.match(re);
     ok(m, 'could not find the ' + kind + ' call site to slots() -- extraction is broken, not the page');
-    return { hubMult: +m[1], aspect: +m[2], widthScale: +m[3] };
+    const hubMult = m[1] === 'BOSS_MUL' ? grabNumber('BOSS_MUL') : +m[1];
+    return { hubMult: hubMult, aspect: +m[2], widthScale: +m[3] };
   }
   function wheelRadii(teeth, fam) {
     const r = page.MODULE * teeth / 2;

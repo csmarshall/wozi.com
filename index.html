@@ -553,6 +553,15 @@ const TOOTH_THICK = 0.495; /* tooth thickness at the pitch circle, as a fraction
                               is backlash. Measured at all six pairs: 0.495 gives zero
                               interference with 0.11px between the flanks, so they read as
                               touching without anti-aliasing ever fusing them. */
+/* Where the raised boss disc's edge sits, as a multiple of hubR (GitHub #95).
+   Every family that draws a boss draws it at this radius, and a family that
+   cuts a pattern starting inside it runs that pattern's innermost ring
+   underneath the boss's own fill -- the fault the hexcore comment below
+   describes. One home for the fact instead of the same literal at ten boss
+   circles and three separate pattern-start clearances. Families that
+   deliberately clear further out (1.55, 1.6) are their own choice and are
+   not this constant. */
+const BOSS_MUL = 1.5;
 /* Depth of the engraving band, in modules — uniform on every wheel. Module-based
    rather than a fraction of the radius, which is what keeps the band exactly as
    wide on a 13-tooth blank as on a 19-tooth one.
@@ -6847,7 +6856,7 @@ class Component extends DCLogic {
       const arms = g.arms;
       inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
       inner.push(h('circle', { key: 'sh', r: wellR + 2, fill: 'none', stroke: p[3], strokeOpacity: 0.35, strokeWidth: 2.5 }));
-      slots(arms, hubR * 1.5, wellR, 1.2, 0.72);
+      slots(arms, hubR * BOSS_MUL, wellR, 1.2, 0.72);
     } else if (kind === 'pockets') {
       /* Cut clean through — a blind pocket reads as a failed hole at this scale. */
       inner.push(h('circle', { key: 'face', r: faceR, fill: 'url(#' + id + 'u)' }));
@@ -6860,7 +6869,7 @@ class Component extends DCLogic {
          more work than leaving the web solid. Now few and LARGE, as big as the
          spacing allows, seated in the outer web where removed mass actually
          counts -- the bike-chainring / flywheel drilling pattern. */
-      const rInD = Math.max(hubR * 1.5, 9), rOutD = wellR - 2, spanD = rOutD - rInD;
+      const rInD = Math.max(hubR * BOSS_MUL, 9), rOutD = wellR - 2, spanD = rOutD - rInD;
       /* CENTRE ON THE AREA, NOT THE RADIUS. Charles, looking at a drilled wheel:
          "why isn't the circle centred in the AREA of the annulus?" It was not:
          the orbit was rIn + span*0.58, a hand-picked fraction. Area grows as
@@ -7135,7 +7144,7 @@ class Component extends DCLogic {
         }
         holes.push(d2 + 'Z');
       }
-      inner.push(h('circle', { key: 'boss', r: hubR * 1.5, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
+      inner.push(h('circle', { key: 'boss', r: hubR * BOSS_MUL, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
     } else if (kind === 'star') {
       /* A star truss: arc-topped windows with straight sides — the first
          straight edges anywhere on the page, welded-plate rather than cast. */
@@ -7152,7 +7161,7 @@ class Component extends DCLogic {
         d2 += 'L' + PT(rInS, a0 + stepS - gB) + ' L' + PT(rInS, a0 + gB) + ' ';
         holes.push(d2 + 'Z');
       }
-      inner.push(h('circle', { key: 'boss', r: hubR * 1.5, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
+      inner.push(h('circle', { key: 'boss', r: hubR * BOSS_MUL, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
     } else if (kind === 'honeycomb') {
       /* A hex CORE, the kind that stiffens a rover deck or a robot chassis --
          not one polite orbit of six hexes, which is what this used to be.
@@ -7205,7 +7214,7 @@ class Component extends DCLogic {
           holes.push(d2 + 'Z');
         }
       }
-      inner.push(h('circle', { key: 'boss', r: hubR * 1.5, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
+      inner.push(h('circle', { key: 'boss', r: hubR * BOSS_MUL, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
     } else if (kind === 'hexcore') {
       /* A hexagonal patch of hexagons, not a circular crop of them.
 
@@ -7279,7 +7288,7 @@ class Component extends DCLogic {
          those two were written against -- so the search keeps the room it had,
          now at every scale instead of one. */
       const CELL_MAX = CELL_MIN * 1.7;
-      /* Clear the BOSS, not the hub. The boss disc is drawn at hubR * 1.5 and
+      /* Clear the BOSS, not the hub. The boss disc is drawn at hubR * BOSS_MUL and
          painted over the web, so a lattice that only cleared hubR * 1.1 ran its
          innermost ring underneath it -- half-covered cells, and the ragged inner
          edge the hex-ring boundary was supposed to have got rid of. Every other
@@ -7508,7 +7517,7 @@ class Component extends DCLogic {
         }
       }
       amShells(inner);
-      inner.push(h('circle', { key: 'boss', r: hubR * 1.5, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
+      inner.push(h('circle', { key: 'boss', r: hubR * BOSS_MUL, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
     } else if (kind === 'isogrid') {
       /* Equilateral triangles on a true Cartesian lattice -- the isogrid pattern
          real stiffened hardware uses, and the one Charles picked for covering the
@@ -7619,7 +7628,7 @@ class Component extends DCLogic {
         }
       }
       amShells(inner);
-      inner.push(h('circle', { key: 'boss', r: hubR * 1.5, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
+      inner.push(h('circle', { key: 'boss', r: hubR * BOSS_MUL, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
     } else if (kind === 'polarbrick' || kind === 'polariso') {
       /* POLAR, not Cartesian -- and that is the whole point. The region to fill
          is an ANNULUS, between the boss and the engraving. A Cartesian lattice
@@ -7693,7 +7702,7 @@ class Component extends DCLogic {
         }
       }
       amShells(inner);
-      inner.push(h('circle', { key: 'boss', r: hubR * 1.5, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
+      inner.push(h('circle', { key: 'boss', r: hubR * BOSS_MUL, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
     } else if (kind === 'labyrinth') {
       /* Two staggered rings of arc slots, brake-rotor fashion. The stagger is
          the load path: every slot's ends land on solid metal in the other ring. */
@@ -7769,7 +7778,7 @@ class Component extends DCLogic {
         ring(rInL + depthL * 0.3, nL, 0);
         ring(rInL + depthL * 0.72, nL + 3, 360 / (nL + 3) / 2);
       }
-      inner.push(h('circle', { key: 'boss', r: hubR * 1.5, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
+      inner.push(h('circle', { key: 'boss', r: hubR * BOSS_MUL, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
     } else if (kind === 'geneva') {
       /* Geneva-plate slots: radial stadium cuts with an end drill, leaving a
          Maltese cross of metal. The drill is real practice — it stops cracks. */
@@ -7792,7 +7801,7 @@ class Component extends DCLogic {
           ' A' + er + ',' + er + ' 0 1 0 ' + (ex - er).toFixed(2) + ',' + ey.toFixed(2) +
           ' A' + er + ',' + er + ' 0 1 0 ' + (ex + er).toFixed(2) + ',' + ey.toFixed(2) + ' Z');
       }
-      inner.push(h('circle', { key: 'boss', r: hubR * 1.5, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
+      inner.push(h('circle', { key: 'boss', r: hubR * BOSS_MUL, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
     } else if (kind === 'sunburst') {
       /* Every window cut to the SAME depth, per Charles. Alternating long and
          short read as decoration applied to a wheel; one depth leaves the metal
@@ -7803,7 +7812,7 @@ class Component extends DCLogic {
       /* Stops at the boss edge rather than under it: the spokes still converge on
          the boss, which is what was wanted, without windows running beneath a
          disc that is painted on top of them. */
-      const rInR = Math.max(hubR * 1.5, 9), rOutR = wellR - 2;
+      const rInR = Math.max(hubR * BOSS_MUL, 9), rOutR = wellR - 2;
       /* THE COUNT FOLLOWS FROM THE BLANK, rather than being dealt (CL#117,
          GitHub #96). A window's half-angle at the inner radius is
          (360/n)*0.16 degrees, so its chord width there is
@@ -7836,7 +7845,7 @@ class Component extends DCLogic {
         const wi = (360 / nR) * 0.16, wo = (360 / nR) * 0.34;
         holes.push('M' + PT(rInR, A - wi) + ' L' + PT(rOutR, A - wo) + ' L' + PT(rOutR, A + wo) + ' L' + PT(rInR, A + wi) + ' Z');
       }
-      inner.push(h('circle', { key: 'boss', r: hubR * 1.5, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
+      inner.push(h('circle', { key: 'boss', r: hubR * BOSS_MUL, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
     } else {
       /* Spiral web (was the plain wheel): slots wound like a lathe's scroll
          chuck, each converging from the well onto the hub. Cut clean through
@@ -7869,7 +7878,7 @@ class Component extends DCLogic {
         for (let q = 1; q <= STEPS; q++) se += 'L' + spt(q / STEPS, -spW / 2 - 1.3) + ' ';
         inner.push(h('path', { key: 'spe' + k, d: se, fill: 'none', stroke: ft.line, strokeOpacity: 0.5, strokeWidth: 1.4 }));
       }
-      inner.push(h('circle', { key: 'boss', r: hubR * 1.5, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
+      inner.push(h('circle', { key: 'boss', r: hubR * BOSS_MUL, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
     }
     /* The BOX is scaled, the viewBox is not: every path, gradient and engraving
        below is authored in module units and stays there, while the element that
