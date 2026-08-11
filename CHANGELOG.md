@@ -5,6 +5,52 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ## Unreleased
 
+### Fixed
+
+- **CL#157 — a timing mark only exists where there is metal, and an epicyclic
+  is marked where a real one would be.** (GitHub #132, #133.)
+
+  Charles, with a screenshot: *"timing mark lines added to plantary and grid
+  centers adding lines that are drawn on top of empty space"* and *"timming
+  marks missing from planets in single and dual planetary gearsets."* Two
+  reports, one root cause: CL#154's mark spans `hubR * BOSS_MUL → wellR`, which
+  is **exactly the web** — solid on a plain blank, and the one annulus every
+  other family either cuts a pattern into or draws an assembly onto. The mark
+  never consulted what the wheel's web actually contained.
+
+  **Cut families now clip the mark to the body's own solid material**, reusing
+  the `path + holes` evenodd clip the fill already builds, so it breaks at each
+  opening and resumes on the next wall by itself. Note this is the *opposite*
+  case to the cut contour's rule (CLAUDE.md: draw that one OUTSIDE the clipped
+  group, since a stroke tracing a hole boundary loses its inner half) — that
+  warning is about a stroke ON the boundary; this is one crossing the interior,
+  where being cut off at the boundary is the whole intent.
+
+  **Epicyclics get no mark on the blank at all, and marks on the sun and every
+  planet instead.** Relocating rather than clipping, because on
+  `planetary`/`ravigneaux` that span is where the ring, sun and planets are
+  DRAWN, and because the blank is the one body in an epicyclic whose phase
+  carries no information. Each planet's mark lives *inside* the group carrying
+  its own `base` rotation, not the carrier's — what a fitter actually checks is
+  each planet's phase against the carrier arm, and a mark riding the carrier
+  would hold still relative to it and say nothing. So #133 was not a missing
+  feature so much as the same mistake as #132 seen from the other side.
+
+  Relocating the shape to three sites made it worth having one home:
+  `timingMark(rIn, rOut, mod, col)` carries the proportions once (0.22 of a
+  module of stroke, a 0.28 dot), the same argument `teethPath()`'s `chipSev`
+  makes for a fracture. Planet and sun marks stop inside their own root circles
+  via `TOOTH_DED`, derived rather than chosen.
+
+  Verified by counting elements rather than trusting a screenshot of a
+  deliberately subtle mark: with `?kind=` forcing each family, `planetary` gives
+  35 marks = 7 × (1 sun + 4 planets) and **0** on the blanks, `ravigneaux` 49 =
+  7 × (1 sun + 6 planets), and `isogrid`/`hexcore`/`spokes` one per wheel with
+  **all 7 clipped**; `timing=false` gives 0 everywhere, so the layer gate still
+  holds. Zero console errors in every case. `npm test` 119/0.
+
+  Still default OFF, so none of this is live on the shipped page.
+
 ### Added
 
 - **CL#156 — `/fidget/` fills the whole window instead of sharing it with a

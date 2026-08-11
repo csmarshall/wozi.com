@@ -6963,6 +6963,22 @@ class Component extends DCLogic {
                           interiors, so anything living inside an opening -- the
                           planetary's moving parts -- draws here instead */
     const kind = g.kind;
+    /* An epicyclic DRAWS its ring, sun and planets where every other family
+       cuts or leaves a web, so the two #125 timing rules differ by family and
+       both need to ask this one question (GitHub #132, #133). */
+    const epiKind = kind === 'planetary' || kind === 'ravigneaux';
+    /* THE TIMING MARK IS ONE SHAPE, SCALED -- the same argument teethPath()'s
+       `chipSev` makes for a fracture (CLAUDE.md: "one shape, scaled by
+       severity, not two shapes"). A scored index line plus its punch dot is a
+       single machining gesture, so the wheel, the sun and every planet get the
+       same primitive at their own module rather than three hand-tuned copies
+       that could drift apart. Proportions live here once: 0.22 of a module of
+       stroke, a 0.28 dot at the tip. */
+    const timingMark = (rIn, rOut, mod, col) => [
+      h('line', { key: 'tl', x1: rIn, y1: 0, x2: rOut, y2: 0,
+        stroke: col, strokeWidth: (mod * 0.22).toFixed(2), strokeLinecap: 'round', strokeOpacity: 0.9 }),
+      h('circle', { key: 'td', cx: rOut, cy: 0, r: (mod * 0.28).toFixed(2), fill: col, opacity: 0.9 })
+    ];
 
     /* Openings are cut out of the blank itself: each one is appended to the body path
        as a subpath and filled with even-odd, so the page shows through. No masks. */
@@ -7315,7 +7331,17 @@ class Component extends DCLogic {
           h('path', { d: 'M0,0 L' + rad.r.toFixed(2) + ',0', stroke: ft.line, strokeWidth: 3, strokeOpacity: 0.85 }),
           h('g', { transform: 'translate(' + rad.r.toFixed(2) + ',0)' },
             h('g', { ref: epi(kFac, base), style: { transform: 'rotate(' + base.toFixed(2) + 'deg)' } },
-              h('path', { d: this.teethPath(teeth, pitchR, -1, m2), fill: fill, stroke: ft.line, strokeWidth: 1, strokeOpacity: EPI_LINE_OP })),
+              h('path', { d: this.teethPath(teeth, pitchR, -1, m2), fill: fill, stroke: ft.line, strokeWidth: 1, strokeOpacity: EPI_LINE_OP }),
+              /* This planet's own index mark (GitHub #133), INSIDE the group that
+                 carries `base` -- so it turns with the planet's own spin rather
+                 than with the carrier, which is the entire reason a real set is
+                 marked here: what a fitter checks is each planet's phase against
+                 the carrier arm, and a mark that rode the carrier would hold
+                 still relative to it and say nothing. Stops inside the root
+                 circle, the same rule the wheel's own mark follows for the band:
+                 never run a scribe out through the teeth. */
+              timingOn ? h('g', { key: 'ptiming' },
+                timingMark(2.4, Math.max(2.4 + m2 * 0.5, pitchR - m2 * TOOTH_DED), m2, ft.line)) : null),
             /* The stud end. Same ink as every other contour in the assembly, so it
                takes the same weight -- it is the one place ft.line is used as a
                FILL rather than a line, and at full opacity it was the darkest
@@ -7343,7 +7369,13 @@ class Component extends DCLogic {
       }
       post.push(h('g', { key: 'epicarrier', ref: epi(kC, baseC), style: { transform: 'rotate(' + baseC.toFixed(2) + 'deg)' } }, planets));
       post.push(h('g', { key: 'episun', ref: epi(kS, baseS), style: { transform: 'rotate(' + baseS.toFixed(2) + 'deg)' } },
-        h('path', { d: this.teethPath(Zs, Rs, -1, m2), fill: ft.body, stroke: ft.line, strokeWidth: 1, strokeOpacity: EPI_LINE_OP })));
+        h('path', { d: this.teethPath(Zs, Rs, -1, m2), fill: ft.body, stroke: ft.line, strokeWidth: 1, strokeOpacity: EPI_LINE_OP }),
+        /* The sun's mark, in the sun's own rotating group for the same reason as
+           the planets' (GitHub #133). It starts at the centre rather than at a
+           stud, because the sun has no stud -- it is the one body here on the
+           wheel's own axis. */
+        timingOn ? h('g', { key: 'stiming' },
+          timingMark(0, Math.max(m2 * 0.5, Rs - m2 * TOOTH_DED), m2, ft.line)) : null));
     } else if (kind === 'iris') {
       /* Aperture blades: tangential crescents, pointed at both ends. The metal
          between blades is a full-depth curved spoke — nothing floats. */
@@ -8196,15 +8228,43 @@ class Component extends DCLogic {
          real machining mark rather than a longer one crossing something it
          should not have.
 
+         ON AN EPICYCLIC THE WHEEL ITSELF CARRIES NO MARK AT ALL (GitHub #132,
+         #133). `epiKind` suppresses it, because on `planetary`/`ravigneaux`
+         this exact span is where the ring, sun and planets are DRAWN rather
+         than cut, so the one mark crossed the whole assembly -- and it marked
+         the blank, which is the one body in an epicyclic whose phase carries
+         no information. The marks moved to where a real set is timed instead:
+         the sun and every planet get their own, inside their own rotating
+         groups, so each one reads against the carrier as it turns. That is
+         what #133 asked for and it is also the fix for #132's planetary half
+         -- the same mistake seen from two sides.
+
          OFF BY DEFAULT, gated behind `timing` like `character` -- a new prop
          in the same "Layers" section, reviewed by photograph before it is
          ever the shipped default, exactly as CLAUDE.md's SHOW-DONT-DESCRIBE
          rule asks for a tuned visual choice. */
-      timingOn ? h('g', { key: 'timing' }, [
-        h('line', { x1: hubR * BOSS_MUL, y1: 0, x2: wellR, y2: 0,
-          stroke: p[3], strokeWidth: (m * 0.22).toFixed(2), strokeLinecap: 'round', strokeOpacity: 0.9 }),
-        h('circle', { cx: wellR, cy: 0, r: (m * 0.28).toFixed(2), fill: p[3], opacity: 0.9 })
-      ]) : null,
+      timingOn && !epiKind ? (function () {
+        const mark = h('g', { key: 'timing' }, timingMark(hubR * BOSS_MUL, wellR, m, p[3]));
+        /* CLIPPED TO THE METAL ON ANY WHEEL THAT HAS OPENINGS (GitHub #132).
+           The span hubR*BOSS_MUL..wellR is exactly the web, which is solid on a
+           plain blank and is where every cut family puts its pattern -- so the
+           unclipped mark was drawn straight across empty space, which is what
+           Charles caught. A scribed line exists only where there is material to
+           scribe, so clipping it to the body-minus-holes region is not a
+           cosmetic trim: it is the same statement the geometry already makes,
+           and the mark now breaks across each opening and resumes on the next
+           wall by itself, at no cost to the one-clock rule.
+
+           This reuses the clip the body fill already builds, and note it is the
+           OPPOSITE case to the cut contour's rule (CLAUDE.md: draw that one
+           OUTSIDE the clipped group, since a stroke sitting ON a hole boundary
+           loses its inner half to the clip). That warning is about a stroke
+           tracing the boundary itself; this is a stroke crossing the interior,
+           where being cut off at the boundary is precisely the intent. */
+        return holes.length
+          ? h('g', { key: 'timingclip', clipPath: 'url(#' + id + 'c)', clipRule: 'evenodd' }, mark)
+          : mark;
+      })() : null,
       /* LAYER: knurl (GitHub #125, ported from /fidget's grounded-ring hatch
          marks). fidget draws its ticks OUTSIDE the ring gear's tip, in clear
          space beyond the teeth -- space this page does not have, since a
