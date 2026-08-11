@@ -135,6 +135,52 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#155 — Speed and Wear get visible labels, and their rows shrink to the
+  Table of Gears' own rhythm without losing any touch-target area.** (GitHub
+  #127.)
+
+  Charles: *"the slider for speed is unlabeled and bigger than necessary -
+  is there a reason it can't be sized more in coordination with the table of
+  gears line items."* Both true: "Machine Settings" names the group, not
+  either control, and a bare numeric readout with no word next to it reads
+  as unlabelled to anyone not using a screen reader (the accessible name was
+  always there via `aria-label` — this is purely the sighted half); and the
+  row's rendered height was dictated by the `<input>`'s own 44px WCAG
+  touch-target box, well above a Table of Gears row's ~27px.
+
+  **The touch target does not shrink** — that would trade away real
+  accessibility for density. What shrinks is how much of that 44px the ROW
+  allocates in flow, via the exact hit-vs-visible split the corner buttons
+  already use between their 44px box and their `var(--icon)` glyph: a
+  `margin: calc((var(--trk) - var(--btn)) / 2) 0` on the input pulls it in
+  to sit centred without changing its rendered size, so the row's own height
+  now falls out of the label/readout line instead. Measured: 58px → 34px per
+  row.
+
+  **Two 44px hit boxes stacked in a shrunk row can mathematically overlap**
+  once their row centres are closer together than `var(--btn)` — caught
+  before it shipped, not after: `rowAntiOverlapGap` derives the exact margin
+  needed between Speed and Wear specifically (the only two rows here with an
+  oversized hit box to protect) from the same padding/gap figures the rows
+  actually use, rather than a second guessed number that could drift out of
+  step with them. Verified directly, not just measured on paper: Speed's
+  input bottom edge and Wear's input top edge land at the identical
+  coordinate — zero gap, zero overlap, confirmed with the three `#125`
+  checkbox rows present too.
+
+  `LIST_ROW_FONT`/`ROW_PAD_Y` are now the one home for the Table of Gears'
+  own type/padding, read by both list styles instead of a second copy of
+  `"600 13px/1.3 'Manrope',system-ui,sans-serif"`.
+
+  Built in a worktree-isolated agent, reviewed and manually reconciled onto
+  a `main` that had since gained the `#125` checkbox rows the agent's own
+  baseline predated — no collisions. `npm test` 119/0, `a11y_audit.py`
+  clean (0 targets under 24×24px, 0 unlabelled focusable elements, hit boxes
+  still 129×44px), `devices.py` 24/24 and 4/4 (the safe-area clearance this
+  session's `#125` checkboxes had narrowed to 2px on the tightest phone
+  profile is back up to 8px, since three fewer pixels of row height per
+  control adds up).
+
 - **CL#152 — the datum plate clears the metal it is drawn near, and searches
   for a clean spot before giving up.** (GitHub #88, #109, #110 — CL#108
   re-landed against the current mesh/ghost/flywheel code, then taken further

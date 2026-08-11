@@ -366,6 +366,7 @@ input[type="range"]:focus{outline:none;}
          re-announce "Gear speed 5x" on every step of a drag. -->
     <div style="font:700 11px/1 'Manrope',system-ui,sans-serif;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);padding:4px 12px 8px;">Machine Settings</div>
     <div style="{{ speedRowStyle }}">
+      <span aria-hidden="true" style="{{ speedLabelStyle }}">Speed</span>
       <span aria-hidden="true" style="{{ speedReadStyle }}">{{ speedMark }}</span>
       <input type="range" min="0" max="{{ speedMax }}" step="1" value="{{ speedPos }}" title="{{ speedTitle }}" aria-label="Gear speed" aria-valuetext="{{ speedValueText }}" onInput="{{ onSpeedInput }}" onChange="{{ onSpeedCommit }}" style="{{ speedTrackStyle }}" />
     </div>
@@ -374,6 +375,7 @@ input[type="range"]:focus{outline:none;}
          and wearTrackStyle in renderVals(). Zero is the shipped default and
          looks like today's page exactly; every other position is opt-in. -->
     <div style="{{ wearRowStyle }}">
+      <span aria-hidden="true" style="{{ wearLabelStyle }}">Wear</span>
       <span aria-hidden="true" style="{{ wearReadStyle }}">{{ wearMark }}</span>
       <input type="range" min="0" max="{{ wearMax }}" step="1" value="{{ wearPos }}" title="{{ wearTitle }}" aria-label="Wear" aria-valuetext="{{ wearValueText }}" onInput="{{ onWearInput }}" onChange="{{ onWearCommit }}" style="{{ wearTrackStyle }}" />
     </div>
@@ -615,6 +617,12 @@ const BOSS_MUL = 1.5;
    together. A ratio, not an absolute severity, is what survives turning a
    chosen constant into a live control. */
 const WEAR_SCUFF_RATIO = 0.5;
+/* The Table of Gears list's own type treatment (GitHub #127) -- read by
+   togList's item() below AND by the Speed/Wear row labels in renderVals(),
+   so the panel's two label styles cannot drift apart into two "the same but
+   different" type systems the way the row height and the list height once
+   did. One string, two readers. */
+const LIST_ROW_FONT = "600 13px/1.3 'Manrope',system-ui,sans-serif";
 /* Depth of the engraving band, in modules — uniform on every wheel. Module-based
    rather than a fraction of the radius, which is what keeps the band exactly as
    wide on a 13-tooth blank as on a 19-tooth one.
@@ -9331,6 +9339,30 @@ class Component extends DCLogic {
        multiplier that spans two orders of magnitude. */
     const wearNow = this.state.wear ?? 0;
     const wearPos = Math.round(wearNow * 100);
+    /* GitHub #127: "Speed" and "Wear" share one minWidth so both rows' tracks
+       start at the same x regardless of which word is shorter -- derived from
+       the labels themselves rather than a guessed ch count that would go
+       stale the day either word changes. */
+    const rowLabelMinWidth = Math.max('Speed'.length, 'Wear'.length) + 'ch';
+    /* GitHub #127: the Speed/Wear rows' own vertical padding and the panel's
+       row gap, named once so the anti-overlap margin below can be computed
+       from the SAME figures the rows and the panel actually use, instead of
+       restating them as a third copy that could drift out of step with
+       either. */
+    const ROW_PAD_Y = 7;
+    const PANEL_GAP = 2;
+    /* Speed and Wear are the only two rows that both overflow a 44px hit box
+       above and below a visually-shortened track (see speedTrackStyle's
+       comment) -- every other row in this panel is plain text with no hit
+       box larger than its own line. Two such rows stacked need their
+       CENTRES at least var(--btn) apart to keep their hit boxes from
+       overlapping, and shrinking the row to the label/readout line's height
+       trades away exactly that margin. max(0px, ...) is the floor: once
+       var(--icon) alone (plus this padding) already clears --btn, no extra
+       gap is owed and this must not go negative and pull the rows together
+       instead. */
+    const rowAntiOverlapGap =
+      'max(0px, calc(var(--btn) - var(--icon) - ' + (2 * ROW_PAD_Y + PANEL_GAP) + 'px))';
     /* Fraction of the TRACK, not of the multiplier: the thumb travels over
        stop INDICES (see the markup, and CL#96's invariant against a
        continuous control), so the fill is positioned by index too. One stop
@@ -9415,7 +9447,7 @@ class Component extends DCLogic {
          already in view and the rest of the list is one scroll away rather
          than off-screen with nothing pointing at it. */
       togPanelStyle: {
-        display: this.state.tog ? 'flex' : 'none', flexDirection: 'column', gap: '2px',
+        display: this.state.tog ? 'flex' : 'none', flexDirection: 'column', gap: PANEL_GAP + 'px',
         position: 'fixed', left: 'var(--offleft)', top: '50%', transform: 'translateY(-50%)',
         zIndex: 30, background: 'var(--chip)', border: '1px solid var(--hair)',
         borderRadius: '14px', padding: '10px 6px', boxShadow: 'var(--shadow)', minWidth: '190px',
@@ -9451,8 +9483,8 @@ class Component extends DCLogic {
           return {
             href: key ? '?kind=' + key : (location.pathname || '/'),
             label: label, current: active ? 'true' : 'false',
-            style: { display: 'block', padding: '7px 12px', borderRadius: '9px', textDecoration: 'none',
-              font: "600 13px/1.3 'Manrope',system-ui,sans-serif",
+            style: { display: 'block', padding: ROW_PAD_Y + 'px 12px', borderRadius: '9px', textDecoration: 'none',
+              font: LIST_ROW_FONT,
               color: active ? 'var(--bg)' : 'var(--ink)',
               background: active ? 'var(--accent)' : 'transparent' }
           };
@@ -9573,8 +9605,33 @@ class Component extends DCLogic {
       },
       /* THE MENU ROW THE SLIDER SITS IN: full width of the panel less its own
          padding, readout to the slider's left so the number a drag is
-         approaching is read before the thing moving toward it. */
-      speedRowStyle: { display: 'flex', alignItems: 'center', gap: '10px', padding: '6px 12px 8px' },
+         approaching is read before the thing moving toward it. Padding
+         matches the Table of Gears list's own vertical rhythm (GitHub #127)
+         -- the row's visible footprint now falls out of the label/readout
+         line rather than out of the input's 44px hit box, which is what
+         speedTrackStyle's margin does below; this padding is the other half
+         of that split. */
+      speedRowStyle: {
+        display: 'flex', alignItems: 'center', gap: '10px',
+        padding: ROW_PAD_Y + 'px 12px',
+        /* The anti-overlap gap belongs on the boundary BETWEEN Speed and
+           Wear specifically, not on the panel's general row gap -- every
+           other row here has no oversized hit box to protect. See
+           rowAntiOverlapGap's comment above. */
+        marginBottom: rowAntiOverlapGap
+      },
+      /* THE VISIBLE LABEL (GitHub #127) -- "Machine Settings" names the
+         group, not this control, and a numeric readout with no word next to
+         it read as unlabelled to anyone not using a screen reader (the
+         accessible name is still carried by the input's own aria-label;
+         this is purely the sighted half). Same font as a Table of Gears row
+         (LIST_ROW_FONT) so the two lists in this panel read as one type
+         system rather than two. minWidth is shared with Wear's label so
+         both rows' tracks line up regardless of which word is shorter. */
+      speedLabelStyle: {
+        flex: '0 0 auto', minWidth: rowLabelMinWidth,
+        color: 'var(--ink)', font: LIST_ROW_FONT
+      },
       /* The readout's colour is the only thing about it that depends on
          state, exactly like the corner control's did, and for the same
          reason. minWidth is pinned to the widest multiplier the ladder can
@@ -9616,14 +9673,32 @@ class Component extends DCLogic {
           backgroundImage: 'linear-gradient(90deg,' + fill + ' 0 ' + at + ',var(--hair) ' + at + ' 100%)',
           backgroundSize: '100% var(--trk)',
           backgroundPosition: 'center',
-          backgroundRepeat: 'no-repeat'
+          backgroundRepeat: 'no-repeat',
+          /* GitHub #127: var(--btn) (44px, set in the shared input[type="range"]
+             rule) is the WCAG touch-target floor and does not shrink -- what
+             shrinks is how much of that 44px the ROW allocates in flow, the
+             same hit-vs-visible split the corner button already makes between
+             its 44px button box and its var(--icon) glyph. margin does not
+             change the input's own rendered size, only where it sits and how
+             much flow space it reserves, so pulling it in by the same formula
+             already used to centre --thumb inside --trk (here generalised to
+             --btn inside --trk) lets the row's flow height fall out of the
+             label/readout line instead of the input's full height, while the
+             actual hit box still overflows above and below by the same
+             amount -- unshrunk, just no longer dictating the row's height. */
+          margin: 'calc((var(--trk) - var(--btn)) / 2) 0'
         };
       })(),
       /* SAME ROW/READOUT SHAPE AS SPEED'S, minus the strobe colour switch --
          wear has no benchmark stops to warn about, so its fill is always
          --muted. speedAt() is reused rather than restated: it is generic
          over any (position, span) pair, not specific to SPEED_STOPS. */
-      wearRowStyle: { display: 'flex', alignItems: 'center', gap: '10px', padding: '6px 12px 8px' },
+      wearRowStyle: { display: 'flex', alignItems: 'center', gap: '10px', padding: ROW_PAD_Y + 'px 12px' },
+      /* Same label as Speed's, same reasoning -- see speedLabelStyle. */
+      wearLabelStyle: {
+        flex: '0 0 auto', minWidth: rowLabelMinWidth,
+        color: 'var(--ink)', font: LIST_ROW_FONT
+      },
       wearReadStyle: {
         flex: '0 0 auto', textAlign: 'right', minWidth: '4ch',
         color: 'var(--muted)',
@@ -9639,7 +9714,9 @@ class Component extends DCLogic {
           backgroundImage: 'linear-gradient(90deg,' + fill + ' 0 ' + at + ',var(--hair) ' + at + ' 100%)',
           backgroundSize: '100% var(--trk)',
           backgroundPosition: 'center',
-          backgroundRepeat: 'no-repeat'
+          backgroundRepeat: 'no-repeat',
+          /* Same hit-vs-visible split as speedTrackStyle's -- see its comment. */
+          margin: 'calc((var(--trk) - var(--btn)) / 2) 0'
         };
       })(),
       /* THE THREE #125 STYLE LAYERS, as a live checkbox list (Charles's own
