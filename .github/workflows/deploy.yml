@@ -103,11 +103,17 @@ jobs:
           # idlers, a datum -- and ?who=charles is one chain with none of them.
           python3 tools/dom_invariants.py http://127.0.0.1:8765/ ; DOM=$?
           python3 tools/dom_invariants.py http://127.0.0.1:8765/ --query '?who=charles' ; DOM1=$?
+          # dom_invariants' own mesh check deliberately exempts escape-run
+          # ghosts (GitHub #117) -- they live one DOM level deeper than its
+          # element test requires, and there are far more of them than linked
+          # wheels (200+ on a wide viewport). Nothing had ever checked whether
+          # a ghost actually meshes with what it grew from until this existed.
+          python3 tools/escape_mesh.py http://127.0.0.1:8765/ ; ESCMESH=$?
           set -e
           kill $SERVER 2>/dev/null || true
           if [ $LAYOUT -ne 0 ] || [ $MOTION -ne 0 ] || [ $PILL -ne 0 ] \
-             || [ $DOM -ne 0 ] || [ $DOM1 -ne 0 ]; then
-            echo "::error::layout, motion, pill or DOM-invariant gate failed — not deploying"
+             || [ $DOM -ne 0 ] || [ $DOM1 -ne 0 ] || [ $ESCMESH -ne 0 ]; then
+            echo "::error::layout, motion, pill, DOM-invariant or escape-mesh gate failed — not deploying"
             exit 1
           fi
 

@@ -7,6 +7,18 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#148 — `tools/escape_mesh.py` (GitHub #117) is now wired into CI, not
+  just written.** The harness itself already existed and already passed — 4
+  runs, 17 ghosts, 17 meshes measured, worst residual 0.0144px of a 0.35px
+  tolerance across 4 seeds and both orientations — but nothing in
+  `deploy.yml` ever ran it, so a real regression in escape-run meshing could
+  ship with every other gate green. Added alongside `dom_invariants` in the
+  same gated step. Closed #117 on this plus CL#147: the specific "this
+  configuration doesn't look possible" screenshot is very likely CL#147's bug
+  — a ghost rotating off the wrong flywheel reads as an impossible mesh on a
+  still frame even though its static geometry (what this gate measures) was
+  correct the whole time.
+
 - **CL#147 — a self-driven chain's escape ghosts were driven by the SPINE's
   flywheel, not their own.** (GitHub #122 follow-up. Charles: *"if one pulls
   on my chain it moves all the gears on my chain and all the ghost gears on
