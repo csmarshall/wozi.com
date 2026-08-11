@@ -178,6 +178,17 @@ jobs:
             --cache-control "public, max-age=300" --only-show-errors
           echo "  ssh_public_key"
 
+      - name: Publish the favicon
+        if: github.event_name != 'pull_request'
+        run: |
+          # Every browser requests this unconditionally before ever honouring
+          # a <link rel="icon"> (GitHub #119) -- it 403'd for the whole life
+          # of the site otherwise, the same shape as #74's robots.txt fault.
+          aws s3 cp favicon.ico "$BUCKET/favicon.ico" \
+            --content-type "image/x-icon" \
+            --cache-control "public, max-age=86400" --only-show-errors
+          echo "  favicon.ico"
+
       - name: Publish the crawl policy
         if: github.event_name != 'pull_request'
         run: |
@@ -354,6 +365,11 @@ jobs:
           exact https://wozi.com/keybase.html keybase.html
           check https://wozi.com/keybase.html 200 ''
           check https://wozi.com/ssh_public_key 200 'ssh-'
+          # Every browser requests this unconditionally, so a 403 here (its
+          # state for the whole life of the site before GitHub #119) fires on
+          # every cold load even though the data: URI favicons still win.
+          check https://wozi.com/favicon.ico 200 ''
+          check_content_type https://wozi.com/favicon.ico image/x-icon
           # robots.txt is the one object here whose entire job is to be fetched
           # by somebody else's parser, so nothing on our side ever notices it
           # being wrong. It 403'd for the whole life of the site (#74) and the

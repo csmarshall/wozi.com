@@ -21,12 +21,34 @@ The deploy **names the paths it publishes** rather than excluding the ones it
 does not — a whitelist, so a new file cannot reach the web by being forgotten.
 
 Published: `index.html`, `support.js`, `config.js`, `assets/`, `keybase.html`,
-`ssh_public_key`, `robots.txt`, `fidget/index.html`.
+`ssh_public_key`, `robots.txt`, `fidget/index.html`, `favicon.ico`.
 
 `config.js` carries the link table, the people and the palette. It is published,
 and CI asserts it is reachable, serves as `text/javascript` and parses — this
 rulebook simply failed to list it for a while (#59), which is the worst kind of
 drift: the rules requiring a file the rules do not name.
+
+`favicon.ico` exists because every browser requests it unconditionally before
+ever honouring a `<link rel="icon">` (GitHub #119) — it 403'd for the whole
+life of the site otherwise, the same shape of fault #74 found for
+`robots.txt`. The tab icon a visitor actually SEES on a modern browser is one
+of two theme-aware SVG data URIs declared inline in `<helmet>`, chosen by
+`prefers-color-scheme` — `favicon.ico` is the fallback for whichever request
+gets there first or whichever engine never evaluates the media-queried
+`<link>`s at all. Its "w", both SVGs' "w", and `engraving()`'s lettering all
+render in Manrope, but they are three independent facts: the favicon glyph
+outline was extracted once from Manrope ExtraBold with `fontTools` (see
+`scratchpad/`, not shipped) and baked into a static path, since a `data:`
+favicon cannot load a webfont, and `favicon.ico` is a raster generated the
+same way — none of the three re-reads `index.html`'s own `font-family`
+declaration, so a future font change does not reach any of them by itself.
+
+**The theme-aware favicon can only ever track the system/browser colour
+scheme, never the page's own manual theme toggle.** A `<link media="...">`
+has no way to read `data-theme` — that state lives in the DOM, not in
+anything CSS media queries can see. A visitor who flips the in-page toggle
+away from their system default sees a tab icon in the OTHER theme. Known and
+accepted, not a bug to chase.
 
 `keybase.html` is a signed ownership proof and is kept live deliberately — the
 claim only verifies while the file is reachable, so dropping it from the include
@@ -722,9 +744,8 @@ Never trust the screenshot alone — a static train looks fine in a still. Serve
 the page and check, ~700ms apart:
 
 - gear `transform` values advance — all of them, not just the first
-- no console errors. A `/favicon.ico` 404 is expected and benign: the real icon
-  is a `data:` URI injected through `helmet`, so the browser asks for the default
-  path first.
+- no console errors. `/favicon.ico` is now a real published file (GitHub #119)
+  — it should return 200, not the 403 it did before that fix.
 - hub badges sit at ~0px offset from their wheel centres
 - each badge contains an `<svg>`. Empty badges mean the page was opened from
   `file://` instead of served — `loadIcons()` fetches them, and its `.catch`

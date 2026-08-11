@@ -7,6 +7,36 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#151 — the favicon is a "w" in the page's own font, not a generic blue
+  dot, and `/favicon.ico` is a real file instead of a 403.** (GitHub #119.)
+
+  Three findings, all fixed together: the placeholder two-circle blue dot
+  (`#3B7DE8`, a colour belonging to no palette on the page) is replaced by a
+  single "w" in Manrope ExtraBold; `/favicon.ico` — requested unconditionally
+  by every browser before any `<link rel="icon">` is honoured — now returns
+  200 instead of 403 (the exact #74 failure shape, one file later); and
+  CLAUDE.md's own claim that the 403 was actually a benign 404 is corrected.
+
+  **Theme-aware, via two `<link rel="icon" media="(prefers-color-scheme: ...)">`
+  tags** rather than one static icon — each an inline SVG in the matching
+  theme's real `--bg`/`--ink`. This can only ever track the system/browser
+  colour scheme, never the page's own manual toggle (a media query has no way
+  to read `data-theme`) — stated plainly in both the markup comment and
+  CLAUDE.md, not chased as a bug.
+
+  **The glyph is the real Manrope, not a substitute.** A `data:` favicon
+  cannot load a webfont, so the "w" outline was extracted once from the
+  actual Manrope ExtraBold TTF with `fontTools` and baked into a static SVG
+  path; `favicon.ico` (three embedded sizes, 16/32/48) is a `Pillow`-rendered
+  raster of the same glyph. Three independent artifacts — the two SVGs and
+  the ICO — none of which re-read `index.html`'s own `font-family`
+  declaration, worth remembering if the page's font ever changes.
+
+  `favicon.ico` joins the publish whitelist and CLAUDE.md's published-files
+  list; the deploy's liveness check asserts it's reachable and served as
+  `image/x-icon`. `npm test` 118/0, `pixel_regress` 0px (a `<link>` tag is
+  invisible to the render), 0 console errors.
+
 - **CL#150 — unnamed constants sweep (GitHub #103).** Five entries, all
   `index.html` unless noted:
 
