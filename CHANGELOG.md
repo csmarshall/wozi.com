@@ -7,6 +7,25 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Added
 
+- **CL#156 — `/fidget/` fills the whole window instead of sharing it with a
+  button bar and a readout row.** (GitHub #129, part 1 of 4.)
+
+  Charles asked for "one gear on a page — like a fidget spinner." This is the
+  layout half only: the stage used to be a flex row sized by whatever the
+  chrome above and below it left over; now the stage is the full viewport and
+  the buttons + readout are a floating overlay pinned to the bottom safe area,
+  faded in on a gradient so text stays legible over whichever wheel sits
+  underneath. Nothing below the `<body>` tag touches `SET_NODES`, `CENTRES`,
+  the integrator, or any Willis-equation math — the drawing already scales to
+  fill whatever box it's given (the SVG's own `viewBox` + default
+  `xMidYMid-meet`), so shrinking the box was never the hard part.
+
+  What #129 actually asked for beyond this — swiping to switch between two
+  planetary *formats* (Charles: swap which member is grounded, ring vs sun) —
+  is a new Willis derivation, not a layout change, and ships separately once
+  that math is designed and its own `sunCheck` invariant is verified the way
+  `ringCheck` is today.
+
 - **CL#154 — three fidget-style layers ported to the landing page, each its
   own live checkbox.** (GitHub #125.)
 

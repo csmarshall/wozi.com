@@ -66,46 +66,55 @@ button:focus-visible,[tabindex]:focus-visible{outline:3px solid var(--accent);ou
 </head>
 <body>
 
-<!-- The readout is a SIBLING of the stage rather than an overlay on it. An
-     overlaid panel is fine on a desktop and covers a third of a phone held
-     upright, and there is no width at which it is out of the way of a
-     full-bleed drawing -- so it takes its own row and the drawing gets what is
-     left. Same reason the stage is flex:1 rather than 100vh. -->
-<div style="position:fixed;inset:0;display:flex;flex-direction:column;background:var(--bg);overflow:hidden;">
+<!-- PROTOTYPE for GitHub #129 point 1 ("one gear, centered, full-window").
+     CSS/layout only -- no change below this point touches the physics, the
+     integrator, or SET_NODES/CENTRES. The stage used to be a flex row sized
+     by what the button bar and readout left over; the drawing itself already
+     scales to fill whatever box it is given (the SVG's viewBox + default
+     xMidYMid-meet preserveAspectRatio does that), so shrinking the box
+     shrinks the gear. Here the stage IS the whole viewport, and the chrome
+     that used to claim its own rows is a floating overlay pinned to the
+     bottom safe area instead -- present, reachable, but no longer taking a
+     cut of the space the gear draws into. This does NOT decide whether "one
+     gear" also means showing only one of the two stages at a time; see the
+     scoping notes this prototype shipped alongside. -->
+<div style="position:fixed;inset:0;background:var(--bg);overflow:hidden;">
 
-  <main id="stage" style="position:relative;flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center;">
+  <main id="stage" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;">
     <svg id="train" xmlns="http://www.w3.org/2000/svg" role="img"
          aria-label="A double planetary gear set with both ring gears fixed. Drag the first set to turn the sun, the second to turn the output carrier."
          style="width:100%;height:100%;display:block;touch-action:none;-webkit-user-select:none;user-select:none;cursor:grab;"></svg>
 
   </main>
 
-  <!-- The buttons live in the bar, NOT floating over the stage. Floated they
-       sat on top of the first set's label in portrait, and there is no corner of
-       a full-bleed drawing that is free at every aspect ratio. In the bar they
-       are also where a thumb already is on a phone, which is where a fidget's
-       controls belong. -->
-  <div style="flex:0 0 auto;display:flex;gap:6px;flex-wrap:wrap;
-       padding:8px max(14px, env(safe-area-inset-left)) 0;">
-    <button id="flickSun" type="button" title="Flick the sun"
-       style="font:600 11px/1 'Manrope',system-ui,sans-serif;color:var(--muted);background:var(--chip);
-       border:1px solid var(--hair);border-radius:999px;padding:9px 12px;cursor:pointer;box-shadow:var(--shadow);">flick sun</button>
-    <button id="flickCarrier" type="button" title="Flick the output carrier"
-       style="font:600 11px/1 'Manrope',system-ui,sans-serif;color:var(--muted);background:var(--chip);
-       border:1px solid var(--hair);border-radius:999px;padding:9px 12px;cursor:pointer;box-shadow:var(--shadow);">flick carrier</button>
-    <button id="theme" type="button" title="Switch theme" aria-label="Switch theme"
-       style="font:600 11px/1 'Manrope',system-ui,sans-serif;color:var(--muted);background:var(--chip);
-       border:1px solid var(--hair);border-radius:999px;padding:9px 12px;cursor:pointer;box-shadow:var(--shadow);
-       margin-left:auto;">theme</button>
-  </div>
+  <!-- The chrome is now an overlay strip rather than a sibling row, so it
+       costs the drawing nothing. It keeps the bar's own background so text
+       stays legible over whatever wheel happens to sit underneath it. -->
+  <div style="position:absolute;left:0;right:0;bottom:0;pointer-events:none;
+       background:linear-gradient(to top, var(--bg) 0%, var(--bg) 55%, transparent 100%);
+       padding-top:18px;">
+    <div style="pointer-events:auto;display:flex;gap:6px;flex-wrap:wrap;
+         padding:8px max(14px, env(safe-area-inset-left)) 0;">
+      <button id="flickSun" type="button" title="Flick the sun"
+         style="font:600 11px/1 'Manrope',system-ui,sans-serif;color:var(--muted);background:var(--chip);
+         border:1px solid var(--hair);border-radius:999px;padding:9px 12px;cursor:pointer;box-shadow:var(--shadow);">flick sun</button>
+      <button id="flickCarrier" type="button" title="Flick the output carrier"
+         style="font:600 11px/1 'Manrope',system-ui,sans-serif;color:var(--muted);background:var(--chip);
+         border:1px solid var(--hair);border-radius:999px;padding:9px 12px;cursor:pointer;box-shadow:var(--shadow);">flick carrier</button>
+      <button id="theme" type="button" title="Switch theme" aria-label="Switch theme"
+         style="font:600 11px/1 'Manrope',system-ui,sans-serif;color:var(--muted);background:var(--chip);
+         border:1px solid var(--hair);border-radius:999px;padding:9px 12px;cursor:pointer;box-shadow:var(--shadow);
+         margin-left:auto;">theme</button>
+    </div>
 
-  <!-- Updated on a 250ms timer OUTSIDE the loop, and it reads the integrator's
-       state rather than the DOM, so the instrument cannot change the reading --
-       the lesson index.html's ?hud panel is built around. -->
-  <div id="readout" aria-live="off" style="flex:0 0 auto;display:flex;flex-wrap:wrap;gap:2px 22px;
-       align-items:baseline;border-top:1px solid var(--hair);
-       padding:10px max(14px, env(safe-area-inset-left)) max(10px, env(safe-area-inset-bottom));
-       font:500 12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted);"></div>
+    <!-- Updated on a 250ms timer OUTSIDE the loop, and it reads the integrator's
+         state rather than the DOM, so the instrument cannot change the reading --
+         the lesson index.html's ?hud panel is built around. -->
+    <div id="readout" aria-live="off" style="pointer-events:auto;display:flex;flex-wrap:wrap;gap:2px 22px;
+         align-items:baseline;
+         padding:10px max(14px, env(safe-area-inset-left)) max(10px, env(safe-area-inset-bottom));
+         font:500 12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted);"></div>
+  </div>
 </div>
 
 <script>
