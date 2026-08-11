@@ -154,6 +154,10 @@ const page = (function build() {
        wobble with it and derives its wheel-count backstop from it (#80), so the
        suite has to hand it in or the extracted function throws. */
     'ESCAPE_WOBBLE',
+    /* fitEscapes' named search policy (GitHub #103) -- extracted and run for
+       real by fitEscapesOn(), which throws ReferenceError on any of these
+       without them handed in the same way ESCAPE_WOBBLE already is. */
+    'ESCAPE_CROSS_EXT_PX', 'ESCAPE_MIN_REACH_PX', 'ESCAPE_RUN_MARGIN',
     /* RING_STUB governs the mesh this suite's headline test is named after, and
        was the one constant kept as a copy here instead of read from the page.
        Mutating index.html alone used to leave every test green while 10 of 19
@@ -210,8 +214,11 @@ const page = (function build() {
     + grabDecl('const STEP_DRIFT_MAX =') + '\n'
     + grabDecl('const BAND_MAX =') + '\n'
     + grabBlock('function endsCapFor(', '{', '}') + '\n'
+    /* ESCAPE_SEARCH_ARC is an array, so grabNumber() cannot read it -- grabbed
+       as the real declaration like STEP_DRIFT_MAX/BAND_MAX above. */
+    + grabDecl('const ESCAPE_SEARCH_ARC =') + '\n'
     + 'return { planetaryBore, planetaryMenuFor, RAVIGNEAUX_MENU, PLANETARY_FLAVOURS, '
-    + 'endsCapFor, TEETH_MEAN, STEP_DRIFT_MAX, BAND_MAX, ENDS_MAX, '
+    + 'endsCapFor, TEETH_MEAN, STEP_DRIFT_MAX, BAND_MAX, ENDS_MAX, ESCAPE_SEARCH_ARC, '
     + consts.join(', ') + ' };';
   const built = new Function('enumeratePlanetaries', src)(enumeratePlanetaries);
   /* One entry per chain, in PEOPLE order. The page has no TEETH_SUM constant any
@@ -3007,11 +3014,13 @@ function fitEscapesOn(solved, axisRot, spineSlug, margin) {
      Handed in from the page's values, never restated here. */
   const fn = new Function('window', 'MODULE', 'TOOTH_ADD', 'GHOST_COLORS', 'segCross',
     'TEETH_MIN', 'TEETH_MAX', 'ESCAPE_WOBBLE',
+    'ESCAPE_SEARCH_ARC', 'ESCAPE_CROSS_EXT_PX', 'ESCAPE_MIN_REACH_PX', 'ESCAPE_RUN_MARGIN',
     'return function ' + grabBlock('  fitEscapes() {', '{', '}') + ';')(
     { innerWidth: solved.w + margin * 2, innerHeight: solved.h + margin * 2 },
     page.MODULE, page.TOOTH_ADD, ['#000'],
     new Function('return ' + grabBlock('function segCross(', '{', '}'))(),
-    page.TEETH_MIN, page.TEETH_MAX, page.ESCAPE_WOBBLE);
+    page.TEETH_MIN, page.TEETH_MAX, page.ESCAPE_WOBBLE,
+    page.ESCAPE_SEARCH_ARC, page.ESCAPE_CROSS_EXT_PX, page.ESCAPE_MIN_REACH_PX, page.ESCAPE_RUN_MARGIN);
   const ctx = {
     _axisRot: axisRot,
     _stageRef: { current: { getBoundingClientRect: () => (

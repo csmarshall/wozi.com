@@ -1635,6 +1635,16 @@ const TRAIN = (function () {
   });
   return out;
 })();
+/* Whether ANYTHING on the shipped train would read `_spreadBoost` at all
+   (GitHub #103). `linked` in solve() is `!!t.link`, and no shipped TRAIN
+   entry carries one (CLAUDE.md: "No chain or belt is enabled in the shipped
+   train") -- so today this is always false, and fitStage()'s own boost/tight
+   cache-invalidation check below is guarded on it for exactly that reason: a
+   variable with no effect on this train should not be allowed to throw the
+   solve away and rebuild it on a resize either. Computed once, off the same
+   TRAIN a re-enabled `link: 'chain'`/`link: 'belt'` entry would already be
+   part of -- no second place to remember when reviving the dormant capability. */
+const TRAIN_HAS_LINKED = TRAIN.some((t) => !!t.link);
 /* Two lookups into BRIDGES, keyed by TRAIN index: which bridge STARTS at this
    wheel -- the first idler, or the chain head itself when there are none -- and
    which bridge this wheel is the chain head of. Built once because solve() asks
@@ -3509,6 +3519,41 @@ const SITES = (function () {
    have broken far more than this. */
 const badgeKey = (person, slug) => person + '/' + slug;
 
+/* fitStage()'s two reference viewport widths, in CSS px, that `boost` and
+   `tight` interpolate against (GitHub #103). Both are CHOSEN, not derived --
+   there is no formula relating "how much the drive runs get to spread out"
+   or "how tightly the train packs" to a specific screen width, and no record
+   of why they sit 8% apart rather than sharing one reference. Named rather
+   than left as bare literals so the next person tuning either has one place
+   to look, not two adjacent unlabelled numbers to guess between. */
+const BOOST_REF_PX = 700;
+const TIGHT_REF_PX = 760;
+
+/* fitEscapes()'s own unnamed policy (GitHub #103) -- named rather than left as
+   bare literals scattered through the search, one home each for facts that
+   were the same number written more than once with no name attached.
+
+   UNITS MATTER HERE AND WERE NOT LABELLED: everything below is screen px,
+   because the search runs in screen space (sx/sy, reachAlong, segCross) --
+   EXCEPT ESCAPE_RUN_MARGIN, which is added to `span` AFTER `span = e.reach / gs`
+   has already converted the reach into solve units. A literal 120 on either
+   side of that conversion line would look identical and mean different
+   things; they are two different constants for exactly that reason. */
+/* The arc searched either side of a run's own axis, in degrees, when the axis
+   itself is already taken by another run -- a search policy, not a magic list. */
+const ESCAPE_SEARCH_ARC = [0, 16, -16, 32, -32, 50, -50];
+/* How far a candidate crossing-test segment extends past the run's actual
+   reach, in screen px -- margin so a run ending just short of another's start
+   still tests as a crossing rather than a near miss. */
+const ESCAPE_CROSS_EXT_PX = 80;
+/* Below this screen-px reach, a run is not worth drawing at all -- too short
+   to read as a run rather than a stray wheel or two. */
+const ESCAPE_MIN_REACH_PX = 60;
+/* How far past the viewport edge a run must reach, in SOLVE units (see the
+   unit note above) -- the run keeps adding wheels until it clears the edge by
+   this much, not merely until it touches it. */
+const ESCAPE_RUN_MARGIN = 120;
+
 class Component extends DCLogic {
   /* `hover` holds a badgeKey(), not a slug -- see the note above badgeKey. */
   /* `speed` is null until the slider, the corner reset, or localStorage says
@@ -4206,18 +4251,17 @@ class Component extends DCLogic {
          tried first. */
       const want = host.deg;
       let e = null;
-      const offsets = [0, 16, -16, 32, -32, 50, -50];
-      for (let q = 0; q < offsets.length; q++) {
-        const ang = want + offsets[q];
+      for (let q = 0; q < ESCAPE_SEARCH_ARC.length; q++) {
+        const ang = want + ESCAPE_SEARCH_ARC[q];
         const reach = reachAlong(sx, sy, ang);
         const oa = ang * Math.PI / 180;
-        const seg = [{ x: sx, y: sy }, { x: sx + (reach + 80) * Math.cos(oa), y: sy + (reach + 80) * Math.sin(oa) }];
+        const seg = [{ x: sx, y: sy }, { x: sx + (reach + ESCAPE_CROSS_EXT_PX) * Math.cos(oa), y: sy + (reach + ESCAPE_CROSS_EXT_PX) * Math.sin(oa) }];
         if (!taken.some(t => segCross(seg[0], seg[1], t[0], t[1]))) { e = { ang: ang, reach: reach }; break; }
       }
       if (!e) return;
       const ea = e.ang * Math.PI / 180;
-      taken.push([{ x: sx, y: sy }, { x: sx + (e.reach + 80) * Math.cos(ea), y: sy + (e.reach + 80) * Math.sin(ea) }]);
-      if (e.reach < 60) return;
+      taken.push([{ x: sx, y: sy }, { x: sx + (e.reach + ESCAPE_CROSS_EXT_PX) * Math.cos(ea), y: sy + (e.reach + ESCAPE_CROSS_EXT_PX) * Math.sin(ea) }]);
+      if (e.reach < ESCAPE_MIN_REACH_PX) return;
       const span = e.reach / gs;
       let prev = { cx: g0.cx, cy: g0.cy, r: g0.r, teeth: g0.teeth, dir: g0.dir, phase: g0.phase };
       let reached = 0, k = 0;
@@ -4233,7 +4277,7 @@ class Component extends DCLogic {
 
          So bound the ITERATIONS by the arithmetic instead: the shortest step this
          loop can take is two minimum wheels in mesh, foreshortened by the widest
-         wobble it may deal, and the run needs `span + 120`. That cannot stop short
+         wobble it may deal, and the run needs `span + ESCAPE_RUN_MARGIN`. That cannot stop short
          -- it is an upper bound on how many wheels the distance can possibly need --
          while still refusing to spawn without limit on a pathological viewport.
 
@@ -4255,8 +4299,8 @@ class Component extends DCLogic {
       const w = ESCAPE_WOBBLE * Math.PI / 180;
       const maxCorrect = Math.asin(Math.min(1, (TEETH_MAX / TEETH_MIN) * Math.tan(w)));
       const stepMin = MODULE * TEETH_MIN * Math.cos(maxCorrect + w);
-      const kMax = Math.ceil((span + 120) / stepMin) + 1;
-      while (reached < span + 120 && k < kMax) {
+      const kMax = Math.ceil((span + ESCAPE_RUN_MARGIN) / stepMin) + 1;
+      while (reached < span + ESCAPE_RUN_MARGIN && k < kMax) {
         /* DEALT LIKE THE CHAIN'S OWN, uniform over the same range. The ramp here was
            `Math.min(26, 11 + k * 2 + rnd() * 8)` -- wheels that grew as the run went
            out, and past the chain's own TEETH_MAX at that. It was a second sizing
@@ -4942,15 +4986,25 @@ class Component extends DCLogic {
     /* Small screens pack the train tighter, so each wheel renders bigger on the glass;
        roomy screens spread it out and let the drive runs stretch. */
     const small = Math.min(window.innerWidth, window.innerHeight);
-    const boost = Math.round(Math.max(0.86, Math.min(1.15, small / 700)) * 20) / 20;
-    const tight = Math.round(Math.max(0.6, Math.min(1, small / 760)) * 20) / 20;
+    const boost = Math.round(Math.max(0.86, Math.min(1.15, small / BOOST_REF_PX)) * 20) / 20;
+    const tight = Math.round(Math.max(0.6, Math.min(1, small / TIGHT_REF_PX)) * 20) / 20;
     /* The idler count belongs with the other quantised layout inputs: it changes
        how many wheels the solve places, so a change has to invalidate the cache
        exactly as an orientation flip does. Its own hysteresis lives in
        idlerCount(), which reads the count it is replacing. */
     const idle = this.idlerCount();
-    if (rot !== this._axisRot || boost !== this._spreadBoost || tight !== this._tight
-      || idle !== this._idlerN) {
+    /* `boost` is guarded on TRAIN_HAS_LINKED (GitHub #103): it is the spread
+       multiplier for the dormant chain-and-belt capability, read only in the
+       `linked` branch of solve() that no shipped TRAIN entry takes. Comparing
+       it unconditionally meant a resize crossing any of its ~6 quantised
+       thresholds threw the whole solve away and rebuilt it for a variable with
+       no effect on this train. Guarding it here rather than deleting it keeps
+       CLAUDE.md's promise that re-enabling `link: 'chain'`/`link: 'belt'`
+       stays a one-line TRAIN edit -- the moment a shipped entry IS linked,
+       this same line starts invalidating on it again, with nothing else to
+       remember. */
+    if (rot !== this._axisRot || (TRAIN_HAS_LINKED && boost !== this._spreadBoost)
+      || tight !== this._tight || idle !== this._idlerN) {
       this._axisRot = rot;
       this._spreadBoost = boost;
       this._tight = tight;
@@ -4975,7 +5029,6 @@ class Component extends DCLogic {
     const w = (vv && vv.width) || window.innerWidth;
     const hgt = (vv && vv.height) || window.innerHeight;
     const rowMode = w > 820 && w > hgt * 1.2;
-    const colH = this._colRef && this._colRef.current ? this._colRef.current.offsetHeight : 60;
     /* THE MACHINE FILLS THE LONG AXIS, EDGE TO EDGE. The ghosts exist to say it
        continues past the frame, so the long side of the screen is what the scale
        must satisfy -- not the smaller of the two axes, and not a shaved fraction
@@ -6700,6 +6753,9 @@ class Component extends DCLogic {
        which is four chances to update three of them. */
     const LATTICE_WALL = Math.max(px(1.06, 0.55, 2.4),
                                   1.2 * (g.teeth || TEETH_MAX) / TEETH_MAX);
+    /* polarbrick's course-splitting trigger (GitHub #103) -- see its use below
+       for what it means. CHOSEN, not derived; no record of why 1.9. */
+    const POLARBRICK_ASPECT_MAX = 1.9;
     const h = React.createElement;
     /* BOTH THEMES ARE FLAT -- Charles's call, 2026-07-30, after a side-by-side
        against the modelled version. This was a `const flat = true` guarding
@@ -7663,7 +7719,14 @@ class Component extends DCLogic {
       let kP = Math.max(6, Math.round(2 * Math.PI * (rInP + hC / 2) / hC / 6) * 6);
       for (let c = 0; c < nC; c++) {
         const r0 = rInP + c * hC, r1 = r0 + hC, rm = (r0 + r1) / 2;
-        if (2 * Math.PI * rm / kP > 1.9 * hC) kP *= 2;
+        /* POLARBRICK_ASPECT_MAX is CHOSEN, not derived (GitHub #103) -- the one
+           unexplained figure in an otherwise fully-derived family. Every other
+           number here comes off MIN_CUT, LATTICE_WALL or the wheel's own
+           radii; this one is a judgment call about how elongated a cell may
+           get -- tangential width (2*PI*rm/kP) against radial height (hC) --
+           before the course doubles its cell count rather than stretching
+           further. No record of why 1.9 specifically. */
+        if (2 * Math.PI * rm / kP > POLARBRICK_ASPECT_MAX * hC) kP *= 2;
         if (kind === 'polarbrick') {
           /* Alternate courses are offset half a cell, so no wall runs straight
              through the web -- the same reason a brick wall is laid in bond. */

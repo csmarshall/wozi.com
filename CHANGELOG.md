@@ -7,6 +7,45 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#150 — unnamed constants sweep (GitHub #103).** Five entries, all
+  `index.html` unless noted:
+
+  - **`colH` deleted.** Assigned from a DOM `offsetHeight` read (forcing
+    layout) inside `fitStage()`, and never read by anything.
+  - **`boost`'s cache invalidation is now guarded on `TRAIN_HAS_LINKED`.** It
+    is the spread multiplier for the dormant chain-and-belt capability, read
+    only in the `linked` branch no shipped `TRAIN` entry takes — so comparing
+    it unconditionally threw the whole solve away and rebuilt it on every
+    resize that crossed one of its ~6 quantised thresholds, for a variable
+    with no effect on this train. `TRAIN_HAS_LINKED` is computed once, off
+    the same `TRAIN` a revived `link: 'chain'`/`link: 'belt'` entry would
+    already be part of — the moment one exists, this line starts
+    invalidating on `boost` again, with nothing else to remember.
+  - **Named:** `BOOST_REF_PX`/`TIGHT_REF_PX` (fitStage's two reference
+    viewport widths — chosen, not derived, no record of why they're 8%
+    apart); `ESCAPE_SEARCH_ARC` (the arc `fitEscapes` searches either side of
+    a run's axis); `ESCAPE_CROSS_EXT_PX`/`ESCAPE_MIN_REACH_PX` (both screen
+    px); `ESCAPE_RUN_MARGIN` (solve units — the unit split matters: this one
+    is added to `span` *after* `span = e.reach / gs` has already converted
+    screen px into solve units, so an unlabelled `120` on either side of that
+    line would look identical and mean different things); `POLARBRICK_ASPECT_MAX`
+    (the one unexplained figure in an otherwise fully-derived family — chosen,
+    not derived, no record of why 1.9).
+  - **`tools/test.js`** updated to hand all four new `fitEscapes` constants
+    into `fitEscapesOn()` the same way `ESCAPE_WOBBLE` already was —
+    `ESCAPE_SEARCH_ARC` is an array, so it's grabbed as the real declaration
+    (`grabDecl`) rather than through `grabNumber()`, same as `STEP_DRIFT_MAX`/
+    `BAND_MAX`.
+
+  Deliberately not touched: `spiral`'s `spW` — the ticket's own read is that
+  it's retired code (the `else` fallback, `CENTRE_FAMILIES` entry commented
+  out), same as `honeycomb`/`iris`/`labyrinth`, worth leaving alone rather
+  than tuning a renderer nothing deals.
+
+  `npm test` 118/0, `pixel_regress` 0px on both scopes (plus forced on
+  `?kind=polarbrick`, the one family whose rendering math changed a variable
+  name), `tools/escape_mesh.py` unchanged (17/17 meshes, same residuals).
+
 - **CL#149 — `hubR * 1.5` gets one home: `BOSS_MUL`.** (GitHub #95.)
 
   Ten boss circles and three pattern-start clearances (`spokes`, `sunburst`'s
