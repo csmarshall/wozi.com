@@ -7,6 +7,44 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#146 — `/fidget` redirects to `/fidget/` instead of 403ing.**
+
+  The origin is the S3 REST endpoint behind an OAI, not the S3 website
+  endpoint, so S3's own `IndexDocument` rule never runs and CloudFront's
+  `DefaultRootObject` only covers `/` — a request for the bare directory path
+  reached S3 directly and got its raw `AccessDenied` XML back at 403. Same
+  failure shape as #74, one directory later, and CL#145 shipped the page
+  without anyone having typed the URL without its slash.
+
+  The fix is not in this repo in the usual sense. `wozi-viewer-request`, the
+  CloudFront Function already doing the www→apex redirect and the directory-
+  index rewrite that makes `/fidget/` itself work, now also slashes any path
+  in a new `DIRS` list (currently `['fidget']`) before either of those run —
+  so `www.wozi.com/fidget` takes one hop, not two, and `charles.wozi.com/fidget`
+  redirects to `charles.wozi.com/fidget/`, never to the apex.
+
+  **`DIRS` is a named list, not "any extensionless path gets a slash."**
+  `ssh_public_key` is a root object published deliberately without an
+  extension; an extensionless rule would 301 it into `/ssh_public_key/` and
+  break it. Same whitelist reasoning as the deploy step in
+  `.github/workflows/deploy.yml` — a directory not added here fails as a 403,
+  not as a broken published object.
+
+  The function's source is now versioned at
+  `infra/cloudfront-viewer-request.js` — see CLAUDE.md, "What the distribution
+  does before S3 sees the request," for why that file is documentation and not
+  what CI deploys, and why nothing before this entry ever said CloudFront ran
+  code at all. `deploy.yml`'s liveness check gained `check_redirect`, asserting
+  both the status and the `Location`, and used it for both `/fidget` and the
+  pre-existing bare www check, which previously asserted only the status code.
+
+  Verified against AWS's own `test-function` API returning a genuine
+  `ServiceUnavailable` 503 (confirmed via `--debug`, not a malformed event) —
+  pre-publish verification fell back to running the function body directly
+  under Node against eight scenarios (host × path combinations covering the
+  slash, the redirect, the exclusion, and the per-host preservation) before
+  publishing DEVELOPMENT to LIVE. Confirmed live afterward with `curl`.
+
 - **CL#144 — the pop-out menu is a control surface, and the person picker is
   gone.** (GitHub #118.)
 
@@ -43,6 +81,30 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
   base that predates the flywheel, ghost-palette and `MIN_CUT` rewrites. It is
   worth salvaging deliberately rather than rebasing blind, and #112 is where that
   belongs.
+
+### Added
+
+- **CL#145 — `/fidget` ships.** (GitHub #123. Charles: *"ship fidget"*.)
+
+  One line in the deploy's publish whitelist is the whole of it — CLAUDE.md's
+  own rule that adding a file does not publish it had been holding the page
+  back since it was built, which is exactly its job.
+
+  `fidget/index.html` joins the HTML publish loop. `fidget/README.md` does
+  not: it records the tooth counts, inertias and loss coefficients and why
+  they were chosen, which is repo documentation and not something the web
+  needs.
+
+  The liveness check is a substring rather than the `exact()` byte-identity
+  used for `keybase.html`. Deliberate: `/fidget` carries no sensitive data and
+  no signature, so byte-identity buys nothing, and what actually matters is
+  that the page arrives and is the fidget rather than a redirect or an error
+  body.
+
+  Not published, and staying that way: `legacy/`, every root `.md`, and the
+  tools.
+
+### Fixed
 
 - **CL#143 — `cards/` is removed entirely.**
 

@@ -264,6 +264,27 @@ jobs:
             fail=1
           }
 
+          # check_redirect <url> <expected-status> <expected-location>
+          # Two assertions a plain status check would miss: the redirect goes
+          # to the RIGHT place (a 301 to the wrong URL passes a status-only
+          # check), and it takes ONE hop, not a chain -- -I follows no
+          # redirects, so this reads the Location the origin actually sent.
+          check_redirect() {
+            local code loc
+            for i in $(seq 1 $ATTEMPTS); do
+              loc=$(curl -sSI --max-time 20 "$1" | tr -d '\r')
+              code=$(printf '%s\n' "$loc" | awk 'NR==1{print $2}')
+              loc=$(printf '%s\n' "$loc" | awk -F': ' 'tolower($1)=="location"{print $2}')
+              if [ "$code" = "$2" ] && [ "$loc" = "$3" ]; then
+                echo "  ok   $1 -> $code -> $loc"
+                return 0
+              fi
+              [ "$i" -lt "$ATTEMPTS" ] && sleep $BACKOFF
+            done
+            echo "  FAIL $1 -> $code -> '$loc', wanted $2 -> '$3'"
+            fail=1
+          }
+
           check https://wozi.com/ 200 'support.js'
           check https://wozi.com/support.js 200 ''
           # config.js carries the link table, the people and the palette. If it
@@ -297,6 +318,12 @@ jobs:
           # here -- what matters is that the page arrives and is the fidget
           # rather than a redirect or an error body.
           check https://wozi.com/fidget/ 200 'planetary'
+          # The bare path without the trailing slash used to 403 with the raw
+          # S3 AccessDenied body (CL#146) -- the #74 failure shape again, one
+          # directory later. wozi-viewer-request (infra/cloudfront-viewer-
+          # request.js) is what adds the slash; this is the only thing that
+          # would notice if that function were ever rolled back or replaced.
+          check_redirect https://wozi.com/fidget 301 'https://wozi.com/fidget/'
           # EXACT MATCH, NOT PRESENCE (#54). keybase.html's body is
           # signature-covered, so a truncated response still returns 200 while
           # the ownership proof silently stops verifying -- a substring check
@@ -342,9 +369,7 @@ jobs:
           # with no console error. Assert it explicitly.
           check_content_type https://wozi.com/assets/icons/github.svg image/svg+xml
           # www must redirect to the apex rather than fail TLS, as it did before #22.
-          wwwcode=$(curl -sS -o /dev/null --max-time 20 -w '%{http_code}' https://www.wozi.com/ || true)
-          if [ "$wwwcode" = "301" ]; then echo "  ok   https://www.wozi.com -> 301"; \
-          else echo "  FAIL https://www.wozi.com -> $wwwcode, wanted 301"; fail=1; fi
+          check_redirect https://www.wozi.com/ 301 'https://wozi.com/'
 
           exit $fail
 

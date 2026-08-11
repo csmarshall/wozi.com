@@ -21,7 +21,7 @@ The deploy **names the paths it publishes** rather than excluding the ones it
 does not — a whitelist, so a new file cannot reach the web by being forgotten.
 
 Published: `index.html`, `support.js`, `config.js`, `assets/`, `keybase.html`,
-`ssh_public_key`, `robots.txt`.
+`ssh_public_key`, `robots.txt`, `fidget/index.html`.
 
 `config.js` carries the link table, the people and the palette. It is published,
 and CI asserts it is reachable, serves as `text/javascript` and parses — this
@@ -32,6 +32,33 @@ drift: the rules requiring a file the rules do not name.
 claim only verifies while the file is reachable, so dropping it from the include
 list silently breaks it. Its content is signature-covered: serve it byte-exact or
 not at all.
+
+## What the distribution does before S3 sees the request
+
+The deploy step above is not the whole path from repo to browser. The origin is
+the S3 **REST** endpoint behind an OAI, not the S3 **website** endpoint — that
+choice is what makes OAI-restricted access possible at all, but it means S3's own
+`IndexDocument` rule never runs, and CloudFront's `DefaultRootObject` only ever
+covers `/` itself. Neither of those config knobs makes `/fidget/` resolve to
+`fidget/index.html`; something has to append the filename on every directory path,
+and that something is a **CloudFront Function** — `wozi-viewer-request`, on the
+distribution's default cache behaviour, `viewer-request` event — not a line in
+this repo. It also carries the `www` → apex 301 (#22).
+
+Its source lives at `infra/cloudfront-viewer-request.js` for the record, but
+**that file is not what is running.** It is not in the publish whitelist above —
+deliberately, since it must never be reachable over HTTP — and nothing deploys it
+to CloudFront. Updating the function on AWS is a manual step (the file's header
+comment carries the exact `aws cloudfront` commands); if the two ever disagree,
+AWS is live and the repo copy is stale documentation until someone runs them.
+
+`DIRS` inside it is the list of directories reachable without their trailing
+slash — currently `['fidget']`. It is a **named list, not an extensionless
+rule** ("any path whose last segment has no dot gets a slash"): `ssh_public_key`
+is a root object published deliberately without an extension, and an
+extensionless rule would 301 it into `/ssh_public_key/` and break it. Same
+whitelist reasoning as the deploy step: a new directory not added here fails as
+today's 403, not as a broken published object.
 
 ## The crawl policy, and where it is not stated
 
