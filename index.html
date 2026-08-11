@@ -4313,7 +4313,25 @@ class Component extends DCLogic {
              Anything measuring the heading would otherwise have to re-derive
              which of those applies -- modelling the rule it is supposed to be
              checking. Recorded here, where it is already known. */
-          hostCx: host.g.cx, hostCy: host.g.cy };
+          hostCx: host.g.cx, hostCy: host.g.cy,
+          /* THE HOST'S FLYWHEEL, NOT THE SPINE'S (GitHub #122 follow-up). An
+             escape run is decoration computed here, after solve() -- it is
+             never in `g` and never reaches the union-find at line ~6137, so
+             without this every escape ghost on the page read `comp` as
+             `undefined` and applyRotation()'s fallback silently drove it off
+             component 0, the spine's. A self-driven root's escape ghosts then
+             turned with whoever holds the spine's chain -- not just moving
+             when they should have sat still, but rotating at the SPINE's
+             angle while drawn in mesh with a wheel turning at the ROOT's, so
+             the two visibly slipped out of tooth-sync with each other. The
+             two idlers nearest the mesh point were never affected, because
+             they are the chain's own origin-run idlers -- structural `TRAIN`
+             entries solved into `g` like any real gear, correctly tagged
+             there. `host.g` is that same solved gear (`c.head`/`c.tail`/the
+             origin tip), already comp-tagged by solve() before fitEscapes()
+             ever runs, so every wheel grown from it inherits the SAME
+             component its host actually turns with. */
+          comp: host.g.comp };
         ghosts.push(g);
         /* PROGRESS ALONG THE RUN'S AXIS, not the length of the step that made it.
            `span` is measured straight down the escape bearing to the viewport edge,

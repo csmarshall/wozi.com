@@ -7,6 +7,50 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#147 — a self-driven chain's escape ghosts were driven by the SPINE's
+  flywheel, not their own.** (GitHub #122 follow-up. Charles: *"if one pulls
+  on my chain it moves all the gears on my chain and all the ghost gears on
+  harper's chain excluding the 2 before and after the link gear."*)
+
+  CL#142 gave every mesh its own flywheel (`_M[comp]`) and tagged every wheel
+  with the component it belongs to — but only wheels that pass through
+  `solve()`'s union-find get tagged. Escape-run ghosts are decoration
+  computed afterward, in `fitEscapes()`, entirely outside `g`: they never
+  reach line ~6137, so `.comp` was always `undefined` on every escape ghost
+  on the page, and `applyRotation()`'s `x.g.comp != null ? x.g.comp : 0`
+  fallback silently drove all of them off **component 0** — the spine's.
+
+  That is exactly why the two idlers nearest the mesh point were unaffected
+  and everything past them was not: those two are harper's own **origin-run**
+  idlers, structural `TRAIN` entries solved into `g` like any real gear and
+  correctly comp-tagged there. Her escape run, trailing off the far end, is
+  pure decoration with no such tag, so it rode Charles's angle instead of
+  hers — not just moving when a self-driven chain's ghosts should have sat
+  still, but rotating at the wrong rate entirely, which is what broke the
+  tooth-sync illusion between a ghost and the real wheel it is drawn meshing
+  against.
+
+  **The fix is one field.** `host.g` — the solved gear (`c.head`/`c.tail`/the
+  origin-run tip) an escape run grows from — is already comp-tagged by
+  `solve()` before `fitEscapes()` ever runs. Every ghost grown from it now
+  carries `comp: host.g.comp`, the same pattern already used for `hostCx`/
+  `hostCy` a few lines above, for the same reason: a run's identity is only
+  ever recoverable from its host.
+
+  **Verified by reaching into the live React instance rather than by eye.**
+  A one-off harness (not shipped — see `scratchpad/`) walks the stage's fiber
+  tree to the component instance, reads `_solved.gears` and `_ghostEls`
+  directly, holds `wozi-motion` at `rest` so idle animation cannot confound
+  the reading, and drags a real wheel on Charles's chain with a real pointer
+  sequence (press, wait for frames, tangential move, release — the #78/#92
+  class of gesture this repo's other drag harnesses already insist on).
+  Before the fix: all 12 of harper's escape ghosts carried `comp: null` and
+  all 12 moved. After: all 12 carry `comp: 1`, matching her own linked wheel,
+  and none moved. `npm test` 118/0, `dom_invariants` both scopes,
+  `verify_motion`, `pill_clip` all green; `pixel_regress` 0px both scopes —
+  expected, since nothing about a resting frame changes when only the
+  *ownership* of a flywheel is corrected.
+
 - **CL#146 — `/fidget` redirects to `/fidget/` instead of 403ing.**
 
   The origin is the S3 REST endpoint behind an OAI, not the S3 website
