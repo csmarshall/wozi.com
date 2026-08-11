@@ -6,14 +6,39 @@ runtime it loads. Serve the folder and you are looking at the site.
 This repo is the **source of truth** for `s3://wozi.com`, including the parts
 that predate the gear train.
 
-It is private, and the reason it was made private — `cards/` publishing a real
-address and mobile number — **no longer applies**: `cards/` was removed
-entirely in CL#143. What still argues against making it public is **history**,
-not the working tree: the vCard blob and the street address remain reachable in
-the object graph of every past commit, so publishing would expose them despite
-their being gone from HEAD. `legacy/resume-2014.pdf` is also uncleared. Going
-public therefore needs a `git filter-repo` rewrite and a look at that PDF — see
-#113 for the public-mirror alternative that avoids both.
+It is private. The reason it was made private — `cards/` publishing a real
+address and mobile number — no longer applies (`cards/` went in CL#143), and
+**the history that argued against going public has now been rewritten out**:
+`cards/` and both copies of `legacy/resume-2014.pdf` are gone from every
+commit, verified by grepping every blob in every commit for the address and
+mobile number. `scratchpad/public-safety-audit.md` is the authoritative record
+of what was there; read it before any further public-mirror work, because it
+also names a MEDIUM finding that was deliberately **not** stripped (the AWS
+account ID and deploy role ARN in `.github/workflows/deploy.yml` — not secrets,
+but world-readable once public, so the control is the OIDC trust policy's
+scoping rather than redaction).
+
+**This repo is not the GitHub repo it used to be, and that has one durable
+consequence.** Going public could not be done by force-pushing a rewrite,
+because GitHub keeps unreferenced objects fetchable by SHA indefinitely after a
+force-push — only a Support-side gc clears them, which a push cannot trigger. So
+the rewritten history was pushed to a **new** repo and renamed into the
+`csmarshall/wozi.com` slug, with the old one renamed aside. Issues were
+transferred afterwards and **kept their numbers exactly** (1–134), which the
+transfer only guarantees because the source numbering was contiguous with no PRs
+and the target was empty — so every `#N` in this file, `CHANGELOG.md` and 291
+commit messages still resolves, and the log's "numbers are stable" rule
+survived. Do not assume a future repo move gets that for free.
+
+**A repo swap breaks the deploy until IAM is updated, and the rename is not
+what fixes it.** `wozi-com-deploy`'s trust policy pins GitHub's OIDC subject by
+**immutable numeric repo ID**, not by name —
+`repo:csmarshall@1200112/wozi.com@<repo-id>:ref:refs/heads/main`. Renaming a repo
+does not change its ID, and a new repo has a different one, so deploys failed
+`Not authorized to perform sts:AssumeRoleWithWebIdentity` until that ID was
+updated. Worth knowing before touching the repo's identity again: the branch
+scoping in that same condition is also the control that makes the account ID
+being public acceptable.
 
 ## What deploys, and what does not
 
