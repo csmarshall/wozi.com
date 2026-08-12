@@ -835,6 +835,25 @@ run with `--query '?who=charles&kind=hexcore'` reported **27,069**. When a chang
 targets a family, force it with `kind=` or the gate is agreeing with you about a
 picture it never took.
 
+**The deal decides ±40% of the first render's cost, so an unpinned deal makes a
+load-time measurement incomparable** (#143, measured by `tools/render_cost.py`).
+At a fixed 24 SVGs and 6× CPU throttle the family alone moves the long render
+task from `spokes` 98.3ms to `ravigneaux` 181.6ms, with `hexcore` at 178.5ms and
+a mixed deal at 136.0ms. Two separate reasons: `hexcore` is **50.4ms of
+`gearSvg` against `sunburst`'s 2.1ms**, because its cell-size search is a
+triple-nested sweep that enumerates the whole lattice per candidate size and
+discards all but the winner; and the two epicyclics are expensive because they
+**draw** their ring, sun and planets in `ft.line` rather than cutting, so they
+call `teethPath` per member.
+
+The consequence for anyone profiling: **the deal is random, so first-render cost
+is random within a 40% band.** Two measurements taken on different loads are not
+comparable unless the deal is pinned, and `?seed` is what pins it — the same
+affordance CL#109 added for bug reports, never previously mentioned in a
+performance context. This is the same shape of trap as a 0px gate meaning "not
+tested": the number looks like a measurement and is partly a sample of which
+families were dealt.
+
 **The pixel gate photographs the combined stage.** `tools/pixel_regress.py`
 serves on `127.0.0.1`, which is a `STAGE_HOSTS` name, so its default shot is
 every chain at once. Use `--query '?who=charles'` to ask the narrower and often
