@@ -45,6 +45,17 @@ injection: without it the injection is accepted and silently never runs.
 Determinism lives in the harness and never in index.html -- the shipped page
 carries no test hooks.
 
+AND THE SEED IS BAKED INTO THAT INJECTION, NOT NAMED IN THE URL (GitHub #155).
+Until CL#180 this file read the seed out of `location.search` and navigated with
+`?seed=` appended, so the injection only ran when the page's OWN `?seed` handler
+was also triggered -- and index.html's DEAL_SEED runs at module scope, after any
+injected script, and reassigns Math.random to its own generator. The deal was
+therefore dealt by the shipped mechanism and the injected LCG was dead code, in
+the one file that is not allowed to work that way. See `seed_js()` below. The
+consequence to know when reading old output: every number this gate reports
+changed at CL#180 because every machine it measures changed. Nothing about the
+page did.
+
 THE WEBFONT IS PINNED TOO, AND THIS HARNESS IS THE LEAST EXPOSED OF THE FOUR --
 WHICH IS WHY IT IS WORTH SAYING WHAT PINNING BUYS HERE (GitHub #140). The page's
 drawing depends on WHEN Manrope arrives relative to its own first render
@@ -217,7 +228,14 @@ PAD_GHOST = MODULE * TOOTH_ADD + _pad_literal(
 # so once the svg width is corrected back to a pitch radius the residual on a
 # genuinely meshing pair is float noise. Measured over 30 runs (5 seeds x 2
 # themes x 2 scopes, then 5 viewports from 375x667 to 5120x1440) the worst
-# residual on a meshing pair was 0.0045px.
+# residual on a meshing pair is 0.0036px.
+#
+# THAT FIGURE WAS RE-MEASURED AT CL#180 OVER 30 ENTIRELY DIFFERENT DEALS, and it
+# had to be: GitHub #155 moved the seed out of the URL and into the injected
+# closure, so every machine this gate measures changed. Re-run in the same shape
+# it came back 0.0036px on a meshing pair (it was 0.0045px) against 47.5px on the
+# closest non-meshing pair -- the identical figure, still on the smallest viewport
+# in the list. Neither side of the bound got tighter.
 #
 # The tolerance is not set by that, though: S is recovered LOSSILY. index.html
 # writes `--gsfit` as `fit.toFixed(3)` and this harness re-floors that string to
@@ -228,7 +246,7 @@ PAD_GHOST = MODULE * TOOTH_ADD + _pad_literal(
 # (13 solve units) on BOTH wheels of a pair: 2 * 13 * 0.01 = 0.26px worst case.
 # 0.35px clears that analytically, and the closest NON-meshing pair over those
 # same 30 runs was 47.5px away, on the smallest viewport in the list -- so the
-# bound has ~135x margin on the side that would make it lie. It is the same
+# bound has ~136x margin on the side that would make it lie. It is the same
 # number, reached the same way, as tools/mesh_dirs.py's; the brief for this work
 # said "~0.5px", and the tighter figure is used because the repo has already
 # paid for the analysis and the measured margin supports it.
@@ -415,18 +433,32 @@ SAMPLE_JS = r"""
 })()
 """
 
-# The same LCG, seeded off the URL, that tools/devices.py and
-# tools/pixel_regress.py inject. Reading the seed from the query rather than
-# baking it in means the injection happens once and each navigation names its
-# own.
-SEED_JS = """
-  (() => {
-    const m = /[?&]seed=(\\d+)/.exec(location.search);
-    if (!m) return;
-    let s = +m[1] >>> 0;
-    Math.random = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
-  })();
-"""
+# THE SEED IS BAKED INTO THE CLOSURE, AND `?seed=` NEVER REACHES THE URL
+# (GitHub #155). This used to read the seed out of `location.search`, which made
+# the injection depend on the page's OWN determinism affordance being triggered:
+# no `?seed=` in the URL and this script returned immediately, and with one in the
+# URL index.html's `DEAL_SEED` block -- module scope, so strictly AFTER anything
+# injected here -- reassigned Math.random to its own murmur3-scrambled generator
+# and dealt the machine itself. The injection was therefore dead code either way,
+# and every run of this gate was dealt by the mechanism it is supposed to be able
+# to see a fault in. CLAUDE.md is explicit: "a gate that deals through the same
+# mechanism the page deals through cannot see a fault in that mechanism, because
+# it would agree with the page about a machine they had both got wrong."
+#
+# Baked in, the LCG is the ONLY thing touching Math.random -- absent `?seed=` the
+# page does not touch it at all -- so a repeat run being bit-identical is now
+# evidence about this closure and nothing else. That is the shape
+# tools/pixel_regress.py and tools/parse_cost.py have always had.
+#
+# It costs one injection per navigation instead of one per browser, which is why
+# callers with more than one navigation must remove the previous script first (see
+# tools/devices.py). Both harnesses here navigate once per browser.
+def seed_js(seed):
+    return ("(() => {"
+            f"let s = {int(seed) & 0xFFFFFFFF};"
+            "Math.random = () => { s = (s * 1664525 + 1013904223) >>> 0;"
+            " return s / 4294967296; };"
+            "})();")
 
 
 def hsv(hex_str):
@@ -562,15 +594,17 @@ async def sample(url, seed, viewport, theme, pin):
             # work -- two different deals and the same green verdict.
             await send("Page.enable")
             await send("Runtime.enable")
-            await send("Page.addScriptToEvaluateOnNewDocument", {"source": SEED_JS})
+            await send("Page.addScriptToEvaluateOnNewDocument", {"source": seed_js(seed)})
             await send("Page.addScriptToEvaluateOnNewDocument",
                        {"source": "try{localStorage.setItem('wozi-theme','%s')}catch(e){}" % theme})
             await pin.install(send)
             await send("Emulation.setDeviceMetricsOverride",
                        {"width": viewport[0], "height": viewport[1],
                         "deviceScaleFactor": 1, "mobile": False})
-            sep = "&" if "?" in url else "?"
-            await send("Page.navigate", {"url": f"{url}{sep}seed={seed}"})
+            # NO `seed=` IN THE URL, EVER (GitHub #155). The deal comes off the
+            # injected closure above; naming a seed here would hand it to
+            # index.html's own DEAL_SEED instead, which runs later and wins.
+            await send("Page.navigate", {"url": url})
             # A CONDITION, NOT THE OLD FIXED 4.0s. That sleep was three things at
             # once -- load, the font coming off the network, and the fit settling --
             # and only one of them is still a duration at all now the font is

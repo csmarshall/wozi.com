@@ -58,6 +58,10 @@ CI_FLAGS = ([] if _sys_platform_is_darwin() else
             ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"])
 _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
 import fontpin
+# ONE HOME FOR THE INJECTED LCG (GitHub #155). Three harnesses used to carry a
+# copy of it and all three copies read the seed out of the URL, which is the
+# fault #155 is about -- a second copy is a second chance to reintroduce it.
+import dom_invariants as dom
 
 _ap = argparse.ArgumentParser(description="does the train run along the long side")
 # POSITIONAL, because CI and tools/mutation_gate.py both append the served URL to
@@ -68,6 +72,20 @@ _ap.add_argument("--fonts", default="auto", choices=["auto", "pinned", "blocked"
                       "loudly to blocked if it cannot be fetched. pinned: require "
                       "it, exit 2 if unobtainable. blocked: never fetch it — every "
                       "text-sized box measured is then a fallback metric.")
+# THE SEED BASE AND THE CENSUS EXIST TO MAKE THE BOUNDS BELOW RE-MEASURABLE
+# (GitHub #155). Every threshold in this file was characterised over the deals it
+# happened to be dealing at the time, and CL#180 changed every one of those deals
+# by moving the seed out of the URL and into the injected closure. A bound nobody
+# can re-measure without editing the harness is a bound that drifts, so: --seed
+# moves all 28 rows onto a different set of machines, and --census prints the
+# quantity each assertion actually compares rather than only the verdict.
+_ap.add_argument("--seed", type=int, default=20260804,
+                 help="base seed; every row takes this plus its own index, so a "
+                      "different base is 28 different machines, the same 28 every "
+                      "time. The verdict is a property of this number")
+_ap.add_argument("--census", action="store_true",
+                 help="print the margin each bound is measured against, per row — "
+                      "what a re-characterisation of these tolerances reads")
 _ARGS = _ap.parse_args()
 URL = _ARGS.url
 # THE PORT IS NOT FIXED (#42). Every harness here used a hardcoded DevTools
@@ -337,18 +355,25 @@ async def main():
 
     ws_url = None
     for _ in range(60):
-        try:
-            with urllib.request.urlopen(f"http://127.0.0.1:{PORT}/json/new?{URL}", timeout=1) as r:
-                ws_url = json.load(r)["webSocketDebuggerUrl"]
-                break
-        except Exception:
+        # about:blank, NOT the page -- the same rule tools/verify_motion.py and
+        # tools/dom_invariants.py state (GitHub #155). Asking /json/new for the URL
+        # directly makes the tab navigate before Fetch interception is armed and
+        # before the seed script is installed, so that first navigation fetches
+        # the stylesheet off the network and warms the cache for the measured one,
+        # and deals a machine from an unpinned Math.random. Every profile below
+        # navigates explicitly, so nothing needs this first one to land anywhere.
+        for method in (None, "PUT"):  # older Chrome requires PUT on /json/new
             try:
-                req = urllib.request.Request(f"http://127.0.0.1:{PORT}/json/new?{URL}", method="PUT")
+                target = f"http://127.0.0.1:{PORT}/json/new?about:blank"
+                req = urllib.request.Request(target, method=method) if method else target
                 with urllib.request.urlopen(req, timeout=1) as r:
                     ws_url = json.load(r)["webSocketDebuggerUrl"]
                     break
             except Exception:
-                time.sleep(0.2)
+                pass
+        if ws_url:
+            break
+        time.sleep(0.2)
     if not ws_url:
         proc.kill()
         print("FATAL: no DevTools endpoint")
@@ -397,7 +422,8 @@ async def main():
                 waited += poll
             return last  # never settled inside the budget -- report the last read anyway
 
-        # THE DEAL IS SEEDED, ONE FIXED SEED PER ROW.
+        # THE DEAL IS SEEDED, ONE FIXED SEED PER ROW -- ALL 28 ROWS, INCLUDING THE
+        # SAFE-AREA PASS, WHICH CARRIED NO SEED AT ALL UNTIL GitHub #155.
         #
         # Every wheel on this page is dealt at random, so two loads of one profile
         # are two different machines -- and this tool's verdict was a property of
@@ -411,27 +437,52 @@ async def main():
         # A flaky gate is worse than a narrow one: it teaches everyone to re-run
         # until it passes, which is how a real failure gets waved through. So the
         # deal is pinned. Breadth is not lost, because the seed varies BY ROW --
-        # 24 profiles still exercise 24 different machines, the same 24 every time.
+        # 28 profiles still exercise 28 different machines, the same 28 every time.
         #
         # Same LCG and the same reasoning as tools/pixel_regress.py, and the seed
-        # is read from the URL rather than baked in, so the injection happens once
-        # and each navigation names its own. Determinism lives in the harness and
-        # never in index.html -- there is no test hook in the shipped page.
+        # is BAKED INTO THE INJECTED CLOSURE rather than read out of the URL
+        # (GitHub #155). It used to be read from `location.search`, which meant the
+        # injection only ran when the page's own `?seed` handler ran too -- and
+        # index.html's DEAL_SEED runs at module scope, after any injected script,
+        # and reassigns Math.random to its own murmur3-scrambled generator. So the
+        # injection was dead code and all 24 rows were dealt by the shipped
+        # mechanism, which is precisely what CLAUDE.md forbids a gate from doing:
+        # a gate that deals through the page's own mechanism cannot see a fault in
+        # it. Determinism lives in the harness and never in index.html -- there is
+        # no test hook in the shipped page.
         # Page.enable FIRST. Without it the injection is accepted and silently
         # never runs, which reads exactly like a seed that does not work: two runs
         # of this tool came back with different deals and the same 24/24.
         await send("Page.enable")
         await send("Runtime.enable")
-        await send("Page.addScriptToEvaluateOnNewDocument", {"source": """
-          (() => {
-            const m = /[?&]seed=(\\d+)/.exec(location.search);
-            if (!m) return;
-            let s = +m[1] >>> 0;
-            Math.random = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
-          })();
-        """})
         await pin.install(send)
-        seed = 20260804
+        # ONE INJECTION PER NAVIGATION, AND THE PREVIOUS ONE IS REMOVED. A baked
+        # seed cannot be installed once for a run that navigates 28 times, and
+        # LEAVING the old scripts in place would be worse than the fault this
+        # replaces: they all run, in install order, so the last one installed would
+        # decide every deal and the row-varying seed would silently collapse to one
+        # machine measured 28 times. `dom_invariants.seed_js` is the one home for
+        # the generator, imported rather than copied for the reason tools/test.js
+        # reads its constants out of index.html.
+        seed_script = None
+
+        async def deal_from(seed):
+            nonlocal seed_script
+            if seed_script is not None:
+                await send("Page.removeScriptToEvaluateOnNewDocument",
+                           {"identifier": seed_script})
+            r = await send("Page.addScriptToEvaluateOnNewDocument",
+                           {"source": dom.seed_js(seed)})
+            seed_script = r.get("identifier")
+            if not seed_script:
+                # print-then-2, never `SystemExit("...")`: the string form exits 1,
+                # this tool's word for "a device failed its layout check" (#156).
+                print("FATAL: Chrome accepted the seed script without returning an "
+                      "identifier, so the next row cannot remove it — every deal "
+                      "after this one would be decided by a stale injection.")
+                raise SystemExit(2)
+
+        seed = _ARGS.seed
         for label, pw, ph, dpr, ua, pchrome, lchrome in DEVICES:
             for orient in ("portrait", "landscape"):
                 seed += 1
@@ -444,8 +495,13 @@ async def main():
                                           else "landscapePrimary",
                                           "angle": 0 if orient == "portrait" else 90}})
                 await send("Emulation.setTouchEmulationEnabled", {"enabled": True, "maxTouchPoints": 5})
+                await deal_from(seed)
+                # `d=WxH` is a cache-busting label so consecutive rows are distinct
+                # URLs; the page ignores it. NO `seed=` (GitHub #155) -- the deal
+                # comes off the injected closure, and naming one here would hand it
+                # to index.html's DEAL_SEED instead.
                 await send("Page.navigate", {"url": URL + ("&" if "?" in URL else "?")
-                                             + f"d={w}x{h}&seed={seed}"})
+                                             + f"d={w}x{h}"})
                 # A CONDITION, then the geometry settle that was always here. The
                 # retired 2.3s was covering load, the font's trip across the
                 # network, and the fit -- and with the font served from memory only
@@ -529,6 +585,41 @@ async def main():
                 # 390-418px against a 222px standard. TARGET_GEAR_PX is read out
                 # of index.html rather than copied, for the same reason
                 # tools/test.js reads its constants there.
+                #
+                # RE-CHARACTERISED AT CL#180 OVER 72 DEALT MACHINES (24 rows x 3
+                # seed bases, `--census --seed`), because GitHub #155 moved the
+                # seed out of the URL and changed every machine this file measures.
+                # Worst case per bound, and the whole point of writing them down is
+                # that the next person can reproduce them with two flags:
+                #
+                #   reach, near end      -143.3px against a +1.0 bound
+                #   reach, far end       +131.6px against a -1.0 bound
+                #   centre offset         0.0001 of 0.06          600x margin
+                #   link share, ceiling   0.6496 of 0.80          0.150 margin
+                #   link share, floor     0.5538 of 0.45          0.104 margin
+                #                         (38 of 72 rows have the floor in play at
+                #                          all; at_standard disjoins the rest)
+                #   gear, ceiling         221.9px of 226.4px      4.5px margin
+                #
+                # THE REACH FIGURES WOBBLE BY A FEW TENTHS OF A PIXEL BETWEEN TWO
+                # RUNS OF THE SAME SEED, AND THAT IS NOT THE DEAL MOVING. `share`,
+                # `gear` and `centre` are bit-identical run to run; only `reach` is
+                # not, because a0/a1 come off getBoundingClientRect on the ROTATING
+                # wheel wrappers -- the box of a spinning square, so it depends on
+                # the phase the settle-poll happened to stop at. It is the same
+                # reason tools/dom_invariants.py refuses that call for its own
+                # geometry. The margin is 144px, so it cannot reach the assertion;
+                # what it can do is look like nondeterminism to somebody diffing
+                # two census runs, which is why it is written down here.
+                #
+                # ONE MARGIN TIGHTENED and it is worth naming rather than burying:
+                # the linked-share FLOOR. The narrowest row used to sit at 0.57 and
+                # now sits at 0.5538, so the margin fell from about 0.12 to 0.104.
+                # Two things moved at once -- different deals AND three times as
+                # many of them -- so part of that is simply more sampling finding a
+                # worse row, and it is not evidence about the page. 0.45 still
+                # clears it by more than a fifth of the reachable range, so the
+                # bound is unchanged. Everything else held or improved.
                 LINK_FLOOR, LINK_CEIL = 0.45, 0.80
                 gear = m.get("gear", 0)
                 # THE TOLERANCE IS ONE TOOTH, AND IT IS DERIVED, because the two
@@ -589,6 +680,18 @@ async def main():
                 print(f"{label:22} {orient:10} {str(w) + 'x' + str(h):11} "
                       f"{covered * 100:5.0f}%   {link_share * 100:4.0f}%  "
                       f"{gear:5.0f}px  {'ok' if ok else 'FAIL: ' + ', '.join(why)}")
+                if _ARGS.census:
+                    # Each bound and the distance this row sits from it, in the
+                    # bound's OWN units -- reach in px off each end, centre offset
+                    # as a fraction of the long axis, link share against whichever
+                    # of its two bounds is nearer, gear against its ceiling. `std`
+                    # says whether the linked-share floor was even in play, since
+                    # at_standard disjoins it away on the wide profiles.
+                    print(f"    census seed {seed}  reach {a0:+.1f}/"
+                          f"{a1 - long_px:+.1f}px  centre {centre_off:.4f} of 0.06  "
+                          f"share {link_share:.4f} in [{LINK_FLOOR},{LINK_CEIL}] "
+                          f"std={'y' if at_standard else 'n'}  "
+                          f"gear {gear:.1f} of {TARGET_GEAR_PX * 1.02:.1f}")
 
         print(f"\nsafe areas (insets injected — Chrome resolves every env() to 0)\n")
         print(f"{'device':22} {'orient':10} {'insets':16} {'clearance':11} verdict")
@@ -603,6 +706,16 @@ async def main():
                                       else "landscapePrimary",
                                       "angle": 0 if orient == "portrait" else 90}})
             await send("Emulation.setTouchEmulationEnabled", {"enabled": True, "maxTouchPoints": 5})
+            # SEEDED, FOR THE SAME REASON THE PASS ABOVE IS (GitHub #155). This
+            # pass was unseeded outright -- no seed in the URL and, once the
+            # injection above was baked rather than URL-driven, nothing pinning
+            # Math.random at all -- while its last assertion, "assembly no longer
+            # reaches the physical edges", is a statement about the dealt machine.
+            # That is #88 exactly: a verdict that is a property of the machine this
+            # row happened to get. The seed counter continues from the device pass,
+            # so all 28 profiles are 28 distinct machines and the same 28 every run.
+            seed += 1
+            await deal_from(seed)
             await send("Page.navigate", {"url": URL + ("&" if "?" in URL else "?") + f"s={w}x{h}"})
             await fontpin.wait_ready(send, pump, wait_until,
                                      what=f"{label} {orient} (safe area)")
@@ -666,6 +779,9 @@ async def main():
             await pin.state(send, label=f"{label} {orient} (safe area)")
             print(f"{label:22} {orient:10} {f'{t}/{r_}/{b}/{l}':16} "
                   f"{worst:7.0f}px   {'ok' if not why else 'FAIL: ' + ', '.join(why)}")
+            if _ARGS.census:
+                print(f"    census seed {seed}  clearance {worst:+.2f}px of -0.50  "
+                      f"reach {e0:+.1f}/{e1 - long_px:+.1f}px of 1.0")
 
     proc.kill()
     print(f"\n{len(DEVICES) * 2 - bad}/{len(DEVICES) * 2} passed"

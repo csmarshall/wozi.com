@@ -79,10 +79,24 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GATES = {
     "suite":  {"argv": ["node", "tools/test.js"], "server": False,
                "what": "tools/test.js — the geometry suite (CI, every push)"},
+    # THE TWO STRUCTURAL GATES, REGISTERED AT LAST (GitHub #155). Both run on
+    # every deploy and neither had a single mutant, so "every gate went red for
+    # its own mutant" was silent about them -- the exact shape of claim this file
+    # exists to stop being taken on trust. `dom` is CI's first invocation of the
+    # two it makes (the bare URL is the combined stage); the `?who=charles` scope
+    # is a second code path and is left to CI, since a mutant that survives one
+    # scope and not the other would be a finding about the page rather than the
+    # gate.
+    "dom":    {"argv": [sys.executable, "tools/dom_invariants.py"], "server": True,
+               "what": "tools/dom_invariants.py — the rendered DOM meshes, draws and "
+                       "is inked (CI, every push)"},
     "motion": {"argv": [sys.executable, "tools/verify_motion.py"], "server": True,
                "what": "tools/verify_motion.py — the train turns (CI, every push)"},
     "type":   {"argv": [sys.executable, "tools/pill_clip.py"], "server": True,
                "what": "tools/pill_clip.py — the pill label fits its clip (CI, every push)"},
+    "escape": {"argv": [sys.executable, "tools/escape_mesh.py"], "server": True,
+               "what": "tools/escape_mesh.py — escape-run ghosts mesh with what they "
+                       "grew from (CI, every push)"},
     "pixels": {"argv": [sys.executable, "tools/pixel_regress.py", "--ref", "HEAD",
                         "--viewport", "1440x900"], "server": False,
                "what": "tools/pixel_regress.py — the drawing is unchanged (manual)"},
@@ -241,6 +255,61 @@ MUTANTS = [
                "times in the file afterwards — the destination key, the echo and the "
                "live-site check — so a text search still finds it and only reading the "
                "commands notices it has stopped being published.",
+    },
+    {
+        "id": "train-loses-mesh",
+        "gate": "dom",
+        "file": "index.html",
+        "find": ": prev.r + r;",
+        "repl": ": prev.r + r + 2;",
+        "expect": "caught",
+        "why": "THE ONE THING solve() PROMISES, broken by two solve units. CLAUDE.md's "
+               "'do not hardcode centre distances' is this line: a direct-mesh child is "
+               "placed at exactly the sum of the two pitch radii, and adding to it opens "
+               "a gap of about 2.8px at desk scale on EVERY pair at once. Nothing looks "
+               "wrong — the wheels are the right size, the right count and the right "
+               "colour, they all turn on the one clock, the composition still reaches "
+               "both ends of the long axis and the pill still fits. The teeth simply are "
+               "not in mesh, which is the fault a still cannot show and the maths suite "
+               "cannot see because the maths never changed. This is the first mutant "
+               "either structural gate has ever had (GitHub #155).",
+    },
+    {
+        "id": "escape-host-misrecorded",
+        "gate": "escape",
+        "file": "index.html",
+        "find": "hostCx: host.g.cx, hostCy: host.g.cy,",
+        "repl": "hostCx: host.g.cx + 40, hostCy: host.g.cy,",
+        "expect": "caught",
+        "why": "THE BOOKKEEPING HALF, and it is the reason escape_mesh reads the run "
+               "structure out of the page instead of re-deriving it. CL#132's actual bug "
+               "was a host that stopped being recoverable from the chain, and 'a run's "
+               "heading means nothing measured from the wrong origin' is the rule that "
+               "came out of it. Nothing DRAWS from hostCx — it is recorded for the datum "
+               "mark and for whatever measures a heading — so this moves not one pixel "
+               "and changes no geometry: every ghost still meshes with the wheel it "
+               "really grew from. What breaks is the page's own account of which wheel "
+               "that was, and escape_mesh's host-identity match (HOST_MATCH_PX, 1.5px "
+               "against two numbers that should agree to float noise) is what refuses "
+               "it. A gate that trusted the bookkeeping without checking it would report "
+               "every run green.",
+    },
+    {
+        "id": "escape-run-steps-wide",
+        "gate": "escape",
+        "file": "index.html",
+        "find": "const d = prev.r + r;",
+        "repl": "const d = prev.r + r + 1.5;",
+        "expect": "caught",
+        "why": "GitHub #117 exactly — Charles at a screenshot: 'this configuration "
+               "doesn't look possible.' CL#80 grows a run wheel to wheel at `prev.r + r`, "
+               "so every consecutive pair is MEANT to be in mesh; 1.5 solve units is "
+               "about 2.1px at desk scale, six times the tolerance, on every step of "
+               "every run. The geometry half of this gate to `escape-host-misrecorded`'s "
+               "bookkeeping half, and deliberately invisible to dom_invariants: its mesh "
+               "check exempts escape ghosts by construction (they live one DOM level "
+               "deeper than its element test allows), which is why this file exists at "
+               "all and why the mutant belongs to this gate and not that one.",
     },
     {
         "id": "sleep-latched",

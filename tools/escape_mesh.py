@@ -50,8 +50,17 @@ from the page and every NUMBER is measured from the DOM.
 
 SEEDED AND IN BOTH ORIENTATIONS. The deal is pinned exactly as dom_invariants,
 devices.py and pixel_regress do, by injecting an LCG over Math.random through
-Page.addScriptToEvaluateOnNewDocument (CL#109 forbids gates using the page's own
-`?seed`). Portrait is not optional: the stage rotates the whole train by
+Page.addScriptToEvaluateOnNewDocument with the seed BAKED INTO THE CLOSURE and
+never named in the URL (CL#109 forbids gates using the page's own `?seed`, and
+GitHub #155 is the entry about this file having used it anyway: the injected
+script read `location.search`, so it only ran when the page's own handler ran
+too, and index.html's DEAL_SEED -- module scope, later than any injected script
+-- then dealt the machine itself. The injection was dead code and the sentence
+above was false for as long as it stood. `dom.seed_js()` is the one home for the
+generator now, and the residuals this file prints all changed at CL#180 because
+every machine it measures did).
+
+Portrait is not optional: the stage rotates the whole train by
 `_axisRot`, and CLAUDE.md records two separate bugs from geometry that honoured
 the screen instead of the axis -- both of which only a measurement in screen
 space could see.
@@ -66,7 +75,10 @@ the others -- a full `--census` run with both font hosts blackholed at Chrome's
 resolver, against a normal run -- and the two outputs are IDENTICAL: 4 seeds x 2
 viewports, every run, every ghost, every residual to the last printed digit, the
 only differing line being the ephemeral port the server bound. Zero exposure, so
-pinning would add a mechanism and prove nothing.
+pinning would add a mechanism and prove nothing. RE-RUN AT CL#180 and still
+identical, which was not optional: GitHub #155 changed every deal this file
+measures, so the CL#168 result was a measurement about machines that no longer
+exist.
 
 Two reasons it comes out that way, and both would have to change before this
 paragraph does. Every number here is a radius or a centre, taken off the anchor
@@ -104,6 +116,19 @@ import dom_invariants as dom  # noqa: E402
 CHROME, CI_FLAGS, ROOT = dom.CHROME, dom.CI_FLAGS, dom.ROOT
 PAD_LINKED, PAD_GHOST, TOL_MESH_PX = dom.PAD_LINKED, dom.PAD_GHOST, dom.TOL_MESH_PX
 
+# WHAT THAT TOLERANCE ACTUALLY BUYS *HERE*, re-measured at CL#180 over 24 deals
+# (12 seeds x 2 viewports) because GitHub #155 changed every one of them. Worst
+# residual on a ghost the gate calls meshing: 0.0233px against the 0.35px bound,
+# a 15x margin. It is worth stating separately from dom_invariants' own number
+# because a ghost's residual comes out an order of magnitude LARGER than a
+# structural pair's (0.0036px there) and consistently so -- an observation, with
+# no mechanism established for it here, and therefore not a number either file
+# may borrow from the other. THE MARGIN TIGHTENED at CL#180 -- the old deals' worst was
+# 0.0197px, an 18x margin -- which is a property of which machines get dealt and
+# not of the geometry. 15x is still an order of magnitude clear of the bound, so
+# the bound is unchanged; a future re-characterisation that lands under about 5x
+# is the one that should move it.
+
 # How close an escape ghost's recorded host coordinate has to land to a rendered
 # structural wheel's own inline centre before we believe they are the same wheel.
 # This is an IDENTITY match, not a geometry test: both numbers are the same
@@ -132,7 +157,10 @@ def serve(directory):
         except Exception:
             time.sleep(0.1)
     p.kill()
-    raise SystemExit(f"FATAL: could not serve {directory}")
+    # print-then-2, never `SystemExit("...")`: the string form exits 1, which the
+    # docstring above promises means "a ghost does not mesh" (GitHub #156).
+    print(f"FATAL: could not serve {directory}")
+    raise SystemExit(2)
 
 
 # ---- the one evaluate ------------------------------------------------------
@@ -249,7 +277,9 @@ async def sample(url, seed, viewport, theme):
     """One navigation, one evaluate. Bootstrapping copied from
     tools/dom_invariants.py, including the rule that `Page.enable` must precede
     the injection -- without it the seed script is accepted and silently never
-    runs, which reads as two different deals and the same green verdict."""
+    runs, which reads as two different deals and the same green verdict. The seed
+    is baked into the injected closure and the URL carries no `seed=` at all
+    (GitHub #155)."""
     port = int(os.environ.get("CDP_PORT") or 0) or dom.free_port()
     profile = os.environ.get("CHROME_PROFILE") or tempfile.mkdtemp(prefix="wozi-esc-")
     proc = subprocess.Popen(
@@ -301,14 +331,16 @@ async def sample(url, seed, viewport, theme):
 
             await send("Page.enable")
             await send("Runtime.enable")
-            await send("Page.addScriptToEvaluateOnNewDocument", {"source": dom.SEED_JS})
+            await send("Page.addScriptToEvaluateOnNewDocument", {"source": dom.seed_js(seed)})
             await send("Page.addScriptToEvaluateOnNewDocument",
                        {"source": "try{localStorage.setItem('wozi-theme','%s')}catch(e){}" % theme})
             await send("Emulation.setDeviceMetricsOverride",
                        {"width": viewport[0], "height": viewport[1],
                         "deviceScaleFactor": 1, "mobile": False})
-            sep = "&" if "?" in url else "?"
-            await send("Page.navigate", {"url": f"{url}{sep}seed={seed}"})
+            # NO `seed=` IN THE URL (GitHub #155) -- the deal comes off the baked
+            # closure above, and naming a seed here would hand it to index.html's
+            # own DEAL_SEED, which runs later and wins.
+            await send("Page.navigate", {"url": url})
             # fitEscapes runs out of the fit pass, which settles a beat after the
             # first paint -- the runs do not exist at load.
             await asyncio.sleep(4.0)

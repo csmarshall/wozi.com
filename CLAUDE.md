@@ -823,9 +823,11 @@ and it only appears under CPU contention *plus* the CI runner's own
 `DETERMINISTIC_FLAGS` removes Chrome's freedom to raster a pass differently and is
 verified appearance-neutral. **No tolerance was added to either the diff or the
 control**, deliberately: a threshold chosen to turn a red run green measures
-nothing. A residual now prints a greppable `NOTE:` instead of failing. **`tools/devices.py`, `tools/dom_invariants.py` and
-`tools/pill_clip.py` still carry the unpinned exposure** — `pill_clip` measures
-type specifically, so it is the likeliest to flake for this exact reason.
+nothing. A residual now prints a greppable `NOTE:` instead of failing.
+**`tools/pill_clip.py` is the last harness still carrying the unpinned exposure**
+— `devices.py` and `dom_invariants.py` both pin through `fontpin` today — and
+`pill_clip` measures type specifically, so it is the likeliest to flake for this
+exact reason.
 
 **A 0px pixel gate can mean "not tested", not "unchanged".** The default deal is
 seven wheels drawn from eleven families, so a change confined to one family has
@@ -916,7 +918,30 @@ shipped code (CL#109). **The harnesses keep injecting their own LCG through
 `Page.addScriptToEvaluateOnNewDocument` and must go on doing so**: a gate that
 deals through the same mechanism the page deals through cannot see a fault in
 that mechanism, because it would agree with the page about a machine they had
-both got wrong. Absent the parameter the page does not touch `Math.random` at
+both got wrong.
+
+**Three of them did both, and doing both means the injection loses** (#155,
+CL#180). `dom_invariants`, `escape_mesh` and `devices` each injected an LCG *and*
+appended `?seed=` to the URL, because their copy of the injected source read the
+seed out of `location.search`. `DEAL_SEED` runs at index.html's module scope,
+which is **after** any injected script, and reassigns `Math.random` to its own
+generator — so the shipped mechanism dealt every one of those machines and the
+injection was dead code, in the three files least allowed to work that way. The
+seed is now **baked into the closure** and the URL carries no `seed=` at all;
+`dom_invariants.seed_js()` is the one home for it, imported by the other two,
+because a copy is a second chance to reintroduce this. **`tools/pill_clip.py`
+still carries a fourth copy with the identical fault**, and its own comment claims
+it seeds the same way the others do, which is now false in the other direction.
+
+The consequence when reading old output: **every number those three gates report
+changed, because every machine they measure changed** — nothing about the page
+did. Re-characterised rather than assumed, and no bound was moved: a threshold
+adjusted to keep a run green measures nothing. Two margins tightened on their own
+(`escape_mesh`'s worst ghost residual 18× → 15× under its bound, `devices`' link
+share floor 0.12 → 0.104), and that is a property of which machines get dealt
+rather than of the geometry.
+
+Absent the parameter the page does not touch `Math.random` at
 all, which is what keeps `pixel_regress` at 0px; a malformed or out-of-range seed
 deals at random and says so in the console. And it fixes the **deal**, not the
 fit — the placement is measured off the viewport, so reproducing a machine takes

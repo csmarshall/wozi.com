@@ -289,6 +289,108 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#180 — three gates dealt their machines through the shipped `?seed`
+  mechanism, so their own injected generator was dead code.** (GitHub #155.)
+
+  `CLAUDE.md` is explicit that a harness must inject its own LCG and never use the
+  page's `?seed`, because *"a gate that deals through the same mechanism the page
+  deals through cannot see a fault in that mechanism — it would agree with the page
+  about a machine they had both got wrong."* `dom_invariants`, `escape_mesh` and
+  `devices` each did **both**, and doing both means the injection loses:
+
+  Their copy of the injected source read the seed out of `location.search`, so it
+  only produced anything when `?seed=` was also on the URL — and `DEAL_SEED` runs at
+  `index.html`'s **module scope**, which is *after* any injected script, reassigning
+  `Math.random` to its own generator. The shipped mechanism dealt every machine those
+  three gates have ever measured. The rule was in the rulebook, the mechanism was in
+  the file, and the two had never been checked against each other.
+
+  **Fixed by baking the seed into the closure** — `seed_js(seed)` replaces the
+  `SEED_JS` constant, and the URL carries no `seed=` at all. `dom_invariants.seed_js`
+  is the **one home**, imported by the other two rather than copied, because three
+  copies is what let one fault be three.
+
+  **Proved in both halves, because either alone is worthless.** Repeats must be
+  bit-identical *and* the injected seed must be what governs — absent `?seed=` the
+  page does not touch `Math.random`, so identical repeats can only come from the
+  injection:
+
+  | measurement | result |
+  | --- | --- |
+  | `dom_invariants --census` ×2, same seed | identical but for the wall-clock line |
+  | same nominal seed, before vs after | 76 of 85 lines differ — the deal changed |
+  | injected seed 20260804 vs 4242 | 127 census lines differ |
+  | `escape_mesh --census` ×2 | identical, 149/149 |
+  | `devices --census`, three seed bases | **28/28 rows differ** on each |
+
+  **`devices` had a second, larger hole: its `SAFE_DEVICES` pass was not seeded at
+  all.** Four of its 28 rows dealt at random every run. All 28 are now pinned on one
+  counter. The re-injection is per-navigation via
+  `Page.removeScriptToEvaluateOnNewDocument`, and it **fails hard** if Chrome returns
+  no identifier — leaving stale scripts installed would be *worse* than the original
+  bug, because the last one added would silently decide all 28 deals. Its first
+  navigation also went to `?{URL}`, racing the network before `pin.install()`; it is
+  `/json/new?about:blank` now, like its siblings.
+
+  **Every bound was re-characterised and none was moved.** Every number these three
+  gates print changed, because every machine they measure changed — nothing about the
+  page did. `dom_invariants` over 30 runs: worst meshing residual **0.0036px** of
+  0.35 (97×), closest non-meshing pair **47.5px** (136×). `escape_mesh` over 24
+  deals: worst ghost residual **0.0233px** of 0.35 (15×). `devices` over 72 dealt
+  machines: centre offset 600× clear, gear ceiling 4.5px, link-share floor **0.104**.
+
+  Two of those **tightened** — `escape_mesh` from 18× to 15×, `devices`' link-share
+  floor from ~0.12 — and both are properties of which machines got dealt rather than
+  of the geometry. Left alone deliberately: a bound moved to keep a run green
+  measures nothing. One honest confound stated rather than smoothed over: the
+  `devices` floor moved while **two** things changed at once, different deals *and*
+  three times as many of them, so part of that is more sampling finding a worse row
+  and not evidence about the page.
+
+  **Two gates that run on every deploy had no mutant at all**, so "every gate went
+  red for its own mutant" was silent about them — exactly the claim
+  `mutation_gate.py` exists to stop anyone taking on trust. `dom` and `escape` are
+  registered now, with three mutants, all **caught**:
+
+  - `train-loses-mesh` — `prev.r + r` → `+ 2`. Every direct-mesh pair opens ~2.78px;
+    the gate reports all 10 wheels orphaned across 10 components.
+  - `escape-host-misrecorded` — `hostCx: host.g.cx + 40`. **Moves no pixel and
+    changes no geometry**; it corrupts only the page's account of which wheel a run
+    grew from, which is precisely what no pixel gate can see.
+  - `escape-run-steps-wide` — escape step `+ 1.5`, red at 2.20px against 0.35, and
+    invisible to `dom_invariants` by construction.
+
+  `--blind` on the two new gates reports 0/3 and exits 1, so the registrations are
+  not self-certifying.
+
+  **One caveat found while proving determinism, documented rather than hidden:**
+  `devices --census`'s `reach` figures wobble a few tenths of a pixel between
+  identical runs while every other quantity is bit-identical. `a0`/`a1` come off
+  `getBoundingClientRect()` on the *rotating* wheel wrappers — the box of a spinning
+  square — so it is phase-dependent and always was. 144px of margin, so it cannot
+  reach the assertion.
+
+  **Two more instances of CL#179's exit-code lie, and one of them was brand new.**
+  `escape_mesh`'s serve failure was a pre-existing eighth site. The other was
+  introduced *by this change* — the stale-injection guard above was written as
+  `SystemExit("...")`, which exits **1**, this tool's word for *"a device failed its
+  layout check"*, on a condition that means nothing was measured at all. Worth
+  recording rather than quietly fixing: the contract is one commit old and the reflex
+  that breaks it is still the default. Both are print-then-2 now, and a sweep of
+  `tools/` finds no string-form `SystemExit` left in any gate. The two remaining
+  (`contact_sheet.py`, `palettes.py`) document no exit-code contract and are not
+  gates, so there is nothing for them to contradict.
+
+  `npm test` 120/0. `dom_invariants` exit 0 on stage, solo and light; `escape_mesh`
+  PASS; `devices` 24/24 and 4/4. `mutation_gate` **17/17 caught**, 1/1 tolerated, 1
+  known gap still open, 8/8 controls green.
+
+  **Follow-up, not fixed:** `tools/pill_clip.py` carries a **fourth** copy of the
+  URL-reading seed source and has the identical fault — and its own comment asserts
+  it seeds the same way as the two files just fixed, which is now false in the other
+  direction. It needs its own tolerance re-characterisation, since its deals will
+  change too.
+
 - **CL#179 — seven harness paths said "nothing has been proved" and exited with the
   code that means "the artifact is wrong"; and the light theme is now rendered by
   three gates instead of none.** (GitHub #156, GitHub #157.)
