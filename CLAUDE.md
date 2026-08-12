@@ -289,8 +289,11 @@ tick — one tooth of travel per tooth of the driving sprocket, in whichever
 direction the train is turning. The same rule binds any drive strand: its
 `stroke-dashoffset` comes off that master angle too, so reversing the drag
 reverses the strand with it. No chain or belt is enabled in the shipped train
-(see *Dormant capability* below), but this invariant is what makes re-enabling
-one safe.
+(see *Dormant capability* below), and **that invariant is currently BROKEN in the
+dormant strand code** — `chainEl` records no component, so every strand would ride
+`_M[0]` (#175). It is what *would* make re-enabling safe, once it is true again.
+Stated this way round deliberately: this sentence used to promise the safety, which
+is how the promise outlived the code.
 
 **The speed control is a multiplier on that integrator and nothing else** (#96).
 `speedFactor()` is the only thing it reaches, wherever it is drawn — the menu
@@ -765,26 +768,56 @@ spacing is fixed by the pitch radii and only the bearing varies. That was a
 deliberate late decision: a serpentine with no slack cannot fold, which is how
 #9 was finally settled.
 
-The roller chain and toothed belt are **not deleted, only uninvoked**, and the
-implementation is intact:
+The roller chain and toothed belt are **not deleted, only uninvoked** — but
+"uninvoked" and "intact" are different claims, and this section asserted the
+second for a long time on the strength of the first. A prototype (#147) turned the
+capability on and measured it; most of it works, and **three things this section
+said were wrong**. Dormant code is covered by no gate — `verify_motion` cannot
+check a strand that does not exist and the pixel gate photographs a page without
+one — so an invariant underneath it can move with no signal at all.
 
 - `chainEl()` builds both variants — external tangents plus far-side wrap arcs,
-  with dash arrays at the gears' own circular pitch (π × module), so every roller
-  drops into a tooth space.
-- `applyRotation()` drives every tracked strand's `stroke-dashoffset` off the
-  master angle.
+  with dash arrays at the gears' own circular pitch (π × module). **It never reads
+  either sprocket's tooth phase**, so the spacing is pitch-correct and the
+  *registration* is arbitrary: rollers land on tooth tips as often as in gaps.
+  "Every roller drops into a tooth space" was true of pitch, not of phase.
+- `applyRotation()` drives every tracked strand off the master angle — but
+  **`chainEl`'s tracker records no component**, so every strand rides `_M[0]`
+  whichever component it belongs to, and enabling strands is precisely what
+  creates the extra components (2 → 8 in the prototype). That is the ONE CLOCK
+  invariant broken for the dormant code, and it is **#175**, not a subtlety:
+  per-component `_M` arrived later and silently broke code nothing exercises.
 - `solve()` reads `belt: t.link` and creates a run wherever a `TRAIN` entry
-  carries one.
+  carries one. **The `link` goes on the RECEIVING wheel, not the driving one** —
+  `solve()` tests `t.link` on the wheel being placed, and this section said the
+  opposite.
 
-To bring one back, put `link: 'chain'` or `link: 'belt'` on the `TRAIN` entry
-that should drive its successor by strand instead of tooth mesh. Nothing else
-needs wiring — the solver picks it up.
+**And "put `link` on the `TRAIN` entry" is no longer possible: `TRAIN` is not a
+literal.** It is a generated IIFE built from `CHAIN_ORDER`/`PEOPLE`, so there is
+no entry to hand-edit and the `link` must be computed in the generator. Worse for
+anyone trying it: **`tools/test.js` slices out and executes both the `TRAIN`
+builder and `solve()`'s body in Node**, injecting a named list of declarations —
+so a helper at module scope is invisible there and the suite fails 39 tests with
+`... is not defined`. Keep the decision self-contained inside the IIFE, or teach
+the harness the new name.
 
-Re-enabling means re-earning the four rules the strands cost the most to learn. A
+**Do not reach for a URL parameter to switch it.** `?seed` is the only determinism
+affordance shipped code carries, and `ORIGIN_MOUNT`'s entry explains why a second
+address-bar switch is refused: it is a second way for the page to draw something
+no gate photographs. The prototype used one deliberately as a throwaway spike and
+it must not ship.
+
+The four rules the strands cost the most to learn are the part that **did** hold. A
 run must wrap the **far** side of the sprocket (#4), must not cross another run
 (#5), must be long enough to read as span rather than wrap (#8), and must head
-*away* from the centroid of the wheels already placed (#9). The solver still
-enforces all four; they are simply not exercised while no entry has a `link`.
+*away* from the centroid of the wheels already placed (#9). Measured: the solver
+already spaces a linked run at `(prev.r + r) × spread × boost`, giving `d/mesh` of
+exactly **2.300** on a desk and **1.700** on a phone, with the straight span
+**59.2–59.4%** of loop length on desk and **51.6–52.0%** on phone. #5 and #9 never
+rejected a candidate. So rule #8 is met with room, and the real cost of enabling
+strands is not the rules — it is the **composition**: six strands shrink every
+wheel by about **51%** and push the solved bounding box past the viewport, because
+each strand's run needs more centre distance than a mesh.
 
 ## Verifying a change
 
