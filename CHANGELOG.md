@@ -289,6 +289,67 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#186 — `pill_clip` was the fourth harness dealing through the page's own
+  `?seed`, and it carried the eighth exit-code lie.** (GitHub #167.)
+
+  The last of the four. `SEED_JS` read `/[?&]seed=(\d+)/` off `location.search` and
+  the navigation appended `&seed={SEED}` — so `DEAL_SEED`, which runs at module scope
+  *after* any injected script, dealt every machine this gate has ever measured, and the
+  injection was dead code. Now `dom.seed_js(SEED)` with no `seed=` on the URL, the local
+  copy deleted, and the comment rewritten: it used to assert it seeded *"THE SAME WAY
+  `tools/devices.py` AND `tools/dom_invariants.py`"* do, which was true when written and
+  went false in the other direction at CL#180.
+
+  **Two of the ticket's own premises were wrong, and the more useful correction is the
+  second.** It asked for the webfont to be pinned here — **already done in CL#168**,
+  verified rather than assumed (`fonts: PINNED — 7 object(s) prefetched … every render
+  verified 'applied'`). And it called this "a one-line change plus a comment", which
+  understates it — not because of the font, but because of what determinism needs to be
+  *checkable*.
+
+  **A `--seed` flag and three census lines, because without them the two halves of a
+  determinism claim are indistinguishable.** The seed was a buried constant, so "the
+  seed does nothing" and "two runs agree" looked identical from outside — which is
+  precisely how a dead injection survived in four files at once. The census prints the
+  seed, the per-badge deal, and the settle time, and asserts nothing.
+
+  Re-characterised over **15 deals, 30 renders**, and **no bound moved**: `TOLERANCE`
+  +0.05px against a worst overrun of **−0.58px** (0.63px clear), `REPEAT_TOL` 0.01px
+  against **0.00px** drift, `SETTLE_TOL` 0.5px against **0.00px**, and
+  `SETTLE_TIMEOUT_S` 15.0s against a **0.10s** settle — 150× clear. 15/15 deal lines
+  distinct, 15/15 PASS.
+
+  **Nothing tightened, and unlike CL#180 the reason is structural rather than lucky:**
+  the type figures are invariant across the deal by construction, since font-size and
+  line-height are fixed by the page, so the verdict does not move even though every
+  badge coordinate does. Stated honestly: there is no prior distribution to compare
+  against here, because the file had no per-deal census at all before — these 15 are
+  the first on record, not a re-measurement of a known set.
+
+  **The pin is load-bearing, demonstrated rather than argued:** `--fonts blocked` moves
+  the worst overrun from −0.58px to **−1.45px** and the face from Manrope to
+  system-ui — the 0.87px swing the docstring claims, reproduced. Under a true blackhole
+  `--fonts auto` degrades loudly and `--fonts pinned` **refuses with exit 2**. And the
+  `deal` line is byte-identical across all three font regimes, which is the property
+  that matters: the seed pins the deal independently of typography.
+
+  **The eighth instance of CL#179's exit-code lie**, which that sweep missed because
+  `pill_clip` was not in #156's list: the settle-timeout path said *"Nothing has been
+  measured, so nothing has been proved"* and exited **1**. Print-then-2 now. Eight
+  sites over three commits is the honest count, and the reflex is clearly still live.
+
+  Verified independently: three consecutive runs identical in every measured quantity —
+  only the wall-clock settle line moves, 0.10s against 0.11s, which is a small cost of
+  putting a duration in a census meant for bit-comparison — and `--seed 4242` changes
+  the deal. `npm test` 121/0. `mutation_gate --gate type` 1/1 caught, controls green;
+  `--gate type --blind` 0/1 and `RESULT: FAIL`.
+
+  **This closes the set: all four harnesses now deal from the injected generator**, and
+  `CLAUDE.md`'s claim that `pill_clip` was "the last harness still carrying the unpinned
+  exposure" is corrected — every *gate* pins, and has for longer than that sentence
+  admitted. A stale exemption list is worse than none: it sends someone to fix what is
+  already fixed, which is what this ticket did.
+
 - **CL#185 — one alias was hiding two facts, and the ink on an accent is now derived
   rather than guessed.** (GitHub #152, GitHub #153.)
 

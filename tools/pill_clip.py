@@ -56,7 +56,21 @@ one pass is about ten seconds, and a second one buys the only evidence that a
 0.58px clearance is a fact about the page rather than about this run. --once
 gives it up, and says so by printing no `repeat` line.
 
+AND THE DEAL IS DEALT BY THE HARNESS, NOT BY THE PAGE (GitHub #167, and #155
+before it). Until this change the injected LCG below read its seed out of
+`location.search` and this file navigated with `?seed=` appended -- which handed
+the dealing to `index.html`'s own `DEAL_SEED` block, because that runs at module
+scope, strictly after anything injected, and reassigns `Math.random` to its own
+generator. The injection was dead code and the page dealt every machine this gate
+has ever measured, which CLAUDE.md forbids in as many words. The seed is baked
+into the closure now, `dom_invariants.seed_js()` is the one home for it, and the
+URL carries no `seed=` at all. The consequence when reading output from before
+this change: every deal, and therefore every badge coordinate, differs. The type
+numbers themselves do not -- font-size and line-height are fixed by the page --
+which is why the verdict did not move.
+
 Usage: python3 tools/pill_clip.py [url] [--fonts auto|pinned|blocked] [--once]
+                                  [--seed N]
 """
 
 import argparse
@@ -74,6 +88,13 @@ import websockets
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fontpin
+# ONE HOME FOR THE SEEDED GENERATOR, imported rather than copied (GitHub #167).
+# Four copies of it is what let one fault be four. Note what the import costs:
+# dom_invariants reads its constants out of index.html at module scope, so a
+# checkout whose index.html has stopped matching those regexes fails here on
+# import too. Every caller of this harness runs from a checkout, and the
+# alternative -- a fifth copy of five lines of LCG -- is what #167 was about.
+import dom_invariants as dom
 
 # CI runs on Linux, where Chrome is not in /Applications. Honour $CHROME, then
 # whatever is on PATH, then the macOS bundle. Same order as the other harnesses.
@@ -98,6 +119,15 @@ _ap.add_argument("--fonts", default="auto", choices=["auto", "pinned", "blocked"
 _ap.add_argument("--once", action="store_true",
                  help="one measurement pass instead of two. Faster, and it gives up "
                       "the only evidence that the numbers are repeatable.")
+# A FLAG, NOT A BURIED CONSTANT, because the two halves of a determinism claim
+# need different seeds: repeat runs at one seed must be bit-identical, AND a
+# different seed must draw a different machine. With the seed hardcoded only the
+# first half was checkable, and on its own that is also what a silently dead
+# injection looks like -- which is exactly the fault #167 fixed. It also makes the
+# bounds below re-characterisable over many deals without editing the harness.
+_ap.add_argument("--seed", type=int, default=20260812,
+                 help="the deal to pin, injected into this harness's own LCG and "
+                      "never named in the URL (default: 20260812)")
 _ARGS = _ap.parse_args()
 URL = _ARGS.url
 # How far two passes over the same page may disagree about one label's ink before
@@ -114,27 +144,26 @@ REPEAT_TOL = 0.01
 # fallback.
 SETTLE_TOL = 0.5
 SETTLE_TIMEOUT_S = 15.0
-# THE DEAL IS SEEDED, THE SAME WAY tools/devices.py AND tools/dom_invariants.py
-# SEED THEIRS, and it became necessary the moment this file measured twice. Every
-# wheel is dealt at random, so two navigations draw two different machines: the
-# badges come back in a different order, at different coordinates, and a
+# THE DEAL IS SEEDED, and it became necessary the moment this file measured twice.
+# Every wheel is dealt at random, so two navigations draw two different machines:
+# the badges come back in a different order, at different coordinates, and a
 # comparison by position is then comparing "Instagram" against "LinkedIn" and
-# calling the 3.1px between their descenders a wobble. The type numbers
-# themselves do not depend on the deal -- font-size and line-height are fixed --
-# but the harness's ability to line two passes up does.
+# calling the 3.1px between their descenders a wobble. The type numbers themselves
+# do not depend on the deal -- font-size and line-height are fixed -- but the
+# harness's ability to line two passes up does.
 #
-# Injected through Page.addScriptToEvaluateOnNewDocument and keyed off the URL,
-# never through the page's own `?seed` affordance: a harness that deals through
-# the same mechanism the page deals through cannot see a fault in that mechanism.
-SEED = 20260812
-SEED_JS = """
-  (() => {
-    const m = /[?&]seed=(\\d+)/.exec(location.search);
-    if (!m) return;
-    let s = +m[1] >>> 0;
-    Math.random = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
-  })();
-"""
+# THE SEED IS BAKED INTO THE INJECTED CLOSURE AND `?seed=` NEVER REACHES THE URL
+# (GitHub #167). The retired version of this comment claimed it seeded "the same
+# way tools/devices.py and tools/dom_invariants.py" do, which was true when it was
+# written and became false in the other direction at CL#180: those two stopped
+# reading the seed out of `location.search` precisely because doing so let
+# index.html's own DEAL_SEED -- module scope, so after any injected script -- take
+# Math.random over and deal the machine itself. A comment asserting compliance is
+# what stops the next reader checking, so it is worth saying plainly what this
+# does: `dom.seed_js(SEED)` closes over the number, is the only thing on the page
+# that touches Math.random, and the URL below carries a cache-buster and nothing
+# else. A repeat run being bit-identical is therefore evidence about this closure.
+SEED = _ARGS.seed
 # THE PORT IS NOT FIXED (#42). Every harness here used a hardcoded DevTools
 # port, so two running at once fought over it and the loser reported a
 # ConnectionClosedError -- which reads as a page fault, not a harness fault, and
@@ -289,7 +318,8 @@ async def main():
         # Page.enable FIRST, or the injection fontpin.install() makes is accepted
         # and silently never runs.
         await send("Page.enable")
-        await send("Page.addScriptToEvaluateOnNewDocument", {"source": SEED_JS})
+        await send("Page.addScriptToEvaluateOnNewDocument",
+                   {"source": dom.seed_js(SEED)})
         await pin.install(send)
 
         async def one_pass(tag):
@@ -304,7 +334,10 @@ async def main():
             # The CDP profile persists across runs, so a cached document is a real
             # hazard -- one of these harnesses served a 300s-old page once.
             bust = ("&" if "?" in URL else "?") + "v=" + str(int(time.time() * 1000))
-            await send("Page.navigate", {"url": f"{URL}{bust}&seed={SEED}"})
+            # NO `seed=` IN THE URL, EVER (GitHub #167). The deal comes off the
+            # injected closure; naming a seed here would hand it to index.html's
+            # own DEAL_SEED, which runs later and wins.
+            await send("Page.navigate", {"url": f"{URL}{bust}"})
             # A CONDITION, not the fixed 4s this used to sleep. That 4s was tuned
             # to a network which is no longer in the path: the font now arrives
             # from memory, so the honest wait is "loaded and fonts.ready settled"
@@ -324,7 +357,8 @@ async def main():
             # than a duration -- it comes in well under the old sleep on a settled
             # page and waits longer than it on a slow one.
             badges = None
-            end = time.monotonic() + SETTLE_TIMEOUT_S
+            began = time.monotonic()
+            end = began + SETTLE_TIMEOUT_S
             while time.monotonic() < end:
                 now = json.loads(await ev(LIST_JS))
                 if badges is not None and len(now) == len(badges) and all(
@@ -337,12 +371,23 @@ async def main():
                 badges = now
                 await pump(0.1)
             else:
-                raise SystemExit(
-                    f"FATAL: {tag}: the badges never stopped moving — two reads "
-                    f"{SETTLE_TOL}px apart still disagree after {SETTLE_TIMEOUT_S}s. "
-                    f"Nothing has been measured, so nothing has been proved.")
+                # print-then-exit-2, NOT `raise SystemExit("...")` (GitHub #156).
+                # The string form prints and exits 1, which is the code for "it
+                # measured and the answer is bad" -- the exact opposite of the
+                # sentence it was printing. CL#179 fixed seven of these and this
+                # one survived, in the file that was not in its list.
+                print(f"FATAL: {tag}: the badges never stopped moving — two reads "
+                      f"{SETTLE_TOL}px apart still disagree after "
+                      f"{SETTLE_TIMEOUT_S}s. Nothing has been measured, so nothing "
+                      f"has been proved.")
+                raise SystemExit(2)
             if not badges:
                 return None
+            # HOW MUCH OF THE TIMEOUT WAS USED. SETTLE_TIMEOUT_S is the other
+            # re-measurable bound in this file and nothing printed the figure it is
+            # a bound on, so the only way to learn the margin was to watch a run
+            # fail. Reported per pass; the verdict does not read it.
+            settled_s = time.monotonic() - began
             rows = []
             for b in badges:
                 lab = json.dumps(b["label"])
@@ -362,11 +407,20 @@ async def main():
                 d = json.loads(await ev(MEASURE_JS.replace("%LABEL%", lab)))
                 d["shutW"] = shut.get("openW")
                 d["aria"] = b["label"]
+                # THE DEAL, CARRIED THROUGH TO THE OUTPUT (GitHub #167). The type
+                # numbers are the same on every machine the page can deal, so they
+                # cannot tell a working seed injection from a dead one -- the badge
+                # coordinates are the only thing printed here that the deal moves.
+                # Without them "two runs agree" and "the seed does nothing" look
+                # identical, which is how a dead injection survived this long.
+                d["bx"], d["by"] = round(b["x"], 1), round(b["y"], 1)
                 rows.append(d)
             # AFTER the measurements, never before: the probe appends and removes
             # a span, and a font state read before the page has been measured says
             # nothing about the render that was.
             await pin.state(send, label=tag)
+            print(f"{tag:<19}: badges settled in {settled_s:.2f}s "
+                  f"(timeout {SETTLE_TIMEOUT_S}s)")
             return rows
 
         for i in range(1 if _ARGS.once else 2):
@@ -397,6 +451,13 @@ async def main():
         # Instagram's descender being compared with LinkedIn's baseline. The label
         # is the identity; the index is an accident of the deal.
         second = {r.get("aria"): r for r in passes[1]}
+        # THE MARGIN, NOT ONLY THE VERDICT. REPEAT_TOL and SETTLE_TOL are both
+        # bounds somebody has to be able to re-measure, and a line that says only
+        # "agrees" gives the next person no way to tell 0.00px of agreement from
+        # 0.009px of it. Reported, never asserted on: the assertions below are
+        # against the bounds themselves.
+        worst_drift, worst_drift_what = -1.0, "-"
+        worst_move = 0.0
         for a in passes[0]:
             b = second.get(a.get("aria"))
             if b is None:
@@ -406,9 +467,23 @@ async def main():
             if a.get("err") or b.get("err"):
                 continue
             for key in ("inkBottom", "clipBottom", "overrun", "openW"):
-                if abs((a.get(key) or 0) - (b.get(key) or 0)) > REPEAT_TOL:
+                # `gap`, not `d`: `d` is the reported-drift loop variable a few
+                # lines below and the measured row dict above, and a name reused
+                # across three meanings in one function is the shape of trap #156
+                # recorded for `fatal`.
+                gap = abs((a.get(key) or 0) - (b.get(key) or 0))
+                if gap > worst_drift:
+                    worst_drift, worst_drift_what = gap, f"{a.get('text', '?')} {key}"
+                if gap > REPEAT_TOL:
                     drift.append(f"{a.get('text', '?')} {key} "
                                  f"{a.get(key)} vs {b.get(key)}")
+            # The badge's own position, which the deal moves and the type does not.
+            # A seed injection that stopped working shows up here first and by a
+            # wide margin -- two random deals put a badge tens of pixels away --
+            # so it is measured even though the verdict does not depend on it.
+            worst_move = max(worst_move,
+                             abs((a.get("bx") or 0) - (b.get("bx") or 0)),
+                             abs((a.get("by") or 0) - (b.get("by") or 0)))
             if a.get("used") != b.get("used"):
                 drift.append(f"{a.get('text', '?')} face {a.get('used')!r} vs "
                              f"{b.get('used')!r}")
@@ -421,10 +496,21 @@ async def main():
             for d in drift[:12]:
                 print("   " + d)
             return 2
-        print(f"repeat             : 2 passes agree to within {REPEAT_TOL}px")
+        print(f"repeat             : 2 passes agree to within {REPEAT_TOL}px "
+              f"(worst {worst_drift:.2f}px on {worst_drift_what}; badge centres "
+              f"moved {worst_move:.2f}px, budget {SETTLE_TOL})")
 
     print(f"url                : {URL}")
+    print(f"seed               : {SEED} (injected; the URL carries no seed=)")
     print(f"badges measured    : {len(rows)}")
+    # THE DEAL, PRINTED (GitHub #167). Two runs at one seed must produce this line
+    # identically and two different seeds must not, which is the only pair of
+    # observations that can tell a live seed injection from a dead one. It is a
+    # census, not a gate: nothing here is asserted against a bound, because where
+    # the machine lands is a property of the deal and the viewport rather than of
+    # the typography this harness is for.
+    print("deal               : " + " ".join(
+        f"{r.get('text', '?')}@{r.get('bx')},{r.get('by')}" for r in rows))
     print()
     print("label        face              lh    asc/desc  baseline    ink"
           "   clip  overrun  width")
