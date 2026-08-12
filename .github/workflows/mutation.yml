@@ -119,3 +119,101 @@ jobs:
             echo "failure this project has actually had, then green again on the"
             echo "restored tree. \`tools/mutation_gate.py --list\` names them."
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # THE ONLY GATE THAT LOOKS AT THE LIGHT THEME AT ALL, and until now it was in
+  # no workflow (GitHub #157). Every themed harness in deploy.yml runs at its own
+  # `--theme dark` default; a11y_audit is the one tool that iterates both, and it
+  # is also the only automated check on contrast and target size anywhere.
+  #
+  # IT LIVES IN THIS WORKFLOW RATHER THAN THE DEPLOY, AND THE REASON IS NOT THAT
+  # IT IS SLOW. Measured on a laptop it is 1.6-2.3s warm and 1.8s with the axe
+  # cache cleared, against devices.py's 3m38 in CI — cost is no argument either
+  # way. Two things are:
+  #
+  #   1. THE RULESET IS SOMEBODY ELSE'S AND IT FLOATS. The tool fetches
+  #      `axe-core@4` from unpkg, so a 4.x release that adds or tightens a rule
+  #      can turn this red with nothing in this repo having changed. On the deploy
+  #      path that blocks a bucket over an upstream publish; here it is a report
+  #      on a Monday.
+  #   2. IT DOES NOT PIN THE DEAL. Unlike every gate in deploy.yml this one
+  #      injects no LCG, so each pass audits a randomly dealt machine — and axe's
+  #      colour-contrast rule reads dealt colours. 12 consecutive runs came back
+  #      green, which is green-on-average over an unbounded population of deals and
+  #      is not the same claim as deterministic green.
+  #
+  # So this workflow is now "the weekly slow-or-drifting checks", not only the
+  # mutation gate, and the two jobs share the trigger for the same reason: both
+  # answer questions whose answers change on somebody else's schedule rather than
+  # on this repo's.
+  #
+  # It is GREEN as of CL#173, which fixed five serious light-only contrast
+  # failures. Wiring it in is a commitment to keep it so — which is the point, and
+  # why the job fails rather than merely printing.
+  a11y:
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       contains(toJSON(github.event.pull_request.labels.*.name), 'harness'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: browser-actions/setup-chrome@v1
+        id: chrome
+        with:
+          chrome-version: stable
+      # THE SOURCE, NOT THE ARTIFACT, and that is a limitation stated rather than
+      # hidden: deploy.yml strips the comments out of index.html before its gates
+      # run, and nothing here does. The strip changes no pixel — that is what
+      # `pixel_regress --ref HEAD` asserts on the deploy path — so contrast and
+      # target sizes are the same in both. If that ever stops being true, this job
+      # is measuring the repo copy and nothing measures the delivered one.
+      - name: Contrast and target sizes, in BOTH themes
+        env:
+          CHROME: ${{ steps.chrome.outputs.chrome-path }}
+        run: |
+          set -uo pipefail
+          unset TMOUT
+          python3 -m pip install --quiet --disable-pip-version-check websockets
+          # Port 8797 rather than deploy.yml's 8765: a fixed port is only safe
+          # because a runner is a clean machine, and two workflows sharing one
+          # number is a collision waiting for the day they land on the same one.
+          python3 -m http.server 8797 --bind 127.0.0.1 &
+          SERVER=$!
+          for i in $(seq 1 40); do
+            if curl -sf -o /dev/null http://127.0.0.1:8797/index.html; then break; fi
+            sleep 0.25
+          done
+          set +e
+          python3 tools/a11y_audit.py http://127.0.0.1:8797/ ; A11Y=$?
+          set -e
+          kill $SERVER 2>/dev/null || true
+          # 2 AND 1 ARE DIFFERENT SENTENCES and the log must not blur them: 2 is
+          # "nothing was audited" (no browser, or axe-core unreachable), 1 is
+          # "audited, and it failed". Both stop the job; only one is about the page.
+          if [ $A11Y -eq 2 ]; then
+            echo "::error::a11y_audit could not audit (exit 2) — no browser, or axe-core unreachable. Nothing was proved either way."
+            exit 1
+          fi
+          if [ $A11Y -ne 0 ]; then
+            echo "::error::a11y_audit found critical/serious failures — see the RESULT: FAIL block above"
+            exit 1
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### accessibility audit"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Result | ${{ job.status }} |"
+            echo "| Commit | \`${{ github.sha }}\` |"
+            echo ""
+            echo "axe-core in **both** themes, plus the 24x24 target floor, duplicate"
+            echo "accessible names, lang/main and unlabelled focusables — also in both"
+            echo "themes since GitHub #157. Undecided axe checks are printed and do"
+            echo "not fail."
+          } >> "$GITHUB_STEP_SUMMARY"

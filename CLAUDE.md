@@ -835,6 +835,51 @@ run with `--query '?who=charles&kind=hexcore'` reported **27,069**. When a chang
 targets a family, force it with `kind=` or the gate is agreeing with you about a
 picture it never took.
 
+**Exit 2 means "nothing was measured"; exit 1 means "it measured, and the answer
+is bad". Never blur them, and never write `raise SystemExit("some string")`** —
+the string form prints and exits **1**, so every one of those was a sentence
+contradicting its own exit code. Seven sites were (GitHub #156), across
+`pixel_regress`, `render_cost`, `parse_cost`, `fontpin`, `dom_invariants`,
+`mutation_gate` and `devices`; the form to use is `print(...)` then
+`raise SystemExit(2)`. Two traps that produced the same lie by other routes and
+are worth knowing: a **local named `fatal`** shadows the module helper of that
+name for the whole function, and closures made earlier will call the local — which
+is how the one path that reports a harness fault came to die of a `TypeError`. And
+an **absent `$CHROME`** raises `FileNotFoundError` out of `Popen` before any of a
+tool's own error handling runs, so "no binary" and "binary never answered" were
+different codes for what is one sentence to an operator. `fontpin` is a library,
+so whatever it raises is what `a11y_audit` and `dom_invariants` return.
+
+**The light theme is gated by three runs, and it used to be gated by none.**
+Every themed harness defaults to `--theme dark`, and this project's real faults
+have been light-only twice (CL#133's wheel shadow, CL#173's five contrast
+failures). `deploy.yml` now runs **five** `pixel_regress` invocations — stage,
+`?who=charles`, `fidget/`, `--panel`, `--theme light` — and **three**
+`dom_invariants` runs, the third in light because the ink census is the one check
+whose *subject* changes with the palette: 64 inks in light against 56 in dark, so
+eight had never been censused. **The light pixel run does not subsume it** —
+`pixel_regress` is differential, so a light-only fault present in both sides is
+0px there forever, while the census is absolute.
+
+**`pixel_regress` asserts the theme it was asked for**, because it plants
+`wozi-theme` in localStorage and used to never read it back — a `--theme light`
+run that silently rendered dark would report a contented 0px, which is CL#171's
+fault exactly. `/fidget/` never reads that key, so the assertion is exempted
+there off the page source before any browser starts, and the run says so rather
+than leaving `--theme` a silent no-op.
+
+**`a11y_audit` runs weekly in `mutation.yml`, not on the deploy path, and not
+because it is slow** — 1.6–2.3s warm against `devices.py`'s 3m38 in CI. It
+fetches `axe-core@4` from unpkg, so somebody else's publish could turn a deploy
+red, and it injects no LCG, so it audits a randomly dealt machine and axe's
+contrast rule reads dealt colours: twelve green runs is green-on-average over an
+unbounded population of deals, not deterministic green. That workflow is now "the
+weekly slow-or-drifting checks" rather than only the mutation gate. Its axe
+`incomplete` bucket is **printed and never failed** — one undecided
+`color-contrast` node per theme, on an `aria-hidden` rim engraving axe cannot
+flatten a background for — on the same #41/#46 reasoning that keeps `moderate`
+out of the verdict.
+
 **The deal decides ±40% of the first render's cost, so an unpinned deal makes a
 load-time measurement incomparable** (#143, measured by `tools/render_cost.py`).
 At a fixed 24 SVGs and 6× CPU throttle the family alone moves the long render

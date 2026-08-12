@@ -401,7 +401,10 @@ def serve(directory):
         except Exception:
             time.sleep(0.1)
     proc.kill()
-    raise SystemExit("FATAL: could not serve " + directory)
+    # print-then-2, never `SystemExit("...")`: the string form exits 1, this
+    # runner's word for "a mutant survived" (GitHub #156).
+    print("FATAL: could not serve " + directory)
+    raise SystemExit(2)
 
 
 def apply_mutation(tree, m):

@@ -165,6 +165,14 @@ def launch(port: int) -> "tuple[subprocess.Popen, str]":
     be holding. Twenty lines duplicated is the smaller cost.
     """
     profile = tempfile.mkdtemp(prefix="wozi-render-")
+    # A CHROME THAT IS NOT THERE IS THE SAME SENTENCE AS ONE THAT NEVER ANSWERS,
+    # and it used to be a different exit code (#156): Popen raises
+    # FileNotFoundError, which reaches the top as a traceback and exits 1 — the
+    # code that means "it measured, and the answer is bad". Said here, once,
+    # rather than caught around the whole run.
+    if not os.path.exists(pc.CHROME):
+        print(f"FATAL: no Chrome at {pc.CHROME!r} — set $CHROME to the binary")
+        raise SystemExit(2)
     proc = subprocess.Popen(
         [pc.CHROME, "--headless=new", "--window-position=-4000,-4000",
          f"--remote-debugging-port={port}", f"--user-data-dir={profile}",
@@ -189,7 +197,10 @@ def launch(port: int) -> "tuple[subprocess.Popen, str]":
     if not ws_url:
         proc.kill()
         shutil.rmtree(profile, ignore_errors=True)
-        raise SystemExit("FATAL: no DevTools endpoint")
+        # print-then-2, never `SystemExit("...")`: the string form exits 1, and
+        # the docstring above promises 2 for "could not get a browser" (#156).
+        print("FATAL: no DevTools endpoint")
+        raise SystemExit(2)
     proc._wozi_profile_dir = profile                      # type: ignore[attr-defined]
     return proc, ws_url
 

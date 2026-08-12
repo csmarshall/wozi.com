@@ -93,7 +93,11 @@ def _page_const(name):
     with open(src, encoding="utf-8") as fh:
         m = re.search(r"\b" + re.escape(name) + r"\s*=\s*([0-9.]+)\s*[,;]", fh.read())
     if not m:
-        raise SystemExit(f"FATAL: {name} not found in index.html")
+        # print-then-2, never `SystemExit("...")`: the string form exits 1, this
+        # tool's word for "a device failed its layout check". A constant that has
+        # been renamed means nothing was measured at all (GitHub #156).
+        print(f"FATAL: {name} not found in index.html")
+        raise SystemExit(2)
     return float(m.group(1))
 
 

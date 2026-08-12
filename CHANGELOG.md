@@ -289,6 +289,127 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#179 — seven harness paths said "nothing has been proved" and exited with the
+  code that means "the artifact is wrong"; and the light theme is now rendered by
+  three gates instead of none.** (GitHub #156, GitHub #157.)
+
+  **The shadow.** `tools/pixel_regress.py` had `fatal = pin.announce()` in `main()`,
+  which shadows the module-level `fatal()` — the helper that prints and exits **2** —
+  for the whole of `main()`, and `stable_render()` closes over it. So the one path
+  that reports a harness fault called `None`, died with a `TypeError`, and exited
+  **1**: this tool's word for THE ARTIFACT MOVED. A flaky machine would have been
+  reported as a broken page. The local is now `announce_err`, and the reason it may
+  never be called `fatal` again is written at the site.
+
+  Demonstrated in both directions rather than reasoned about, by forcing the
+  never-agrees branch with `STABLE_ATTEMPTS = 1` from a wrapper so no flaky machine
+  was needed: with the shadow restored, `TypeError: 'NoneType' object is not
+  callable`, exit **1**; with the fix, the intended sentence and exit **2**.
+
+  **It was not one site but seven, and they are one contract.** `SystemExit("some
+  string")` prints the string and exits **1**. Every tool here documents **2** as
+  "could not measure", so every use of the string form was a sentence contradicting
+  its own exit code:
+
+  | site | what it says | exited |
+  | --- | --- | --- |
+  | `pixel_regress` never-agrees | a fault in the harness, not the artifact | 1 (`TypeError`) |
+  | `render_cost` / `parse_cost` no DevTools endpoint | could not get a browser | 1 |
+  | `render_cost` / `parse_cost` **absent** `$CHROME` | — | 1 (`FileNotFoundError` traceback) |
+  | `fontpin` `wait_until` timeout | nothing has been measured, so nothing has been proved | 1 |
+  | `dom_invariants` `settle_geometry` | nothing has been measured, so nothing has been proved | 1 |
+  | `mutation_gate` `serve` | could not serve | 1 |
+  | `devices` `_page_const` | constant not found in `index.html` | 1 |
+
+  The absent-`$CHROME` pair is the one nobody would have predicted: a **missing**
+  binary and a binary that **never answers** are the same sentence to an operator,
+  and they were different exit codes because `Popen` raises `FileNotFoundError`
+  before any of the tool's own error handling runs. All seven are now
+  print-then-`SystemExit(2)`, each proved by forcing its branch — `CHROME` pointed
+  at a nonexistent path, `CHROME=/usr/bin/true` (launches, publishes no endpoint), a
+  `settle_geometry` whose reads never agree, a served directory that does not exist,
+  and a constant name that is not in the page.
+
+  **`fontpin`'s is the one that had already fired**, and it fired again while this
+  was being landed: an `a11y_audit` run pointed at a port nothing was serving printed
+  *"nothing has been measured, so nothing has been proved"* and exited **1**. It is a
+  library, so its code is the code `a11y_audit` and `dom_invariants` return — and it
+  now sits under the CI job added below, whose `exit 2` branch could never have seen
+  it.
+
+  **The light theme was rendered by no gate in any workflow.** Every themed harness
+  in `deploy.yml` runs at its own `--theme dark` default, and `a11y_audit` — the only
+  tool that iterates both, and the only automated check on contrast or target size
+  anywhere — was in **no workflow at all**. Twelve gate invocations, none of which
+  had ever drawn the palette half the page is painted in, in a project whose real
+  faults have been light-only twice: CL#133 removed the wheel shadow in light because
+  the shared layer showed through the cuts, and CL#173 fixed five serious contrast
+  failures in light, two of them a regression introduced one commit earlier.
+
+  Three additions, and each answers a different question:
+
+  - **A fifth `pixel_regress` run, `--theme light`**, combined stage. 0px at both
+    viewports, controls 0px, 12s locally against the other four's 16/15/9/15.
+  - **A third `dom_invariants` run, `--theme light`.** The ink census is the one
+    check here whose *subject* changes with the theme, and it claims to catch a
+    palette leaking into the other theme's render — a claim it could not
+    substantiate while it only ever rendered one. Measured at the same seed: **64
+    inks in light against 56 in dark**, with different saturation and value extremes,
+    so eight of the page's inks had never been censused. **The light pixel run does
+    not subsume it**: `pixel_regress` is *differential*, so a light-only fault
+    present in both sides is 0px there forever, while the census is *absolute*.
+  - **An `a11y` job in `mutation.yml`**, on the same weekly/dispatch/`harness`-label
+    trigger, port 8797. It is on a Monday rather than the deploy path, and **not
+    because it is slow** — 1.6–2.3s warm against `devices.py`'s 3m38 in CI. The
+    reasons are that it fetches `axe-core@4` from unpkg, so somebody else's publish
+    can turn a deploy red, and that unlike every gate in `deploy.yml` it injects no
+    LCG, so it audits a randomly dealt machine each pass and axe's contrast rule
+    reads dealt colours. Twelve consecutive green runs is green-on-average over an
+    unbounded population of deals, which is not the same claim as deterministic
+    green. This workflow is now "the weekly slow-or-drifting checks": both jobs
+    answer questions whose answers change on somebody else's schedule.
+
+  **Half of `a11y_audit`'s own assertions were about one theme.** The 24×24 floor,
+  the duplicate-name check, `lang`/`main` and the unlabelled-focusable count were
+  gated on `theme == "dark"` inside a tool whose entire reason for looping is that
+  findings differ between themes — and nothing there is theme-independent by
+  construction, since a target's box comes from the style that painted it. They run
+  in both now and name their theme in each failure; the verbose printout stays
+  dark-only, because that half describes the page rather than checking it, and light
+  prints a one-line summary so a reader can tell the battery ran. Light comes back
+  identical to dark today — 0 under the floor, 30 focusable, 0 unlabelled, tightest
+  24.00px — so it costs nothing and is now asserted rather than assumed.
+
+  **"No violations" was a weaker sentence than it read as.** axe puts a check it
+  could not decide into `incomplete`, and the report only ever mapped
+  `r.violations` — so the undecided bucket was invisible. On a page painted almost
+  entirely in inline gradients, `color-contrast` is exactly the rule that lands
+  there. Measured: **exactly one undecided rule per theme**, `color-contrast` on an
+  SVG rim engraving axe could not flatten a background for. That engraving is inside
+  an `aria-hidden="true"` SVG, as all 40 are, so it is decorative and never
+  announced — the gap was real and what it hid is not alarming. It is **printed,
+  never failed**, on the same #41/#46 reasoning that keeps `moderate` out of the
+  verdict; a rule moving from decided to undecided is now visible instead of reading
+  as a clean run.
+
+  **And the new light run is now able to prove it looked at light.**
+  `pixel_regress` plants `wozi-theme` in localStorage and **never read it back**, so
+  a `--theme light` run that silently rendered dark would have reported a contented
+  0px — CL#171's fault verbatim, on the very run whose whole job is the other
+  palette. It asserts `data-theme` after every render and exits 2 on a mismatch,
+  proved by inverting the comparison. `/fidget/` keeps its own `data-theme="auto"`
+  and never reads the key, so the assertion is **exempted there by a decision taken
+  off the page source before any browser starts**, exactly as the font decision is —
+  and the run now *says* so, where `--theme` was previously an unstated no-op on that
+  page.
+
+  `npm test` 120/0. All five `pixel_regress` runs 0px, controls 0px. `a11y_audit`
+  PASS in both themes, exit 0. `dom_invariants` exit 0 for stage, solo and light.
+  `mutation_gate` full sweep 14/14 caught, 1/1 tolerated, 6/6 controls green, one
+  known gap still open; `--blind` still returns `0/14 caught … RESULT: FAIL`, so the
+  runner can still fail. Both workflows parse as YAML and every `run:` block passes
+  `bash -n`.
+
 - **CL#178 — `/fidget/`'s grip spring was divided by gear twice, so the drag and the
   flick buttons demonstrated different laws.** (GitHub #158.)
 

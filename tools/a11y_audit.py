@@ -2,7 +2,19 @@
 """Full accessibility audit: axe-core injected over CDP, plus the structural and
 behavioural checks axe cannot make on a page that is entirely motion.
 
-Run against both themes, because contrast findings differ per theme.
+Run against both themes, because contrast findings differ per theme — and since
+GitHub #157 that means BOTH batteries, not just axe: the 24x24 target floor, the
+duplicate-name check, lang/main and the unlabelled-focusable count used to be
+gated on `theme == "dark"`, which made half this tool's assertions statements
+about one theme inside a tool whose whole reason for looping is that they differ.
+The verbose printout is still dark-only; the assertions are not.
+
+Axe's `incomplete` bucket is PRINTED and never failed. A check axe could not
+decide is an open question, and this page is painted almost entirely in inline
+gradients, which is exactly the background `color-contrast` cannot flatten — so
+"no violations" was a weaker sentence than it read as. Measured on the shipped
+page: one undecided node per theme, an aria-hidden rim engraving overlapped by
+another element.
 
 Usage: python3 tools/a11y_audit.py [url] [--fonts auto|pinned|blocked]
 
@@ -355,12 +367,36 @@ async def main(pin):
             # "color-contrast x3" is a fact nobody can act on: which three, and
             # by how much? axe already knows -- it is the `any` check's own
             # message, carrying the two colours and the ratio it wanted.
-            res = await ev("axe.run(document,{resultTypes:['violations']}).then(r=>JSON.stringify("
-                           "r.violations.map(v=>({id:v.id,impact:v.impact,help:v.help,"
+            # `incomplete` COMES BACK WITH THE VIOLATIONS, and it is reported
+            # rather than asserted (GitHub #157). axe puts a check it could not
+            # decide into `incomplete`, not `violations` -- and on a page painted
+            # almost entirely in inline gradients, `color-contrast` is exactly the
+            # rule that lands there, because axe cannot resolve a background it
+            # cannot flatten to one colour. So "no violations" was a weaker
+            # sentence than it read as: it did not mean axe had cleared the page,
+            # only that nothing it could decide came out failing.
+            #
+            # NOT A FAILURE, deliberately. An undecided check is an open question,
+            # and a gate that goes red on an open question trains everyone to
+            # ignore it -- the same #41/#46 reasoning that keeps `moderate` out of
+            # the verdict. It is printed so the operator sees the size of what axe
+            # declined to judge, and so a change that moves a rule FROM decided TO
+            # undecided is visible instead of reading as a clean run.
+            #
+            # `resultTypes` is left naming only `violations`: it controls which
+            # buckets get every node populated, and one node per incomplete rule
+            # is all this printout wants. The invisibility was `r.violations.map`,
+            # not that flag.
+            res = await ev("axe.run(document,{resultTypes:['violations']}).then(r=>JSON.stringify({"
+                           "v:r.violations.map(v=>({id:v.id,impact:v.impact,help:v.help,"
                            "n:v.nodes.length,nodes:v.nodes.slice(0,6).map(nd=>({"
                            "t:(nd.target||[]).join(' '),"
-                           "why:((nd.any||[])[0]||{}).message||nd.failureSummary||''}))}))))", True)
-            v = json.loads(res)
+                           "why:((nd.any||[])[0]||{}).message||nd.failureSummary||''}))})),"
+                           "i:r.incomplete.map(x=>({id:x.id,impact:x.impact,n:x.nodes.length,"
+                           "t:((x.nodes[0]||{}).target||[]).join(' '),"
+                           "why:(((x.nodes[0]||{}).any||[])[0]||{}).message||''}))}))", True)
+            parsed = json.loads(res)
+            v, inc = parsed["v"], parsed["i"]
             if not v:
                 print("   no violations")
             for x in sorted(v, key=lambda z: ["critical","serious","moderate","minor"].index(z["impact"] or "minor")):
@@ -374,8 +410,29 @@ async def main(pin):
                 # question trains everyone to ignore it (#41, #46).
                 if (x["impact"] or "") in ("critical", "serious"):
                     _FAILURES.append(f"axe {theme}: [{x['impact']}] {x['id']} x{x['n']} — {x['help']}")
+            if inc:
+                print(f"   axe could not DECIDE {len(inc)} rule(s) here — reported, not failed:")
+                for x in inc:
+                    print(f"   [undecided] {x['id']:<28} x{x['n']}  {x['t'][:60]}")
+                    if x["why"]:
+                        print(f"         {' '.join(x['why'].split())[:150]}")
+            else:
+                print("   nothing undecided")
+            # THE BATTERY RUNS IN BOTH THEMES NOW (GitHub #157). It used to be
+            # gated on `theme == "dark"`, which made the 24x24 floor, the
+            # duplicate-name check, lang/main and the unlabelled-focusable count
+            # assertions about ONE theme in a tool whose whole reason for iterating
+            # two is that findings differ between them. Nothing here is
+            # theme-independent by construction: a target's box comes from the
+            # style that painted it, and the accessible names come from a DOM built
+            # per render.
+            #
+            # The VERBOSE printout stays dark-only, because that half is a
+            # description of the page rather than a check, and printing it twice
+            # buries the assertions in a log nobody reads twice. The ASSERTIONS run
+            # in both and name their theme.
+            m = json.loads(await ev(MANUAL))
             if theme == "dark":
-                m = json.loads(await ev(MANUAL))
                 print("\n=== structural / behavioural (axe cannot judge these) ===")
                 print(f"   lang attribute          : {m['lang'] or 'MISSING'}")
                 print(f"   <main> landmark         : {'yes' if m['main'] else 'MISSING'}")
@@ -410,25 +467,34 @@ async def main(pin):
                     w, h = ri["box"]
                     print(f"   range input hit box      : {w}x{h}px "
                           f"(visible thumb: {ri['thumbPx']}px disc)")
-                # WCAG 2.5.8 target size. Two-sided by nature -- there is no
-                # upper bound worth asserting on a hit target, so this one floor
-                # is the whole check.
-                if m["smallTargets"]:
-                    _FAILURES.append(
-                        f"{len(m['smallTargets'])} interactive target(s) under "
-                        f"24x24px (WCAG 2.5.8): "
-                        + ", ".join(f"{t['name']} {t['w']}x{t['h']}"
-                                    for t in m["smallTargets"][:6]))
-                if not m["lang"]:
-                    _FAILURES.append("no lang attribute on <html>")
-                if not m["main"]:
-                    _FAILURES.append("no <main> landmark")
-                if m["focusableNoLabel"]:
-                    _FAILURES.append(f"{m['focusableNoLabel']} focusable element(s) with no accessible name")
-                for name, n in m["dupNames"]:
-                    _FAILURES.append(
-                        f'{n} focusables share the accessible name "{name}" and do not '
-                        f"share a destination (WCAG 2.4.4/4.1.2)")
+            else:
+                # One line for the theme that does not get the full printout, so a
+                # reader can tell the battery RAN here rather than assuming it did.
+                print(f"   structural battery, {theme} theme: "
+                      f"{len(m['smallTargets'])} target(s) under 24x24px, "
+                      f"{m['focusable']} focusable ({m['focusableNoLabel']} unlabelled), "
+                      f"{len(m['dupNames'])} duplicate name(s), "
+                      f"tightest {min((t['min'] for t in m.get('tightest', [])), default=float('nan')):.2f}px")
+            # WCAG 2.5.8 target size. Two-sided by nature -- there is no
+            # upper bound worth asserting on a hit target, so this one floor
+            # is the whole check.
+            if m["smallTargets"]:
+                _FAILURES.append(
+                    f"{theme}: {len(m['smallTargets'])} interactive target(s) under "
+                    f"24x24px (WCAG 2.5.8): "
+                    + ", ".join(f"{t['name']} {t['w']}x{t['h']}"
+                                for t in m["smallTargets"][:6]))
+            if not m["lang"]:
+                _FAILURES.append(f"{theme}: no lang attribute on <html>")
+            if not m["main"]:
+                _FAILURES.append(f"{theme}: no <main> landmark")
+            if m["focusableNoLabel"]:
+                _FAILURES.append(f"{theme}: {m['focusableNoLabel']} focusable element(s) "
+                                 f"with no accessible name")
+            for name, n in m["dupNames"]:
+                _FAILURES.append(
+                    f'{theme}: {n} focusables share the accessible name "{name}" and do not '
+                    f"share a destination (WCAG 2.4.4/4.1.2)")
             # AFTER everything measured in this theme, never before: the probe
             # appends and removes a span, and a state read before the page was
             # measured says nothing about the render that was.

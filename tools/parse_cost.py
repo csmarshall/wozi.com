@@ -270,7 +270,10 @@ def serve(directory: str, encode: bool) -> "tuple[http.server.ThreadingHTTPServe
         except Exception:
             time.sleep(0.1)
     srv.shutdown()
-    raise SystemExit(f"FATAL: could not serve {directory}")
+    # print-then-2, never `SystemExit("...")`: the string form exits 1, and the
+    # docstring above promises 2 for "could not get a browser or a trace" (#156).
+    print(f"FATAL: could not serve {directory}")
+    raise SystemExit(2)
 
 
 def determinism_js(seed: int) -> str:
@@ -549,6 +552,13 @@ async def measure(url: str, viewport: "tuple[int, int]", rate: int, runs: int,
     """One browser, `runs` cold navigations at one CPU throttling rate."""
     port = free_port()
     profile = tempfile.mkdtemp(prefix="wozi-parse-")
+    # A CHROME THAT IS NOT THERE IS THE SAME SENTENCE AS ONE THAT NEVER ANSWERS,
+    # and it used to be a different exit code (#156): Popen raises
+    # FileNotFoundError, which reaches the top as a traceback and exits 1 — the
+    # code that means "it measured, and the answer is bad".
+    if not os.path.exists(CHROME):
+        print(f"FATAL: no Chrome at {CHROME!r} — set $CHROME to the binary")
+        raise SystemExit(2)
     proc = subprocess.Popen(
         [CHROME, "--headless=new", "--window-position=-4000,-4000",
          f"--remote-debugging-port={port}", f"--user-data-dir={profile}",
@@ -572,7 +582,8 @@ async def measure(url: str, viewport: "tuple[int, int]", rate: int, runs: int,
         time.sleep(0.2)
     if not ws_url:
         proc.kill()
-        raise SystemExit("FATAL: no DevTools endpoint")
+        print("FATAL: no DevTools endpoint")
+        raise SystemExit(2)
 
     out: "list[dict]" = []
     async with websockets.connect(ws_url, max_size=2 ** 30) as ws:

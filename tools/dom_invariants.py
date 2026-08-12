@@ -489,10 +489,13 @@ async def settle_geometry(send, pump, timeout=GEOMETRY_TIMEOUT_S):
             return time.monotonic() - t0
         prev = now
         await pump(0.1)
-    raise SystemExit(
-        f"FATAL: the stage never stopped moving — two reads of its geometry still "
-        f"disagree after {timeout}s. Nothing has been measured, so nothing has "
-        f"been proved.")
+    # print-then-2, never `SystemExit("...")`: the string form exits 1, which is
+    # this tool's word for "the invariants were checked and one failed" — the
+    # exact opposite of the sentence it carries (GitHub #156).
+    print(f"FATAL: the stage never stopped moving — two reads of its geometry still "
+          f"disagree after {timeout}s. Nothing has been measured, so nothing has "
+          f"been proved.")
+    raise SystemExit(2)
 
 
 async def sample(url, seed, viewport, theme, pin):

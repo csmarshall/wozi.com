@@ -432,7 +432,8 @@ def serve(directory):
     fatal(f"FATAL: could not serve {directory}")
 
 
-async def shoot(url, viewports, seed, frames, theme, pin, panel=False):
+async def shoot(url, viewports, seed, frames, theme, pin, panel=False,
+                theme_honoured=True):
     """One browser, every viewport. Returns ({label: png}, {label: font state}).
 
     `pin` is the font state, decided once by main() before either tree is served,
@@ -614,6 +615,35 @@ async def shoot(url, viewports, seed, frames, theme, pin, panel=False):
             # was just waited for.
             r = await send("Runtime.evaluate", {"expression": probe, "returnByValue": True})
             states[label] = r.get("result", {}).get("value", "unreadable")
+            # THE THEME IS ASSERTED, NOT ASSUMED (GitHub #157). It is planted in
+            # localStorage by an injected script and nothing here ever read it
+            # back, so a `--theme light` run that silently rendered dark would
+            # report a contented 0 px about a picture of the other theme -- which
+            # is CL#171's fault verbatim, where an f-string brace bug made
+            # a11y_audit's "PASS in both themes" one theme twice for months. It
+            # matters more now that the deploy has a light run: the run whose whole
+            # job is to look at the other palette is exactly the one that must
+            # prove it did. Exit 2, because a shot of the wrong theme has
+            # photographed nothing this run asked for.
+            #
+            # ONLY WHERE THE PLANT IS READ. `--path fidget/` is a page that keeps
+            # its own `data-theme="auto"` and never looks at `wozi-theme`, so
+            # asserting there would fail a run that is behaving correctly -- and
+            # the honest consequence, said out loud rather than hidden behind a
+            # passing assertion, is that `--theme` MEANS NOTHING on such a page and
+            # a light run of it tests the same picture twice. `theme_honoured` is
+            # decided once, off the served page's own source, before any browser
+            # exists, exactly as the font decision is.
+            if theme_honoured:
+                r = await send("Runtime.evaluate",
+                               {"expression": "document.documentElement.getAttribute('data-theme')",
+                                "returnByValue": True})
+                drawn = r.get("result", {}).get("value")
+                if drawn != theme:
+                    proc.kill()
+                    fatal(f"FATAL: {label} asked for the {theme} theme and the page reports "
+                          f"data-theme={drawn!r}. This shot is of the wrong palette, so "
+                          f"nothing this run asked for has been photographed.")
             r = await send("Runtime.evaluate", {"expression": ARRIVAL_JS,
                                                 "returnByValue": True})
             arrivals[label] = r.get("result", {}).get("value", -1)
@@ -729,11 +759,29 @@ def main():
     # only when --fonts pinned asked for a state it could not have.
     src = page_source(ROOT, a.path)
     pin = fontpin.FontPin.decide(want=a.fonts, html_path=src)
-    fatal = pin.announce()
-    if fatal:
-        print(fatal)
+    # NOT named `fatal`: that is the module-level helper (:398) which exits 2, and
+    # `stable_render()` below closes over it. A local of that name shadows it for
+    # the whole of main(), so the never-agrees path called None and died with a
+    # TypeError -- exit 1, this tool's word for THE ARTIFACT MOVED (GitHub #156).
+    announce_err = pin.announce()
+    if announce_err:
+        print(announce_err)
         return 2
     mode, expect = pin.mode, pin.expect
+
+    # ---- the theme decision, taken the same way and for the same reason --------
+    # Whether `--theme` reaches this page at all. The harness plants `wozi-theme`
+    # in localStorage; a page that never reads that key cannot be put into either
+    # theme by this tool, and /fidget/ is exactly such a page — it keeps its own
+    # `data-theme="auto"`. Decided off the WORKING tree's source before any browser
+    # exists, so the assertion in `shoot()` is only made where it can be true, and
+    # the run SAYS which of the two situations it is in rather than leaving a
+    # reader to assume the flag did something.
+    theme_honoured = bool(src) and "wozi-theme" in open(
+        src, encoding="utf-8", errors="replace").read()
+    if not theme_honoured:
+        print(f"theme: /{a.path} does not read 'wozi-theme' — --theme {a.theme} "
+              f"reaches nothing here, and both themes photograph the same page")
 
     def stable_render(directory, who):
         """Photograph one tree until it agrees with itself, and say so if it did not
@@ -759,7 +807,8 @@ def main():
             passes = []
             for _ in range(STABLE_ATTEMPTS):
                 passes.append(asyncio.run(shoot(base_ + a.path + a.query, vps, a.seed,
-                                                a.frames, a.theme, pin, a.panel)))
+                                                a.frames, a.theme, pin, a.panel,
+                                                theme_honoured)))
                 if len(passes) < 2:
                     continue
                 # Compared as PNG bytes, per viewport: same encoder, same settings,
@@ -784,7 +833,7 @@ def main():
         try:
             now, now_fonts, now_ms, now_box = asyncio.run(
                 shoot(base + a.path + a.query, vps, a.seed, a.frames, a.theme,
-                      pin, a.panel))
+                      pin, a.panel, theme_honoured))
         finally:
             srv.kill()
         for label, box in sorted(now_box.items()):

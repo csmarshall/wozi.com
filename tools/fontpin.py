@@ -520,7 +520,14 @@ def attach(ws, pin, on_message=None):
         """Poll until `expr` returns `want`, pumping in between. Returns the last
         value seen; raises SystemExit naming the binding term if it never does,
         because a page that never became ready has not been measured and saying
-        so is the whole point."""
+        so is the whole point.
+
+        AND IT MUST SAY SO IN THE EXIT CODE TOO, not only in the sentence
+        (GitHub #156). `SystemExit("some string")` prints the string and exits
+        **1** — which in both callers means "it measured, and the artifact is
+        wrong", the opposite of what the message says. This is a library, so the
+        code it raises is the code `a11y_audit` and `dom_invariants` return, and
+        both document 2 as "unobtainable"."""
         end = time.monotonic() + timeout
         last = "never evaluated"
         while time.monotonic() < end:
@@ -530,8 +537,9 @@ def attach(ws, pin, on_message=None):
             if last == want:
                 return last
             await pump(0.05)
-        raise SystemExit(f"FATAL: {what} timed out after {timeout}s (last: {last!r}) "
-                         f"-- nothing has been measured, so nothing has been proved")
+        print(f"FATAL: {what} timed out after {timeout}s (last: {last!r}) "
+              f"-- nothing has been measured, so nothing has been proved")
+        raise SystemExit(2)
 
     return send, pump, wait_until
 

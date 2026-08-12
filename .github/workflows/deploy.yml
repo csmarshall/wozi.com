@@ -186,6 +186,22 @@ jobs:
           # idlers, a datum -- and ?who=charles is one chain with none of them.
           python3 tools/dom_invariants.py http://127.0.0.1:8765/ ; DOM=$?
           python3 tools/dom_invariants.py http://127.0.0.1:8765/ --query '?who=charles' ; DOM1=$?
+          # AND ONCE IN LIGHT, because check 4 (the ink census) is the one check
+          # here whose SUBJECT changes with the theme, and it claims to catch "a
+          # theme's palette leaking into the other theme's render" — a claim it
+          # cannot substantiate while it only ever renders one (GitHub #157).
+          # Measured, not assumed: at the same seed the combined stage censuses 64
+          # inks in light against 56 in dark, with different saturation and value
+          # extremes, so eight of the page's inks had never been censused at all.
+          #
+          # AND THE LIGHT PIXEL RUN BELOW DOES NOT SUBSUME IT. That run is
+          # DIFFERENTIAL — working tree against a ref — so a light-only fault
+          # present in both is 0px there and always will be. This one is ABSOLUTE:
+          # it asserts every ink is a tone of its own wheel's base, with no ref and
+          # no baseline. Combined stage only, because it is a superset: 10 wheels
+          # against the solo scope's, and the theme changes the palette rather than
+          # the composition. ~1.3s.
+          python3 tools/dom_invariants.py http://127.0.0.1:8765/ --theme light ; DOMLIGHT=$?
           # dom_invariants' own mesh check deliberately exempts escape-run
           # ghosts (GitHub #117) -- they live one DOM level deeper than its
           # element test requires, and there are far more of them than linked
@@ -195,8 +211,9 @@ jobs:
           set -e
           kill $SERVER 2>/dev/null || true
           if [ $LAYOUT -ne 0 ] || [ $MOTION -ne 0 ] || [ $PILL -ne 0 ] \
-             || [ $DOM -ne 0 ] || [ $DOM1 -ne 0 ] || [ $ESCMESH -ne 0 ]; then
-            echo "::error::layout, motion, pill, DOM-invariant or escape-mesh gate failed — not deploying"
+             || [ $DOM -ne 0 ] || [ $DOM1 -ne 0 ] || [ $DOMLIGHT -ne 0 ] \
+             || [ $ESCMESH -ne 0 ]; then
+            echo "::error::layout, motion, pill, DOM-invariant (dark $DOM, solo $DOM1, light $DOMLIGHT) or escape-mesh gate failed — not deploying"
             exit 1
           fi
 
@@ -207,12 +224,14 @@ jobs:
       # a swallowed expression, a regex read as division, a template literal cut
       # short — comes out here as a delta, and 0 is the only passing answer.
       #
-      # THREE RUNS, because they are three different code paths and the first one
-      # alone would agree with a fault in the other two. 127.0.0.1 is a
+      # FIVE RUNS, because they are five different code paths and the first one
+      # alone would agree with a fault in the other four. 127.0.0.1 is a
       # STAGE_HOSTS name so the bare URL is the combined stage — bridges, idlers,
       # a datum; ?who=charles is one chain with none of that; /fidget/ is a
       # separate page with its own physics loop that goes through the same
-      # stripper and has no other harness of its own.
+      # stripper and has no other harness of its own; --panel opens the pop-out
+      # the other four cannot see into; --theme light renders the palette no other
+      # gate in this workflow has ever rendered (GitHub #157).
       #
       # Pillow and numpy are not optional here. Without them the tool used to
       # print "cannot diff" and exit 0 — the strongest gate in the tree passing by
@@ -237,9 +256,25 @@ jobs:
           # one-pixel edit twice, caught here (132px) and surviving in the shut runs
           # (0px), which measures the coverage instead of claiming it.
           python3 tools/pixel_regress.py --ref HEAD --panel ; PANEL=$?
+          # LIGHT, because every other themed gate in this workflow runs at its
+          # own `--theme dark` default and light is where this project's real
+          # faults have been (GitHub #157): CL#133 removed the wheel shadow in
+          # light ONLY, because the shared shadow layer showed through the cuts,
+          # and CL#173 fixed five serious contrast failures in light ONLY, two of
+          # them a regression from CL#169 one commit earlier. Twelve gate
+          # invocations and not one of them had ever rendered the palette half the
+          # page is painted in.
+          #
+          # The COMBINED STAGE in light rather than a fifth axis crossed with the
+          # other three: light vs dark changes the palette, not the composition,
+          # so the marginal question is "does the light palette still draw the
+          # same" and the widest render is where a light-only path is most likely
+          # to appear at all. ~15s locally, one more browser launch.
+          python3 tools/pixel_regress.py --ref HEAD --theme light ; LIGHT=$?
           set -e
-          if [ $STAGE -ne 0 ] || [ $SOLO -ne 0 ] || [ $FIDGET -ne 0 ] || [ $PANEL -ne 0 ]; then
-            echo "::error::the stripped page does not draw the same as the source (stage $STAGE, solo $SOLO, fidget $FIDGET, panel $PANEL) — not deploying"
+          if [ $STAGE -ne 0 ] || [ $SOLO -ne 0 ] || [ $FIDGET -ne 0 ] || [ $PANEL -ne 0 ] \
+             || [ $LIGHT -ne 0 ]; then
+            echo "::error::the stripped page does not draw the same as the source (stage $STAGE, solo $SOLO, fidget $FIDGET, panel $PANEL, light $LIGHT) — not deploying"
             exit 1
           fi
 
