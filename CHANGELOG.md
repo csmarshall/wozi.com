@@ -289,6 +289,55 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#177 — the datum's ink caches are discarded when the palette in force changes,
+  and the latent failure was reproduced before it was fixed.** (GitHub #159.)
+
+  `datumOpacity()` and `datumInk()` cached per `state.theme` for the page's life, while
+  the palette actually in force is the **`data-theme` attribute** — and CL#174 moved
+  the state seed to construction while `paintTheme()` still applies the attribute at
+  the end of mount. So the first render could solve and cache against a theme whose
+  palette was not yet applied.
+
+  **Reproduced rather than reasoned about, and it is worse than the ticket said.** With
+  a scratch FOUC fix (the `<helmet>` style block duplicated into the real `<head>`,
+  never shipped), a dark first render reads `--muted: #677977` — the **light** value —
+  with the attribute still `null`, caches it, and never reads again. The datum then
+  ships **`rgb(0, 0, 0)`**: pure black, not merely dark, because `k` is the dark ratio
+  applied to a light token that sits *below* the light page, so every channel clamps at
+  zero. With the fix, all six cold-load combinations give the correct
+  `rgb(223,250,244)`.
+
+  **Two corrections to #159's own text.** The trigger is *dark at first render from ANY
+  source*, not the system path specifically — `state.theme` is seeded from
+  `storedChoice()` at construction too. Which means that once someone lands the FOUC
+  fix, `pixel_regress --theme dark` **would** catch this, since that plants
+  localStorage; today's empty token reads are what hide it from both paths equally.
+
+  **Cleared rather than re-keyed, for a reason worth keeping.** `datumInk()` computes
+  `k = datumOpacity() / ghostOpacity()`, and `ghostOpacity()` reads `state.theme`.
+  Keying the caches on the attribute would leave the two solvers reading one theme
+  while the ratio they divide by reads the other — **a second opinion about "which
+  theme am I in", inside exactly the window the bug lives in.** Clearing on "the
+  palette in force just changed" needs no second notion of theme, keeps CL#174's
+  paint/setState split intact, and costs one bisection per theme change, off the rAF
+  loop. **The solve is untouched — only when it may be remembered.**
+
+  Swept for the same shape: there are exactly **three** `getComputedStyle` sites. The
+  third, `GHOST_GROUNDS` at module scope, is **theme-invariant by construction** — it
+  reads only `--ref-bg` and `--ref-bg-dark`, both declared in bare `:root` and
+  deliberately not overridden in the dark block, and carries literal fallbacks equal to
+  those hexes — so its timing cannot matter. Every instance memo was checked for what
+  it keys on and when it is seeded (`_tw`/`_ti`, `_gsr`, `_hexMemo`, `_bridgeAt`,
+  `_slugFor`, `_solved`, the warn-once flags): none is theme-dependent. Every other
+  `state.theme` consumer is a render-time read with no memo, and `syncVars()` runs
+  after `paintTheme()` so the `--accent` write never precedes the attribute.
+
+  `npm test` 120/0. `pixel_regress` **0px** on the combined stage, on `?who=charles`,
+  and on `--theme light` — all three expected zeros, since this is a caching fix — with
+  controls 0px. `dom_invariants`, `verify_motion` and `a11y_audit` (both themes) PASS,
+  0 console errors. Solved inks byte-identical to HEAD at every cold-load combination,
+  so the green-channel clamp and CL#173's 0.15-wide token window are untouched.
+
 - **CL#176 — `datumClear()` was paying 20% short of what the datum actually puts
   outboard, in every treatment the page has ever shipped.** (GitHub #141.)
 

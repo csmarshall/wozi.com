@@ -6037,9 +6037,39 @@ class Component extends DCLogic {
 
   /* The DOM half of a theme, split out because the two halves are now needed
      separately: at boot the theme is already in state and only the attribute is
-     missing, while a toggle needs both. One home for the attribute's name. */
+     missing, while a toggle needs both. One home for the attribute's name.
+
+     AND THEREFORE THE ONE HOME FOR "THE PALETTE IN FORCE JUST CHANGED" (GitHub
+     #159). datumOpacity() and datumInk() solve against the tokens
+     getComputedStyle actually resolves and cache the answer per `state.theme` for
+     the life of the page -- but the palette those tokens come from is selected by
+     the ATTRIBUTE below, and since CL#174 the two are set at different moments:
+     the theme is seeded into state at construction, so the first render already
+     draws in it, while the attribute is not painted until the end of mount. A
+     dark-system cold load therefore renders once with `state.theme === 'dark'`
+     and the LIGHT palette resolved, and a cache keyed on state alone would hold
+     a light-derived ink under the key 'dark' forever after.
+
+     Nothing is broken today only by an ordering accident -- that first render's
+     token reads come back as empty strings, because the page's own <style> lives
+     in <helmet> and has not been re-inserted yet, and neither solver caches on
+     that path. That makes this a LATENT fault whose trigger is the obvious FOUC
+     fix: hoist the palette into the real <head> and the reads succeed, k comes
+     out as the dark ratio applied to light tokens, every channel clamps at 0 and
+     the scribe is drawn PURE BLACK on the dark page for the page's lifetime.
+     Measured, with the style block duplicated into <head> and prefers-color-scheme
+     emulated dark: rgb(0,0,0) against the correct rgb(223,250,244).
+
+     Discarding both caches here fixes it for any such edit without giving either
+     solver a second opinion about which theme it is in -- the alternative, keying
+     them on the attribute, leaves them reading one theme and `ghostOpacity()`
+     (which is state's) reading another during exactly that window. The solve is
+     untouched; only when it is allowed to be remembered changes. Cost is one
+     bisection per theme change, off the rAF loop. */
   paintTheme(theme) {
     document.documentElement.setAttribute('data-theme', theme);
+    this._datumOp = null;
+    this._datumInk = null;
   }
 
   apply(theme) {
@@ -7206,7 +7236,12 @@ class Component extends DCLogic {
      dark 0.17, is indistinguishable from the feature not existing, and leaves
      nothing on the page to diagnose it from. So each refusal below returns the
      REFERENCE alpha -- too strong for a dark page, obviously so to anyone
-     looking, and present. */
+     looking, and present.
+
+     THE CACHE IS DISCARDED BY paintTheme(), not keyed on the attribute (GitHub
+     #159): `state.theme` is the key here and the ATTRIBUTE is what selects the
+     palette these tokens come from, and the two are set at different moments on a
+     cold load. See the note there. */
   datumOpacity() {
     if (!this._datumOp) this._datumOp = {};
     const theme = this.state.theme;
@@ -7296,7 +7331,10 @@ class Component extends DCLogic {
      CACHED PER THEME, and only once it has read. An empty token means the page's
      own <style> has not landed yet -- the markup is compiled and re-inserted --
      so caching the fallback would hold the wrong ink for the life of the page,
-     which is the trap datumOpacity() documents next door. */
+     which is the trap datumOpacity() documents next door. And the cache is
+     discarded by paintTheme() (GitHub #159), because "which theme" here is state's
+     and the palette is the attribute's -- the empty read is what saves this today,
+     not the key. */
   datumInk() {
     if (!this._datumInk) this._datumInk = {};
     const theme = this.state.theme;
