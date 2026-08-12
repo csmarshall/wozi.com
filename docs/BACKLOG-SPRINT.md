@@ -78,6 +78,15 @@ Related trap: `.claude/worktrees/*/` are other agents' checkouts pinned to
 arbitrary older commits, each with its own stale `CLAUDE.md` and `CHANGELOG.md`.
 Read docs from the repo root only.
 
+**Port 8765 is a shared resource, and two concurrent agents will measure each
+other's tree.** Several harnesses default to `http://127.0.0.1:8765/` and none of
+them serve — so whichever agent starts a server first owns the port, and the
+second one silently measures the first one's checkout. That happened during the
+#154 work: the agent noticed, moved to 18765, and verified by grepping the served
+bytes for a string only its own tree contained. **Tell every dispatched agent to
+serve on a port of its own and to confirm what it is measuring**, because the
+symptom is not an error — it is a plausible number from the wrong file.
+
 Every subagent brief must carry, without exception:
 
 - **Read `CLAUDE.md` first**; it overrides their defaults. Tell them to read it

@@ -436,7 +436,13 @@ input[type="range"]:focus{outline:none;}
   <button onClick="{{ resetSpeed }}" title="{{ speedLabel }}" aria-label="{{ speedLabel }}" style="{{ speedStyle }}" style-hover="color:var(--ink);">
     {{ speedMark }}
   </button>
-  <button onClick="{{ toggleTog }}" title="{{ togLabel }}" aria-label="{{ togLabel }}" aria-expanded="{{ togExpanded }}" style="position:fixed;top:var(--offtop);right:calc(var(--offright) + (var(--btn) + var(--btngap)) * 2);z-index:20;display:flex;align-items:center;justify-content:center;width:var(--btn);height:var(--btn);padding:0;border:0;border-radius:999px;background:transparent;color:var(--muted);cursor:pointer;transition:color .18s ease;" style-hover="color:var(--ink);">
+  <!-- THE REF IS HERE SO ESCAPE HAS SOMEWHERE TO PUT THE FOCUS BACK (GitHub
+       #154). Closing the panel from the keyboard has to return focus to the
+       control that opened it, and the only alternative to a ref is
+       `querySelector('[aria-expanded]')` -- which is exactly the contract three
+       harnesses already depend on, so borrowing it in shipped code would make
+       the page's own focus management break the day that attribute moves. -->
+  <button ref="{{ togRef }}" onClick="{{ toggleTog }}" title="{{ togLabel }}" aria-label="{{ togLabel }}" aria-expanded="{{ togExpanded }}" style="position:fixed;top:var(--offtop);right:calc(var(--offright) + (var(--btn) + var(--btngap)) * 2);z-index:20;display:flex;align-items:center;justify-content:center;width:var(--btn);height:var(--btn);padding:0;border:0;border-radius:999px;background:transparent;color:var(--muted);cursor:pointer;transition:color .18s ease;" style-hover="color:var(--ink);">
     {{ togIcon }}
   </button>
   <button onClick="{{ toggleMotion }}" title="{{ motionLabel }}" aria-label="{{ motionLabel }}" aria-pressed="{{ motionPressed }}" style="position:fixed;top:var(--offtop);right:calc(var(--offright) + var(--btn) + var(--btngap));z-index:20;display:flex;align-items:center;justify-content:center;width:var(--btn);height:var(--btn);padding:0;border:0;border-radius:999px;background:transparent;color:var(--muted);cursor:pointer;transition:color .18s ease;" style-hover="color:var(--ink);">
@@ -446,6 +452,48 @@ input[type="range"]:focus{outline:none;}
     {{ themeIcon }}
   </button>
 
+  <!-- THE DISMISSAL SCRIM (GitHub #154). Charles: "click or tap off of the
+       settings pannel should collapse it if open". It is an ELEMENT and not a
+       document-level listener, and that choice is what makes every one of the
+       cases below fall out of layout instead of out of event bookkeeping:
+
+       THE TAP IS CONSUMED, DELIBERATELY. The stage's own onPointerDown is the
+       gear drag, so "tap off the panel" lands on something that already means
+       "grab the train and spin it". A tap whose entire intent is to dismiss must
+       not also fling the machine -- that is a side effect the visitor did not
+       ask for. Because the scrim is the topmost element under the pointer, the
+       stage never receives the event at all: the consumption is structural, not
+       a stopPropagation() somebody can delete without the behaviour changing
+       visibly. The cost is that the first tap after opening the panel does not
+       reach the machine, which is the smaller of the two surprises.
+
+       Z-INDEX 19 IS THE WHOLE OF THE POLICY, and it is one number rather than
+       four exclusions:
+         - the panel itself is z-index 30, so a click or drag INSIDE it never
+           reaches the scrim -- including a slider drag that starts on the input
+           and overshoots the panel's edge, because the pointer is captured by
+           the input and the scrim only ever listens for pointerdown;
+         - all four corner controls are z-index 20, so they stay live and the
+           scrim cannot see the toggle's own press. That is what makes the
+           close-then-reopen double-fire IMPOSSIBLE here rather than merely
+           guarded against;
+         - the stage and the wordmark are below it, so everything that is not a
+           control counts as "off the panel".
+
+       THE OTHER THREE CORNER CONTROLS ACT WITHOUT DISMISSING, decided rather
+       than discovered. Theme, motion and the departure indicator are peers of
+       the settings in the panel -- flipping the theme to compare it is a thing
+       you do WITH the panel open -- and the departure indicator's whole job is
+       to reset the speed the panel's own slider sets. Closing the panel out from
+       under any of them would be the same unasked-for side effect the paragraph
+       above refuses. One tap anywhere else still dismisses, so nothing is
+       stranded by the choice. Only the toggle closes it, because that IS its job.
+
+       It carries no background and no transition: it must be invisible (a scrim
+       that dims the page is a different, visual decision nobody asked for), and
+       a collapse animation is exactly the casually-added motion CLAUDE.md
+       forbids outside the one integrator. -->
+  <div aria-hidden="true" onPointerDown="{{ dismissTog }}" style="{{ togScrimStyle }}"></div>
   <nav aria-label="Table of gears" style="{{ togPanelStyle }}">
     <!-- THE SPEED SLIDER, AT THE TOP (GitHub #108, CL#114). Charles: "if
          someone pops up the menu the slider is at the top" -- above the
@@ -4034,6 +4082,29 @@ class Component extends DCLogic {
   _tickDt = HUD ? new Array(HUD_WINDOW).fill(0) : null;
   _colRef = React.createRef();
   _stageRef = React.createRef();
+  _togRef = React.createRef();
+
+  /* ONE HOME FOR CLOSING THE POP-OUT (GitHub #154). Three things now dismiss it
+     -- the scrim, Escape, and the toggle button's own second press -- and
+     `aria-expanded` is drawn from `state.tog` alone, so all three have to arrive
+     at the same setState or that attribute stops being honest. It is honest
+     because there is nowhere else to write the flag, not because three call
+     sites are kept in step.
+     `refocus` is the keyboard half and is FALSE for the scrim on purpose: a
+     pointer dismissal has already put the focus wherever the visitor pressed,
+     and yanking it to a corner button they did not touch is the arbitrary
+     placement this exists to avoid. It runs in the setState callback so the
+     panel is already display:none -- focus moved while its subtree is still
+     laid out can be taken straight back off the button by the browser's own
+     handling of a focused element disappearing. */
+  closeTog(refocus) {
+    if (!this.state.tog) return;
+    this.setState({ tog: false }, () => {
+      if (!refocus) return;
+      const b = this._togRef.current;
+      if (b) b.focus();
+    });
+  }
 
   /* Grab any wheel and push it: the whole train follows your hand, and if you push
      against the way it was turning, it keeps running that way when you let go. */
@@ -5890,6 +5961,22 @@ class Component extends DCLogic {
       const dx = (e.clientX / window.innerWidth - 0.5) * 26, dy = (e.clientY / window.innerHeight - 0.5) * 18;
       this._ghostLayer.style.transform = 'translate(' + (-dx).toFixed(1) + 'px,' + (-dy).toFixed(1) + 'px) scale(0.94)';
     };
+    /* ESCAPE CLOSES THE POP-OUT (GitHub #154), and this is the one listener the
+       dismissal needs -- the pointer half is the scrim element in the markup,
+       which needs none. It is on `document` and not on the panel or the toggle
+       because a key press has to be caught wherever the focus happens to be:
+       activating the toggle with a keyboard leaves focus on the button, but
+       opening it with a MOUSE leaves focus on the button in Chrome and on the
+       body in Safari, and a handler hung off either element would work in one of
+       those and silently not in the other.
+       The state test comes first, so a page with the panel shut does no work per
+       key press beyond one comparison, and Escape keeps whatever meaning the
+       browser gives it everywhere else -- nothing is preventDefault()ed here. */
+    this._onKey = (e) => {
+      if (e.key !== 'Escape' || !this.state.tog) return;
+      this.closeTog(true);
+    };
+    document.addEventListener('keydown', this._onKey);
     window.addEventListener('pointermove', this._onPointer, { passive: true });
     this.mq = DARK_MQ;
     this.onSys = (e) => {
@@ -5920,6 +6007,7 @@ class Component extends DCLogic {
     window.removeEventListener('resize', this.onResize);
     if (window.visualViewport) window.visualViewport.removeEventListener('resize', this.onResize);
     if (this._onPointer) window.removeEventListener('pointermove', this._onPointer);
+    if (this._onKey) document.removeEventListener('keydown', this._onKey);
     if (this._raf) cancelAnimationFrame(this._raf);
     if (this._io) this._io.disconnect();
     if (this._hudTimer) clearInterval(this._hudTimer);
@@ -10354,6 +10442,50 @@ class Component extends DCLogic {
          ride along in localStorage. display:none while closed keeps it out of
          the tab order and the accessibility tree. */
       toggleTog: () => this.setState({ tog: !this.state.tog }),
+      togRef: this._togRef,
+      /* The scrim's only job. `preventDefault` is not what consumes the tap --
+         the scrim being the topmost element under the pointer is (see the
+         markup) -- it is here so a press-and-drag on the page behind the panel
+         does not also begin a text selection on the way out. No refocus: a
+         pointer dismissal leaves the focus where the hand was. */
+      dismissTog: (e) => { e.preventDefault(); this.closeTog(false); },
+      /* FULL-VIEWPORT AND UNPAINTED, sized off nothing: `inset:0` on a fixed
+         element is the viewport by definition, so this needs no measurement and
+         no resize handler, and it cannot disagree with the viewport the way a
+         computed width would. It is display:none while the panel is shut, from
+         the same `state.tog` the panel and `aria-expanded` read, so there is
+         never a live invisible layer over a page with no panel open -- the one
+         way this pattern goes wrong on its own. `aria-hidden` in the markup plus
+         no tabindex keeps it out of the accessibility tree and the tab order
+         entirely; it is a pointer target and nothing else.
+
+         `fixed` AND NOT `absolute`, WHICH IS NOT INTERCHANGEABLE HERE EVEN
+         THOUGH THE PAGE LOOKS LIKE IT NEVER SCROLLS. `main` carries
+         overflow:hidden, but `html` and `body` do not, and at a short landscape
+         viewport the composition is taller than the window: with the panel open,
+         documentElement.scrollHeight measures 423 against a 390px window and 440
+         against a 273px one, and window.scrollTo() then really does move the page
+         33px and 167px. An absolutely positioned scrim is
+         anchored to the initial containing block, so once the page is scrolled
+         that much of the visible area is UNCOVERED -- a tap there falls through
+         to the stage and spins the train instead of dismissing, which is the one
+         behaviour this element exists to prevent. `fixed` cannot drift off the
+         viewport by construction.
+
+         THE COST, MEASURED, SO NOBODY HAS TO REDISCOVER IT: a transparent fixed
+         layer over the page changes how Chrome rasterises what is beneath it.
+         `pixel_regress --panel --ref HEAD` reports 2,852 px differing at a max
+         channel delta of 18 -- antialiasing on gear and type edges, spread over
+         the whole frame rather than gathered anywhere -- and reports 0 px with
+         this element's `display` forced off and everything else unchanged, which
+         is how the cause was established rather than guessed. The default gate,
+         with the panel shut and this element display:none, stays at 0 px. It is
+         a repaint difference in a state that only exists while a menu is open,
+         and it is the price of the structural consumption above. */
+      togScrimStyle: {
+        display: this.state.tog ? 'block' : 'none',
+        position: 'fixed', inset: '0', zIndex: 19, background: 'transparent'
+      },
       togLabel: this.state.tog ? 'Close the table of gears' : 'Browse the table of gears',
       togExpanded: this.state.tog ? 'true' : 'false',
       /* A cogwheel, not a sun: the first draft was circle-plus-rays, which sat
@@ -10383,12 +10515,32 @@ class Component extends DCLogic {
          space its neighbours are promised; overflowY lets everything past
          that scroll, so the slider -- flex-column's first child -- opens
          already in view and the rest of the list is one scroll away rather
-         than off-screen with nothing pointing at it. */
+         than off-screen with nothing pointing at it.
+
+         AND THE CAP ONLY MEANS THAT UNDER border-box (GitHub #149). max-height
+         on a content-box element caps the CONTENT and then adds the padding and
+         the border on top of it, so this panel stood 22px taller than the
+         clearance it was written to leave -- 10px of padding twice plus 1px of
+         border twice: measured 396px against a 374px cap at 844x390 and 279px
+         against 257px at 844x273, and #149 reports the same 22px putting the
+         panel 13.5px inside the bottom safe-area inset once the real insets are
+         injected, which no gate had ever photographed. That is the
+         exact fault CL#114 exists to prevent, in the line that prevents it.
+         `border-box` is one word and makes the cap mean the border box, which is
+         the box the safe-area clearance is about. The alternative -- subtracting
+         `20px + 2px` inside the calc() -- keeps 22px more content but writes the
+         padding and the border down a second time, three lines above where they
+         are actually declared, which is the drifting-constant shape
+         LATTICE_WALL and BOSS_MUL were both created to end. The 22px is paid out
+         of the SCROLLABLE part, not out of what opens in view: the flex column's
+         first child is still Machine Settings and the speed slider, which is the
+         thing "hiding at 1x must not strand anyone" is about. */
       togPanelStyle: {
         display: this.state.tog ? 'flex' : 'none', flexDirection: 'column', gap: PANEL_GAP + 'px',
         position: 'fixed', left: 'var(--offleft)', top: '50%', transform: 'translateY(-50%)',
         zIndex: 30, background: 'var(--chip)', border: '1px solid var(--hair)',
         borderRadius: '14px', padding: '10px 6px', boxShadow: 'var(--shadow)', minWidth: '190px',
+        boxSizing: 'border-box',
         maxHeight: 'calc(100vh - var(--offtop) - var(--offbot))',
         overflowY: 'auto', overscrollBehavior: 'contain'
       },

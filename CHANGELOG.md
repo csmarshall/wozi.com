@@ -289,6 +289,76 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#175 — the pop-out panel can be dismissed by tapping off it, and it stops
+  overshooting its own cap.** (GitHub #154, #149 — both close.)
+
+  Charles: *"click or tap off of the settings pannel should collapse it if open"*.
+  It could not be: `toggleTog` was the only thing that changed `state.tog`, there was
+  no document listener, and **no Escape handler either** — so a disclosure that can
+  cover most of a phone was dismissible only from the smallest target on screen.
+
+  Four routes now, all through one `closeTog(refocus)`, so `state.tog` and
+  `aria-expanded` cannot disagree — and that attribute's contract is untouched, since
+  `pixel_regress --panel` (CL#172) and `a11y_audit` (CL#171) both locate the toggle by
+  it. Escape returns focus to the toggle rather than dropping the visitor somewhere
+  arbitrary.
+
+  **The dismissing tap is CONSUMED, and the mechanism is layout rather than event
+  bookkeeping.** A full-viewport transparent scrim sits at `z-index 19`, the panel at
+  30, all four corner controls at 20. One ladder is the whole policy: inside clicks and
+  slider drags never reach the scrim because the panel is above it; **the scrim cannot
+  see the toggle's own press, so the close-then-reopen double-fire is impossible rather
+  than guarded**; and the stage's `onPointerDown` never fires because the scrim is the
+  hit target — so there is no `stopPropagation()` for a later edit to delete. A tap
+  whose intent is to dismiss does not also fling the machine.
+
+  **`position: fixed`, not `absolute`, and that is not interchangeable — measured.**
+  `main` has `overflow:hidden` but `html`/`body` do not, so at short landscape
+  viewports the composition is taller than the window and the page really scrolls
+  (`scrollHeight` 423 vs 390, 440 vs 273). With an absolute scrim, after scrolling,
+  `elementFromPoint` at the bottom edge returns `MAIN` — an uncovered band where a tap
+  would spin the train.
+
+  **Theme and motion deliberately do NOT dismiss**, against the ticket's own
+  presumption: they are peers of the panel's settings (flipping theme to compare is
+  something you do *with* it open), and the departure indicator's job is to reset the
+  very speed the panel's slider sets. Reversible by dropping the scrim to `z-index 21`.
+
+  #149: `boxSizing: 'border-box'` on `togPanelStyle`. The `maxHeight` cap sat on a
+  `content-box` element with `padding: 10px 6px` and a 1px border, so padding and
+  border were added **on top of** the cap — the fault CL#114 was written to prevent,
+  by 22px. Proven by the gate CL#172 built: at 844x390 the box goes **396 → 374 against
+  a 374px cap**, `over: +3 → −8`, so the panel gets the same 8px clearance every other
+  fixed element gets. Rejected the alternative of subtracting `20px + 2px` inside the
+  `calc()` — that restates the padding and border three lines above their own
+  declaration, which is the `LATTICE_WALL`/`BOSS_MUL` failure mode. The 22px comes out
+  of the scrolled remainder, not the opening view: the slider is still first child with
+  `scrollTop` 0 at both tight profiles, on the combined stage and on `?who=charles`.
+
+  Six behaviours measured with real `Input.dispatchMouseEvent` taps rather than
+  `element.click()`, with capture counters on both the stage and the scrim: outside tap
+  closes (scrim 1, **stage 0**); toggle tap closes without reopening (**scrim 0**); a
+  Table of Gears entry does not close; a slider drag from inside to x=824 outside does
+  not close and moves the value 0→7; Escape closes from inside-panel focus and returns
+  it to the toggle; Escape while shut is inert. Bonus: a dismissing tap landing on a
+  gear badge dismisses **without** navigating, while the same tap with the panel shut
+  still navigates.
+
+  **`--panel` reports 2,852px at the two uncapped viewports and it is not the panel** —
+  the panel box is byte-identical there (568.6px), and the differing pixels are
+  scattered over the whole frame at antialiasing magnitude. Isolated by experiment:
+  forcing the scrim's `display` off and changing nothing else gives **0px**. A
+  transparent fixed layer changes how Chrome rasterises what is beneath it, it exists
+  only while the menu is open, and the default gate is 0px. Accepted as the price of
+  structural consumption; the `absolute` variant was 0px and genuinely incorrect under
+  scroll. At the capped viewports `--panel` reports 27,384 / 22,849, which is #149's
+  intended 22px and its re-centring.
+
+  `npm test` 120/0, `a11y_audit` PASS both themes with the panel confirmed open in
+  each, `devices.py` 24/24 + 4/4 with the tightest clearance unchanged at 8px,
+  `verify_motion` and `dom_invariants` PASS with 0 console errors, `strip_comments
+  --check` still parses with all 769 backlinks naming real lines.
+
 - **CL#174 — the page no longer draws itself once at a scale it is about to throw
   away.** (GitHub #135, plan A. The ticket's remaining work.)
 
