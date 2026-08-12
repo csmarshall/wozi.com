@@ -25,6 +25,16 @@ CDP; `pip` needs websockets, and Pillow/numpy for the image-analysis ones).
 - a11y_audit.py <url>      axe-core injected over CDP + the structural checks
                            axe cannot make (focus rules, reduced-motion, SVG
                            exposure, target sizes).
+- strip_comments.py        NOT a harness — the one thing in here that BUILDS
+                           what ships. Cuts the commentary out of an HTML page
+                           for delivery (603KB -> 189KB on index.html) and
+                           leaves a /*L1234*/ backlink where each comment was,
+                           pinned by the banner to the commit it came from. The
+                           deploy runs it `--in-place` over its own checkout
+                           before any gate, which is how everything else in this
+                           directory ends up measuring the artifact instead of
+                           the source. `--in-place` refuses on a file that
+                           differs from HEAD; `--selftest` covers every trap.
 - shots.py <url>           five-viewport geometry + screenshots (layout work).
 - pin_test.py              pins a wheel at 8 rotations, samples the tooth ring
                            (the only band where the body paint is alone).
@@ -42,6 +52,14 @@ CDP; `pip` needs websockets, and Pillow/numpy for the image-analysis ones).
                            Exists because #19 was invisible to everything else
                            in this directory: Blink and Gecko centred the
                            handle, WebKit put it 19% of a band depth out.
+
+**Check you are measuring your own tree.** Everything here that takes a `<url>`
+measures whatever answers on that port, and the deploy's layout step serves on a
+FIXED 8765 — fine on a clean runner, a trap on this machine. With another agent's
+worktree already on 8765, `python3 -m http.server 8765` fails with EADDRINUSE and
+every gate then passes against somebody else's `index.html` without a word. Serve
+on a port of your own, and confirm the body is the tree you meant before believing
+a PASS. `pixel_regress.py` picks a free port for this reason (#42).
 
 Testing lesson recorded in git history worth repeating here: synthesized CDP
 pointer events never trigger native link drag-and-drop, so a harness can pass

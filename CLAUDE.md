@@ -4,10 +4,13 @@ Static site, no build step. `index.html` is the landing page; `support.js` is th
 runtime it loads. Serve the folder and you are looking at the site.
 
 This repo is the **source of truth** for `s3://wozi.com`, including the parts
-that predate the gear train.
+that predate the gear train — but it is **no longer byte-for-byte what the bucket
+holds**: the two HTML pages are comment-stripped on the way out (CL#159). See
+*What deploys* for the transform and for the gate that keeps the two the same
+page.
 
-It is private. The reason it was made private — `cards/` publishing a real
-address and mobile number — no longer applies (`cards/` went in CL#143), and
+**It is PUBLIC** (2026-08-11). The reason it was private — `cards/` publishing a
+real address and mobile number — no longer applies (`cards/` went in CL#143), and
 **the history that argued against going public has now been rewritten out**:
 `cards/` and both copies of `legacy/resume-2014.pdf` are gone from every
 commit, verified by grepping every blob in every commit for the address and
@@ -24,11 +27,19 @@ because GitHub keeps unreferenced objects fetchable by SHA indefinitely after a
 force-push — only a Support-side gc clears them, which a push cannot trigger. So
 the rewritten history was pushed to a **new** repo and renamed into the
 `csmarshall/wozi.com` slug, with the old one renamed aside. Issues were
-transferred afterwards and **kept their numbers exactly** (1–134), which the
+transferred afterwards and **kept their numbers exactly** (1–136), which the
 transfer only guarantees because the source numbering was contiguous with no PRs
 and the target was empty — so every `#N` in this file, `CHANGELOG.md` and 291
 commit messages still resolves, and the log's "numbers are stable" rule
 survived. Do not assume a future repo move gets that for free.
+
+**One consequence worth naming, because it changes what a published file may
+say:** the delivered page's banner links every `/*L1234*/` marker back to this
+repo, and that link now resolves for anybody. It used to carry a caveat that the
+repo was private and the reader would meet a sign-in wall; that caveat is gone,
+and `tools/strip_comments.py --selftest` asserts it **stays** gone — it was true
+for the whole life of the tool and is exactly the sentence somebody restores from
+memory.
 
 **A repo swap breaks the deploy until IAM is updated, and the rename is not
 what fixes it.** `wozi-com-deploy`'s trust policy pins GitHub's OIDC subject by
@@ -47,6 +58,49 @@ does not — a whitelist, so a new file cannot reach the web by being forgotten.
 
 Published: `index.html`, `support.js`, `config.js`, `assets/`, `keybase.html`,
 `ssh_public_key`, `robots.txt`, `fidget/index.html`, `favicon.ico`.
+
+**Two of those are BUILT, not copied** (CL#159). `index.html` and
+`fidget/index.html` go through `tools/strip_comments.py` on the way to the bucket,
+which removes the commentary — about two thirds of both files — and leaves a
+compact `/*L1234*/` backlink where each comment was, naming the source line.
+602,972 → 188,901 B raw and 172,917 → 45,435 B brotli on the landing page; the
+markers themselves cost 7,146 B raw / 2,517 B brotli, 3.8% of the delivered file,
+which is what buys the file its way back to the prose. The banner carries the one
+URL they all hang off, **pinned to the deployed commit** — `blob/main/…` would rot
+the moment anything above a marked line moved, so the SHA is `github.sha` in CI
+and `git rev-parse HEAD` locally, and a build from a modified working copy says so
+in the banner rather than implying a precision it has not got. The repo is public,
+so that link resolves for the reader it is aimed at.
+
+**The transform is gated by making the artifact the thing under test, not by
+adding a second set of checks.** The strip runs over the deploy's own checkout
+(`--in-place`), before Chrome and before any credential, so `npm test`, the
+device sweep, the motion, DOM, pill and escape-mesh gates all measure the
+delivered file without knowing anything was stripped. `tools/pixel_regress.py
+--ref HEAD` is then the bridge: working tree is the artifact, HEAD is the source,
+and the transform may change every byte so long as it changes **no pixel** — run
+on the combined stage, on `?who=charles`, and on `/fidget/` via `--path`, because
+those are three different code paths and the first agrees with a fault in the
+other two. `npm test` runs **twice**, once against the source and once against
+the artifact: it reads its constants and the two-row menu out of `index.html` as
+text, so it is the only gate that can notice a strip that left the page drawing
+correctly while making it unparseable to the tools that read it.
+
+**What that catches is the failure a stripper actually has**: eating live code on
+its way past a comment. The version that stops parsing is caught by the tool's own
+`node --check`; the version that does not is caught only by the pixel gate, and
+`tools/mutation_gate.py --only stripper-ate-a-line` is the standing proof of it —
+one line of props deleted out of an object literal passes all 119 of `npm test`
+and moves 2,933 pixels.
+
+`--in-place` **refuses on a file that differs from HEAD.** Overwriting a source
+carrying uncommitted prose is the one version of this mistake nothing can undo; a
+CI checkout is clean by construction, so it only ever bites on a laptop.
+
+`keybase.html` is **not** stripped and must never be — its body is
+signature-covered. `robots.txt` is asserted byte-identical to the repo copy. Both
+are copied straight from the checkout, and the build step's own list of files is
+the only place that decides which pages are transformed.
 
 `config.js` carries the link table, the people and the palette. It is published,
 and CI asserts it is reachable, serves as `text/javascript` and parses — this

@@ -6,6 +6,7 @@ git ref pixel for pixel.
     tools/pixel_regress.py --ref origin/main
     tools/pixel_regress.py --shot /tmp/x.png # just capture, no comparison
     tools/pixel_regress.py --query '?who=charles'   # one chain, not the stage
+    tools/pixel_regress.py --path fidget/   # a different page in the same tree
 
 WHY THIS EXISTS. A screenshot of this page proves very little on its own, for
 two separate reasons, and both had to be dealt with before a pixel diff could
@@ -36,8 +37,19 @@ The comparison side checks out the ref into a throwaway git worktree and serves
 it on its own port, so nothing touches your working tree -- no stash, no
 checkout, no chance of losing an edit to a harness run.
 
+THIS IS ALSO THE GATE ON THE DELIVERED ARTIFACT. `tools/strip_comments.py
+--in-place` makes the deploy's checkout the stripped file, so "working tree vs
+HEAD" becomes "what ships vs what is reviewed" with nothing added here: the
+transform is allowed to change the bytes and forbidden to change the drawing, and
+that is exactly the one claim this tool can settle. `--path` is what extends it to
+/fidget/, which is stripped by the same step and is a different page in the same
+tree rather than a query on this one.
+
 Exit 0 if every viewport matches, 1 if any pixel differs, 2 if it could not
-photograph at all.
+photograph -- OR COULD NOT COMPARE. Those two used to be different: a missing
+Pillow printed "cannot diff" and exited 0, so the strongest gate in the tree
+passed by not running, on a machine that had simply never installed numpy. A
+comparison that did not happen is not a comparison that passed.
 """
 
 import argparse
@@ -218,6 +230,12 @@ def main():
     # the only question left once the default view has deliberately changed.
     ap.add_argument("--query", default="",
                     help="query string appended to the page, e.g. '?who=charles'")
+    # /fidget/ is a second published page in the same tree, with its own physics
+    # loop, and it goes through the same stripper. Without this there is no way to
+    # ask the artifact question about it at all -- --query cannot reach a path, and
+    # a second harness for one page would be a second thing to keep in step.
+    ap.add_argument("--path", default="",
+                    help="path under the served root, e.g. 'fidget/'")
     a = ap.parse_args()
 
     # It is appended to a bare directory URL, so without the '?' it becomes a
@@ -229,12 +247,23 @@ def main():
               f"without it the shot is a 404, and two 404s agree perfectly")
         return 2
 
+    # Same trap, one level up: a leading slash makes the join absolute and drops
+    # the port, and a directory without its trailing slash is a 404 from
+    # http.server -- which, again, two of would compare perfectly.
+    if a.path.startswith("/"):
+        print(f"FATAL: --path must be relative to the served root (got {a.path!r})")
+        return 2
+    if a.path and not a.path.endswith("/") and "." not in os.path.basename(a.path):
+        print(f"FATAL: --path {a.path!r} names neither a file nor a directory "
+              f"(a directory needs its trailing slash, or http.server 404s)")
+        return 2
+
     vps = [tuple(int(n) for n in v.lower().split("x")) for v in a.viewport] \
         or [(1440, 900), (390, 844)]
 
     srv, base = serve(ROOT)
     try:
-        now = asyncio.run(shoot(base + a.query, vps, a.seed, a.frames, a.theme))
+        now = asyncio.run(shoot(base + a.path + a.query, vps, a.seed, a.frames, a.theme))
     finally:
         srv.kill()
 
@@ -256,7 +285,7 @@ def main():
     try:
         srv2, base2 = serve(tree)
         try:
-            ref = asyncio.run(shoot(base2 + a.query, vps, a.seed, a.frames, a.theme))
+            ref = asyncio.run(shoot(base2 + a.path + a.query, vps, a.seed, a.frames, a.theme))
         finally:
             srv2.kill()
     finally:
@@ -265,11 +294,22 @@ def main():
         shutil.rmtree(work, ignore_errors=True)
 
     print(f"\nworking tree vs {a.ref}   seed {a.seed}, {a.frames} frames, "
-          f"{a.theme} theme{', ' + a.query if a.query else ''}")
+          f"{a.theme} theme, /{a.path}{a.query}")
     total = 0
+    skipped = []
     for label in now:
         n = compare(ref[label], now[label], label, a.outdir)
+        if n is None:
+            skipped.append(label)
         total += (n or 0)
+    if skipped:
+        # Reported as a harness failure (2), never as agreement (0). See the
+        # docstring: this is the gate the artifact rests on, and "I could not
+        # look" must not read the same as "nothing moved".
+        print(f"\nRESULT: COULD NOT COMPARE {len(skipped)} viewport(s) "
+              f"({', '.join(skipped)}) -- install Pillow and numpy. Nothing has "
+              f"been proved either way.")
+        return 2
     if total:
         print(f"\nRESULT: {total} pixels differ — see diff-*.png in {a.outdir}")
         print("        Intended? Then this is your record of exactly what moved.")

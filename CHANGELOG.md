@@ -7,6 +7,100 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Added
 
+- **CL#159 — the bucket gets the machine, the repo keeps the prose, and the
+  gates moved onto the artifact.** (GitHub #113.)
+
+  `tools/strip_comments.py` has existed and worked for a while and was
+  deliberately not wired into the deploy: publishing something other than the
+  file in the repo changes what "the repo is the source of truth for
+  s3://wozi.com" means, and its own docstring called that "a decision with a
+  gate on it, not a side effect of adding a tool." Charles took the decision.
+  This is the gate.
+
+  | | source | delivered | saving |
+  |---|---|---|---|
+  | `index.html` raw | 602,972 B | 188,901 B | 68.7% |
+  | `index.html` brotli | 172,917 B | 45,435 B | 73.7% |
+  | `fidget/index.html` raw | 38,329 B | 20,646 B | 46.1% |
+  | `fidget/index.html` brotli | 12,091 B | 6,123 B | 49.4% |
+
+  **The stripped page stays navigable back to the source.** Charles: *"do we
+  want to have the script inject references back to github to individual
+  methods in the code so that someone could easily go from one to the other?"*
+  A full URL at each of the 709 sites would be ~57KB — a third of the delivered
+  file spent saying the same thing 709 times — so the URL is carried ONCE in the
+  banner and each site keeps only `/*L1234*/`, the line it stood on. `#L1234`
+  on the banner's URL is the comment that used to be there. Measured cost:
+  7,146 B raw / 2,517 B brotli, 3.8% of the delivered file against a 68.7%
+  saving, so per-comment resolution was affordable and the coarser per-method
+  fallback was not needed. The marker syntax follows the SITE, not the file —
+  `<!--L1234-->` in markup, because `/*L1234*/` in a document body is text on
+  the page.
+
+  **The banner links to a repo that is now public**, which landed the same day
+  (the PII history rewrite completed, verified from an anonymous clone). The
+  tool shipped with a caveat that the reader would meet a GitHub sign-in wall —
+  pointing the public at a door they cannot open being arguably worse than
+  pointing them nowhere, which is why the caveat was written in the first place.
+  It is gone, and `--selftest` now asserts it STAYS gone: it was true for the
+  whole life of the tool, so it is exactly the sentence somebody restores from
+  memory. `--repo-url` remains for a rename or a mirror.
+
+  **The URL is pinned to the deployed commit.** `blob/main/index.html#L1234`
+  names a line that moves the next time anything above it is edited, which would
+  make the marker a drifting constant published 709 times over. The SHA is
+  `github.sha` in CI, `git rev-parse HEAD` locally, and a build from a working
+  copy that differs from that commit SAYS SO in the banner instead of implying a
+  precision it has not got.
+
+  **The gating is the order of the steps, not a second set of checks.** The real
+  risk here is the one CLAUDE.md names: a transform between the repo and the
+  bucket means the reviewed file and the served file are two different files, and
+  every gate in `tools/` ran against the first one. So the strip runs over the
+  deploy's OWN CHECKOUT (`--in-place`) before Chrome and before any credential,
+  and `npm test`, `devices.py`, `verify_motion.py`, `dom_invariants.py` (both
+  scopes), `pill_clip.py` and `escape_mesh.py` all measure the artifact with not
+  one line changed in any of them — a harness that had to be told about
+  stripping would be one that could be told the wrong thing. `npm test` runs
+  twice, source and artifact, because it is the only gate that reads the page as
+  TEXT and so the only one that could notice a strip that left the drawing
+  correct and the file unparseable.
+
+  **`pixel_regress.py --ref HEAD` is the bridge, and 0 is the only passing
+  answer**: working tree is the artifact, HEAD is the source, so the transform
+  may change every byte and must change no pixel. Measured 0 px at 1440x900 and
+  390x844 on the combined stage, 0 px on `?who=charles`, and 0 px on `/fidget/`
+  through the new `--path`. Two smaller fixes fell out of using it this way. It
+  now exits 2 rather than 0 when it cannot diff — a missing Pillow printed
+  "cannot diff" and passed, so the strongest gate in the tree could go green by
+  not running — and `--path` exists because `--query` cannot reach a second page
+  and a separate harness for `/fidget/` would have been a second thing to keep in
+  step.
+
+  **What that catches is the failure a stripper actually has.** The versions that
+  stop parsing are caught by the tool's own `node --check`; the version that does
+  not is caught by nothing else in the tree.
+  `tools/mutation_gate.py --only stripper-ate-a-line` is the standing proof —
+  one line of props deleted out of an object literal (#36's engraving hairline)
+  is valid JavaScript, meshes identically, turns, fits every viewport, passes all
+  119 of `npm test`, and moves **2,933 pixels**.
+
+  **`--in-place` refuses on a file that differs from HEAD.** Overwriting a source
+  carrying uncommitted prose is the one version of this that nothing undoes. A CI
+  checkout is clean by construction, so the guard only ever bites on a laptop —
+  which is exactly where it matters.
+
+  `keybase.html` never goes near the stripper: its body is signature-covered, so
+  it is served byte-exact or the ownership proof stops verifying. `robots.txt` is
+  still asserted byte-identical to the repo copy. The publish whitelist is
+  untouched and still a whitelist — nothing new is reachable over HTTP, and the
+  intermediate is the checkout itself rather than a new file that would have to be
+  kept off the list. One assertion was added to the live-site checks:
+  `blob/<github.sha>/index.html` must appear in the served body, which in one
+  substring says the object is the artifact rather than the source, is THIS
+  commit's artifact rather than a stale one, and still carries the markers that
+  are a visitor's only route to the documentation.
+
 - **CL#158 — `/fidget/` can be grounded at the sun instead of the ring, and the
   inertia model is now honest about the parallel-axis term.** (GitHub #129,
   part 2 of 4.)

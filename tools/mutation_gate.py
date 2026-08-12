@@ -200,6 +200,26 @@ MUTANTS = [
                "proved rather than remembered.",
     },
     {
+        "id": "stripper-ate-a-line",
+        "gate": "pixels",
+        "file": "index.html",
+        "find": "        stroke: L.col, strokeWidth: (eng.fT * ENGRAVE_STROKE).toFixed(3), strokeOpacity: L.op,\n",
+        "repl": "",
+        "expect": "caught",
+        "why": "THE FAILURE MODE THE DELIVERY STRIPPER CAN HAVE, stood up as a mutant. "
+               "tools/strip_comments.py now runs over the deploy's own checkout, so the "
+               "published page is not the reviewed one, and the thing it could do wrong "
+               "is eat live code on its way past a comment — a regex read as division, a "
+               "template literal cut short, a `//` inside a URL. The stripper's own "
+               "verification catches every version of that which stops PARSING, and this "
+               "is the version that does not: one line of props deleted out of the middle "
+               "of an object literal is valid JavaScript, meshes identically, turns, fits "
+               "every viewport and passes the whole of tools/test.js. It is also #36's "
+               "hairline, so what it costs is legibility of the engraving on every wheel "
+               "at once. The pixel gate is the only thing in the tree that can see it, "
+               "which is exactly why the deploy runs it against HEAD after stripping.",
+    },
+    {
         "id": "link-share-collapsed",
         "gate": "layout",
         "file": "index.html",
