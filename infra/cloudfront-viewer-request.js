@@ -3,16 +3,39 @@
 // it is applied by hand and lives here so the repo has a copy of it at all.
 // See CLAUDE.md, "What the distribution does before S3 sees the request".
 //
+// --function-config IS PASSED AS JSON, NOT AS SHORTHAND, AND THAT IS NOT A STYLE
+// CHOICE (GitHub #166). Shorthand syntax separates key=value pairs on COMMAS, and
+// the shell strips the quotes before the CLI ever sees them -- so a Comment
+// containing commas is split into a list and the call dies at parameter
+// validation, before it reaches AWS at all:
+//
+//   Invalid type for parameter FunctionConfig.Comment,
+//   value: ['www->apex redirect', 'directory index rewrite', '/fidget slash'],
+//   type: <class 'list'>, valid types: <class 'str'>
+//
+// That is what the command here used to do, so the one manual step in the whole
+// deploy path could not be run as documented. The JSON form is unambiguous and
+// also survives being pasted into a shell that quotes differently. Verified by
+// running both against a deliberately nonexistent function name: the shorthand
+// form fails at ParamValidation, the JSON form gets past it and fails on
+// credentials -- i.e. the parameters parsed and the request was attempted.
+//
 // Test before publishing (DEVELOPMENT stage, does not touch LIVE):
 //   aws cloudfront update-function --name wozi-viewer-request \
 //     --if-match "$(aws cloudfront describe-function --name wozi-viewer-request \
 //                    --stage DEVELOPMENT --query ETag --output text)" \
-//     --function-config Comment="www->apex redirect, directory index rewrite, /fidget slash",Runtime=cloudfront-js-2.0 \
+//     --function-config '{"Comment":"www->apex redirect, directory index rewrite, /fidget slash","Runtime":"cloudfront-js-2.0"}' \
 //     --function-code fileb://infra/cloudfront-viewer-request.js
 //   aws cloudfront test-function --name wozi-viewer-request --stage DEVELOPMENT \
 //     --if-match "$(aws cloudfront describe-function --name wozi-viewer-request \
 //                    --stage DEVELOPMENT --query ETag --output text)" \
 //     --event-object fileb://<event.json>
+//
+// test-function WAS RETURNING 503 during CL#146's work -- confirmed with --debug,
+// not a malformed event, so it was AWS-side. If it still is, the fallback that was
+// used then is to simulate handler() directly in Node over the same sample events,
+// which exercises this file's logic but NOT CloudFront's own runtime. Say which of
+// the two was done rather than reporting "tested" for either.
 //
 // Publish to LIVE (takes effect immediately, no invalidation needed -- this
 // runs on every request, cache hit or miss):

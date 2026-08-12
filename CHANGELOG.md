@@ -289,6 +289,49 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#181 — the one manual step in the deploy path could not be run as
+  documented.** (GitHub #166.)
+
+  `infra/cloudfront-viewer-request.js` exists because **it is not what is running** —
+  the CloudFront Function is applied by hand, nothing deploys it, and if the two ever
+  disagree then AWS is live and the repo copy is stale documentation until someone
+  runs the commands in the header. Those commands were the only thing standing
+  between the two, and the `update-function` one **died before it reached AWS**:
+
+  ```
+  Invalid type for parameter FunctionConfig.Comment,
+  value: ['www->apex redirect', 'directory index rewrite', '/fidget slash'],
+  type: <class 'list'>, valid types: <class 'str'>
+  ```
+
+  `--function-config` shorthand separates key=value pairs on **commas**, and the
+  shell strips the quotes before the CLI sees them — so a `Comment` containing commas
+  is split into a list. Now passed as JSON, which is unambiguous and also survives
+  being pasted into a shell that quotes differently.
+
+  **Verified without mutating anything**, which is the part worth recording: both
+  forms were run against a deliberately nonexistent function name, because the CLI
+  validates parameter types *before* it makes a request. The shorthand form fails at
+  `ParamValidation`; the JSON form gets past it and fails on credentials — parameters
+  parsed, request attempted. No AWS state was touched and no approval was needed.
+
+  The change is **comment-only**, so the live function needs no update — the fix is to
+  the instructions, not to the code they publish.
+
+  Also recorded in the header: `test-function` was returning **503** during CL#146's
+  work, confirmed with `--debug` rather than assumed, so it was AWS-side. The fallback
+  used then was simulating `handler()` in Node over the same sample events, which
+  exercises this file's logic but **not** CloudFront's own runtime — and the header now
+  says to report which of the two was done rather than calling either "tested".
+
+  All six sample events re-simulated and correct: `/fidget` 301s to `/fidget/`; the
+  query survives; `www.wozi.com/fidget` takes **one** hop straight to
+  `https://wozi.com/fidget/`; `charles.wozi.com/fidget` stays on
+  `charles.wozi.com`; `/ssh_public_key` passes through untouched — which is why `DIRS`
+  is a named list and not an extensionless rule; and `/fidget/` still rewrites to
+  `/fidget/index.html`. `node --check` passes and the JSON literal in the comment
+  parses.
+
 - **CL#180 — three gates dealt their machines through the shipped `?seed`
   mechanism, so their own injected generator was dead code.** (GitHub #155.)
 
