@@ -86,6 +86,18 @@ GATES = {
     "pixels": {"argv": [sys.executable, "tools/pixel_regress.py", "--ref", "HEAD",
                         "--viewport", "1440x900"], "server": False,
                "what": "tools/pixel_regress.py — the drawing is unchanged (manual)"},
+    # THE SAME TOOL, WITH THE POP-OUT OPEN, AND IT IS A SEPARATE GATE ON PURPOSE
+    # (GitHub #144). `pixels` and `panel` are one command apart and they photograph
+    # two disjoint halves of the page: the default shot cannot contain a control
+    # that is display:none, and the panel-open shot covers it up with a 190px-wide
+    # opaque card. Registered as two gates so the registry can hold the SAME
+    # mutation against both and state which one is expected to see it — see
+    # panel-thumb-one-px and panel-thumb-invisible-shut below, which are one edit
+    # asserted red under one gate and green under the other.
+    "panel":  {"argv": [sys.executable, "tools/pixel_regress.py", "--ref", "HEAD",
+                        "--panel", "--viewport", "1440x900"], "server": False,
+               "what": "tools/pixel_regress.py --panel — the pop-out's own controls "
+                       "are unchanged (manual)"},
     "layout": {"argv": [sys.executable, "tools/devices.py"], "server": True,
                "what": "tools/devices.py — the train fills the long axis (CI, every push)"},
 }
@@ -301,6 +313,51 @@ MUTANTS = [
                "hairline, so what it costs is legibility of the engraving on every wheel "
                "at once. The pixel gate is the only thing in the tree that can see it, "
                "which is exactly why the deploy runs it against HEAD after stripping.",
+    },
+    {
+        "id": "panel-thumb-one-px",
+        "gate": "panel",
+        "file": "index.html",
+        "find": "  --trk:4px; --thumb:16px;",
+        "repl": "  --trk:4px; --thumb:15px;",
+        "expect": "caught",
+        "why": "THE PROOF THAT --panel IS A GATE AND NOT A SECOND WAY OF TAKING THE SAME "
+               "PICTURE (GitHub #144). One pixel off the slider thumb's diameter, which "
+               "is the smallest edit that can be made to a control in the pop-out menu — "
+               "and one that moves more than its own size, because the thumb's centring "
+               "margin is derived as (--trk - --thumb) / 2 rather than measured, so the "
+               "disc also shifts half a pixel down the track. It is invisible to every "
+               "other gate in this file: the geometry suite is about the train, the train "
+               "still turns, the pill still fits and the composition still reaches both "
+               "ends of the long axis. It was invisible to the PIXEL gate too, which is "
+               "the whole of #144 — five controls in this panel were rewritten in CL#169 "
+               "and the gate reported 0 px differ at both viewports with the font pinned "
+               "and the control clean, because the panel is display:none until it is "
+               "clicked. Nothing was wrong with the gate; it was photographing a page "
+               "that did not contain the thing that changed.",
+    },
+    {
+        "id": "panel-thumb-invisible-shut",
+        "gate": "pixels",
+        "file": "index.html",
+        "find": "  --trk:4px; --thumb:16px;",
+        "repl": "  --trk:4px; --thumb:15px;",
+        "expect": "survives",
+        "issue": "GitHub #144 — the pop-out is display:none on the shipped page, so the "
+                 "default shot cannot contain any control inside it. This is not a fault "
+                 "to fix in the default shot: a page whose menu is shut is the page a "
+                 "visitor gets, and photographing it open by default would stop measuring "
+                 "it. --panel is the answer, and `panel-thumb-one-px` is the same edit "
+                 "asserted RED under that gate.",
+        "why": "THE NEGATIVE HALF OF THE PAIR ABOVE, and the reason both entries carry the "
+               "same `find`. A new mode that goes red for a mutant proves it can fail; it "
+               "does not prove the mutant was ever hidden, and 'the old gate could not see "
+               "this' is exactly the kind of claim that gets asserted from memory and "
+               "quietly stops being true. Run together these two are one measurement of "
+               "the coverage #144 added: identical substitution, 0 px with the panel shut "
+               "and a red verdict with it open. If this one ever goes RED, the default "
+               "shot has started seeing into the panel — which would be a real change in "
+               "what the gate measures and wants saying out loud, not a line to delete.",
     },
     {
         "id": "link-share-collapsed",

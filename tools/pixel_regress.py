@@ -7,6 +7,7 @@ git ref pixel for pixel.
     tools/pixel_regress.py --shot /tmp/x.png # just capture, no comparison
     tools/pixel_regress.py --query '?who=charles'   # one chain, not the stage
     tools/pixel_regress.py --path fidget/   # a different page in the same tree
+    tools/pixel_regress.py --panel          # with the pop-out menu OPEN
 
 WHY THIS EXISTS. A screenshot of this page proves very little on its own, for
 two separate reasons, and both had to be dealt with before a pixel diff could
@@ -44,6 +45,42 @@ transform is allowed to change the bytes and forbidden to change the drawing, an
 that is exactly the one claim this tool can settle. `--path` is what extends it to
 /fidget/, which is stripped by the same step and is a different page in the same
 tree rather than a query on this one.
+
+THE FOURTH THING A SHOT CANNOT SEE IS A CONTROL THAT IS NOT DISPLAYED, AND THE
+GATE REACHES INTO THE PAGE RATHER THAN THE PAGE GROWING A FLAG FOR THE GATE
+(GitHub #144). The pop-out menu is `display:none` until its corner button is
+clicked, so every control inside it -- the speed slider, the wear slider, the
+three style-layer checkboxes, both section headings -- was invisible to this
+tool for the whole of its life. Five of them were rewritten in CL#169 and the
+verdict came back `0 px differ / PASS` at both viewports, with the font pinned
+and the control clean. The gate was working correctly and photographing a page
+that does not contain the thing that changed.
+
+That is strictly worse than the `?kind=` coverage gap documented below. There the
+discipline is to remember a flag; here there was no flag to remember, and no
+amount of care by the author could have produced a shot of the panel.
+
+`--panel` is that shot. It is deliberately NOT a `?panel` query parameter, which
+is the cheaper option and the wrong one: `?seed` is the only determinism
+affordance shipped code carries (CL#109), and `ORIGIN_MOUNT` was kept out of the
+address bar for exactly this reason -- "a second switch reachable from the
+address bar is a second way for the page to draw something no gate
+photographs." Adding one to close a gate's blind spot is that same mistake
+pointing the other way. `?hud` earns its exception by being the only way to read
+tick rate on a real phone; a harness can click, so a panel flag has no argument
+of that kind. The shipped page is byte-identical with this mode and without it.
+
+WHAT IT COSTS IS ONE MORE STATE TRANSITION, AND THAT IS WAITED FOR AS A
+CONDITION. The click is delivered to the element the page itself marks as the
+disclosure (`[aria-expanded]`, the same target tools/devices.py and
+tools/a11y_audit.py locate) and never to a screen position, because a coordinate
+is a guess that goes stale the moment the corner row is renumbered -- and a
+click into empty space produces a photograph of a closed panel, which is exactly
+the 0px this mode exists to stop. Then the page's own report is polled until it
+says the panel is open AND the controls inside it have non-zero boxes; a page
+that never gets there stops the run rather than being photographed shut. The
+settle happens AFTER the panel is open, so the pixels being waited on are the
+ones the shutter is going to catch.
 
 THE THIRD NONDETERMINISM, AND THE ONE THAT COMES OFF THE NETWORK. index.html
 pulls Manrope from fonts.googleapis.com, and the page's own #98 handler clears
@@ -247,6 +284,62 @@ READY_TIMEOUT_S = 25.0
 # abandoned. Three, so a lone odd pass is survivable and reported, and two odd
 # passes out of three is not quietly averaged into a verdict.
 STABLE_ATTEMPTS = 3
+
+# ---- opening the pop-out, for --panel (GitHub #144) -------------------------
+# THE TARGET IS THE PAGE'S OWN DISCLOSURE MARKER, NOT A COORDINATE. Every corner
+# button is a fixed-position circle whose `right` is its index in the row times a
+# button pitch, and that index has already been renumbered once (CL#114 moved the
+# menu toggle from 2 to 3 and back). A harness that clicked x/y would have gone on
+# clicking the button that used to be there, and a click into empty space
+# photographs a SHUT panel and reports 0 px -- the fault this mode exists to
+# remove, reintroduced by the mode itself. `[aria-expanded]` is the one attribute
+# the panel's toggle carries and nothing else on the page does; tools/devices.py
+# and tools/a11y_audit.py locate it the same way, so there is one answer to "which
+# button opens the menu" rather than three.
+#
+# The click returns a WORD rather than nothing, so a missing toggle is a fast,
+# named failure instead of ten seconds of polling a condition that can never come
+# true. /fidget/ is the case that matters: it is a different page with no menu at
+# all, so `--panel --path fidget/` must say so immediately rather than time out
+# and leave the operator guessing whether the wait was too short.
+PANEL_CLICK_JS = ("(()=>{const b=document.querySelector('[aria-expanded]');"
+                  "if(!b)return 'no toggle';"
+                  "if(b.getAttribute('aria-expanded')==='true')return 'already open';"
+                  "b.click();return 'clicked';})()")
+# AND THE OPEN STATE IS A CONDITION, NEVER A SLEEP. Two things are asserted and
+# they fail for different reasons. `aria-expanded === 'true'` is the page saying
+# it changed state -- if that is false the click was delivered somewhere useless.
+# A non-zero box on the controls themselves is the stronger half: the panel is
+# switched between `display:flex` and `display:none`, and a display:none subtree
+# reports every rect as 0x0, so a control with width is proof that what is about
+# to be photographed is actually being laid out. #46's shape is the thing being
+# refused here -- a check that passes loudest when the feature is broken.
+PANEL_OPEN_JS = ("(()=>{const b=document.querySelector('[aria-expanded]');"
+                 "if(!b)return 'no toggle';"
+                 "if(b.getAttribute('aria-expanded')!=='true')return 'shut';"
+                 "const c=[...document.querySelectorAll("
+                 "'nav input[type=range],nav input[type=checkbox]')]"
+                 ".filter(e=>e.getBoundingClientRect().width>0);"
+                 "return c.length?'open':'no controls';})()")
+# The ceiling on that condition. A click is a discrete event and the re-render is
+# synchronous, so this is orders of magnitude more than it needs and is here only
+# so a genuinely stuck page stops the run instead of hanging it.
+PANEL_TIMEOUT_S = 10.0
+# WHAT THE OPEN PANEL ACTUALLY MEASURES, reported alongside the shot and not
+# gated on. The panel's `max-height` is `calc(100vh - --offtop - --offbot)`
+# (CL#114) and it sits on a content-box element with 10px of padding, so its
+# border box can exceed the cap it was given -- GitHub #149, which no gate has
+# ever seen because tools/devices.py measures with the panel SHUT. This mode is
+# the first thing in the tree that photographs it open, so it is the first thing
+# that can print the two numbers side by side. Diagnostics, deliberately: #149 is
+# an index.html fault and turning a number into a verdict here would be a gate
+# nobody asked this change for.
+PANEL_BOX_JS = ("(()=>{const n=document.querySelector('nav[aria-label]');"
+                "if(!n)return 'no panel';const r=n.getBoundingClientRect();"
+                "const cs=getComputedStyle(n);"
+                "return JSON.stringify({h:+r.height.toFixed(1),"
+                "cap:cs.maxHeight,vh:innerHeight,"
+                "over:+(r.bottom-innerHeight).toFixed(1)});})()")
 PREFETCH_UA = fontpin.PREFETCH_UA
 # The stress knob that makes this file's claim about the race testable: hold every
 # intercepted font request on a coin flip, and the gate must STILL report 0 px and
@@ -302,6 +395,26 @@ applied_js = fontpin.applied_js
 page_source = fontpin.page_source
 
 
+def fatal(msg):
+    """Stop with the exit code the docstring promises for a run that could not
+    photograph, which is 2 and not 1.
+
+    THE CODE IS PART OF THE MESSAGE. Every failure below is "nothing has been
+    photographed, so nothing has been proved" -- an unservable tree, a browser
+    with no DevTools endpoint, a page that never loaded, a picture that never
+    went still, a menu that is not there to open. `raise SystemExit("FATAL: ...")`
+    prints the string and exits 1, which is this tool's word for THE ARTIFACT
+    MOVED, so a caller reading only the code was told a pixel verdict by a run
+    that never took a picture. That is CL#159's fault exactly -- "a comparison
+    that did not happen is not a comparison that passed" -- one rung further
+    down, in the codes rather than in the prose, and it survived because every
+    one of these paths prints a sentence that makes it obvious to a human
+    reading the log and invisible to anything reading the exit status.
+    """
+    print(msg)
+    raise SystemExit(2)
+
+
 def serve(directory):
     """A server per tree, on its own port. Returns (proc, base_url)."""
     port = free_port()
@@ -316,10 +429,10 @@ def serve(directory):
         except Exception:
             time.sleep(0.1)
     p.kill()
-    raise SystemExit(f"FATAL: could not serve {directory}")
+    fatal(f"FATAL: could not serve {directory}")
 
 
-async def shoot(url, viewports, seed, frames, theme, pin):
+async def shoot(url, viewports, seed, frames, theme, pin, panel=False):
     """One browser, every viewport. Returns ({label: png}, {label: font state}).
 
     `pin` is the font state, decided once by main() before either tree is served,
@@ -327,6 +440,13 @@ async def shoot(url, viewports, seed, frames, theme, pin):
     rather than by both happening to win the same race. It carries the
     interception itself (tools/fontpin.py): every request to a font host is
     answered from prefetched bytes or failed outright, identically on both sides.
+
+    `panel` opens the pop-out menu before the shutter (GitHub #144). It belongs
+    HERE rather than in main() for the same reason the seed and the clock do:
+    every render the run makes goes through this function -- three passes of the
+    working tree and two of the ref -- so putting the click anywhere else would
+    give a subtraction one side with the panel open and one without, which is a
+    picture of the panel rather than of the change.
     """
     port = free_port()
     profile = tempfile.mkdtemp(prefix="wozi-px-")
@@ -353,9 +473,9 @@ async def shoot(url, viewports, seed, frames, theme, pin):
         time.sleep(0.2)
     if not ws_url:
         proc.kill()
-        raise SystemExit("FATAL: no DevTools endpoint")
+        fatal("FATAL: no DevTools endpoint")
 
-    out, states, arrivals = {}, {}, {}
+    out, states, arrivals, boxes = {}, {}, {}, {}
     mid = 0
     async with websockets.connect(ws_url, max_size=10 ** 8) as c:
         # A request paused by the Fetch domain arrives UNSOLICITED and can land
@@ -415,7 +535,7 @@ async def shoot(url, viewports, seed, frames, theme, pin):
                 if last == want:
                     return last
                 await pump_once(0.05)
-            raise SystemExit(f"FATAL: {what} timed out after {timeout}s "
+            fatal(f"FATAL: {what} timed out after {timeout}s "
                              f"(last: {last!r}) -- nothing has been photographed, "
                              f"so nothing has been proved")
 
@@ -451,7 +571,7 @@ async def shoot(url, viewports, seed, frames, theme, pin):
                 deadline = time.monotonic() + STABLE_SAMPLE_MS / 1000
                 while time.monotonic() < deadline:
                     await pump_once(0.02)
-            raise SystemExit(
+            fatal(
                 f"FATAL: {label} never stopped changing — two screenshots "
                 f"{STABLE_SAMPLE_MS}ms apart still differ after {timeout}s. Nothing "
                 f"has been photographed, so nothing has been proved.")
@@ -465,7 +585,29 @@ async def shoot(url, viewports, seed, frames, theme, pin):
             await send("Page.navigate", {"url": url})
             await wait_until(READY_JS, "ready", READY_TIMEOUT_S,
                             f"{label} never finished loading")
+            if panel:
+                # BEFORE the settle, not after: opening the panel is the last
+                # thing that changes the picture, so waiting for the picture to
+                # stop changing has to come after it. Reversed, the settle
+                # certifies a page that is about to be redrawn, which is the one
+                # thing this gate's readiness condition exists to refuse.
+                r = await send("Runtime.evaluate", {"expression": PANEL_CLICK_JS,
+                                                    "returnByValue": True})
+                clicked = r.get("result", {}).get("value")
+                if clicked not in ("clicked", "already open"):
+                    proc.kill()
+                    fatal(
+                        f"FATAL: {label} has no pop-out toggle to click "
+                        f"({clicked!r}) — --panel is asking for a menu this page "
+                        f"does not have (/fidget/ is the likely case). Nothing has "
+                        f"been photographed, so nothing has been proved.")
+                await wait_until(PANEL_OPEN_JS, "open", PANEL_TIMEOUT_S,
+                                 f"{label}: the pop-out panel never opened")
             await settle(label, READY_TIMEOUT_S)
+            if panel:
+                r = await send("Runtime.evaluate", {"expression": PANEL_BOX_JS,
+                                                    "returnByValue": True})
+                boxes[label] = r.get("result", {}).get("value", "unreadable")
             # Read the font state BEFORE pumping frames: the probe appends a span
             # and removes it, which is a DOM mutation, and taking it while the
             # quiescence condition still matters would invalidate the thing that
@@ -482,7 +624,7 @@ async def shoot(url, viewports, seed, frames, theme, pin):
             out[label] = base64.b64decode(shot["data"])
     proc.kill()
     shutil.rmtree(profile, ignore_errors=True)
-    return out, states, arrivals
+    return out, states, arrivals, boxes
 
 
 def compare(a, b, label, outdir):
@@ -532,6 +674,16 @@ def main():
     # a second harness for one page would be a second thing to keep in step.
     ap.add_argument("--path", default="",
                     help="path under the served root, e.g. 'fidget/'")
+    # The pop-out is display:none until it is clicked, so the default shot cannot
+    # contain any control that lives in it (GitHub #144). This is the only way to
+    # ask whether the speed slider, the wear slider or the three style-layer
+    # checkboxes still draw as they did -- and it is a HARNESS action rather than a
+    # query parameter on purpose, so the shipped page stays byte-identical whether
+    # this mode is used or not. See the module docstring for why a `?panel` flag
+    # was refused.
+    ap.add_argument("--panel", action="store_true",
+                    help="click the pop-out menu open before shooting, so the "
+                         "controls inside it are actually in the picture")
     # Which typography both trees are photographed under. See the module
     # docstring for why this cannot be left to the network. `auto` is the default
     # because it is the only one of the three that is deterministic AND never
@@ -607,7 +759,7 @@ def main():
             passes = []
             for _ in range(STABLE_ATTEMPTS):
                 passes.append(asyncio.run(shoot(base_ + a.path + a.query, vps, a.seed,
-                                                a.frames, a.theme, pin)))
+                                                a.frames, a.theme, pin, a.panel)))
                 if len(passes) < 2:
                     continue
                 # Compared as PNG bytes, per viewport: same encoder, same settings,
@@ -621,20 +773,22 @@ def main():
                                   f"The machine is not rendering repeatably — this run is "
                                   f"still valid, but the flake is real and worth chasing.")
                         return passes[-1]
-            print(f"FATAL: {who} never agreed with itself in {STABLE_ATTEMPTS} passes of "
+            fatal(f"FATAL: {who} never agreed with itself in {STABLE_ATTEMPTS} passes of "
                   f"identical bytes. This is a fault in the harness or the machine, not "
                   f"in the artifact, and nothing has been proved either way.")
-            raise SystemExit(2)
         finally:
             srv_.kill()
 
     if a.shot:
         srv, base = serve(ROOT)
         try:
-            now, now_fonts, now_ms = asyncio.run(shoot(base + a.path + a.query, vps, a.seed,
-                                                       a.frames, a.theme, pin))
+            now, now_fonts, now_ms, now_box = asyncio.run(
+                shoot(base + a.path + a.query, vps, a.seed, a.frames, a.theme,
+                      pin, a.panel))
         finally:
             srv.kill()
+        for label, box in sorted(now_box.items()):
+            print(f"   {label:<12} panel {box}")
         # Same diagnostics as the comparison path, because --shot is what a human
         # uses to look at one render, and "which typography is this, and did it get
         # there in time" is exactly as load-bearing for a shot as for a diff.
@@ -650,7 +804,7 @@ def main():
     # ---- EACH SIDE IS ESTABLISHED BEFORE EITHER IS SUBTRACTED -----------------
     # The working tree first, so its two passes straddle the ref's in time and
     # catch drift across the run rather than only within a burst.
-    now, now_fonts, now_ms = stable_render(ROOT, "the working tree")
+    now, now_fonts, now_ms, now_box = stable_render(ROOT, "the working tree")
 
     work = tempfile.mkdtemp(prefix="wozi-ref-")
     tree = os.path.join(work, "t")
@@ -660,7 +814,7 @@ def main():
         print("FATAL: could not check out " + a.ref + "\n" + r.stderr.strip())
         return 2
     try:
-        ref, ref_fonts, ref_ms = stable_render(tree, a.ref)
+        ref, ref_fonts, ref_ms, ref_box = stable_render(tree, a.ref)
     finally:
         subprocess.run(["git", "-C", ROOT, "worktree", "remove", "--force", tree],
                        capture_output=True)
@@ -669,11 +823,30 @@ def main():
     # And one more pass of the working tree AFTER the ref, which is what makes the
     # working side's agreement span the whole run. stable_render's own two passes
     # are back-to-back; this is the straddle.
-    again, again_fonts, again_ms = stable_render(ROOT, "the working tree (again)")
+    again, again_fonts, again_ms, again_box = stable_render(ROOT, "the working tree (again)")
 
     print(f"\nworking tree vs {a.ref}   seed {a.seed}, {a.frames} frames, "
           f"{a.theme} theme, /{a.path}{a.query}, "
-          f"fonts {'n/a — none linked' if expect == 'none' else mode}")
+          f"fonts {'n/a — none linked' if expect == 'none' else mode}"
+          f"{', POP-OUT PANEL OPEN' if a.panel else ''}")
+
+    # The panel's own box, printed per viewport and per tree, because a mode whose
+    # whole claim is "the panel is in this picture" should say what it measured
+    # rather than be believed (GitHub #144). `over` is how far the panel's border
+    # box falls past the bottom of the viewport, which is GitHub #149's number:
+    # the max-height cap sits on a content-box element with 10px of padding, so
+    # the border box is 20px taller than the cap allows and the panel's own
+    # clearance is gone. Not asserted here — see PANEL_BOX_JS.
+    for label in sorted(now_box):
+        print(f"   panel {label:<12} working {now_box[label]}")
+        # Only printed when it differs, and every difference is worth a line: the
+        # ref's box differing is the change under test, and the working tree's own
+        # second pass differing is the harness wobbling, which the pixel control
+        # below would also catch but not explain.
+        if ref_box.get(label) != now_box[label]:
+            print(f"   panel {label:<12} {a.ref} {ref_box.get(label)}")
+        if again_box.get(label) != now_box[label]:
+            print(f"   panel {label:<12} working again {again_box.get(label)}")
 
     # ---- the font state is checked, never assumed ------------------------------
     # Deciding the mode up front makes the two renders SUPPOSED to match; this is

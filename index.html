@@ -48,6 +48,45 @@
      ever reports the palette in force. These two carry them; the dark block
      never overrides them, and the two light declarations below are ALIASES of
      them, so there is still exactly one place each colour is written.
+
+     AND THAT ALIAS IS WHY `--ref-muted` CANNOT BE MOVED FREELY (GitHub #151).
+     Because `--muted` IS `--ref-muted` in light, this one hex carries two jobs
+     that pull opposite ways:
+
+       as the datum's reference   it fixes the scribe's judged WEIGHT, so
+                                  darkening it makes the reference mark stronger
+                                  and datumOpacity() raises DARK's alpha to match
+       as the light UI ink        it is bound from below by a WCAG ratio against
+                                  the pop-out panel -- see the window below
+
+     Raising dark's alpha has a hard ceiling, and it is nearer than it looks.
+     datumInk() lifts the dark token by `datumOpacity() / ghostOpacity()`, and
+     dark's --muted #93A5A3 sits at 165 on the green channel over a ground of 34;
+     the lift clamps at 255 once that ratio passes 1.687, i.e. once the solved
+     alpha rounds past 0.28. At 0.29 the mark composites to 71.6 where the solve
+     asked for 74.6 and the scribe has quietly changed weight -- caught by `npm
+     test`'s "no datum is drawn while one chain is on stage", in exactly the terms
+     datumInk()'s own comment predicts ("a clipped channel means too strong").
+
+     SO THIS TOKEN LIVES IN A WINDOW WITH TWO COMPUTED WALLS, and both of them are
+     gated rather than remembered:
+
+       floor  4.5:1 on --chip          #687A79 .. , held by tools/a11y_audit.py
+       cap    solved dark alpha <= .28 .. #657876, held by `npm test`
+
+     which is a 0.15-wide band of contrast, and #677977 sits mid-band at 4.59:1
+     with the alpha at 0.2812 against its 0.285 cutoff. That is thin, and it is
+     the honest state of this palette rather than a comfortable answer: #120's own
+     sweep candidates (#5A6E6C, #4F6462) both clear the floor easily and both
+     break the cap, which is why neither of them is what shipped. THE WAY OUT IS
+     TO SPLIT THE ALIAS -- make `--ref-muted` the weight that was judged once and
+     `--muted` the ink a ratio binds, at which point light's own alpha solves to
+     0.40, the lift runs DOWNWARD at 0.87 and cannot clip, the dark scribe never
+     moves, and the ink is free. Measured, not projected: the split was built and
+     both themes' marks composite to within 0.5/255 of the tone they draw today.
+     It is a two-line change here and a one-line change to the assertion above
+     that requires the alias, so it needs a decision rather than a commit.
+
      Reading them is then one getComputedStyle call. It used to be a scan of
      document.styleSheets for a rule whose selector text was ':root' exactly --
      which finds nothing the moment that block is wrapped in a @media, written
@@ -60,14 +99,54 @@
      `--muted` against this background is the binding ratio, not `--ink`.
 
      Ink is near-black, so darkening the background moves it TOWARD the ink and
-     LOWERS ink contrast rather than raising it (11.38:1 shipped, 10.73:1 here) --
-     the opposite of the intuition, and still far clear of the 4.5:1 floor.
-     `--muted` is what runs out: 3.54:1 shipped, 3.33:1 here, against a 3:1 floor
-     for UI text. One further step to 85% L lands at 3.12:1, which is 0.12 of
-     margin -- so anything darker than this needs `--muted` lifted with it, and
-     is a light-theme pass rather than one token. Measured, not estimated;
-     variants and contrast tables were photographed before this was picked. */
-  --ref-bg:#E1E4DD; --ref-muted:#6B7E7C;
+     LOWERS ink contrast rather than raising it (11.38:1 before CL#131, 10.73:1
+     here) -- the opposite of the intuition, and still far clear of the 4.5:1
+     floor. `--muted` is what runs out, and that is what CL#131 left standing and
+     GitHub #151 finally came back for. Measured, not estimated; variants and
+     contrast tables were photographed before the background was picked. */
+  /* `--muted` IS NOT MEASURED AGAINST `--bg` ALONE, WHICH IS THE WHOLE OF
+     GitHub #151. It has two grounds, and which one binds depends on the surface
+     the text is drawn on:
+
+       --bg   #E1E4DD   the page          3.57:1
+       --chip #FFFFFF   the pop-out panel 4.59:1
+
+     The PANEL is where `--muted` carries real text -- the two section headings at
+     11px/700, and the Speed and Wear readouts at 13px/700 -- and white is the
+     LIGHTER of the two grounds, so the panel's is the HIGHER ratio and was never
+     the number anybody wrote down. The page's 3.33:1 was measured twice (#120,
+     CL#131) and reported as a 3:1 problem, which it is: everything --muted paints
+     on the page is a glyph or large text. Meanwhile the panel sat at 4.28:1 --
+     over the 3:1 floor a glyph is held to and under the 4.5:1 ordinary text is --
+     so five elements failed `a11y_audit`'s `color-contrast` in light, and nothing
+     failed in dark.
+
+     TWO OF THOSE FIVE WERE A REGRESSION NOTHING CHANGED THE COLOUR OF. CL#169
+     dropped the Speed and Wear readouts from var(--icon) (20px/700, WCAG "large
+     text", 3:1) to LIST_ROW_FONT_BOLD (13px/700, normal text, 4.5:1). The ink
+     stayed exactly where it was and the threshold moved out from under it --
+     which is the class of fault worth naming, because a token that clears a bar
+     only at one type SIZE will be broken by a compaction nobody thinks to
+     re-measure contrast for. Putting the type back was the alternative and it
+     gives up over half of a compaction that was measured and approved, so the ink
+     moved instead.
+
+     WHY NOT #120's OWN CANDIDATES. That ticket measured this token as drifted --
+     3.33:1 against the page where dark's --muted holds 6.21:1 -- and was deferred
+     because its two candidates (#5A6E6C, #4F6462) could not be told apart by eye.
+     "Does it clear 4.5:1" is answerable without taste, which is what let it be
+     picked up again, and both of them clear it (5.41 / 6.30 on --chip). Neither
+     can ship: both drive the dark datum's solved alpha past the clamp described
+     above, so both fail `npm test`. #677977 is a hue-preserving step off the
+     retired #6B7E7C, sitting mid-band between the two walls -- a value the two
+     gates chose between them, not one picked by eye.
+
+     Darkening the GROUND was never an option in either direction: --ref-bg at 88%
+     L is where a human said the glare stopped, and moving it down lowers ink
+     contrast and takes the wheel cuts' body-vs-page reading with it. --chip is
+     white because the badge discs separate from the page by 1.21:1 and it is the
+     lighter half of that pair. Fix the ink, not the ground. */
+  --ref-bg:#E1E4DD; --ref-muted:#677977;
   /* The DARK page colour, declared here rather than only inside the dark block
      and deliberately NOT overridden, exactly as --ref-bg is not. Both themes'
      grounds have to be readable from EITHER theme, because the ghost alpha is
@@ -327,8 +406,12 @@ input[type="range"]:focus{outline:none;}
        THE LABEL IS SET AT --icon, THE SAME SIZE AS THE GLYPHS BESIDE IT, and
        that is a contrast requirement as much as a visual one. The other icons
        are graphics, which WCAG asks 3:1 of; this button is TEXT, which is
-       asked 4.5:1 — and --muted on --bg is 3.54:1, so at 13px it FAILED the
-       audit in light theme while its neighbours passed at the same colour.
+       asked 4.5:1 — and --muted on --bg is 3.57:1 (3.33:1 before GitHub #151
+       darkened the token, 3.54:1 before CL#131 lowered the ground), so at 13px it
+       FAILED the audit in light theme while its neighbours passed at the same
+       colour. #151 narrowed the shortfall and cannot close it — the token is
+       capped from above by the datum's lift, so this coupling stays
+       load-bearing.
        Bold text at 18.66px or more is "large scale" and back to a 3:1
        threshold, and --icon is 20px, so taking the size from the token the
        icons already use clears the bar by construction instead of by a number
@@ -6890,6 +6973,12 @@ class Component extends DCLogic {
      number to re-measure when a token moves: change --muted or --bg in either
      block and the solve follows it.
 
+     AND THE HEADROOM ON THAT SOLVE IS ONE ROUNDING STEP (GitHub #151). 0.28 is
+     the largest alpha datumInk()'s lift can convert without clamping -- see its
+     comment -- so the light reference cannot be darkened past #657876 no matter
+     what a contrast audit asks for. The token block states the window and which
+     gate holds each wall.
+
      Bisection, not algebra: composite luminance is monotonic in alpha but not
      invertible in closed form through the sRGB transfer curve, and 24 halvings
      of 0..1 settle it far below the two decimal places that reach the markup.
@@ -10206,9 +10295,29 @@ class Component extends DCLogic {
           return {
             href: key ? '?kind=' + key : (location.pathname || '/'),
             label: label, current: active ? 'true' : 'false',
+            /* THE ACTIVE ROW'S LABEL TAKES THE PANEL'S GROUND, NOT THE PAGE'S
+               (GitHub #151). It is a filled pill punched out of the panel, and
+               the panel is --chip; the page's --bg is a surface this row never
+               touches, so borrowing it was only ever "some light colour" and it
+               was the WRONG light colour by 0.07 of a ratio: --bg #E1E4DD on the
+               shipped steel accent #5F686E is 4.42:1 against text's 4.5:1 floor,
+               and it failed a11y_audit's color-contrast in light. --chip is
+               #FFFFFF there and reaches 5.69:1.
+               It holds in dark too, and by the same argument rather than by
+               luck: --chip inverts to #2A3034 while syncVars swaps the accent
+               for its lighter counterpart (#AEB8BF), so the pill stays dark ink
+               on a light fill at 6.63:1. Both themes clear the floor with the
+               one token, and no branch here has to know which theme is on.
+               The four non-default accents in the `accent` prop's enum still
+               sit under 4.5:1 on this pill -- amber worst at 1.85:1 -- but
+               every one of them is BETTER on --chip than it was on --bg, so
+               this is a strict improvement at every option rather than a fix
+               for the shipped one. Making the ink depend on the accent is a
+               separate decision, and it is the same decision the ON knob of a
+               Machine Settings toggle is waiting on. */
             style: { display: 'block', padding: ROW_PAD_Y + 'px 12px', borderRadius: '9px', textDecoration: 'none',
               font: LIST_ROW_FONT,
-              color: active ? 'var(--bg)' : 'var(--ink)',
+              color: active ? 'var(--chip)' : 'var(--ink)',
               background: active ? 'var(--accent)' : 'transparent' }
           };
         };

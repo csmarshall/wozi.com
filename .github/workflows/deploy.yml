@@ -230,9 +230,16 @@ jobs:
           python3 tools/pixel_regress.py --ref HEAD ; STAGE=$?
           python3 tools/pixel_regress.py --ref HEAD --query '?who=charles' ; SOLO=$?
           python3 tools/pixel_regress.py --ref HEAD --path fidget/ ; FIDGET=$?
+          # The pop-out panel is display:none until clicked, so the three runs above
+          # photograph none of it -- five controls were rewritten in CL#169 and this
+          # gate reported 0px (GitHub #144). --panel clicks it open first. Proven to
+          # be able to fail rather than assumed: mutation_gate carries the SAME
+          # one-pixel edit twice, caught here (132px) and surviving in the shut runs
+          # (0px), which measures the coverage instead of claiming it.
+          python3 tools/pixel_regress.py --ref HEAD --panel ; PANEL=$?
           set -e
-          if [ $STAGE -ne 0 ] || [ $SOLO -ne 0 ] || [ $FIDGET -ne 0 ]; then
-            echo "::error::the stripped page does not draw the same as the source (stage $STAGE, solo $SOLO, fidget $FIDGET) — not deploying"
+          if [ $STAGE -ne 0 ] || [ $SOLO -ne 0 ] || [ $FIDGET -ne 0 ] || [ $PANEL -ne 0 ]; then
+            echo "::error::the stripped page does not draw the same as the source (stage $STAGE, solo $SOLO, fidget $FIDGET, panel $PANEL) — not deploying"
             exit 1
           fi
 

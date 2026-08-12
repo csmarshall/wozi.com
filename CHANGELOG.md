@@ -289,6 +289,117 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#172 — the pixel gate can photograph the pop-out panel, and a paired mutant
+  proves it.** (GitHub #144, closes it.)
+
+  Five controls were rewritten in CL#169 and `pixel_regress` reported **0px differ /
+  PASS** with a clean control and pinned fonts. The panel is `display:none` until
+  clicked and there was **no forcing parameter**, so unlike the `?kind=` trap
+  CLAUDE.md warns about there was nothing to remember to pass — every control in the
+  menu, including the speed slider that is the only route to speed once the corner
+  button hides at 1x, was permanently invisible to the strongest gate in the repo.
+
+  **`--panel` clicks it open; the page grew nothing.** That was the deliberate
+  choice: `?seed` is the only determinism affordance in shipped code (CL#109) and
+  `ORIGIN_MOUNT` was kept out of the URL for exactly this reason — a second switch
+  reachable from the address bar is a second way for the page to draw something no
+  gate photographs. `?hud` earns its exception by being the only way to read some
+  things on a real device; a harness can click, so a panel flag has no such
+  argument. **The gate reaches into the page rather than the page growing an
+  affordance for the gate.**
+
+  It locates the toggle by `[aria-expanded]` — the one attribute nothing else on the
+  page carries, and the locator `devices.py` and `a11y_audit.py` already use — never
+  by coordinates, because the corner row has been renumbered once already (CL#114)
+  and a click into empty space photographs a **shut** panel and reports 0px, which
+  is #144 reintroduced inside its own fix. Open-ness is a condition, not a sleep:
+  `aria-expanded === 'true'` **and** a non-zero input box inside the nav, the second
+  half being load-bearing because a `display:none` subtree reports every rect as 0x0.
+
+  **The deliverable is the PAIR of mutants, not the flag.** The same one-pixel edit
+  — `--thumb` 16px → 15px, whose centring margin is derived so the disc also shifts
+  half a pixel — registered twice with opposite expectations:
+
+  | mutant | gate | result |
+  | --- | --- | --- |
+  | `panel-thumb-one-px` | new `panel` | **caught, 132px differ**, max delta 117 |
+  | `panel-thumb-invisible-shut` | existing `pixels` | **survives, 0px, PASS** |
+
+  Identical edit, 0px shut against 132px open: that **measures** the coverage gap
+  rather than asserting it, and `--gate panel --blind` reports 0/1 caught, so the new
+  gate is inside the mutation gate's own self-proof. Wired into the deploy alongside
+  the three existing invocations.
+
+  **It also became the first thing in the tree that can see #149.** `PANEL_BOX_JS`
+  prints the open panel's box, cap and overhang per viewport: at 844x390 the panel is
+  **396px against a 374px cap — exactly #149's 22px**, from padding on a
+  `content-box` element. Diagnostic rather than verdict, deliberately, since #149 is
+  an `index.html` fault. At the two shipped gate viewports the panel is 568.6px
+  against an 828–884px cap, which is precisely why the fault has hidden.
+
+  One correctness fix outside the brief and worth keeping: every "could not
+  photograph" path (`serve`, no DevTools endpoint, `wait_until`, `settle`,
+  `stable_render`) raised `SystemExit("FATAL: …")`, which **exits 1 — this tool's own
+  word for "the artifact moved"**. They now route through `fatal()` and exit **2**,
+  matching what the module docstring has always promised. CL#159's lesson one rung
+  lower, in the codes rather than the prose.
+
+  4 consecutive runs, zero flake notes, zero variance; also 0px under
+  `WOZI_PX_CPU_THROTTLE=6`. Every existing invocation still 0px with controls 0px.
+  `mutation_gate` 14/14 caught, 1/1 tolerated, 1 known gap (the deliberate one), 6/6
+  controls green. `npm test` 120/0.
+
+- **CL#173 — light's `--muted` clears 4.5:1, and it turns out to live in a 0.15-wide
+  window with two automated walls.** (GitHub #151, closes it.)
+
+  `--ref-muted` `#6B7E7C` → **`#677977`**, a hue-preserving step, plus `togList`'s
+  active pill taking `var(--chip)` instead of `var(--bg)`. All five failures clear:
+  the two headings and both readouts 4.285 → **4.587**, the selected row 4.427 →
+  **5.688**.
+
+  **The finding #151 did not have: the failing ground is `--chip` (white), not
+  `--bg`.** Every measurement in #120 and CL#131 was taken against the page —
+  3.33:1, correctly reported as a 3:1 problem, because everything `--muted` paints
+  there is a glyph or large text. The **panel is a different, lighter ground**, so it
+  carries the *higher* ratio and is the only place `--muted` sets ordinary text. That
+  is why 4.28 → 4.59 suffices where the page's number made it look like a much
+  bigger move was needed.
+
+  **Neither of #120's candidates can ship, and that is measured rather than
+  aesthetic.** `#5A6E6C` (5.41) and `#4F6462` (6.30) both clear 4.5:1 easily and
+  **both fail `npm test`** — because light's `--muted` IS `--ref-muted`, darkening it
+  strengthens the datum's judged reference, `datumOpacity()` raises **dark's** solved
+  alpha 0.27 → 0.31, and `datumInk()`'s green channel clamps at 255 once that alpha
+  rounds past **0.28**, so the mark composites to 71.6 where the solve asked 74.6 and
+  the datum test fails in exactly the terms that function's own comment predicts.
+
+  So the token sits between two computed walls, **both held by automation**: a floor
+  at `#687A79` (4.5:1 on `--chip`, held by `a11y_audit`) and a cap at `#657876`
+  (dark alpha ≤ 0.28, held by `npm test`). `#677977` is mid-band at 4.587:1 and alpha
+  0.2812 against a 0.285 cutoff. That is thin, and both walls plus which gate holds
+  each are now written at the token.
+
+  The fifth finding is a different pair and got its own look: the active pill is
+  punched out of the **panel**, so it should take the panel's ground; `--bg` is a
+  surface that row never touches. `--chip` beats `--bg` for **all five** accent enum
+  options, so it is a strict improvement rather than a fix for the shipped one, and
+  it needs no theme branch (dark holds at 6.63 by the same argument).
+
+  Blast radius checked across every `--muted` consumer in light — corner glyphs, the
+  departure indicator, the wordmark's `.com`, the slider track and `--thumb-color`,
+  the toggle's OFF knob, `?hud`'s labels (unaudited, and also failing before this) —
+  **nothing gets worse**; the page-ground consumers go 3.335 → 3.570 against a 3:1
+  floor. **#120's light/dark drift is narrowed, not closed**: that remains a palette
+  question rather than a threshold one.
+
+  `a11y_audit` PASS in **both** themes with `in force:` asserting light was genuinely
+  exercised at a non-1x speed with the panel open — the first time that has actually
+  happened, per CL#171. `npm test` 120/0. Pixel deltas region-decomposed rather than
+  quoted: combined light 9,270/4,135, dark 5,847/3,483, solo light 1,905/850, **solo
+  dark 0** — and every changed pixel accounted for, **none on a gear**. Solo dark
+  being 0 independently confirms the dark-side change is entirely the datum's alpha
+  stepping one rounding place.
+
 - **CL#171 — `a11y_audit` had never audited the light theme, and fixing it turned up
   five real contrast failures.** (GitHub #145, closes it.)
 
