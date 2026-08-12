@@ -5,6 +5,72 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ## Unreleased
 
+### Added
+
+- **CL#158 — `/fidget/` can be grounded at the sun instead of the ring, and the
+  inertia model is now honest about the parallel-axis term.** (GitHub #129,
+  part 2 of 4.)
+
+  Charles decided "the other format" means **swapping which member is
+  grounded**, so Willis is now solved twice: ring-pinned (shipped, unchanged)
+  and sun-pinned, `ω_r/ω_c = 1 + N_s/N_r`. `sunCheck` mirrors the existing
+  `ringCheck` and, like it, reaches its member down the *other* mesh, so it
+  cannot merely restate the line that set the speed. Both were mutation-tested —
+  perturbing a stage ratio by one part in 10⁶ makes each throw — because an
+  assertion that cannot fail is not an assertion.
+
+  **The compound shaft has to move, and that is not a substitution.** Ring-pinned
+  it is carrier 1 → sun 2; sun-pinned it must be carrier 1 → ring 2, because
+  grounding both suns would pin sun *and* carrier on set 1 — two constraints on a
+  2-DOF set — and the train becomes a solid object.
+
+  **The reflected-inertia claim survives but goes quiet, and Charles accepted
+  that knowingly:** 230.0× becomes 3.3×, 15.1667:1 becomes 1.8200:1. It is a
+  hard bound rather than a tuning failure — every buildable set has
+  `N_r = N_s + 2N_p`, so sun-grounding can never reduce as much as 2:1 and can
+  therefore never reflect more than ~4× however teeth are chosen. That argument
+  is written into both the page header and the README so it is not re-litigated
+  later as a bug. Neither figure is written down; both are still `RATIO²`.
+
+  **Assembly phasing is unaffected, explicitly.** `planetPhase`/`ringPhase`
+  describe where teeth sit at angle zero — the assembly standing still — and the
+  assembly is the same parts however it is later bolted down. Both groundings
+  share those expressions unchanged and draw the identical picture at rest.
+
+  Two things re-deriving exposed. A ring's rotational inertia **was never
+  modelled**, legitimately — a body at zero speed cannot be got wrong — and now
+  is (`ringInertia`, an annulus as disc-minus-hole); rings turn out to be two
+  thirds of the sun-grounded train. And `disc(r)` was `r⁴`, standing for
+  `J = m·r²`, which is harmless while every disc shares one arbitrary constant
+  and **not** harmless the moment a body's inertia is weighed against a
+  parallel-axis term that carries no such factor. `disc` is now `r⁴/2`
+  (`J = ½m·r²`); `m·d²` was correct all along and was never the error. The
+  theorem restated correctly: **a planet's orbital term is exactly twice its spin
+  term**, in both groundings, because it rolls on whichever member is stationary.
+  It came out 1:1 before, and the missing half was the whole of it.
+
+  `J_eff` therefore moves 45,638 → **27,466** ring-grounded and 846,826 →
+  **469,735** sun-grounded, and `HAND_STIFFNESS` with it. **Nothing the page does
+  changes:** `J_eff` enters only as a scale and cancels exactly out of every rate
+  (a flick adds `REF_SPEED × 0.75 / gear`, in which it does not appear), verified
+  empirically by alternating pre/post runs — post-flick sun speed 6.29/6.34/6.39
+  against 6.28/6.29/6.29/6.33/6.34 rev/s, one overlapping spread set by where in
+  the coast the sample lands.
+
+  `GROUNDED` stays a source constant, exactly as `ORIGIN_MOUNT` does, and
+  deliberately **not** a URL parameter — a second switch reachable from the
+  address bar is a second way for the page to draw something no gate
+  photographs. Nothing reaches it yet: the swipe is part 3.
+
+  Verified: both modes boot over HTTP with zero console errors, 16 of 21
+  transform groups advance over ~700ms in each (the 5 static ones are the
+  coupling label, two set translates and two phase rotations), and those two
+  static rotations visibly **move from the rings to the suns** in the DOM when
+  grounding swaps. Rendered SVG with transforms stripped is **byte-identical**
+  to before at 32,863 bytes with zero diff lines, which is the check that
+  distinguishes "the model changed" from "the picture changed". `npm test`
+  119/0. Every ring-grounded number in `fidget/README.md` reproduces.
+
 ### Fixed
 
 - **CL#157 — a timing mark only exists where there is metal, and an epicyclic

@@ -8,17 +8,41 @@
 <title>Double planetary — wozi</title>
 <!-- WHAT THIS PAGE IS.
 
-     A double (compound) planetary gear set you can spin with a finger. Both
-     rings are GROUNDED, so the sun and the final carrier are the two free
-     ports, and the whole train is one degree of freedom bound by Willis:
+     A double (compound) planetary gear set you can spin with a finger. The
+     whole train is one degree of freedom bound by Willis, once per set:
 
          (w_sun - w_carrier) / (w_ring - w_carrier) = -N_ring / N_sun
 
-     with w_ring = 0. The point of the page is that the two free ports sit at
-     opposite ends of a large ratio and REFLECTED INERTIA GOES AS THE SQUARE OF
-     THAT RATIO, so the carrier feels two orders of magnitude heavier than the
-     sun. See README.md in this folder for every number and why it is that
-     number.
+     and A GROUNDING IS A CHOICE OF WHICH MEMBER TO PIN AT ZERO in that one
+     equation. Two are implemented (GitHub #129) and they are the same metal
+     either way -- same tooth counts, same drawn wheels, same assembly:
+
+       - ring-grounded (shipped): w_ring = 0, so the SUN and the final CARRIER
+         are the free ports and the reduction is 1 + N_r/N_s per set. 15.17:1
+         overall, and the two ports are 230x apart in reflected inertia.
+       - sun-grounded: w_sun = 0, so the RING and the final CARRIER are the free
+         ports and the reduction is 1 + N_s/N_r per set -- always under 2:1,
+         because a ring is always bigger than its own sun. 1.82:1 overall, and
+         3.3x between the ports.
+
+     The point of the page is that REFLECTED INERTIA GOES AS THE SQUARE OF THE
+     RATIO BETWEEN THE PORTS, so a port at the slow end of a large reduction
+     feels orders of magnitude heavier than the one at the fast end. That claim
+     is a property of the ratio, not of the page: it is loud under
+     ring-grounding and quiet under sun-grounding, and the same one line of
+     algebra produces both. See README.md in this folder for every number and
+     why it is that number.
+
+     THE DROP FROM 230x TO 3.3x IS THE POINT, AND IT IS INHERENT -- Charles's
+     call, recorded here because it is exactly the kind of thing that gets
+     re-litigated as a bug later. Sun-grounding cannot be made louder by
+     choosing different teeth. Every buildable set has N_r = N_s + 2*N_p, so
+     N_r > N_s ALWAYS, so 1 + N_s/N_r < 2 always: a sun-grounded stage can never
+     reduce as much as 2:1 and therefore can never reflect more than 4x, however
+     many stages are compounded at whatever counts. Swiping between the two
+     groundings is a swipe from two very different ports to two similar ones, and
+     the ratio is visibly the only thing that changed -- which is the
+     demonstration rather than a shortfall in it.
 
      It is standalone by design: it loads nothing from support.js or config.js,
      and it draws its own gears. The palette tokens are copied from index.html's
@@ -81,6 +105,11 @@ button:focus-visible,[tabindex]:focus-visible{outline:3px solid var(--accent);ou
 <div style="position:fixed;inset:0;background:var(--bg);overflow:hidden;">
 
   <main id="stage" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;">
+    <!-- The aria-label and the two button captions below are placeholders for
+         the shipped grounding: build() rewrites all three from the grounding
+         actually in force, because "both ring gears fixed" is a claim about the
+         machine and a page that switches grounding must not keep asserting the
+         other one. -->
     <svg id="train" xmlns="http://www.w3.org/2000/svg" role="img"
          aria-label="A double planetary gear set with both ring gears fixed. Drag the first set to turn the sun, the second to turn the output carrier."
          style="width:100%;height:100%;display:block;touch-action:none;-webkit-user-select:none;user-select:none;cursor:grab;"></svg>
@@ -95,10 +124,10 @@ button:focus-visible,[tabindex]:focus-visible{outline:3px solid var(--accent);ou
        padding-top:18px;">
     <div style="pointer-events:auto;display:flex;gap:6px;flex-wrap:wrap;
          padding:8px max(14px, env(safe-area-inset-left)) 0;">
-      <button id="flickSun" type="button" title="Flick the sun"
+      <button id="flickInput" type="button"
          style="font:600 11px/1 'Manrope',system-ui,sans-serif;color:var(--muted);background:var(--chip);
          border:1px solid var(--hair);border-radius:999px;padding:9px 12px;cursor:pointer;box-shadow:var(--shadow);">flick sun</button>
-      <button id="flickCarrier" type="button" title="Flick the output carrier"
+      <button id="flickOutput" type="button"
          style="font:600 11px/1 'Manrope',system-ui,sans-serif;color:var(--muted);background:var(--chip);
          border:1px solid var(--hair);border-radius:999px;padding:9px 12px;cursor:pointer;box-shadow:var(--shadow);">flick carrier</button>
       <button id="theme" type="button" title="Switch theme" aria-label="Switch theme"
@@ -137,108 +166,272 @@ const SETS = [
   { sun: 18, planet: 21, ring: 60, planets: 3 }    /* stage 2: 1 + 60/18 = 4.333 */
 ];
 
+/* WHICH MEMBER IS BOLTED TO THE WORLD (GitHub #129). One word, and the only
+   thing that separates the two machines this page can draw -- everything else,
+   the tooth counts included, is shared. 'ring' is what has shipped since #123.
+   It is deliberately a source constant rather than a URL parameter, for the same
+   reason ORIGIN_MOUNT is one in index.html: a switch reachable from the address
+   bar is a second way for the page to draw something no gate photographs.
+   useGrounding() is the one place it is acted on, so the swipe #129 asks for has
+   exactly one thing to call. */
+const GROUNDED = 'ring';
+
 /* A carrier is a plate or a spider, not a solid gear blank: it is thinner than
    the wheels it carries. One number, applied to the disc formula below, rather
    than a hand-written inertia per carrier. */
 const CARRIER_THICKNESS = 0.35;
 
+/* How far a ring gear's rim stands outside its own pitch circle. It is a
+   DRAWING figure with no tooth count behind it, so it is named once and read
+   three times -- the ring's outline, the page's own extent in layout(), and now
+   the ring's moment of inertia, which must be the inertia of the ring that is
+   actually drawn and not of a differently-sized one. */
+const RING_RIM = 3.2;
+
 /* Moment of inertia of a uniform disc of radius r at constant thickness and
    density: J = m r^2 / 2 with m proportional to r^2, so J is proportional to
-   r^4. The constant is arbitrary because only RATIOS of inertia matter here --
-   which is exactly why the page can be honest about reflected inertia without
-   inventing a mass in kilograms. */
-const disc = (r) => Math.pow(r, 4);
+   r^4 / 2. The constant of proportionality is arbitrary because only RATIOS of
+   inertia matter here -- which is exactly why the page can be honest about
+   reflected inertia without inventing a mass in kilograms.
+
+   THE HALF IS NOT DECORATIVE, AND IT WAS MISSING UNTIL #129. `disc` was r^4,
+   which stands for J = m r^2 rather than J = m r^2 / 2 -- harmless while every
+   disc on the page shared the one arbitrary constant, and NOT harmless the
+   moment a body's inertia is compared with a PARALLEL-AXIS term, because
+   `mass(r) * d^2` is the whole of m d^2 and carries no factor to match. A
+   planet's orbital term was therefore being weighed against a spin term twice
+   the size it should be. The fix belongs here rather than on the orbital term:
+   m d^2 is exactly right as it stands, so the error was never there.
+
+   Nothing the page DOES changes. J_eff enters the loop only as a scale --
+   HAND_STIFFNESS and flickImpulse are both proportional to it and `accel =
+   torque / jEff` divides by it again -- so it cancels out of every rate and
+   every angle the page produces. What changes is the honesty of the inertia
+   figures themselves, and of the claim about the two planet terms below. Found
+   by re-deriving for the second grounding, not by anything going wrong. */
+const disc = (r) => Math.pow(r, 4) / 2;
 const mass = (r) => Math.pow(r, 2);
 
 const pitchR = (teeth) => teeth * MODULE / 2;
 
 /* ------------------------------------------------------------- KINEMATICS
-   Willis, solved once, with the ring held at zero.
+   Willis, solved once per set, with ONE member held at zero:
 
-   For one set with the ring grounded:
+     (w_sun - w_c) / (w_ring - w_c) = -N_ring / N_sun
+
+   That equation has three speeds and one constraint, so a set is two degrees of
+   freedom until something is pinned. Pinning one member is what makes the train
+   a fixed-ratio machine with a single generalised coordinate, and WHICH member
+   is pinned is the only difference between the two groundings below. Everything
+   else -- the tooth counts, the mesh, the drawn wheels, the assembly -- is the
+   same metal.
+
+   The speeds are stated per unit speed of the INPUT PORT, whichever member that
+   is, so the input port is always the generalised coordinate and every other
+   body is a fixed multiple of it. Nothing downstream needs to know which member
+   the coordinate belongs to; it needs to know only that it is 1.
+
+   A wheel's speed is a plain number in the object either way, so the drawing and
+   the inertia both read `st.ring` or `st.sun` and get a zero in the grounding
+   where that member is the one bolted down. There is no branch for it. */
+
+/* Both constraints that decide whether a set can be built out of metal at all.
+   Asserted rather than trusted -- a set that violates either would draw a
+   machine that does not exist -- and they are properties of the TOOTH COUNTS, so
+   they hold in both groundings and are checked once for both. */
+function assertBuildable(s) {
+  if (s.ring !== s.sun + 2 * s.planet) throw new Error('set is not coaxial: ' + JSON.stringify(s));
+  if ((s.sun + s.ring) % s.planets) throw new Error('planets do not space equally: ' + JSON.stringify(s));
+}
+
+/* How close to zero a grounded member has to come. It is a floating-point
+   tolerance and nothing else: the algebra is exact, so the only thing between
+   the check and 0 is the rounding of a few divisions. Named once because both
+   groundings assert against it. */
+const ZERO_SPEED = 1e-12;
+
+/* ASSEMBLY PHASING -- where each wheel's teeth start, so the drawn set MESHES
+   rather than merely having the right tooth counts. gearPath puts a tooth centre
+   at its own angle zero, so at the line of centres two wheels would otherwise
+   both present a tooth and interpenetrate.
+
+   Work in tooth-index coordinates: t(a) = (a - beta) * N / 2pi, material at
+   integers and space at half-integers. The sun keeps beta = 0 and everything
+   else is solved against it, so nothing here is a tuned number.
+
+     sun-planet contact:  sun angle 0, planet local angle pi
+       t_planet(pi) = N_p/2 - beta_p*N_p/2pi must be a half-integer, so
+       beta_p is -pi/N_p for an even planet and 0 for an odd one.
+     planet-ring contact: planet local angle 0, ring angle 0
+       whichever of the two the planet is now presenting there, the ring
+       takes the other.
+
+   GROUNDING DOES NOT ENTER HERE, and that is worth stating rather than leaving
+   to be noticed. A phase is a statement about where a wheel's teeth sit at angle
+   ZERO -- it is the assembly, the machine standing still before anybody turns
+   anything -- and the assembly is the same set of parts however it is later
+   bolted down. Both groundings therefore share these two expressions, and at
+   S.angle = 0 they draw the identical picture. What grounding changes is which
+   phase is a CONSTANT and which is a starting offset that then advances: under
+   ring-grounding ringPhase is where the ring sits forever, under sun-grounding it
+   is where the ring sets off from. Same number, and applyTransforms adds it to a
+   rate that is zero in exactly one of the two cases. */
+function phasing(s) {
+  return {
+    planetPhase: s.planet % 2 ? 0 : -Math.PI / s.planet,
+    ringPhase: s.planet % 2 ? -Math.PI / s.ring : 0
+  };
+}
+
+function stage(s, stageRatio, speeds) {
+  return Object.assign({
+    spec: s, stageRatio, orbitR: pitchR(s.sun) + pitchR(s.planet)
+  }, speeds, phasing(s));
+}
+
+/* RING GROUNDED -- w_ring = 0, which is the classic reduction and what has
+   shipped since #123. Willis collapses to
+
      w_carrier = w_sun / (1 + N_ring / N_sun)
+
    and the planet's own spin follows from the sun-planet external mesh taken in
    the carrier's rotating frame:
+
      (w_sun - w_c) / (w_planet - w_c) = -N_planet / N_sun
 
-   Stage 2's sun is stage 1's carrier -- one shaft, which is what makes this a
-   COMPOUND set rather than two sets standing next to each other. Every speed
-   below is expressed per unit speed of stage 1's sun, so the sun is the
-   generalised coordinate and every other body is a fixed multiple of it. */
-function kinematics(sets) {
+   Stage 2's sun is stage 1's carrier -- ONE SHAFT, which is what makes this a
+   COMPOUND set rather than two sets standing next to each other. */
+function ringGroundedStages(sets) {
   const out = [];
   let sun = 1;
   for (const s of sets) {
-    if (s.ring !== s.sun + 2 * s.planet) throw new Error('set is not coaxial: ' + JSON.stringify(s));
-    if ((s.sun + s.ring) % s.planets) throw new Error('planets do not space equally: ' + JSON.stringify(s));
+    assertBuildable(s);
     const stageRatio = 1 + s.ring / s.sun;
     const carrier = sun / stageRatio;
     const planet = carrier - (sun - carrier) * s.sun / s.planet;
     /* The ring must come out at exactly zero; if it does not, the algebra above
-       is wrong and everything drawn from it is decorative. */
+       is wrong and everything drawn from it is decorative. Taken the long way
+       round -- from the planet, through the planet-ring internal mesh -- so it is
+       an independent route to the member the grounding claims to have pinned and
+       not a restatement of the line that set it. */
     const ringCheck = carrier + (planet - carrier) * s.planet / s.ring;
-    if (Math.abs(ringCheck) > 1e-12) throw new Error('ring is not grounded: ' + ringCheck);
-    /* ASSEMBLY PHASING -- where each wheel's teeth start, so the drawn set
-       MESHES rather than merely having the right tooth counts. gearPath puts a
-       tooth centre at its own angle zero, so at the line of centres two wheels
-       would otherwise both present a tooth and interpenetrate.
-
-       Work in tooth-index coordinates: t(a) = (a - beta) * N / 2pi, material at
-       integers and space at half-integers. The sun keeps beta = 0 and everything
-       else is solved against it, so nothing here is a tuned number.
-
-         sun-planet contact:  sun angle 0, planet local angle pi
-           t_planet(pi) = N_p/2 - beta_p*N_p/2pi must be a half-integer, so
-           beta_p is -pi/N_p for an even planet and 0 for an odd one.
-         planet-ring contact: planet local angle 0, ring angle 0
-           whichever of the two the planet is now presenting there, the ring
-           takes the other. */
-    const planetPhase = s.planet % 2 ? 0 : -Math.PI / s.planet;
-    const ringPhase = s.planet % 2 ? -Math.PI / s.ring : 0;
-    out.push({
-      spec: s, stageRatio, sun, carrier, planet, planetPhase, ringPhase,
-      orbitR: pitchR(s.sun) + pitchR(s.planet)
-    });
+    if (Math.abs(ringCheck) > ZERO_SPEED) throw new Error('ring is not grounded: ' + ringCheck);
+    out.push(stage(s, stageRatio, { sun, planet, carrier, ring: 0 }));
     sun = carrier;
   }
   return out;
 }
-const STAGES = kinematics(SETS);
 
-/* Overall reduction, sun to final carrier. The product of the stage ratios --
-   and equal to 1 / (speed of the last carrier), which is how it is taken, so
-   the number quoted on screen is the number the integrator actually uses. */
-const RATIO = 1 / STAGES[STAGES.length - 1].carrier;
+/* SUN GROUNDED -- w_sun = 0 (GitHub #129). The same Willis equation, the other
+   member pinned:
+
+     (0 - w_c) / (w_ring - w_c) = -N_ring / N_sun
+     =>  w_c * N_sun = N_ring * (w_ring - w_c)
+     =>  w_carrier = w_ring * N_ring / (N_sun + N_ring)
+     =>  w_ring / w_carrier = 1 + N_sun / N_ring
+
+   So the free ports are the RING and the CARRIER, and the reduction per set is
+   1 + N_s/N_r where ring-grounding gave 1 + N_r/N_s. THAT IS THE RECIPROCAL
+   RELATIONSHIP AND IT IS NOT A COINCIDENCE: N_r > N_s in every buildable set,
+   because N_r = N_s + 2*N_p, so sun-grounding can never reduce by more than 2:1
+   and ring-grounding can never reduce by less than 3:1. A grounding is not a
+   tuning knob over one range -- it picks which side of that boundary the machine
+   is on.
+
+   The planet's spin comes off the planet-ring INTERNAL mesh this time, because
+   the ring is the member whose speed is now known:
+
+     (w_planet - w_c) / (w_ring - w_c) = +N_ring / N_planet
+
+   THE COMPOUND SHAFT HAS TO MOVE, and this is the one consequence of the swap
+   that is not algebra. Under ring-grounding the shaft is carrier 1 -> sun 2.
+   Ground both suns and that shaft would tie a grounded member to a moving one:
+   set 1 would have its sun AND its carrier pinned, which is two constraints on a
+   two-degree-of-freedom set, and the whole train would be a solid object. So the
+   shaft is carrier 1 -> RING 2 here. It is still one coaxial rotating member and
+   still one shaft, so the drawing's tie line stays true, but the input of stage 2
+   is its ring rather than its sun -- which is exactly what "the free ports are
+   the ring and the carrier" already said. */
+function sunGroundedStages(sets) {
+  const out = [];
+  let ring = 1;
+  for (const s of sets) {
+    assertBuildable(s);
+    const stageRatio = 1 + s.sun / s.ring;
+    const carrier = ring / stageRatio;
+    const planet = carrier + (ring - carrier) * s.ring / s.planet;
+    /* The sun's own equivalent of ringCheck, and it is doing the same real work:
+       come back down the sun-planet external mesh and the sun must land on
+       exactly zero. If it does not, the grounding this whole mode is named for is
+       not the grounding being drawn. */
+    const sunCheck = carrier - (planet - carrier) * s.planet / s.sun;
+    if (Math.abs(sunCheck) > ZERO_SPEED) throw new Error('sun is not grounded: ' + sunCheck);
+    out.push(stage(s, stageRatio, { sun: 0, planet, carrier, ring }));
+    ring = carrier;   /* carrier 1 -> ring 2, per the note above */
+  }
+  return out;
+}
+
+/* The two machines, by name. `held` is the member bolted to the world, `input`
+   is the free member on the first set -- and the output port is the last set's
+   carrier in both, which is why it is not named here. */
+const GROUNDINGS = {
+  ring: { stages: ringGroundedStages, held: 'ring', input: 'sun',  plural: 'RINGS' },
+  sun:  { stages: sunGroundedStages,  held: 'sun',  input: 'ring', plural: 'SUNS' }
+};
 
 /* -------------------------------------------------------- EFFECTIVE INERTIA
-   J_eff = sum over every moving body of J_i * (w_i / w_sun)^2 -- the standard
-   reduction of a fixed-ratio train to one degree of freedom. Grounded rings
-   contribute nothing, because their speed is zero; that is not a simplification,
-   it is what "grounded" means.
+   J_eff = sum over every body of J_i * (w_i / w_input)^2 -- the standard
+   reduction of a fixed-ratio train to one degree of freedom.
 
-   A planet contributes twice: its own spin about its own axis, and its mass
-   carried around the sun at the carrier's speed (parallel axis). Both are real
-   and the orbital term is the larger one at these proportions. */
-const J_EFF = (function () {
+   THE GROUNDED MEMBER CONTRIBUTES NOTHING, because its speed is zero; that is
+   not a simplification, it is what "grounded" means. What changed with #129 is
+   that WHICH member that is is no longer knowable from here: the sum is written
+   over every body, and the zero in the grounded member's speed does the work
+   that a missing term used to do. Under ring-grounding the ring drops out and
+   the sum is what it always was, to the last digit. Under sun-grounding the sun
+   drops out instead and THE RINGS NOW MOVE, so a ring's own rotational inertia
+   matters -- it was not modelled at all before, because a body at zero speed
+   cannot be got wrong.
+
+   A planet contributes TWICE: its own spin about its own axis, and its mass
+   carried around the sun at the carrier's speed (parallel axis). Both are real,
+   and THE ORBITAL TERM IS EXACTLY TWICE THE SPIN TERM here, in both groundings
+   -- which is a theorem and not a proportion that happens to land. A planet rolls
+   on whichever of the sun and the ring is stationary, so its instantaneous centre
+   is at that contact and the distance from there to its own axis is its pitch
+   radius:
+
+     r_p * w_p = orbitR * w_c
+
+   The spin term is (mass * r_p^2 / 2) * w_p^2 and the orbital term is
+   mass * orbitR^2 * w_c^2, so that identity collapses them to a ratio of exactly
+   1:2 -- the half in `disc` being the entire difference. Ground the CARRIER
+   instead and the planet would roll on nothing stationary and it would stop being
+   true. (Before #129 the two came out equal instead of 1:2, which is the missing
+   half described at `disc`.) */
+function effectiveInertia(stages) {
   let j = 0;
-  for (const st of STAGES) {
+  for (const st of stages) {
     j += disc(pitchR(st.spec.sun)) * st.sun * st.sun;
     j += st.spec.planets * disc(pitchR(st.spec.planet)) * st.planet * st.planet;
     j += st.spec.planets * mass(pitchR(st.spec.planet)) * st.orbitR * st.orbitR * st.carrier * st.carrier;
     j += CARRIER_THICKNESS * disc(st.orbitR) * st.carrier * st.carrier;
+    j += ringInertia(st.spec.ring) * st.ring * st.ring;
   }
   return j;
-})();
+}
 
-/* THE TWO FREE PORTS. `gear` is how many turns of the sun one turn of this port
-   is worth, so the sun is 1 and the output carrier is RATIO. Inertia seen at a
-   port is J_EFF * gear^2 -- the square, which is the whole claim the page makes.
-   It is derived here and printed on screen; it is never written down. */
-const PORTS = {
-  sun:     { gear: 1,     label: 'SUN' },
-  carrier: { gear: RATIO, label: 'CARRIER' }
-};
-for (const p of Object.values(PORTS)) p.inertia = J_EFF * p.gear * p.gear;
+/* A ring gear is an ANNULUS, and inertia is additive, so a disc minus its own
+   hole is exactly that: disc(outer) - disc(inner), under the same arbitrary
+   constant every other body on the page shares. Both bounds come off the
+   drawing rather than being chosen -- the inner one is the pitch circle, which
+   is the convention the external wheels already take (each is a disc at its
+   pitch radius, tooth spaces counted as solid and bores ignored), and the outer
+   one is RING_RIM, the rim the ring is actually drawn with. A ring whose inertia
+   and whose outline came from two different radii would be the kind of drift
+   nothing on screen could show. */
+const ringInertia = (teeth) => disc(pitchR(teeth) + RING_RIM * MODULE) - disc(pitchR(teeth));
 
 /* ================================================================== LOSSES
    The three-term coast-down the main page arrived at over four iterations
@@ -267,11 +460,18 @@ const WINDAGE_SHARE = 0.10;
    dead stop. Everything else about the losses is derived from it. */
 const COAST_RANGE_S = 9.0;
 
-/* The speed the coast figure is quoted at, in radians per second AT THE SUN --
-   a firm flick of the sun, which is the fastest thing on the page. Named once
+/* The speed the coast figure is quoted at, in radians per second AT THE INPUT
+   PORT -- a firm flick of it, which is the fastest thing on the page. Named once
    so the solver, the readout's "top" and the speed clamp all mean the same
-   thing rather than three similar numbers. */
-const REF_SPEED = 12 * 2 * Math.PI;      /* 12 sun revolutions per second */
+   thing rather than three similar numbers.
+
+   It is quoted at the input port and not at a named member, so it means the same
+   thing in both groundings: the losses are a deceleration of the GENERALISED
+   COORDINATE (see below), and the coordinate is the input port by construction.
+   A coast therefore takes COAST_RANGE_S from a firm flick whichever member the
+   finger is turning, which is the right invariant -- the bearings do not know
+   what is bolted down. */
+const REF_SPEED = 12 * 2 * Math.PI;      /* 12 input-port revolutions per second */
 const MAX_SPEED = 3 * REF_SPEED;         /* nothing may be driven past this */
 
 /* The scale, bisected against a Simpson integral of 1/decel, exactly as
@@ -311,15 +511,59 @@ const retard = (w) => COULOMB + VISCOUS * w + WINDAGE * w * w;
    spring and a damper. The light port snaps to the finger; the heavy port lags
    behind it and has to be wound up. That lag IS the reflected inertia.
 
-   HAND_FREQ is the undamped natural frequency of grip-on-SUN, so the stiffness
-   is derived from the inertia rather than picked against it: change a tooth
-   count and the sun still tracks the finger the same way. At the carrier the
-   same stiffness gives HAND_FREQ / RATIO, which is the square-law showing up as
-   something your hand can notice. */
-const HAND_FREQ = 60;                          /* rad/s at the sun */
+   HAND_FREQ is the undamped natural frequency of grip-on-INPUT-PORT, so the
+   stiffness is derived from the inertia rather than picked against it: change a
+   tooth count, or change which member is grounded, and the input port still
+   tracks the finger the same way. At the output port the same stiffness gives
+   HAND_FREQ / RATIO, which is the square-law showing up as something your hand
+   can notice -- and it is the honest measure of how much of this page survives a
+   grounding swap, because RATIO is the only thing in it that changes. */
+const HAND_FREQ = 60;                          /* rad/s at the input port */
 const HAND_DAMPING = 0.28;                     /* damping ratio, at either port */
-const HAND_STIFFNESS = HAND_FREQ * HAND_FREQ * J_EFF;
-const handDamper = (port) => 2 * HAND_DAMPING * Math.sqrt(HAND_STIFFNESS * port.inertia);
+
+/* ============================================================== THE MACHINE
+   One grounding, solved into everything downstream of it. Nothing above this
+   point knows which grounding is in force and nothing below it needs to ask
+   twice: the ports, the ratio, the inertia, the grip stiffness and the flick
+   strength are all consequences of the one word in GROUNDED, and they are
+   computed together so they cannot be computed from two different answers.
+
+   `gear` is how many turns of the input port one turn of this port is worth, so
+   the input is 1 and the output is RATIO. Inertia seen at a port is
+   J_eff * gear^2 -- the square, which is the whole claim the page makes. It is
+   derived here and printed on screen; it is never written down. */
+function solveGrounding(name) {
+  const g = GROUNDINGS[name];
+  if (!g) throw new Error('unknown grounding: ' + name + ' (want ' + Object.keys(GROUNDINGS).join(' or ') + ')');
+  const stages = g.stages(SETS);
+  /* Overall reduction, input port to final carrier. The product of the stage
+     ratios -- and equal to 1 / (speed of the last carrier), which is how it is
+     taken, so the number quoted on screen is the number the integrator uses. */
+  const ratio = 1 / stages[stages.length - 1].carrier;
+  const jEff = effectiveInertia(stages);
+  const ports = {
+    input:  { gear: 1,     label: g.input.toUpperCase(), member: g.input },
+    output: { gear: ratio, label: 'CARRIER',             member: 'carrier' }
+  };
+  for (const p of Object.values(ports)) p.inertia = jEff * p.gear * p.gear;
+  const stiffness = HAND_FREQ * HAND_FREQ * jEff;
+  return {
+    name, stages, ratio, jEff, ports,
+    held: g.held, grounded: g.plural,
+    stiffness,
+    damper: (port) => 2 * HAND_DAMPING * Math.sqrt(stiffness * port.inertia),
+    /* An impulse sized so the buttons and the arrow keys reach the integrator
+       exactly as a finger does: a firm flick of the input port. It scales with
+       jEff for the same reason the stiffness does -- so the gesture means the
+       same thing in a machine with a different inertia. */
+    flickImpulse: jEff * REF_SPEED * 0.75
+  };
+}
+
+/* Solved at boot, by useGrounding(), not here: the solve reads REF_SPEED and
+   HAND_FREQ, and a page that switches grounding must be able to re-solve
+   anyway. One `let`, so there is one answer to "which machine is this". */
+let MODE = null;
 
 /* ================================================================== DRAWING
    Gear profiles are generated from tooth count and module. Nothing about a
@@ -356,9 +600,43 @@ const el = (tag, attrs) => {
   return n;
 };
 
+/* THE GROUND SYMBOL: hatching leaning 45 degrees off the radius, the drawing
+   convention for "this is bolted to the world". It has one home because it now
+   has two customers -- a grounded RING is hatched outside its rim, and a grounded
+   SUN is hatched inside its bore, which is where a fixed shaft is hatched -- and
+   because it is the page's only statement of which port is NOT free. Getting it
+   onto the wrong member would be the page describing a different machine from the
+   one it is integrating.
+
+   The tick COUNT is derived from the circumference, so the density is the same
+   round a 33-unit rim as round a 3.6-unit bore rather than 24 ticks meaning two
+   different things. HATCH_ARC is the spacing and is a chosen drawing figure:
+   there is no tooth count it could come from. It is set to what the shipped ring
+   already draws -- 24 ticks at that radius -- so ring-grounding is untouched by
+   its existence. */
+const HATCH = 1.6 * MODULE;         /* tick length                              */
+const HATCH_ARC = 8.7 * MODULE;     /* arc between ticks                        */
+const HATCH_MIN = 6;                /* ... but never so few they stop reading as
+                                       a hatch, which a small bore would         */
+function groundHatch(g, radius, outward) {
+  const n = Math.max(HATCH_MIN, Math.round(2 * Math.PI * radius / HATCH_ARC));
+  const lean = outward ? HATCH : -HATCH;
+  for (let i = 0; i < n; i++) {
+    const a = i * 2 * Math.PI / n;
+    const c = Math.cos(a), s = Math.sin(a);
+    const bx = c * radius, by = s * radius;
+    g.appendChild(el('line', {
+      x1: bx, y1: by, x2: bx + (c * lean - s * lean), y2: by + (s * lean + c * lean),
+      stroke: 'var(--muted)', 'stroke-opacity': 0.65, 'stroke-width': 0.36, 'stroke-linecap': 'round'
+    }));
+  }
+}
+
 /* A wheel: the toothed blank, a bore, and one bold radial index mark. The index
    mark is not decoration -- at speed a smooth disc reads as stationary, and it
-   is the only way an eye can tell a turning wheel from a still one. */
+   is the only way an eye can tell a turning wheel from a still one. A grounded
+   sun keeps the mark for the opposite reason: a mark that never moves while
+   everything around it does is what says the sun is the member being held. */
 function wheel(teeth, opts) {
   const g = el('g', {});
   const r = pitchR(teeth);
@@ -372,42 +650,38 @@ function wheel(teeth, opts) {
     fill: opts.fill, stroke: 'var(--muted)', 'stroke-opacity': 0.55,
     'stroke-width': 0.28, 'stroke-linejoin': 'round'
   }));
+  const bore = r * 0.3;
   g.appendChild(el('circle', {
-    r: r * 0.3, fill: 'var(--bg)', stroke: 'var(--muted)', 'stroke-opacity': 0.45, 'stroke-width': 0.28
+    r: bore, fill: 'var(--bg)', stroke: 'var(--muted)', 'stroke-opacity': 0.45, 'stroke-width': 0.28
   }));
+  /* Inward, into the bore: a fixed shaft is hatched on the shaft, and hatching
+     outward from a sun would run straight into the planets it meshes with. */
+  if (opts.grounded) groundHatch(g, bore, false);
   g.appendChild(el('line', {
-    x1: r * 0.3, y1: 0, x2: r - 1.25 * MODULE, y2: 0,
+    x1: bore, y1: 0, x2: r - 1.25 * MODULE, y2: 0,
     stroke: opts.mark, 'stroke-width': 0.75, 'stroke-linecap': 'round'
   }));
   return g;
 }
 
-/* The grounded ring: an annulus whose inner boundary is the internal tooth
-   profile, plus hatch ticks around the outside. The ticks are the drawing
-   convention for "this is bolted to the world", and they are the page's only
-   statement of which port is NOT free. */
-function ringGear(teeth) {
+/* The ring: an annulus whose inner boundary is the internal tooth profile, and,
+   when the ring is the member being held, hatch ticks around the outside. The
+   hatching is conditional because the ring is a free port under sun-grounding --
+   a turning wheel drawn with a ground symbol on it is a contradiction, and the
+   one thing this page cannot afford is a drawing that disagrees with the
+   integrator. */
+function ringGear(teeth, opts) {
   const g = el('g', {});
   const r = pitchR(teeth);
-  const outer = r + 3.2 * MODULE;
+  const outer = r + RING_RIM * MODULE;
   const rim = (rad) => 'M' + rad + ',0A' + rad + ',' + rad + ' 0 1 0 ' + (-rad) + ',0A' + rad + ',' + rad + ' 0 1 0 ' + rad + ',0Z';
   g.appendChild(el('path', {
     d: rim(outer) + gearPath(teeth, true),
     'fill-rule': 'evenodd', fill: 'var(--chip)', 'fill-opacity': 0.55,
-    stroke: 'var(--muted)', 'stroke-opacity': 0.5, 'stroke-width': 0.28
+    stroke: opts.lit ? 'var(--accent)' : 'var(--muted)',
+    'stroke-opacity': opts.lit ? 0.85 : 0.5, 'stroke-width': opts.lit ? 0.42 : 0.28
   }));
-  const ticks = 24;
-  for (let i = 0; i < ticks; i++) {
-    const a = i * 2 * Math.PI / ticks;
-    const c = Math.cos(a), s = Math.sin(a);
-    /* hatch leaning 45 degrees off the radius, the usual ground symbol */
-    const bx = c * outer, by = s * outer;
-    const tx = bx + (c * 1.6 - s * 1.6), ty = by + (s * 1.6 + c * 1.6);
-    g.appendChild(el('line', {
-      x1: bx, y1: by, x2: tx, y2: ty,
-      stroke: 'var(--muted)', 'stroke-opacity': 0.65, 'stroke-width': 0.36, 'stroke-linecap': 'round'
-    }));
-  }
+  if (opts.grounded) groundHatch(g, outer, true);
   return g;
 }
 
@@ -425,10 +699,26 @@ function build() {
   while (svg.firstChild) svg.removeChild(svg.firstChild);
   MOVERS.length = 0; SET_NODES.length = 0;
 
-  /* The coupling between stage 1's carrier and stage 2's sun, drawn first so it
-     sits behind the wheels. It is one shaft in reality; side by side is a
-     schematic, so the drawing says so with a tie line and with two index marks
-     that visibly turn in lockstep. */
+  /* The chrome says what the machine is, and it is rewritten from MODE rather
+     than written down in the markup: an aria-label asserting fixed rings, or a
+     button offering to flick a sun that is bolted to the world, would be the
+     page describing the other grounding. */
+  svg.setAttribute('aria-label',
+      'A double planetary gear set with both ' + MODE.held + ' gears fixed. Drag the first set to turn the '
+    + MODE.ports.input.member + ', the second to turn the output carrier.');
+  flickIn.textContent = 'flick ' + MODE.ports.input.member;
+  flickIn.title = 'Flick the ' + MODE.ports.input.member;
+  flickOut.textContent = 'flick ' + MODE.ports.output.member;
+  flickOut.title = 'Flick the output ' + MODE.ports.output.member;
+
+  /* The coupling between stage 1's carrier and stage 2's input member, drawn
+     first so it sits behind the wheels. It is one shaft in reality; side by side
+     is a schematic, so the drawing says so with a tie line and with two index
+     marks that visibly turn in lockstep. Which member it lands on is the
+     grounding's business and not the drawing's -- carrier 1 -> sun 2 with the
+     rings held, carrier 1 -> ring 2 with the suns held, and a carrier tied to a
+     ring is as much one coaxial rotating member as a carrier tied to a sun, so
+     the note stays true either way without being restated. */
   TIE = el('line', { stroke: 'var(--hair)', 'stroke-width': 0.4, 'stroke-dasharray': '2 2' });
   svg.appendChild(TIE);
   TIE_LABEL = el('text', {
@@ -438,18 +728,27 @@ function build() {
   TIE_LABEL.textContent = 'ONE SHAFT';
   svg.appendChild(TIE_LABEL);
 
-  STAGES.forEach((st, i) => {
+  MODE.stages.forEach((st, i) => {
     const g = el('g', {});
     svg.appendChild(g);
-    const ring = ringGear(st.spec.ring);
-    ring.setAttribute('transform', 'rotate(' + (st.ringPhase * 180 / Math.PI).toFixed(4) + ')');
-    g.appendChild(ring);
 
-    /* THE PORT THIS SET IS GRABBED BY IS THE ONE DRAWN IN --accent. Set 1's is
-       its sun and set 2's is its carrier, which is what the labels say, so the
-       colour is the label repeated on the part rather than a second scheme. */
-    const grabbed = i === 0 ? 'sun' : 'carrier';
+    /* THE PORT THIS SET IS GRABBED BY IS THE ONE DRAWN IN --accent. Set 1 carries
+       the input port and the last set carries the output, which is what the
+       labels say, so the colour is the label repeated on the part rather than a
+       second scheme. Which MEMBER that is comes from the grounding: the input is
+       a sun with the rings held and a ring with the suns held. */
+    const grabbed = i === 0 ? MODE.ports.input.member : MODE.ports.output.member;
     const lit = 'var(--accent)', dim = 'var(--muted)';
+
+    /* The ring is a MOVER unconditionally, at whatever rate the grounding gave
+       it -- zero when it is the member being held. Its assembly phase is the same
+       expression in both groundings and rides along as the entry's phase, so with
+       the rings grounded applyTransforms writes exactly the static rotate() this
+       used to carry, and with the suns grounded the same line turns it. One
+       clock, one code path, no branch on grounding anywhere in the loop. */
+    const ring = ringGear(st.spec.ring, { grounded: MODE.held === 'ring', lit: grabbed === 'ring' });
+    g.appendChild(ring);
+    MOVERS.push({ node: ring, rate: st.ring, phase: st.ringPhase });
 
     /* Carrier: a spider joining the planet axes. Drawn LAST, over the wheels,
        because a carrier plate is physically over them and because underneath it
@@ -492,8 +791,14 @@ function build() {
        A planet moved round to orbit angle theta is the SAME machine with the
        sun held and the carrier wound on by theta, so its own spin has advanced
        by theta * (1 + N_s/N_p); inside a group already carrying theta that
-       leaves theta * N_s/N_p. The equal-spacing check in kinematics() is
-       exactly the condition that this also returns the ring to its own zero. */
+       leaves theta * N_s/N_p. assertBuildable()'s equal-spacing check is exactly
+       the condition that this also returns the ring to its own zero.
+
+       That argument is about ASSEMBLY, so it is grounding-independent for the
+       same reason phasing() is: it asks where a planet's teeth have to sit for
+       the set to go together with its planets equally spaced, and holding the sun
+       is a step in the derivation rather than a claim about the finished machine.
+       Both groundings use it unchanged. */
     for (let p = 0; p < st.spec.planets; p++) {
       const theta = p * 2 * Math.PI / st.spec.planets;
       const orbit = el('g', {});
@@ -507,7 +812,9 @@ function build() {
       });
     }
 
-    const sun = wheel(st.spec.sun, { fill: 'var(--chip)', mark: grabbed === 'sun' ? lit : dim });
+    const sun = wheel(st.spec.sun, {
+      fill: 'var(--chip)', mark: grabbed === 'sun' ? lit : dim, grounded: MODE.held === 'sun'
+    });
     g.appendChild(sun);
     MOVERS.push({ node: sun, rate: st.sun });
 
@@ -524,7 +831,9 @@ function build() {
     cap.appendChild(document.createTextNode(
       (i === 0 ? 'SET 1 · ' : 'SET 2 · ') + st.stageRatio.toFixed(3) + ':1 · DRAG FOR '));
     const strong = el('tspan', { fill: 'var(--accent)', style: 'font-weight:800' });
-    strong.textContent = i === 0 ? 'SUN (light)' : 'CARRIER (heavy)';
+    strong.textContent = i === 0
+      ? MODE.ports.input.label + ' (light)'
+      : MODE.ports.output.label + ' (heavy)';
     cap.appendChild(strong);
     svg.appendChild(cap);
 
@@ -540,7 +849,7 @@ function build() {
    ring's own outer radius, so a tooth-count change moves them by itself. */
 const CENTRES = [{ x: 0, y: 0 }, { x: 0, y: 0 }];
 function layout() {
-  const R = pitchR(SETS[0].ring) + 3.2 * MODULE;
+  const R = pitchR(SETS[0].ring) + RING_RIM * MODULE;
   const wide = svg.clientWidth >= svg.clientHeight;
   /* MARGIN and GAP are separate because they hold different things. The margin
      holds one line of caption above each set; the gap holds the coupling note,
@@ -595,7 +904,10 @@ let GRAB_RADIUS = 0;
    the angle, so nothing can drift out of mesh -- there is nothing to drift
    from. No transition, no CSS animation, no per-body timer (#3). */
 const S = {
-  angle: 0,          /* radians of stage 1's sun */
+  angle: 0,          /* radians of the INPUT PORT -- stage 1's sun with the rings
+                        grounded, stage 1's ring with the suns grounded. The one
+                        generalised coordinate either way, which is why nothing
+                        below this line has to know which member it is. */
   rate: 0,           /* rad/s of the same */
   grip: null         /* { port, target } while a finger is down */
 };
@@ -620,17 +932,17 @@ function step(now) {
   if (dt <= 0) return;
 
   /* The hand, as a generalised force. A torque applied at a port maps onto the
-     sun coordinate by dividing by that port's gear ratio, and the port's own
-     angle is the sun's divided by the same -- which is where the SQUARE comes
-     from, without it ever being written as a square. */
+     input-port coordinate by dividing by that port's gear ratio, and the port's
+     own angle is the coordinate's divided by the same -- which is where the
+     SQUARE comes from, without it ever being written as a square. */
   let accel = 0;
   if (S.grip) {
     const p = S.grip.port;
     const portAngle = S.angle / p.gear;
     const portRate = S.rate / p.gear;
-    const torque = HAND_STIFFNESS * (S.grip.target - portAngle) / (p.gear * p.gear)
-                 - handDamper(p) * portRate / p.gear;
-    accel = torque / J_EFF;
+    const torque = MODE.stiffness * (S.grip.target - portAngle) / (p.gear * p.gear)
+                 - MODE.damper(p) * portRate / p.gear;
+    accel = torque / MODE.jEff;
   }
 
   let v = S.rate + accel * dt;
@@ -670,7 +982,7 @@ function svgPoint(ev) {
 function portAt(p) {
   for (let i = 0; i < CENTRES.length; i++) {
     const dx = p.x - CENTRES[i].x, dy = p.y - CENTRES[i].y;
-    if (Math.hypot(dx, dy) <= GRAB_RADIUS) return i === 0 ? PORTS.sun : PORTS.carrier;
+    if (Math.hypot(dx, dy) <= GRAB_RADIUS) return i === 0 ? MODE.ports.input : MODE.ports.output;
   }
   return null;
 }
@@ -687,7 +999,7 @@ svg.addEventListener('pointerdown', (ev) => {
   if (!p) return;
   const port = portAt(p);
   if (!port) return;
-  const c = port === PORTS.sun ? CENTRES[0] : CENTRES[1];
+  const c = port === MODE.ports.input ? CENTRES[0] : CENTRES[1];
   grabbedCentre = c;
   prevPointerAngle = angleAt(p, c);
   /* The grip starts wherever the body already is, so grabbing a spinning train
@@ -724,22 +1036,27 @@ svg.addEventListener('lostpointercapture', release);
 /* Keyboard and the two buttons reach the same integrator and nothing else --
    there is exactly one thing that can set the train in motion, whichever
    control asks for it. A flick is an impulse at a port: the same impulse at the
-   carrier produces RATIO^2 less speed, which is the claim, demonstrable without
+   output produces RATIO^2 less speed, which is the claim, demonstrable without
    a finger. */
-const FLICK_IMPULSE = J_EFF * REF_SPEED * 0.75;    /* a firm flick at the sun */
 function flick(port, sign) {
-  /* An angular impulse L at a port moves that port by L / (J_EFF * gear^2) and
-     therefore moves the sun coordinate by gear times that -- L / (J_EFF * gear).
-     One line, and the square is in it, not asserted beside it. */
-  S.rate += sign * FLICK_IMPULSE / (J_EFF * port.gear);
+  /* An angular impulse L at a port moves that port by L / (jEff * gear^2) and
+     therefore moves the input-port coordinate by gear times that --
+     L / (jEff * gear). One line, and the square is in it, not asserted beside
+     it. */
+  S.rate += sign * MODE.flickImpulse / (MODE.jEff * port.gear);
   if (Math.abs(S.rate) > MAX_SPEED) S.rate = Math.sign(S.rate) * MAX_SPEED;
 }
-document.getElementById('flickSun').addEventListener('click', () => flick(PORTS.sun, 1));
-document.getElementById('flickCarrier').addEventListener('click', () => flick(PORTS.carrier, 1));
+const flickIn = document.getElementById('flickInput');
+const flickOut = document.getElementById('flickOutput');
+/* The handlers read MODE.ports at click time rather than closing over a port
+   object, so a grounding swap does not leave a button wired to the machine that
+   is no longer on screen. */
+flickIn.addEventListener('click', () => flick(MODE.ports.input, 1));
+flickOut.addEventListener('click', () => flick(MODE.ports.output, 1));
 svg.setAttribute('tabindex', '0');
 svg.addEventListener('keydown', (ev) => {
-  if (ev.key === 'ArrowRight' || ev.key === 'ArrowUp') { flick(PORTS.sun, 1); ev.preventDefault(); }
-  if (ev.key === 'ArrowLeft' || ev.key === 'ArrowDown') { flick(PORTS.sun, -1); ev.preventDefault(); }
+  if (ev.key === 'ArrowRight' || ev.key === 'ArrowUp') { flick(MODE.ports.input, 1); ev.preventDefault(); }
+  if (ev.key === 'ArrowLeft' || ev.key === 'ArrowDown') { flick(MODE.ports.input, -1); ev.preventDefault(); }
 });
 
 /* ================================================================== READOUT */
@@ -750,17 +1067,21 @@ const cell = (label, value, accent) =>
   + '<span style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;">' + label + '</span>'
   + '<b style="color:' + (accent || 'var(--ink)') + ';font-variant-numeric:tabular-nums;">' + value + '</b></span>';
 
+/* Every label as well as every number comes off MODE: the readout is the page
+   saying what machine it is, so a hardcoded "RINGS FIXED" or "SUN→CARRIER" would
+   be the one place the page could go on describing the grounding it left. */
 function draw() {
-  const sunRps = S.rate / (2 * Math.PI);
+  const inp = MODE.ports.input, outp = MODE.ports.output;
+  const inRps = S.rate / (2 * Math.PI);
   const state = S.grip ? 'HELD · ' + S.grip.port.label : (S.rate === 0 ? 'AT REST' : 'COASTING');
   readout.innerHTML =
-      cell('rings', 'FIXED')
-    + cell('stages', STAGES.map((s) => s.stageRatio.toFixed(3)).join(' × '))
-    + cell('sun→carrier', RATIO.toFixed(3) + ':1')
-    + cell('inertia sun', '1.0×')
-    + cell('inertia carrier', (PORTS.carrier.inertia / PORTS.sun.inertia).toFixed(1) + '×', 'var(--accent)')
-    + cell('sun', sunRps.toFixed(2) + ' rev/s')
-    + cell('carrier', (sunRps / RATIO).toFixed(3) + ' rev/s')
+      cell('grounded', MODE.grounded)
+    + cell('stages', MODE.stages.map((s) => s.stageRatio.toFixed(3)).join(' × '))
+    + cell(inp.member + '→' + outp.member, MODE.ratio.toFixed(3) + ':1')
+    + cell('inertia ' + inp.member, '1.0×')
+    + cell('inertia ' + outp.member, (outp.inertia / inp.inertia).toFixed(1) + '×', 'var(--accent)')
+    + cell(inp.member, inRps.toFixed(2) + ' rev/s')
+    + cell(outp.member, (inRps / MODE.ratio).toFixed(3) + ' rev/s')
     + cell('state', state, S.rate === 0 && !S.grip ? 'var(--muted)' : 'var(--ink)');
 }
 
@@ -775,7 +1096,30 @@ themeBtn.addEventListener('click', () => {
 });
 
 /* ===================================================================== BOOT */
-build();
+/* THE ONE PLACE A GROUNDING IS ACTED ON. It re-solves the machine, ZEROES THE
+   ONE STATE and rebuilds the drawing, in that order.
+
+   Zeroing is not tidiness. S.angle is the integral of S.rate in the input
+   port's coordinate, and the input port is a different member in the two
+   groundings -- 40 radians of sun is not 40 radians of ring, so carrying the
+   number across would wind every wheel to a phase that means nothing and, worse,
+   would land the assembly somewhere other than the phase the teeth were solved
+   for. A grounding swap is picking up the other machine, not the same one
+   relabelled.
+
+   This is also the whole of what the swipe GitHub #129 asks for has to call:
+   useGrounding('sun'). It deliberately does not exist yet -- there is no gesture,
+   no key and no URL parameter that reaches it, so the page draws exactly one
+   machine and GROUNDED is the only thing that says which. */
+function useGrounding(name) {
+  MODE = solveGrounding(name);
+  S.angle = 0; S.rate = 0; S.grip = null;
+  grabbedCentre = null;
+  build();
+  draw();
+}
+
+useGrounding(GROUNDED);
 window.addEventListener('resize', layout);
 applyTransforms();
 draw();
