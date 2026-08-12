@@ -3705,8 +3705,16 @@ function datumRunsOn(solved, axisRot, spineSlug, ghosts, sites, plates, S) {
    `past` is the run-out datumLayer draws beyond the assembly, and is handed in
    the same way the page hands it in. Warnings are captured rather than printed:
    "neither side fits" is a reported state, and a test that could not see it
-   could not tell it from a silent give-up. */
-function plateSeatOn(vpBox, r, S, pw, ph, past, box, metal) {
+   could not tell it from a silent give-up.
+
+   `brand` IS THE MEASURED WORDMARK (GitHub #131, CL#160), handed in unattached
+   exactly as `_vpBox` is: plateSeat() reads `this._brandBox` to decide which END
+   of the mark it stamps at, and a component the harness never builds has no
+   wordmark to measure. Left off it is UNDEFINED, which is the page's own state
+   for the frame before the ref is attached -- so every caller written before
+   this parameter existed goes on testing the near-end anchor it always did, and
+   none of them had to be touched to say so. */
+function plateSeatOn(vpBox, r, S, pw, ph, past, box, metal, brand) {
   const metrics = new Function('MODULE',
     'return function ' + grabBlock('  plateMetrics(s) {', '{', '}') + ';')(page.MODULE);
   const margin = new Function('return function ' + grabBlock('  plateMargin(s) {', '{', '}') + ';')();
@@ -3731,7 +3739,8 @@ function plateSeatOn(vpBox, r, S, pw, ph, past, box, metal) {
     page.PLATE_START_ALONG);
   const clip = new Function('return function ' + grabBlock('  slabClip(px, py, dx, dy, box) {', '{', '}') + ';')();
   const warns = [];
-  const ctx = { _vpBox: vpBox, plateMetrics: metrics, plateMargin: margin, slabClip: clip,
+  const ctx = { _vpBox: vpBox, _brandBox: brand, plateMetrics: metrics,
+    plateMargin: margin, slabClip: clip,
     plateAir: air, datumClear: clear, plateExcluded: excl, plateNearestClean: nearest };
   const real = console.warn;
   console.warn = (m) => warns.push(m);
@@ -4177,6 +4186,115 @@ test('a plate gives way to the metal, even when that costs more slide', () => {
   const C = plateSeatOn(wide, r, S, pw, ph, 0, wide, []);
   eq(C.seat.clean, true, 'a plate with no metal to clear reports itself as crowded');
   eq(C.warns.length, 0, 'a plate with no metal nearby warns about crowding anyway');
+});
+
+test('the plate is stamped at the end of its mark furthest from the wordmark', () => {
+  /* GitHub #131, CL#160, and the gap GitHub #138 was filed for: every OTHER plate
+     test above runs with no measured wordmark, so all of them take plateSeat()'s
+     fallback anchor -- the near end, which is what shipped before CL#160. Nothing
+     in the suite could tell a derived far-end anchor from a hardcoded `+1`.
+
+     THE ASSERTIONS ARE IN SCREEN x AND y, NOT ALONG THE RUN, and that is the whole
+     shape of this test. "Right in landscape, top in portrait" over a direction
+     that comes from _axisRot is a handedness, so its mirror image passes every
+     measurement taken along the axis -- which is #67, and the bridge's own sign
+     made the same mistake later (see CLAUDE.md). A seat reported as a distance
+     along the run says nothing about which end of the page it landed on until the
+     run's own direction is resolved back onto the screen, so that is what is
+     compared here: the seat's screen point against the wordmark's.
+
+     `seatXY` is that resolution and nothing more -- the origin the seat chose plus
+     its distance along the run, which is where datumLayer draws it. */
+  const seatXY = (s, run) => ({ x: s.ox + s.at * run.ux, y: s.oy + s.at * run.uy });
+  const pw = 40, ph = 10, S = 1;
+  const step = page.PLATE_START_ALONG + pw / 2;
+  const vp = { x0: -100, y0: -100, x1: 100, y1: 100 };
+  /* THE WORDMARK IS PINNED TO THE BOTTOM-LEFT CORNER in both orientations -- it is
+     the same fixed furniture whichever way the stage has turned -- so one box
+     serves both halves below, and the two answers have to differ because the RUN
+     differs and for no other reason. */
+  const brand = { x0: -95, y0: 78, x1: -55, y1: 95 };
+  const brandC = { x: (brand.x0 + brand.x1) / 2, y: (brand.y0 + brand.y1) / 2 };
+  /* LANDSCAPE: the mark runs +x, the wordmark is off its start, so the plate is
+     stamped at the FINISH -- the stated figure in from the far end rather than the
+     near one, measured to the plate's near edge exactly as it is at either end. */
+  const land = { person: 'p', plate: 'P', ux: 1, uy: 0, nx: 0, ny: 1,
+    o: { x: 0, y: 0 }, alt: { x: 0, y: -20 }, stations: [], d0: 0, d1: 0 };
+  const A = plateSeatOn(vp, land, S, pw, ph, 0, vp, [], brand);
+  eq(A.warns.length, 0, 'a plate seated at the far end of a page with room on both '
+    + 'sides warns about it');
+  eq(A.seat.at, vp.x1 - step, 'the plate is not seated ' + page.PLATE_START_ALONG
+    + 'px in from the FINISH of its mark — a measured wordmark off the start of the '
+    + 'run is the whole of what CL#160 added, and this is the near-end seat again');
+  const a = seatXY(A.seat, land);
+  ok(Math.abs(a.x - brandC.x) > Math.abs((vp.x0 + step) - brandC.x),
+    'the plate landed nearer the wordmark in screen x than the other end of the '
+    + 'same mark would have — the end furthest from it is the end it is stamped at');
+  /* AND THE SAME MARK WITH NO WORDMARK MEASURED KEEPS THE OLD SEAT, so the two
+     branches are asserted against each other rather than one being described. */
+  eq(plateSeatOn(vp, land, S, pw, ph, 0, vp, []).seat.at, vp.x0 + step,
+    'an unmeasured wordmark no longer stands in for the near end, which is the one '
+    + 'frame of the page\'s life that has a viewport and no brand box');
+  /* PORTRAIT DOES NOT FLIP, and this is the half worth pinning. The run is +y, so
+     the mark's START already IS the top of the page and the wordmark at the bottom
+     is furthest from it: `away` is negative and the anchor stays where it was. A
+     rule written as "top in portrait" and a rule written as "furthest from the
+     brand" agree here, which is exactly why the mirror image of this is invisible
+     to anything measured along the run. */
+  const port = { person: 'p', plate: 'P', ux: 0, uy: 1, nx: 1, ny: 0,
+    o: { x: 0, y: 0 }, alt: { x: 20, y: 0 }, stations: [], d0: 0, d1: 0 };
+  const B = plateSeatOn(vp, port, S, pw, ph, 0, vp, [], brand);
+  eq(B.warns.length, 0, 'a portrait plate with room on both sides warns about it');
+  const b = seatXY(B.seat, port);
+  eq(b.y, vp.y0 + step, 'the portrait plate is not stamped ' + page.PLATE_START_ALONG
+    + 'px down from the TOP of the page, in screen y');
+  ok(b.y < (vp.y0 + vp.y1) / 2, 'the portrait plate is stamped in the bottom half of '
+    + 'the page, which is the corner the wordmark is pinned to — the anchor flipped '
+    + 'on an axis that never asked it to (#67)');
+  ok(Math.abs(b.y - brandC.y) > Math.abs((vp.y1 - step) - brandC.y),
+    'the portrait plate is nearer the wordmark than the other end of its own mark');
+  /* AND IT IS THE MEASURED BRAND THAT DECIDES, NOT THE ORIENTATION: move the same
+     wordmark to the TOP-left and the same portrait run must stamp at the bottom.
+     Nothing else in the call changes, so an implementation that read _axisRot, or
+     the sign of `uy`, or anything but the box, cannot pass both this and the one
+     above. */
+  const high = { x0: -95, y0: -95, x1: -55, y1: -78 };
+  const C = plateSeatOn(vp, port, S, pw, ph, 0, vp, [], high);
+  eq(seatXY(C.seat, port).y, vp.y1 - step,
+    'a wordmark measured at the top of the page does not move the plate to the '
+    + 'bottom of the same mark — the end is being chosen by the orientation rather '
+    + 'than by where the brand actually is');
+  /* THE INTERACTION (CL#152 at the far anchor): a far-end seat that is also
+     crowded must still SLIDE. The clearance search and the anchor choice are
+     independent, and a search that only ever ran from the near end would leave the
+     far-end plate sitting on the metal -- which is the failure #88 was, arriving
+     at the other end of the mark.
+
+     A wheel on the far-end seat point of EACH side, so neither side is clean where
+     it wants to sit and both must slide the same distance: the natural side then
+     keeps the seat on the strict tie, exactly as it does at the near anchor, and
+     what is being measured is the slide rather than the choice of side. */
+  const want = vp.x1 - step;
+  const both = [{ x: want, y: 0, r: 5 }, { x: want, y: -20, r: 5 }];
+  const D = plateSeatOn(vp, land, S, pw, ph, 0, vp, both, brand);
+  eq(D.seat.clean, true, 'a far-end plate with clear page either side of the metal '
+    + 'reports itself crowded — the interval search does not run at this anchor');
+  eq(D.warns.length, 0, 'a far-end plate that found a clean seat warns about it');
+  ok(D.seat.at !== want, 'the far-end plate stayed on top of the wheel sitting at '
+    + 'its seat point, so CL#152\'s search runs at one anchor only');
+  const d = seatXY(D.seat, land);
+  ok(Math.abs(d.x - (vp.x1 - step)) < Math.abs(d.x - (vp.x0 + step)),
+    'a crowded far-end plate slid all the way back to the near end of its mark '
+    + 'instead of stepping clear of the metal — the slide is a nudge, not a '
+    + 'change of anchor');
+  /* AND THE SAME CROWDING AT THE NEAR ANCHOR STILL SLIDES, which is what makes the
+     claim "at either anchor" rather than "at the far one too". */
+  const near = vp.x0 + step;
+  const E = plateSeatOn(vp, land, S, pw, ph, 0, vp,
+    [{ x: near, y: 0, r: 5 }, { x: near, y: -20, r: 5 }]);
+  eq(E.seat.clean, true, 'a near-end plate with clear page either side of the metal '
+    + 'reports itself crowded');
+  ok(E.seat.at !== near, 'the near-end plate no longer slides off the metal at all');
 });
 
 test('the datum plate defaults to the person name, untransformed', () => {

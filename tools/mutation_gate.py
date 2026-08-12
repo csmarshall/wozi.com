@@ -197,6 +197,24 @@ MUTANTS = [
                "baked back into an anchor.",
     },
     {
+        "id": "plate-anchor-by-orientation",
+        "gate": "suite",
+        "file": "index.html",
+        "find": "      if (away > 0) anchor = -1;",
+        "repl": "      if (Math.abs(r.ux) > Math.abs(r.uy)) anchor = -1;",
+        "expect": "caught",
+        "why": "THE #67 MIRROR IMAGE, at the datum plate (GitHub #131 / #138). CL#160 "
+               "chooses which END of the mark the plate is stamped at by a screen-space "
+               "dot product against the measured wordmark; this replaces that with the "
+               "handedness it is often mistaken for — 'the far end in landscape, the near "
+               "end in portrait' — which produces exactly the same seat on the shipped "
+               "composition and is a legal mirror image everywhere else. It passes every "
+               "measurement taken along the run, which is why the suite's assertion is in "
+               "screen x/y and why moving the wordmark to the other corner is the case "
+               "that catches it. Before GitHub #138 no plate test supplied a brand box at "
+               "all, so this mutant scored 119/0 and exited 0.",
+    },
+    {
         "id": "ssh-key-off-the-whitelist",
         "gate": "suite",
         "file": ".github/workflows/deploy.yml",

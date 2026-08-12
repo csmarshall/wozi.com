@@ -289,6 +289,91 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#167 — the plate's far-end anchor is now covered by the suite, and the mirror
+  image is a registry mutant.** (GitHub #138, closes it.)
+
+  CL#160 made `plateSeat()` choose which END of the datum mark to stamp the label
+  at, by measuring the wordmark and taking the end furthest from it. **Every
+  existing plate test ran without a `_brandBox`**, so they all took the fallback
+  branch — the behaviour that shipped *before* CL#160 — including CL#152's
+  mutation-tested *"a plate gives way to the metal"*. The far-end path was covered
+  by measurement and by `pixel_regress`, and by nothing that would fail.
+
+  One test, six claims, and **no new extraction anchors** — `plateSeatOn` gained a
+  ninth parameter set as `_brandBox` on the fabricated ctx, the same
+  dependency-injection move `_vpBox` already uses, so the six pre-existing callers
+  keep testing the near end and not one existing assertion was edited. #113's
+  region map and CL#165 both argue against adding anchors and neither was
+  contradicted.
+
+  **The claim that earns its place is the fourth: the brand decides, not the
+  orientation.** The same portrait run with the wordmark moved to the *top*-left
+  must stamp at the bottom. A "far end in landscape, near end in portrait" hardcode
+  passes every other claim — it is the #67 mirror image, legal geometry that no
+  measurement taken along the axis can distinguish — and only that assertion kills
+  it. It is now the registry mutant **`plate-anchor-by-orientation`**, recorded with
+  the fact that it scored 119/0 and exit 0 before this test existed.
+
+  Three mutants, each verified to fail and then restored: forcing the near end
+  always, the axis-terms handedness above, and **searching only at the near
+  anchor** — the last being invisible to CL#152's own test, which is precisely the
+  gap this ticket named.
+
+  `npm test` **120/0**. Full sweep 13/13 caught, 1/1 tolerated, 5/5 controls green.
+  Verified independently by breaking the anchor gate here and watching the new test
+  go red, then restoring to byte-identity. Also cross-checked against CL#166, which
+  landed mid-flight: that changes the label's CROSS-axis side, not `plateSeat`'s
+  along-axis anchor, and the suite is 120/0 against it.
+
+- **CL#168 — three more harnesses pin the webfont, and `pill_clip` was carrying the
+  fault live.** (GitHub #140, closes it.)
+
+  CL#162/#163 fixed `pixel_regress`. `tools/fontpin.py` now lifts that mechanism
+  out — behaviour verbatim, not re-derived — and `pill_clip`, `devices`,
+  `dom_invariants` and `pixel_regress` all share it.
+
+  **`pill_clip` was the worst exposed, and it is the fault class exactly**: same
+  page, same run, only the font's reachability changed — worst overrun **−0.58px
+  with Manrope against −1.45px without**, i.e. 0.87px of swing against a **+0.05px
+  tolerance** and 0.58px of real clearance. Neither regime trips the gate today,
+  which is what made it dangerous: **a regression eating 0.6px is caught in one
+  regime and passed in the other**, and the only hint in the output was a `face`
+  column nobody diffed.
+
+  **`devices` measured exposure of exactly zero** — all 28 rows byte-identical with
+  both font hosts blackholed — and is pinned as insurance on 28 races and because it
+  overrides the UA per profile, where Google legitimately serves different CSS to
+  different engines. Said plainly rather than dressed up as a fix.
+  **`dom_invariants` is exposed only in a diagnostic**: `shortest 'harper'` moves
+  21.7 → 23.5px, no assertion depends on it, and it is pinned so a human diffing
+  two same-seed runs is not shown a line moving with nothing changed.
+
+  **Two real harness bugs surfaced, both hidden by the sleeps it removed.**
+  `pill_clip` read hover coordinates before layout settled, so one of eight pills
+  came back 0px wide — which reads as #46's "feature broken" rather than as a
+  harness fault. And `devices`' safe-area pass could poll the **outgoing** document
+  as ready, measuring at 1x with the panel shut; it now discriminates by a marker
+  on the doomed document instead of a guessed 0.4s.
+
+  `attach()` replaced the loop-until-my-id CDP helper all three carried, which
+  discarded unsolicited `Fetch.requestPaused` and deadlocks once a paused request
+  must be answered. And a plain `asyncio.sleep` in a render path *holds* the
+  stylesheet for its duration and lets it land afterwards — which is the late-font
+  regime itself, so the sleeps were not merely slow, they manufactured the bug.
+  `dom_invariants` went 4.7s → **1.2s** as a side effect.
+
+  Repeatability added in **one** place with a reason: `pill_clip` measures absolutes
+  so it cannot subtract two renders — it now navigates twice, matches by
+  aria-label, and exits **2** without a verdict if the two disagree by more than
+  0.01px. `devices` (28 profiles are already a spread) and `dom_invariants` (exact
+  integers, zero-tolerance residuals, both wobble sources now conditions) were
+  deliberately left alone.
+
+  `npm test` 119/0 at the time; `pill_clip` PASS x4, `devices` 24/24 + 4/4 x4,
+  `dom_invariants` PASS x6, `pixel_regress` 0px with control 0px and 0px on
+  `/fidget/`. Mutation sweep 10/10 caught with `pill-line-height` still caught at
+  +1.82px.
+
 - **CL#166 — the datum label sits opposite the ticks, referenced to its own ink, so
   the gap is the same for every chain.** (GitHub #139 follow-up.)
 
