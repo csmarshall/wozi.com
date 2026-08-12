@@ -81,19 +81,75 @@ x-dc template markup, and every naive approach eats live code:
     finds regions with `str.find('<style')` gets the wrong one.
 
 So the scanner is a real state machine, not a regex sweep, and where it cannot
-decide confidently it KEEPS the text. Every removal is then verified from the
-outside: the output's script bodies must still pass `node --check`, the load-
-bearing markers other gates match on must still be present, the CSS braces must
-still balance, and a second pass over the output must find nothing left to strip
-but this tool's own banner and its backlink markers.
+decide confidently it KEEPS the text.
 
-The markers are themselves comments, so they widen that last check by exactly
-their own shape and no further: a leftover is forgiven only if it matches
-`/*L<digits>*/` or the markup form of the same, every marker's line number must
-land inside the source's own line count, and the number of markers must equal the
-number of source LINES that carried a comment. That last one is the useful half —
-a strip that quietly ate a run of code would take the comments in it too, and the
-count is computed from the source, so it cannot agree with a mistake.
+WHAT VERIFICATION IS WORTH, AND WHAT IT WAS WORTH BEFORE (GitHub #161). Every
+removal is verified from the outside, but "outside" used to mean "the same
+tokenizer, run again". `comment_spans()` made the cut, and the idempotence check,
+the marker tally and the leftover exemption all asked `comment_spans()` whether
+anything was left — so a MISPARSE PASSED ITS OWN VERIFICATION. That is not a
+theoretical hole; it was measured. `a++ / 2; // note` read the `/` as the start of
+a regex, because the scanner's idea of the preceding token was one character (`+`)
+and `+` is a position where an expression may begin. The scan then ran forward to
+the `/` of the `//`, the comment was never located, it SURVIVED into the published
+file, and `verify()` returned clean.
+
+And the fault was not confined to keeping text, which is what made it worth
+fixing rather than noting. A `/` mistaken for a regex opener leaves the cursor
+wherever that phantom literal happened to end, which can be the middle of a
+string — and the scanner then reads the REST OF THAT STRING as code. Measured:
+`let s = 'x /y/ /* z */ w';` after a `i++ /` misparse had `/* z */` cut out of the
+string's own contents, and the result still parsed, so `node --check` was content
+and only a pixel could have told. Postfix `++`/`--` are now values, so that
+particular door is shut, but the general shape stands: a misparse can eat.
+
+So there are now three checks that do NOT ask the tokenizer anything, and they
+are the ones the guarantee rests on:
+
+  - THE DELIVERED STYLESHEET MUST CONTAIN NO COMMENT. CSS is the half with no
+    parser behind it — `node --check` reads JavaScript, and `brace_balance` is a
+    whole-document NET count, so a declaration eaten out of `:focus-visible` or
+    `@media (prefers-reduced-motion)` used to pass everything (those are states no
+    screenshot photographs). After a correct strip a `<style>` body holds no `/*`
+    at all outside a quoted string, which is absolute rather than differential and
+    needs no opinion about what a comment is. Measured on both published files:
+    zero.
+  - THE DELIVERED STYLESHEET'S STRUCTURE MUST BE UNCHANGED. Its ordered census of
+    at-rules, selectors and declaration PROPERTY NAMES must match the source's,
+    per `<style>` block — which is what notices an eaten declaration inside a rule
+    that only applies in a state nothing renders.
+  - A SURVIVING JS COMMENT IS DETECTED BY NODE, NOT BY US. Every `//` or `/*` left
+    in a script body that is not one of this tool's markers is perturbed in a way
+    that is inert inside a comment and fatal anywhere else — deleted to end of
+    line, or given a `${'` that only a comment can swallow — and `node --check`
+    passes judgement. A candidate whose perturbation still parses BEHAVES like a
+    comment, whatever this file's tokenizer believes. Ten hand-built cases pin it,
+    including `//` inside a multi-line template literal, which is the one a naive
+    delete-to-end-of-line probe gets wrong.
+
+Alongside those, and still worth having: the output's script bodies must pass
+`node --check`; the load-bearing markers other gates match on must still be
+present, PER FILE (they used to be `index.html`'s strings applied to both pages,
+which made them vacuous for `fidget/index.html` — a file with no declared anchors
+is now a verification failure, not a silent pass); the CSS braces must balance;
+the artifact must differ from the source ONLY at the located comment sites, with
+whitespace discounted; and a second pass must find nothing left to strip but this
+tool's own banner and its backlink markers.
+
+That last one is still the same tokenizer asking itself, which is why it is listed
+last and no longer stands alone. The markers are themselves comments, so it is
+widened by exactly their own shape and no further: a leftover is forgiven only if
+it matches `/*L<digits>*/` or the markup form of the same, every marker's line
+number must land inside the source's own line count, and the number of markers
+must equal the number of source LINES that carried a comment.
+
+WHAT IS STILL ONLY COVERED BY A PICTURE. A span that is well-formed but in the
+WRONG PLACE — a `/*` inside a string, taken for a comment — removes text that
+looks exactly like a comment, so no lexical check here can object. The JS half of
+that is caught by `node --check` when it breaks the parse and by
+`tools/pixel_regress.py --ref HEAD` when it does not; `tools/mutation_gate.py
+--only stripper-ate-a-line` is the standing proof that the pixel gate does catch
+it. Do not read the checks above as making the pixel gate optional.
 
     tools/strip_comments.py                 # strip, verify, write to scratchpad/
     tools/strip_comments.py --check         # strip and verify, write NOTHING (CI)
@@ -106,6 +162,7 @@ Exit codes: 0 ok, 1 verification failed, 2 usage or I/O, 3 selftest failed.
 """
 from __future__ import annotations
 
+import functools
 import gzip
 import os
 import re
@@ -125,18 +182,38 @@ DEFAULT_IN = os.path.join(REPO_ROOT, "index.html")
 # and cannot reach the bucket -- the deploy is a whitelist of named paths.
 DEFAULT_OUT = os.path.join(REPO_ROOT, "scratchpad", "index.stripped.html")
 
-# Markers other gates match on by literal text. Stripping is only allowed to
-# remove commentary, so every one of these must survive verbatim. `data-props`
-# carries the shipped layer defaults AND the editor schema; the aria-label is
-# what tools/devices.py finds the speed slider by; the three identifiers are
-# named in CLAUDE.md's invariants, so a strip that ate one has eaten code.
-REQUIRED_MARKERS = (
-    'data-props=',
-    'aria-label="Gear speed"',
-    'MIN_CUT_PX',
-    'SPINDOWN_RANGE_MS',
-    'GHOST_COLORS',
-)
+# Markers other gates match on by literal text, KEYED BY THE FILE THEY BELONG TO
+# (GitHub #161). Stripping is only allowed to remove commentary, so every one of
+# these must survive verbatim. They were one flat tuple of `index.html` strings
+# checked against whatever file was being stripped, and `if marker in src and
+# marker not in out` is vacuously true when the marker is in neither — so the
+# second published page, `fidget/index.html`, had no anchor protection at all
+# while appearing to have five.
+#
+# index.html: `data-props` carries the shipped layer defaults AND the editor
+# schema; the aria-label is what tools/devices.py finds the speed slider by; the
+# three identifiers are named in CLAUDE.md's invariants.
+# fidget/index.html: `setInterval(draw, 250)` is matched by name in both
+# tools/fontpin.py and tools/pixel_regress.py, `planetary` is what the deploy's
+# post-publish smoke check greps the live page for, and the rest are the ids and
+# constants the page cannot draw without.
+REQUIRED_MARKERS = {
+    "index.html": (
+        'data-props=',
+        'aria-label="Gear speed"',
+        'MIN_CUT_PX',
+        'SPINDOWN_RANGE_MS',
+        'GHOST_COLORS',
+    ),
+    "fidget/index.html": (
+        'setInterval(draw, 250)',
+        'planetary',
+        'id="train"',
+        'aria-label="Switch theme"',
+        'GROUNDINGS',
+        'REF_SPEED',
+    ),
+}
 
 BANNER_MARK = "wozi.com -- comments stripped for delivery"
 
@@ -155,8 +232,15 @@ RAW_TEXT_TAG = re.compile(r"<(script|style)\b", re.I)
 
 # A `/` opens a regex literal only in expression position. These are the tokens
 # after which an expression may begin; anything else (identifier, number, `)`,
-# `]`, `}`, string) is a value, so the `/` is division.
-REGEX_OK_PUNCT = set("(,=:[!&|?{};+-*%~^<>")
+# `]`, `}`, `++`, `--`, string) is a value, so the `/` is division.
+#
+# `}` USED TO BE IN HERE and the docstring below already claimed it was not
+# (GitHub #161). It is genuinely ambiguous -- it ends a block, after which a regex
+# may begin, and it ends an object literal, after which it may not -- so it is
+# answered "division" with the rest of the values, which is the direction that
+# cannot delete anything. Neither published file has a `/` after a `}` at all, so
+# the change moves no byte of either artifact; it removes a guess that could have.
+REGEX_OK_PUNCT = set("(,=:[!&|?{;+-*%~^<>")
 REGEX_OK_WORDS = {
     "return", "typeof", "instanceof", "in", "of", "new", "delete", "void",
     "do", "else", "case", "yield", "await", "throw",
@@ -305,6 +389,18 @@ def _js_spans(text: str, lo: int, hi: int) -> Iterator[Span]:
             i = j
             continue
 
+        # `++` and `--` have to be ONE token, not two of whatever their last
+        # character is (GitHub #161). A postfix increment leaves a VALUE, so the
+        # `/` after it is division -- but with `prev` holding a bare `+`, which is
+        # a position where an expression may begin, `a++ / 2; // note` had its `/`
+        # read as a regex opener and the comment after it was never found. This is
+        # not one of the ambiguous cases: `++` can only ever be followed by an
+        # operator, so answering "division" is correct rather than merely safe.
+        if c in "+-" and i + 1 < hi and text[i + 1] == c:
+            prev = c + c
+            i += 2
+            continue
+
         prev = c
         i += 1
 
@@ -355,8 +451,26 @@ def _regex_position(prev: str) -> bool:
     """True when a `/` here can only be the start of a regex literal.
 
     `)` and `}` are the genuinely ambiguous ones (`if (a) /re/.test(b)` against
-    `f(x) / 2`) and both are answered "division": that decision removes nothing,
-    so it can only ever leave a comment in place, never delete code.
+    `f(x) / 2`) and both are answered "division", because that is the direction
+    that cannot delete: a `/` treated as division advances the cursor one
+    character, so the worst it can do is leave a comment standing.
+
+    "Removes nothing" is what this used to claim and it was too strong (GitHub
+    #161). Division only removes nothing HERE; the cursor carries on, and whatever
+    the wrong answer resynchronises onto is read as code. `if (a) /x/*y/.test(s)`
+    is the demonstration -- with `)` answered division, the `/*` two characters
+    later is a block comment and the strip eats forward to the next `*/`, which in
+    a real file is hundreds of lines. `node --check` caught that one. The honest
+    statement is that division is the SAFER guess, not a safe one, and that the
+    checks in `verify()` which do not consult this function are what the guarantee
+    actually rests on.
+
+    Both published files were measured under both answers for the ambiguous
+    tokens: `index.html` strips to the identical byte either way, and
+    `fidget/index.html` has two sites (`(now - last) / 1000` and `(S.rate + v) / 2`,
+    each followed by a block comment) where answering "regex" would swallow the
+    comment opener and keep the comment. So the shipped answer is also the correct
+    one there, and it is load-bearing rather than incidental.
     """
     if prev == "":
         return True
@@ -661,25 +775,109 @@ def inject_banner(html: str, url: Optional[str], **kw) -> str:
 def without_banner(out: str) -> str:
     """The output with this tool's own banner cut out, for the checks that count
     markers: the banner explains the convention BY SHOWING ONE, so a naive count
-    over the whole file is always one too many."""
-    for sp in comment_spans(out):
-        if BANNER_MARK in out[sp.start:sp.end]:
-            return out[:sp.start] + out[sp.end:]
-    return out
+    over the whole file is always one too many.
+
+    Found by PLAIN SEARCH rather than by `comment_spans()` (GitHub #161). This
+    feeds the checks whose whole purpose is to not depend on the tokenizer, and a
+    tokenizer confused enough to have mislaid the banner would then have handed
+    them the banner's own example marker to reason about. The banner is this
+    tool's own output, it is the first comment in the file, and `--selftest`
+    asserts it contains exactly one `-->`, so `<!--` before the mark and the first
+    `-->` after it is the whole of it.
+    """
+    at = out.find(BANNER_MARK)
+    if at < 0:
+        return out
+    start = out.rfind("<!--", 0, at)
+    end = out.find("-->", at)
+    if start < 0 or end < 0:
+        return out
+    return out[:start] + out[end + 3:]
+
+
+def raw_text_bodies(html: str, tag: str) -> List[str]:
+    """The bodies of every real `<script>` or `<style>` element, in document order.
+
+    WALKED AS A DOCUMENT, not swept for with a regex (GitHub #161). This is the
+    same trap the module docstring names for `comment_spans()` and it was live
+    here: `re.finditer(r'<script\\b')` counts the word wherever it appears,
+    including inside a comment discussing it, and `fidget/index.html` line 75 says
+    "The <style> block below carries..." in exactly such a comment. So the source
+    measured two stylesheets and the stripped artifact one, and the pair of them
+    disagreeing is a genuine finding about the extractor rather than about the
+    strip. index.html was passing by luck: its three `<script` are three real tags.
+
+    HTML comments are skipped, tags are stepped over with quoted attribute values
+    honoured, and a raw-text element is left at its real close tag -- so a `<style`
+    inside a script's own string is never seen, because the walk is already past it.
+    An element with no body (`<script src=...>`) contributes nothing.
+    """
+    want = tag.lower()
+    bodies: List[str] = []
+    i, n = 0, len(html)
+    while i < n:
+        if html[i] != "<":
+            i += 1
+            continue
+        if html.startswith("<!--", i):
+            end = html.find("-->", i + 4)
+            i = n if end < 0 else end + 3
+            continue
+        m = RAW_TEXT_TAG.match(html, i)
+        if not m:
+            i = _skip_tag(html, i)
+            continue
+        # A raw-text element of EITHER kind is left at its own close tag, whichever
+        # one it is: the walk has to step over a <script> whole even when it is
+        # looking for stylesheets, or a `<style` in the script's own text is next.
+        found = m.group(1).lower()
+        body = _skip_tag(html, i)
+        close = re.compile(r"</" + found + r"\s*>", re.I).search(html, body)
+        if close is None:
+            i = n
+            continue
+        if found == want and html[body:close.start()].strip():
+            bodies.append(html[body:close.start()])
+        i = close.end()
+    return bodies
 
 
 def script_bodies(html: str) -> List[str]:
     """Inline script bodies only -- `<script src=...>` has no body to check."""
-    bodies = []
-    for m in re.finditer(r"<script\b", html, re.I):
-        body = _skip_tag(html, m.start())
-        close = re.compile(r"</script\s*>", re.I).search(html, body)
-        if close is None:
-            continue
-        text = html[body:close.start()]
-        if text.strip():
-            bodies.append(text)
-    return bodies
+    return raw_text_bodies(html, "script")
+
+
+NO_NODE = ("node is not on PATH -- the output cannot be verified, "
+           "and an unverified strip must not be published")
+
+
+@functools.lru_cache(maxsize=None)
+def _node_parses(body: str) -> Tuple[Optional[bool], str]:
+    """Does `node --check` accept this text? `(None, why)` if node could not say.
+
+    Split out of `node_check()` because the surviving-comment probe below asks the
+    same question dozens of times about perturbed copies of the same body, and the
+    two must agree about what "parses" means or the probe's verdict is measured
+    against a different oracle from the one that gates the file.
+
+    Memoised because it is a pure function of the text and the selftest verifies
+    several artifacts that share a script body byte for byte -- the banner goes in
+    the head, so `strip()`'s output and `inject_banner()`'s are the same JavaScript
+    and were being parsed twice over.
+    """
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as fh:
+        fh.write(body)
+        path = fh.name
+    try:
+        r = subprocess.run(["node", "--check", path],
+                           capture_output=True, text=True, timeout=120)
+        return r.returncode == 0, (r.stderr.strip() or r.stdout.strip())
+    except FileNotFoundError:
+        return None, NO_NODE
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, f"node --check failed to run: {exc}"
+    finally:
+        os.unlink(path)
 
 
 def node_check(bodies: List[str]) -> List[str]:
@@ -691,32 +889,296 @@ def node_check(bodies: List[str]) -> List[str]:
     """
     fails: List[str] = []
     for n, body in enumerate(bodies):
-        with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as fh:
-            fh.write(body)
-            path = fh.name
-        try:
-            r = subprocess.run(["node", "--check", path],
-                               capture_output=True, text=True, timeout=120)
-            if r.returncode != 0:
-                fails.append(f"script body #{n + 1} does not parse:\n"
-                             + (r.stderr.strip() or r.stdout.strip()))
-        except FileNotFoundError:
-            fails.append("node is not on PATH -- the output cannot be verified, "
-                         "and an unverified strip must not be published")
+        ok, why = _node_parses(body)
+        if ok is None:
+            fails.append(why)
             break
-        except (OSError, subprocess.SubprocessError) as exc:
-            fails.append(f"node --check failed to run: {exc}")
-            break
-        finally:
-            os.unlink(path)
+        if not ok:
+            fails.append(f"script body #{n + 1} does not parse:\n{why}")
+    return fails
+
+
+# A perturbation that a comment can swallow and nothing else can. `${'` is an
+# unterminated string inside a template substitution and a stray quote inside an
+# ordinary string; the newline is illegal inside every JS literal except a
+# template. Inside a comment both are just characters.
+PROBE_TAIL = "${'"
+
+
+def _comment_candidates(body: str) -> Iterator[Tuple[int, str]]:
+    """Every `//` or `/*` in a stripped script body that is not one of ours.
+
+    The markers are blanked to spaces rather than deleted so the offsets still
+    address `body` itself -- the probe has to perturb the real text, not a copy
+    with different coordinates.
+    """
+    blanked = BACKLINK_ONE.sub(lambda m: " " * len(m.group(0)), body)
+    for m in re.finditer(r"//|/\*", blanked):
+        yield m.start(), m.group(0)
+
+
+def js_leftovers(bodies: List[str]) -> List[str]:
+    """Surviving JS comments, decided by NODE rather than by our own tokenizer.
+
+    This is the check the idempotence pass could not be (GitHub #161). Asking
+    `comment_spans()` whether anything is left is asking the tokenizer to review
+    its own work, and the misparse that keeps a comment keeps it from both passes
+    identically. So each candidate is perturbed instead, in a way that is inert
+    inside a comment and fatal inside a string, a template literal or a regex:
+
+      - `//` is deleted to end of line, AND given a `PROBE_TAIL`. Both must still
+        parse. Two perturbations rather than one because either alone has a class
+        it gets wrong -- deletion is survivable inside a multi-line template, and
+        the tail is survivable inside a single-quoted string on the odd occasion.
+      - `/*` is given a newline and a `PROBE_TAIL`. The newline alone would be
+        enough for quoted strings and regexes; the tail is what refuses a template
+        literal, which may legally contain the newline.
+
+    A candidate that still parses under all of its perturbations BEHAVES like a
+    comment, and the delivered file is not allowed to contain one. Ten cases pin
+    the classifier in `--selftest`, five that are comments and five that are not.
+
+    Cost is one `node --check` per candidate in the ordinary case, because the
+    first perturbation fails immediately for anything inside a literal. Both
+    published files measure 1 candidate between them -- `'http://www.w3.org/2000/svg'`
+    in /fidget/ -- so this is a couple of node invocations, not a sweep.
+    """
+    fails: List[str] = []
+    for n, body in enumerate(bodies):
+        for at, tok in _comment_candidates(body):
+            if tok == "//":
+                eol = body.find("\n", at)
+                eol = len(body) if eol < 0 else eol
+                probes = [body[:at] + body[eol:],
+                          body[:at + 2] + PROBE_TAIL + body[at + 2:]]
+            else:
+                probes = [body[:at + 2] + "\n" + PROBE_TAIL + body[at + 2:]]
+
+            for probe in probes:
+                ok, why = _node_parses(probe)
+                if ok is None:
+                    return fails + [why]
+                if not ok:
+                    break
+            else:
+                ctx = body[max(0, at - 50):at + 40].replace("\n", " ")
+                fails.append(f"script body #{n + 1}: {tok!r} at offset {at} behaves "
+                             f"like a JavaScript comment and survived the strip -- "
+                             f"...{ctx}...")
     return fails
 
 
 def brace_balance(text: str) -> int:
     """Net `{` minus `}` across the whole document. A crude figure, but it is
     the same crude figure before and after, and a stripper that ate into a CSS
-    rule or a JS block moves it."""
+    rule or a JS block moves it.
+
+    Crude in one specific way that matters, which is why the CSS census below
+    exists: it is a NET count over the WHOLE document, so an eaten `{` and an
+    eaten `}` cancel, and a declaration eaten from inside a rule moves it not at
+    all.
+    """
     return text.count("{") - text.count("}")
+
+
+def style_bodies(html: str) -> List[str]:
+    """Inline stylesheet bodies, the same way `script_bodies()` does scripts."""
+    return raw_text_bodies(html, "style")
+
+
+def _css_strings_blanked(body: str) -> str:
+    """`body` with the CONTENTS of every quoted string replaced by spaces.
+
+    Offsets are preserved so a finding can still be reported against the real
+    text. CSS strings cannot span a newline and have no sibling construct that
+    quotes -- no regex literals, no template literals -- so this is the whole of
+    what has to be excluded before a `/*` in a stylesheet means what it says.
+    """
+    out = list(body)
+    i, n = 0, len(body)
+    while i < n:
+        c = body[i]
+        if c in "\"'":
+            j = i + 1
+            while j < n and body[j] != c and body[j] != "\n":
+                if body[j] == "\\":
+                    out[j] = " "
+                    j += 1
+                    if j < n:
+                        out[j] = " "
+                        j += 1
+                    continue
+                out[j] = " "
+                j += 1
+            i = j + 1
+            continue
+        i += 1
+    return "".join(out)
+
+
+def css_leftovers(out: str) -> List[str]:
+    """Any comment surviving in a delivered stylesheet. Asks nothing of anybody.
+
+    THIS IS THE ONE ABSOLUTE CHECK IN THE FILE (GitHub #161), and CSS is the only
+    language here that admits one. After a correct strip a `<style>` body contains
+    no `/*` and no `*/` at all, outside a quoted string and outside this tool's own
+    markers -- measured as exactly zero in both published files. So there is
+    nothing to compare against the source and nothing to ask the tokenizer: a
+    delimiter is either there or it is not.
+
+    That is worth more here than anywhere else, because CSS has no `node --check`
+    behind it and the pixel gate only photographs states that render. A rule that
+    applies on `:focus-visible`, or inside `@media (prefers-reduced-motion)`, is
+    invisible to every other gate on the deploy path.
+    """
+    fails: List[str] = []
+    for n, body in enumerate(style_bodies(out)):
+        blanked = _css_strings_blanked(BACKLINK_ONE.sub(
+            lambda m: " " * len(m.group(0)), body))
+        for m in re.finditer(r"/\*|\*/", blanked):
+            ctx = body[max(0, m.start() - 50):m.start() + 40].replace("\n", " ")
+            fails.append(f"a comment survived into the delivered stylesheet: "
+                         f"{m.group(0)!r} in style block #{n + 1} at offset "
+                         f"{m.start()} -- ...{ctx}...")
+    return fails
+
+
+def css_structure(body: str, collapse: bool = False) -> List[str]:
+    """An ordered census of one stylesheet: at-rules, selectors, property names.
+
+    WHAT IT IS FOR. `brace_balance` is a net count and `node --check` does not read
+    CSS, so until this existed a strip that ate a declaration out of a rule passed
+    every check on the deploy path (GitHub #161). The census is per-block and
+    ordered, so an eaten declaration, an eaten selector, a lost brace or a
+    reordering all move it, whether or not the rule is one anything ever renders.
+
+    WHAT IT DOES NOT TRUST. It lexes CSS itself rather than reusing
+    `_css_spans()`, and it reaches the stylesheet through `style_bodies()` rather
+    than through `comment_spans()`' document walk -- so a runaway span from the JS
+    side, a misidentified `<style>` tag, or damage from `apply_spans()`' line
+    tidying all show up as a census that stopped matching. What it cannot be
+    independent of is the belief that `/*` opens a comment in CSS, and it does not
+    need to be: CSS has no regex literal and no template literal, so that is a fact
+    rather than a decision. All the tool's real fragility is on the JS side.
+
+    `collapse` removes whitespace inside selectors as well, for the `--no-markers`
+    path, where a block comment welded between two tokens becomes a space instead
+    of a marker. Property names always have their whitespace removed -- a property
+    name cannot contain any.
+    """
+    toks: List[str] = []
+    buf: List[str] = []
+    i, n = 0, len(body)
+
+    def prelude() -> str:
+        text = "".join(buf)
+        return re.sub(r"\s+", "" if collapse else " ", text).strip()
+
+    def flush() -> None:
+        text = prelude()
+        if not text:
+            return
+        # A `:` makes it a declaration and everything before the FIRST one is the
+        # property. `background:url(https://x)` has three colons and one property.
+        if ":" in text:
+            toks.append("decl " + re.sub(r"\s+", "", text.split(":", 1)[0]))
+        else:
+            toks.append("at " + text)
+
+    while i < n:
+        c = body[i]
+        if body.startswith("/*", i):
+            end = body.find("*/", i + 2)
+            i = n if end < 0 else end + 2
+            buf.append(" ")
+            continue
+        if c in "\"'":
+            j = i + 1
+            while j < n and body[j] != c:
+                j += 2 if body[j] == "\\" else 1
+            buf.append(body[i:min(j + 1, n)])
+            i = j + 1
+            continue
+        if c == "{":
+            toks.append("{ " + prelude())
+            buf = []
+            i += 1
+            continue
+        if c == "}":
+            flush()
+            buf = []
+            toks.append("}")
+            i += 1
+            continue
+        if c == ";":
+            flush()
+            buf = []
+            i += 1
+            continue
+        buf.append(c)
+        i += 1
+    flush()
+    return toks
+
+
+def verify_css(src: str, out: str, markers: bool) -> List[str]:
+    """The stylesheet half of verification: no survivors, and no lost structure."""
+    fails: List[str] = list(css_leftovers(out))
+    src_blocks, out_blocks = style_bodies(src), style_bodies(out)
+    if len(src_blocks) != len(out_blocks):
+        fails.append(f"{len(src_blocks)} inline stylesheet(s) in source, "
+                     f"{len(out_blocks)} in output")
+        return fails
+    for n, (s, o) in enumerate(zip(src_blocks, out_blocks)):
+        want = css_structure(s, collapse=not markers)
+        got = css_structure(o, collapse=not markers)
+        if want == got:
+            continue
+        diff = next((k for k in range(min(len(want), len(got)))
+                     if want[k] != got[k]), min(len(want), len(got)))
+        was = want[diff] if diff < len(want) else "(end of stylesheet)"
+        now = got[diff] if diff < len(got) else "(end of stylesheet)"
+        fails.append(
+            f"the delivered stylesheet's structure differs from the source's in "
+            f"style block #{n + 1}: {len(want)} census entries became {len(got)}, "
+            f"first divergence at #{diff + 1}, {was!r} became {now!r}")
+    return fails
+
+
+def verify_delta(src: str, out: str) -> List[str]:
+    """The artifact must differ from the source ONLY where a comment was located.
+
+    Source with every located span excised, whitespace discounted, must be byte
+    equal to the artifact with the banner and the markers excised, whitespace
+    discounted. Whitespace has to be discounted because the cut deliberately drops
+    the lines it emptied and the indentation of the lines it left holding only a
+    marker.
+
+    BE PRECISE ABOUT WHAT THIS PROVES, because it is the check GitHub #161 asked
+    for and the ticket credited it with more than it can do. It does not audit what
+    was CALLED a comment -- a span in the wrong place removes bytes this check then
+    agrees were removable, so the measured `a++ / 2; // note` case passes it, as
+    does any other misparse. What it proves is that nothing ELSE moved: an
+    `apply_spans()` fault, a line-tidying fault that dropped a line with code on
+    it, a marker written over the byte next to it, or any future step that started
+    changing bytes away from a comment site.
+    """
+    keep: List[str] = []
+    pos = 0
+    for sp in comment_spans(src):
+        keep.append(src[pos:sp.start])
+        pos = sp.end
+    keep.append(src[pos:])
+    want = re.sub(r"\s+", "", "".join(keep))
+    got = re.sub(r"\s+", "", BACKLINK_ONE.sub("", without_banner(out)))
+    if want == got:
+        return []
+    at = next((k for k in range(min(len(want), len(got))) if want[k] != got[k]),
+              min(len(want), len(got)))
+    return [f"the output differs from the source outside every comment it removed: "
+            f"{len(want)} non-space bytes of code became {len(got)}, first "
+            f"divergence at {at} -- source has {want[at:at + 60]!r}, output has "
+            f"{got[at:at + 60]!r}"]
 
 
 def verify_backlinks(src: str, out: str, markers: bool) -> List[str]:
@@ -760,8 +1222,16 @@ def verify_backlinks(src: str, out: str, markers: bool) -> List[str]:
     return fails
 
 
-def verify(src: str, out: str, markers: bool = True) -> List[str]:
-    """Everything that must still be true of the output. Returns failures."""
+def verify(src: str, out: str, markers: bool = True,
+           rel: str = "index.html") -> List[str]:
+    """Everything that must still be true of the output. Returns failures.
+
+    `rel` is which published page this is, because the load-bearing anchors are
+    per-file (GitHub #161) and a page nobody has declared any for cannot be
+    verified at all. The default is `index.html` so that the selftest's fixture --
+    which carries that page's anchors on purpose -- and any ad-hoc call read
+    naturally; the deploy passes the real path for both of its files.
+    """
     fails: List[str] = []
     fails.extend(verify_backlinks(src, out, markers))
 
@@ -769,25 +1239,50 @@ def verify(src: str, out: str, markers: bool = True) -> List[str]:
     # commentary -- `SPINDOWN_RANGE_MS` appears seven times in the source and
     # twice in the code -- so a count that drops is the tool working. What must
     # never happen is one going to zero: that is a gate's anchor deleted.
-    for marker in REQUIRED_MARKERS:
-        if marker in src and marker not in out:
-            fails.append(f"marker {marker!r} is in the source and gone from the output")
+    #
+    # An undeclared file FAILS rather than passing with nothing checked. The old
+    # flat tuple was `index.html`'s strings, and `marker in src and marker not in
+    # out` is vacuously true for a file that never had them -- so /fidget/ was
+    # anchored by five conditions none of which could fire.
+    anchors = REQUIRED_MARKERS.get(rel)
+    if anchors is None:
+        fails.append(f"no required markers are declared for {rel!r}, so nothing "
+                     f"anchors its code -- add them to REQUIRED_MARKERS")
+    else:
+        for marker in anchors:
+            if marker in src and marker not in out:
+                fails.append(f"marker {marker!r} is in the source and gone from "
+                             f"the output")
+            elif marker not in src:
+                fails.append(f"required marker {marker!r} is not in {rel!r} at all, "
+                             f"so it anchors nothing -- REQUIRED_MARKERS is stale")
 
     if brace_balance(src) != brace_balance(out):
         fails.append(f"brace balance moved: {brace_balance(src)} -> "
                      f"{brace_balance(out)}; a comment cut into real syntax")
+
+    # The artifact may differ from the source only where a comment was located.
+    fails.extend(verify_delta(src, out))
 
     src_bodies, out_bodies = script_bodies(src), script_bodies(out)
     if len(src_bodies) != len(out_bodies):
         fails.append(f"{len(src_bodies)} inline script(s) in source, "
                      f"{len(out_bodies)} in output")
     fails.extend(node_check(out_bodies))
+    # ...and node, not this file's tokenizer, says whether a comment survived one.
+    fails.extend(js_leftovers(out_bodies))
+
+    # The stylesheet, which has no parser of its own on the deploy path.
+    fails.extend(verify_css(src, out, markers))
 
     # Idempotence: a second pass must find nothing but this tool's own banner and
     # its backlink markers. Anything else means the first pass left a comment it
-    # could not recognise, which is worth knowing even though leaving one is the
-    # safe direction. The marker exemption is by exact shape, so a real comment
-    # cannot slip through it.
+    # could not recognise. THIS IS THE CIRCULAR ONE -- the tokenizer reviewing its
+    # own work, which a misparse passes by construction because both passes make
+    # the same mistake (GitHub #161). It is kept because it costs nothing and it
+    # still catches a comment SHAPE the scanner does not know, and it is listed
+    # last because it is no longer what the guarantee rests on. The marker
+    # exemption is by exact shape, so a real comment cannot slip through it.
     leftovers = [sp for sp in comment_spans(out)
                  if BANNER_MARK not in out[sp.start:sp.end]
                  and not BACKLINK_ONE.fullmatch(out[sp.start:sp.end])]
@@ -829,11 +1324,15 @@ def sizes(text: str) -> Tuple[int, int, Optional[int]]:
 FIXTURE = r'''<!DOCTYPE html>
 <html>
 <head>
-<!-- an HTML comment, with Charles's apostrophe in it, that must go -->
+<!-- an HTML comment, with Charles's apostrophe in it, that must go, and which mentions the <style> and <script> blocks below without either being a tag -->
 <style>
 /* a CSS comment -- it's got an apostrophe too */
 a{background:url(https://wozi.com//double/slash.png);color:#fff}
 b:after{content:"/* not a comment */"}
+button:focus-visible{outline:2px solid #f00;outline-offset:2px}  /* a state no screenshot photographs */
+@media (prefers-reduced-motion:reduce){
+  .spin{animation:none;transition:none}   /* nor this one */
+}
 </style>
 </head>
 <body>
@@ -847,6 +1346,9 @@ const nested = `outer ${ inner('a // b') } tail`;
 const seedRe = /[?&]seed=([^&]*)/;
 const slashy = /a\/\*b/;
 const div = (10) / 2 / 1;
+let n = 7;
+const inc = n++ / 2;   // a postfix increment is division, so this must go
+const dec = n-- / 2;   /* and so is this one */
 /* a block comment
    spanning lines, with an apostrophe: it's gone */
 const MIN_CUT_PX = 3;          // keep the value, drop this
@@ -880,6 +1382,19 @@ MUST_SURVIVE = (
     "SPINDOWN_RANGE_MS = 4500",
     "GHOST_COLORS = ['#aaa']",
     "const two = 1;",
+    # The two GitHub #161 cases. A postfix increment leaves a value, so both of
+    # these are division and both trailing comments must be found -- with `prev`
+    # holding a bare `+` the `/` read as a regex opener, the scan ran forward to
+    # the comment's own `/`, and the comment was published.
+    "const inc = n++ / 2;",
+    "const dec = n-- / 2;",
+    # A rule that only applies while an element has focus, and one that only
+    # applies under a media query: states no screenshot on the deploy path
+    # photographs, which is why the CSS census counts them rather than trusting a
+    # picture to.
+    "button:focus-visible{outline:2px solid #f00;outline-offset:2px}",
+    "@media (prefers-reduced-motion:reduce)",
+    ".spin{animation:none;transition:none}",
 )
 
 MUST_GO = (
@@ -890,15 +1405,41 @@ MUST_GO = (
     "keep the value, drop this",
     "indented standalone note",
     "second on the same line",
+    "postfix increment is division",
+    "and so is this one",
+    "a state no screenshot photographs",
+    "nor this one",
+    "without either being a tag",
 )
 
 # Every marker the fixture must produce, in source order and by exact text. Not a
 # count: a count passes while the numbers are all one too high, which is the whole
-# failure this is here to catch. L4 is markup and takes the markup syntax; L29
+# failure this is here to catch. L4 is markup and takes the markup syntax; L36
 # carries TWO comments and gets ONE marker, because a line number said twice says
 # nothing twice.
-FIXTURE_BACKLINKS = ("<!--L4-->", "/*L6*/", "/*L14*/", "/*L22*/", "/*L24*/",
-                     "/*L28*/", "/*L29*/")
+FIXTURE_BACKLINKS = ("<!--L4-->", "/*L6*/", "/*L9*/", "/*L11*/", "/*L18*/",
+                     "/*L27*/", "/*L28*/", "/*L29*/", "/*L31*/", "/*L35*/",
+                     "/*L36*/")
+
+# Ten hand-built cases pinning the node probe that decides whether a `//` or `/*`
+# left in a delivered script body is a comment. Five are, five are not, and the
+# ones that earn their keep are the template literals: a `//` inside a MULTI-LINE
+# template survives being deleted to end of line, so the naive probe calls it a
+# comment. `PROBE_TAIL` is what refuses it.
+PROBE_CASES = (
+    ("a real line comment",       "const a = 1; // a real comment\nconst b = 2;\n", True),
+    ("a real block comment",      "const a = 1; /* real\nblock */\nconst b = 2;\n", True),
+    ("a standalone line comment", "// nothing but a comment\nconst a = 1;\n", True),
+    ("a trailing block comment",  "const a = 1; /* short */\n", True),
+    ("a commented-out line",      "const a = 1;\n// const b = 2;\n", True),
+    ("`//` in a single-quoted string", "const s = 'a // b';\nconst c = 1;\n", False),
+    ("`//` in a URL",             'const s = "http://x//y";\nconst c = 1;\n', False),
+    ("`//` in a multi-line template",
+     "const s = `a // b\nmore`;\nconst c = 1;\n", False),
+    ("`//` in a regex class",     "const r = /[//]/;\nconst c = 1;\n", False),
+    ("`/*` in a multi-line template",
+     "const s = `a /* c */ d\ntail`;\nconst c = 1;\n", False),
+)
 
 
 def selftest() -> None:
@@ -918,6 +1459,16 @@ def selftest() -> None:
     if "apostrophe" in out:
         fails.append("a comment containing an apostrophe was not removed")
 
+    # A raw-text element is found by WALKING the document, not by finding its name.
+    # The fixture's first comment discusses both blocks by name, which is what
+    # `re.finditer(r'<style\b')` counted as a second stylesheet in the source and
+    # not in the artifact -- a difference caused entirely by the extractor.
+    for kind, found in (("style", style_bodies), ("script", script_bodies)):
+        if len(found(FIXTURE)) != 1 or len(found(out)) != 1:
+            fails.append(f"<{kind}> is being found by name rather than by walking "
+                         f"the document: {len(found(FIXTURE))} in the source and "
+                         f"{len(found(out))} in the output, and there is one")
+
     fails.extend(verify(FIXTURE, out))
 
     # THE BACKLINKS, BY EXACT TEXT AND IN ORDER. The numbers are the whole value
@@ -929,7 +1480,7 @@ def selftest() -> None:
     if tuple(got) != FIXTURE_BACKLINKS:
         fails.append(f"backlinks are {got} and should be {list(FIXTURE_BACKLINKS)}")
     # An indent kept for a line with no code left on it is bytes paid for nothing.
-    if "\n/*L28*/\n" not in out:
+    if "\n/*L35*/\n" not in out:
         fails.append("a marker-only line kept the indentation of the comment it replaced")
     # The markup form is not interchangeable with the JS form: `/*L4*/` in the
     # document body is text on the page, and `<!--L6-->` inside <style> is not a
@@ -980,6 +1531,92 @@ def selftest() -> None:
                           at_commit=False)
     if "DIFFERED" not in dirty:
         fails.append("a build from a modified working copy does not say so")
+
+    # THE NODE PROBE'S OWN CLASSIFIER, both ways round. A probe that answers "yes"
+    # to everything would make the leftover check unusable and a probe that answers
+    # "no" to everything would make it vacuous, which is the shape of the fault
+    # GitHub #161 was about in the first place.
+    for name, body, is_comment in PROBE_CASES:
+        found = bool(js_leftovers([body]))
+        if found != is_comment:
+            fails.append(f"the surviving-comment probe says {name} is "
+                         f"{'a comment' if found else 'not a comment'}")
+
+    # EVERY CHECK ADDED FOR GitHub #161, SHOWN GOING RED. A check nobody has
+    # watched fail is not a check -- that is what `tools/mutation_gate.py` exists
+    # to say about the pixel gate, and it applies here. Each case mangles the
+    # VERIFIED artifact in one specific way and demands the failure that names it,
+    # by substring, so a mutation caught by some other check for some other reason
+    # does not count as proof.
+    def mangled(text: str, old: str, new: str) -> str:
+        if old not in text:
+            fails.append(f"the negative case for {old!r} no longer applies to the "
+                         f"fixture, so it is proving nothing")
+        return text.replace(old, new, 1)
+
+    negatives = (
+        # A comment left standing in the delivered stylesheet. Absolute: there is
+        # nothing to compare it against.
+        ("a surviving CSS comment",
+         mangled(stamped, ".spin{", "/* left behind */.spin{"),
+         "comment survived into the delivered stylesheet"),
+        # A comment left standing in the delivered script. Only node can say so.
+        ("a surviving JS comment",
+         mangled(stamped, "const two = 1;", "// left behind\nconst two = 1;"),
+         "behaves like a JavaScript comment"),
+        # One declaration eaten out of a rule that applies only while an element
+        # has focus. Braces still balance, the page still parses, and no screenshot
+        # on the deploy path renders the state.
+        ("a declaration eaten from :focus-visible",
+         mangled(stamped, ";outline-offset:2px", ""),
+         "the delivered stylesheet's structure differs"),
+        # ...and out of a media query nothing on the deploy path matches either.
+        ("a declaration eaten from prefers-reduced-motion",
+         mangled(stamped, ";transition:none", ""),
+         "the delivered stylesheet's structure differs"),
+        # A line of live code gone from the artifact with no comment near it. This
+        # is the case `verify_delta` is for, and the one shape of it the census and
+        # the probes cannot see.
+        ("a line of live code eaten",
+         mangled(stamped, "const GHOST_COLORS = ['#aaa'];", ""),
+         "differs from the source outside every comment"),
+    )
+    for name, bad, want in negatives:
+        got = verify(FIXTURE, bad)
+        if not any(want in f for f in got):
+            fails.append(f"a mangled artifact ({name}) was NOT rejected for the "
+                         f"reason it should have been: wanted {want!r}, got {got}")
+
+    # A page nobody has declared anchors for must not verify at all: the old flat
+    # tuple made five conditions that could never fire read as five that had passed.
+    if not any("no required markers are declared" in f
+               for f in verify(FIXTURE, stamped, rel="nobody/declared-this.html")):
+        fails.append("a file with no declared anchors verified anyway, so its code "
+                     "is unanchored and nothing says so")
+    # ...and a declared anchor that is not in the file anchors nothing.
+    for rel, anchors in REQUIRED_MARKERS.items():
+        path = os.path.join(REPO_ROOT, rel)
+        if not os.path.exists(path):
+            continue
+        text = open(path, encoding="utf-8").read()
+        for anchor in anchors:
+            if anchor not in text:
+                fails.append(f"REQUIRED_MARKERS names {anchor!r} for {rel}, which "
+                             f"does not contain it -- it anchors nothing")
+
+    # THE MEASURED MISPARSE FROM GitHub #161, END TO END. Both halves: the comment
+    # must be found, and the string next to a postfix increment must come through
+    # untouched -- that second one is how the fault deleted rather than merely kept,
+    # and it parsed afterwards, so nothing but a pixel would have objected.
+    ticket = ("<script>\nconst x = a++ / 2; // this comment was published\n"
+              "let s = 'x /y/ /* z */ w';\nlet k = 9;\n</script>\n")
+    ticket_out = strip(ticket)
+    if "this comment was published" in ticket_out:
+        fails.append("the GitHub #161 misparse is back: a `/` after a postfix "
+                     "increment reads as a regex opener and the comment survives")
+    if "'x /y/ /* z */ w'" not in ticket_out:
+        fails.append("the GitHub #161 misparse is back: a string after a postfix "
+                     "increment had its contents cut out")
 
     # An unterminated construct must not silently swallow the rest of the file.
     truncated = strip("<script>\nconst a = 1;\n/* never closed\n")
@@ -1078,7 +1715,7 @@ def main(argv: List[str]) -> int:
     bare = inject_banner(strip(src, False), url, rel=rel, sha=sha, markers=False,
                          at_commit=at_commit) if a.markers else None
 
-    fails = verify(src, stripped, a.markers)
+    fails = verify(src, stripped, a.markers, rel=rel)
     if len(stripped) >= len(src):
         fails.append(f"output is not smaller ({len(src)} -> {len(stripped)}) -- "
                      f"nothing was stripped, or the banner is all there is")
@@ -1096,6 +1733,19 @@ def main(argv: List[str]) -> int:
     print(f"  backlinks:        "
           + (f"{len(BACKLINK_ONE.findall(without_banner(stripped))):,}"
              if a.markers else "none (--no-markers)"))
+    # The checks that do not consult the tokenizer, with their subjects counted, so
+    # the claim below is a reading rather than a reassurance. A file whose census is
+    # empty, or whose probe had nothing to look at, has been verified by nothing --
+    # which is what /fidget/'s five inapplicable anchors amounted to (GitHub #161).
+    censused = sum(len(css_structure(b, collapse=not a.markers))
+                   for b in style_bodies(stripped))
+    probed = sum(1 for b in script_bodies(stripped) for _ in _comment_candidates(b))
+    print(f"  anchors:          {len(REQUIRED_MARKERS.get(rel, ())):,} declared "
+          f"for {rel}")
+    print(f"  css census:       {censused:,} entries over "
+          f"{len(style_bodies(stripped)):,} stylesheet(s)")
+    print(f"  node-probed:      {probed:,} comment opener(s) left in the script "
+          f"bodies, none of them a comment")
     print(f"  source:           {blob_url(url, rel, sha) or '(no origin remote found)'}")
     if at_commit is False:
         print("  NOTE: the input differs from that commit, so the line numbers "
@@ -1104,7 +1754,9 @@ def main(argv: List[str]) -> int:
     if fails:
         print("VERIFY FAILED:\n  - " + "\n  - ".join(fails), file=sys.stderr)
         return EXIT_VERIFY
-    print("  verified: script bodies parse, anchors intact, braces balanced, "
+    print("  verified: stylesheet holds no comment and no lost declaration, node "
+          "finds no surviving comment,\n            nothing moved outside a comment "
+          "site, script bodies parse, anchors intact,\n            braces balanced, "
           "every backlink names a real line")
 
     if a.check:

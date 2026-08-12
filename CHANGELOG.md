@@ -289,6 +289,87 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#187 — the stripper's self-check could not see a comment it had failed to find,
+  and it silently deleted from inside a string literal.** (GitHub #161.)
+
+  **The circularity was real and the ticket described it correctly**, but two of its
+  other claims were wrong and the corrections are the more useful half.
+
+  `comment_spans("<script>const x = a++ / 2; // note</script>")` returned **no spans**:
+  `++` was tokenized as two divisions, the `/` after it opened a phantom regex, and the
+  `//` was consumed inside it. The comment survived into the artifact and `verify()`
+  returned clean — because `verify()` derives its expectation from the same scan that
+  produced the output. A check that asks the scanner to grade its own homework.
+
+  **"It is deletion-safe" was false, and this is the fault that mattered.** A `/`
+  misread as a regex opener leaves the cursor wherever the phantom literal ended, and
+  the scanner reads on from there. Measured, old tokenizer:
+
+  ```
+  <script>let n = i++ / 2; let s = 'x /y/ /* z */ w';</script>
+    ->    <script>let n = i++ / 2; let s = 'x /y/  w';</script>
+  ```
+
+  It deleted `/* z */` **out of the middle of a string literal**, and the result still
+  parses — so `node --check` cannot see it and only the pixel gate can. That is the
+  stripper doing exactly what `mutation_gate --only stripper-ate-a-line` exists to
+  prove is catchable, except for real and in the shipped tool. A second case
+  (`if (a) /x/*y/`) ate to end of file, which `node --check` does catch. The
+  docstring's claim was wrong in both directions and is rewritten.
+
+  **The ticket's own proposed fix does not catch the ticket's own example**, which is
+  worth recording: "blank the spans on both sides and require byte equality" returns
+  *equal* for the `a++` case, because the span was never located, so the surviving
+  comment is present and identical on both sides. It went in anyway as `verify_delta`,
+  for a different fault class, and its docstring says which.
+
+  **Six checks, each demonstrated going red** by disabling it and re-running
+  `--selftest` — the standard this repo holds a gate to, applied to the gate's own
+  checks: `css_leftovers`, `css_structure`, `js_leftovers`, `verify_delta`, per-file
+  `REQUIRED_MARKERS`, and the `++`/`--` tokenizer fix.
+
+  **CSS was the uncovered half and now has two checks.** `node --check` is a JavaScript
+  parser and says nothing about a stylesheet. After a correct strip both published
+  stylesheets contain **zero** `/*`, `*/` or `//` outside strings and markers —
+  measured — so "no comment survives here" is absolute and needs no tokenizer opinion.
+  The ordered census (138 entries on `index.html`, 50 on `/fidget/`) is what notices a
+  declaration eaten out of `:focus-visible` or `@media (prefers-reduced-motion)`, which
+  a net brace count structurally cannot.
+
+  **The JS leftover check is genuinely independent, because node is the oracle rather
+  than the scanner.** Each non-marker `//` or `/*` is perturbed in a way that is inert
+  inside a comment and fatal inside a string, template or regex; 10 hand-built probe
+  cases pin it, including a `//` inside a multi-line template literal, which a naive
+  delete-to-EOL probe misclassifies. Real candidates: **0** in `index.html`, **1** in
+  `/fidget/` (`'http://www.w3.org/2000/svg'`), correctly judged not a comment.
+
+  **And the new check immediately found a latent bug of the same species.**
+  `script_bodies()` used `re.finditer(r'<script\b')` — the exact trap the module
+  docstring warns about for `comment_spans` — and `fidget/index.html` says *"The
+  `<style>` block below carries…"* inside a comment, so the count came out 2 in source
+  and 1 in output. `index.html` was passing by luck: three `<script` occurrences, all
+  real tags. Both extractors walk the document now, and the case is in the fixture.
+
+  Cost, stated: `--selftest` goes **0.19s → 3.13s**, about 60 memoised `node --check`
+  calls, on the deploy path. That is what a standing proof costs.
+
+  Verified: `--selftest` ok. `npm test` **121/0** on the source and on the stripped
+  artifact — the only gate that can see a strip which leaves the page drawing correctly
+  while making it unparseable to the tools that read it. `pixel_regress --ref HEAD`
+  **0px** on the stage and **0px** on `/fidget/` against a stripped tree.
+  `mutation_gate --only stripper-ate-a-line` still **CAUGHT** at 2,933px.
+
+  **Deliberately not closed:** a well-formed span in the *wrong place* still cannot be
+  caught lexically. That remains `node --check` plus the pixel gate, and the docstring
+  says so rather than implying these checks make the pixel gate optional.
+
+  Two things found on the way and filed rather than folded in: **#171**, `--in-place`
+  refuses inside a linked git worktree because it resolves the repo-relative path
+  wrongly — which is where subagents work, though CI's ordinary checkout is
+  unaffected — and the size figures in `CLAUDE.md`, now corrected: `index.html` is
+  **687,760 → 196,704 B raw** and **196,733 → 47,445 brotli**, with markers costing
+  7,783 B (4.0%) over 770 comments.
+
 - **CL#186 — `pill_clip` was the fourth harness dealing through the page's own
   `?seed`, and it carried the eighth exit-code lie.** (GitHub #167.)
 
