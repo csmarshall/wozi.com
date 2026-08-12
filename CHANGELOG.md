@@ -289,6 +289,89 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#174 — the page no longer draws itself once at a scale it is about to throw
+  away.** (GitHub #135, plan A. The ticket's remaining work.)
+
+  The profile behind #135 found the page renders its own composition **five times per
+  cold load**, three inside the one long task, with **render 1 drawn at the boot
+  `--gsfit` of 0.86** against a real ~1.4 — a value the file's own comment called
+  provisional — and render 3 existing only to re-solve the ghosts once the scale was
+  right. Every input the first render got wrong was **synchronously available before
+  mount**: `localStorage`, `matchMedia`, and the fit itself, which reads only
+  `innerWidth`/`innerHeight`/`visualViewport` with no `getComputedStyle` and no
+  layout.
+
+  Theme, motion, speed, wear and the three style layers now seed the **initial
+  state**, through `storedChoice()` / `storedNumber()` / `storedFlag()` — one
+  `try/catch` and one home for the `wozi-` prefix, where six restores had been
+  written out separately in `startPhysics()`. **`fitScale()` is the fit's one home**,
+  called by both `gsRender()` and `fitStage()`, so the boot CSS value is no longer a
+  second source of truth for it.
+
+  **Renders 5 → 4, scales `[0.86, 1.39, 1.39, 1.39, 1.39]` → `[1.39, 1.39, 1.39,
+  1.39]`.** Measured on top of CL#170, so the before figure is 176ms rather than the
+  ticket's 183ms:
+
+  | | 6x before | 6x after | 1x before | 1x after |
+  | --- | --- | --- | --- | --- |
+  | combined | 176.0 | **126.1** (−28.4%) | 25.0 | **17.6** |
+  | `?who=charles` | 150.5 | **101.6** (−32.5%) | 18.9 | **14.4** |
+
+  Call counts agree: `renderVals` 5→4, `gearSvg` 40→28, `polarR` 41,485→30,950 on a
+  solo page.
+
+  **The risk was the deal, not the clock, and it is provably unchanged.** `solve()`
+  consumes `Math.random` for the service shuffle, so a reordered initialisation could
+  silently change which wheel wears which service. A harness-side LCG logged every
+  call's value *and calling frames* over a full cold load: **229 calls, sha1
+  identical, `diff` empty**, on the combined stage and on `?who=charles` alike. The
+  shuffle is calls 225–229 in both, same values, same frames.
+
+  **A second first-render error nobody had named**, found on the way: `solve()`'s
+  partial self-seed set `_axisRot` and `_idlerN` but left `_tight` reading as 1, so
+  the first solve was laid out at the wrong tightness. `seatLayout()` is now the one
+  home for those four quantised inputs and `solve()` calls it.
+
+  **#142 turns out to be a latent hazard, not a live fault, and its filed diagnosis
+  was wrong.** That ticket — mine — claimed `setState({speed})` runs *after* the
+  flywheel seed is read. Probed directly: `support.js`'s `__setLogicState` assigns
+  `logic.state` **synchronously** before scheduling the re-render, so HEAD already
+  seeded at `rateAt(20)` = 6.857143 with `spinUp:false` and a saved 20x, exactly as
+  the existing comment claimed. Plan A removes the ordering dependency structurally
+  rather than fixing a break. Worth recording because *"React state is not readable
+  until the next render"* is false in this runtime and will be reached for again.
+
+  **The gate reading, stated precisely.** Combined stage **0px** at both viewports
+  with controls 0px — and here 0px IS the pass, because the settled state is
+  identical by construction and 90 pumped frames would have exposed a phase offset.
+  `?who=charles` is 0px at 1440x900 and **1px at 390x844, max channel delta 1**. That
+  one pixel was chased, not waved past: the rendered DOM is byte-identical (`main`'s
+  `outerHTML`, the whole body with script sources masked, and the root inline style
+  including `--gsfit` all diff to zero), each build reproduces its own shot across
+  fresh browser launches, and it appears in light theme too. It is **rasterisation**,
+  by #37's own mechanism — the promoted layer is now rasterised **once** at the final
+  composited scale instead of at 0.86 and again at 1.39. Strictly the better raster,
+  and the visible trace of the render this change deleted. Not a tolerance and not a
+  flake; reproduced independently before merging.
+
+  **One clock is not at risk and nothing is deferred** — this makes the first render
+  *more* complete, adds no gate and latches no flag, so #7 is untouched, and `_M`/`_v`
+  initialisation is unmoved.
+
+  Also corrects the `--gsfit` declaration's comment, which still claimed
+  `gsRender()` read it "so the two cannot drift apart". It no longer does; the
+  declaration is now only what `?hud` displays before the first `setProperty`, and the
+  comment says so rather than describing a coupling that has gone.
+
+  `npm test` 120/0, `dom_invariants` PASS, `verify_motion` 40/40 with 0 console
+  errors, `escape_mesh` PASS across 8 seed/orientation combinations, `devices.py`
+  24/24 + 4/4, `pill_clip` PASS, `a11y_audit` PASS in both themes.
+
+  **For `docs/MANUAL-CHECKS.md`**: the first paint now shows the train at the right
+  scale rather than at 0.86 jumping to ~1.4. No harness photographs that moment —
+  every gate here measures the settled state — so it wants a human eye on a real
+  device, as does the 1px raster difference on a phone.
+
 - **CL#172 — the pixel gate can photograph the pop-out panel, and a paired mutant
   proves it.** (GitHub #144, closes it.)
 

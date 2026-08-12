@@ -173,9 +173,16 @@
      geometry is multiplied by it in JS at render time so every wheel is drawn at
      the size it is displayed (#37). It used to feed a `transform: scale()` on the
      gear container, which meant the wheels were rasterised small and stretched.
-     The value here is the boot fit, used for the first render before fitStage()
-     has measured anything; gsRender() reads it from this declaration so the two
-     cannot drift apart. */
+     THIS DECLARATION IS NO LONGER READ BY ANYTHING THAT DRAWS (CL#174, #135).
+     It used to be the boot fit: the first render happened before fitStage() had
+     measured anything, so gsRender() read this value and the page drew itself
+     once at 0.86 and again at the real ~1.4. Plan A gave the fit one home in
+     fitScale(), which measures the viewport synchronously — it needs only
+     innerWidth/innerHeight and visualViewport, no layout — so the first render
+     is now correct and that throwaway render is gone. What is left here is the
+     initial value `?hud` displays before the first setProperty, and nothing
+     else consumes it. Harmless, and deliberately kept so the readout has
+     something to show; do not restore a reader for it. */
   /* --s (1/speed) removed: 0 var(--s) uses, and syncVars recomputed it every
      render for nothing. Motion timing goes through the rAF loop, not CSS (#57). */
   --gsfit:0.86;
@@ -3913,6 +3920,51 @@ const ESCAPE_MIN_REACH_PX = 60;
    this much, not merely until it touches it. */
 const ESCAPE_RUN_MARGIN = 120;
 
+/* EVERY PERSISTED CHOICE IS READ BEFORE THE FIRST RENDER, NOT AFTER IT
+   (GitHub #135, plan A). These used to be six `setState` calls inside
+   startPhysics(), which runs from componentDidMount -- so the first render drew
+   the page at the schema defaults and was then thrown away and drawn again. They
+   read localStorage and nothing else: no layout, no measurement, nothing async,
+   so there was never a reason for them to wait for a mount. Moving them into the
+   initial state is worth one whole render of the composition (41 SVGs) on a cold
+   load: measured 5 renders down to 4, and the long first-render task from 176ms
+   to 126ms at 6x CPU throttle.
+
+   One try/catch for all of them: any localStorage read can throw in Safari's
+   private mode, and a page that cannot read localStorage has no stored choice by
+   definition. Every key is namespaced `wozi-`, which is why the prefix lives
+   here rather than being written out six times. */
+const storedChoice = (key) => {
+  try { return localStorage.getItem('wozi-' + key); } catch (e) { return null; }
+};
+/* A STORED NUMBER IS HONOURED ONLY IF THE CONTROL COULD HAVE WRITTEN IT. A
+   tampered or stale entry outside the control's own range is discarded rather
+   than carried into a render as a value the slider itself could never produce;
+   `null` is "nobody has chosen", which is what falls back to the schema. A value
+   merely BETWEEN two stops is kept -- speedIndex() can always say which stop it
+   is nearest -- and wear is continuous, so anything inside the bounds is exact.
+   NaN loses both comparisons, which is what makes a missing or unparseable entry
+   take the same path as an out-of-range one. */
+const storedNumber = (key, lo, hi) => {
+  const v = parseFloat(storedChoice(key));
+  return (v >= lo && v <= hi) ? v : null;
+};
+/* 'true'/'false' are the only two strings a checkbox writes, so the bounds check
+   for the #125 style flags is "is this one of those two" rather than a range.
+   Anything else -- never set, or tampered -- stays `null`, which reads the
+   schema's own default per wheel exactly as an untouched control should. */
+const storedFlag = (key) => {
+  const v = storedChoice(key);
+  return v === 'true' ? true : v === 'false' ? false : null;
+};
+/* The two media queries the page starts from, constructed once at load because
+   the initial state needs both of them before any instance exists. The
+   MediaQueryList is also the thing componentDidMount adds its `change` listener
+   to, so there is exactly one of each and no second copy of either query string
+   for a later edit to update only half of. */
+const DARK_MQ = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+const REDUCE_MQ = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+
 class Component extends DCLogic {
   /* `hover` holds a badgeKey(), not a slug -- see the note above badgeKey. */
   /* `speed` is null until the slider, the corner reset, or localStorage says
@@ -3922,8 +3974,32 @@ class Component extends DCLogic {
      default", exactly the same convention speed/wear use against their own
      props fallback. `null` and `false` must stay distinct here: a Charles
      toggle to OFF has to override a schema default of true. */
-  state = { theme: 'light', hover: null, icons: {}, ghosts: [], motion: null, tog: false, speed: null, wear: 0,
-    timing: null, lineWork: null, knurl: null };
+  /* THE STORED THEME IS PASSED THROUGH, not validated against a list of two:
+     `data-theme` is a bare attribute selector, so an unrecognised value simply
+     matches no rule and the light palette stands -- which is what the previous
+     `saved || (dark ? 'dark' : 'light')` did too. Kept identical deliberately;
+     tightening it is a separate decision from moving where it is read. */
+  state = { theme: storedChoice('theme') || (DARK_MQ && DARK_MQ.matches ? 'dark' : 'light'),
+    hover: null, icons: {}, ghosts: [],
+    /* Only the two strings the motion button writes; anything else leaves
+       motionActive() following prefers-reduced-motion, as it did. */
+    motion: storedChoice('motion') === 'run' ? 'run' : storedChoice('motion') === 'rest' ? 'rest' : null,
+    tog: false,
+    speed: storedNumber('speed', SPEED_STOPS[0], SPEED_STOPS[SPEED_STOPS.length - 1]),
+    wear: storedNumber('wear', 0, 1) ?? 0,
+    timing: storedFlag('timing'), lineWork: storedFlag('lineWork'), knurl: storedFlag('knurl') };
+  /* prefers-reduced-motion (#3): the machine comes to REST through the same rAF
+     loop -- the idle target becomes zero, and the flywheel physics settles it
+     gently instead of freezing it mid-tooth. The flag is read fresh every tick
+     through this handle, mirroring the sleep gate: #7 is what happens when a
+     flag can latch. A deliberate drag or key press still spins it -- user-
+     initiated motion is the user's choice -- and friction then returns it to
+     rest.
+     Held from construction rather than from startPhysics(), because
+     motionActive() is what the pause button's own label is drawn from and the
+     FIRST render asks for it (GitHub #135): assigned at mount, the very first
+     paint said "pause" to a visitor whose OS had asked for no motion. */
+  _rmq = REDUCE_MQ;
   _badgeOff = {};   /* badgeKey -> {x,y,vx,vy} spring state for the magnetic hub caps */
   _badgeEl = {};    /* badgeKey -> the cap element that key's spring writes to */
   _spinEls = [];
@@ -4876,59 +4952,36 @@ class Component extends DCLogic {
   startPhysics() {
     for (let c = 0; c < this._M.length; c++) this._M[c] = 0;
     this._dirSign = 1;
-    /* prefers-reduced-motion (#3): the machine comes to REST through this same
-       loop -- the idle target becomes zero, and the flywheel physics settles it
-       gently instead of freezing it mid-tooth. The flag is read fresh every
-       tick, mirroring the sleep gate: #7 is what happens when a flag can latch.
-       A deliberate drag or key press still spins it -- user-initiated motion is
-       the user's choice -- and friction then returns it to rest. */
-    this._rmq = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
-    let savedMotion = null;
-    try { savedMotion = localStorage.getItem('wozi-motion'); } catch (e) {}
-    /* setState, not a direct write. This was `this.state.motion = savedMotion`,
-       which rendered correctly only because componentDidMount calls apply()
-       further down and that re-renders. Swap those two lines and the pause
-       button ships with the wrong label (#59). */
-    if (savedMotion === 'run' || savedMotion === 'rest') this.setState({ motion: savedMotion });
-    /* The speed choice rides along in localStorage beside the theme and motion
-       ones. Restored BEFORE the flywheel is seeded below, so a spinUp:false page
-       starts at the chosen rate rather than easing up to it from the default.
-       Bounded by the declared stops rather than by numbers written here: a
-       tampered or stale entry outside the schema's range is discarded, and a
-       value merely BETWEEN stops is kept, because speedIndex() can always say
-       which stop it is nearest. */
-    let savedSpeed = NaN;
-    try { savedSpeed = parseFloat(localStorage.getItem('wozi-speed')); } catch (e) {}
-    if (savedSpeed >= SPEED_STOPS[0] && savedSpeed <= SPEED_STOPS[SPEED_STOPS.length - 1]) {
-      this.setState({ speed: savedSpeed });
-    }
-    /* Wear rides along beside speed, the same way (GitHub #112). Bounded to
-       [0, 1] rather than trusted, for the same reason: a tampered or stale
-       entry outside the control's own range should be discarded, not carried
-       into a render as a value the slider itself could never produce. Unlike
-       speed, there is no "nearest stop" to snap a between-value to -- wear is
-       continuous, so a value that survives the bounds check is kept exactly. */
-    let savedWear = NaN;
-    try { savedWear = parseFloat(localStorage.getItem('wozi-wear')); } catch (e) {}
-    if (savedWear >= 0 && savedWear <= 1) {
-      this.setState({ wear: savedWear });
-    }
-    /* The three #125 style checkboxes (timing/lineWork/knurl), restored the
-       same way -- 'true'/'false' strings rather than a number, so the
-       bounds check is just "is this one of the two strings the checkbox
-       itself can write", not a range. Anything else (never set, or a
-       tampered value) leaves state at its `null` default, which reads the
-       schema's own default per wheel exactly as an untouched control should. */
-    ['timing', 'lineWork', 'knurl'].forEach((key) => {
-      let saved = null;
-      try { saved = localStorage.getItem('wozi-' + key); } catch (e) {}
-      if (saved === 'true' || saved === 'false') this.setState({ [key]: saved === 'true' });
-    });
-    const startRunning = savedMotion === 'run' ? true
-      : savedMotion === 'rest' ? false : !(this._rmq && this._rmq.matches);
+    /* EVERY STORED CHOICE IS ALREADY IN STATE by the time this runs (GitHub
+       #135) -- theme, motion, speed, wear and the three #125 style flags are read
+       in the initial state declaration, where the first render can see them. Six
+       `setState` calls used to sit here, which is why the composition was drawn
+       once at the schema defaults and immediately again at the stored ones. The
+       bounds checks moved with them, unchanged: see storedNumber/storedFlag.
+       The one thing that could not move is below -- the flywheel's seed, which
+       needs a value only this function computes. */
+    /* WHETHER THE TRAIN STARTS RUNNING IS motionActive()'s QUESTION, and asking
+       it is now the whole of it: the stored override wins in either direction,
+       otherwise follow prefers-reduced-motion. That was written out a second time
+       here while `motion` was restored a few lines above by setState -- state the
+       method could not yet see. It can, so there is one home for the answer
+       again. */
+    const startRunning = this.motionActive();
     /* One flywheel per mesh (GitHub #122). Seeded lazily: solve() has not
        necessarily run at this point, and a component that appears later simply
-       starts from the same place this would have put it. */
+       starts from the same place this would have put it.
+       GITHUB #142, AND WHAT MEASURING IT ACTUALLY SHOWED. idleRate() scales by
+       speedFactor(), which reads state.speed, so #142 read this line as seeding a
+       spinUp:false page at the DEFAULT rate rather than the stored one -- on the
+       reasoning that the setState restoring the speed ran a few lines above and
+       React does not make `this.state` readable until the next render. That last
+       step is false for THIS runtime: support.js's __setLogicState assigns
+       `logic.state` synchronously before scheduling the re-render, so the restore
+       above did reach this line. Probed directly with spinUp:false and a stored
+       20x, the seed was rateAt(20) both before and after this change. So #142 was
+       a latent hazard rather than a live fault, and what removes the hazard is
+       that the value is now in state before any of this runs -- the seed cannot
+       depend on where a restore was written any more. */
     const seed = (this.props.spinUp === false && startRunning) ? this.idleRate() : 0;
     this._v = [];
     this._M = [];
@@ -5419,16 +5472,54 @@ class Component extends DCLogic {
   }
 
   /* The one number every rendered coordinate in the stage is multiplied by.
-     Before fitStage() has measured the viewport there is nothing to multiply by
-     yet, so the boot value is read back out of the `--gsfit` declaration rather
-     than repeated here -- one source of truth for the first frame. */
+     IT IS SOLVED ON DEMAND, NOT WAITED FOR (GitHub #135). This used to read the
+     boot `--gsfit` declaration -- 0.86, a figure that file calls provisional --
+     because the real one was only computed by fitStage(), which runs from
+     componentDidMount, which is after the first render. So the whole composition
+     was built once at 0.86 against a real ~1.4 on a desk, thrown away, and built
+     again; and the ghosts then had to be solved a THIRD time, because fitEscapes
+     had run against the wrong scale. Nothing about the fit needs a mount --
+     fitScale() reads innerWidth/innerHeight/visualViewport and the solve, no
+     getComputedStyle and no layout -- so the honest thing is to ask for it.
+     Memoised into the same `_gsr` fitStage compares against, so the two cannot
+     disagree and the first fitStage() finds nothing to change. */
   gsRender() {
-    if (this._gsr) return this._gsr;
-    const boot = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--gsfit'));
-    return Math.floor((boot || 0.86) * (this.props.gearScale ?? 1) * 100) / 100;
+    if (!this._gsr) this._gsr = this.fitScale();
+    return this._gsr;
   }
 
-  fitStage() {
+  /* THE VIEWPORT AS THE FIT MEASURES IT, in one place because two callers ask.
+     MEASURE WHAT IS ACTUALLY VISIBLE. On iOS Safari `100vh` is the LARGE
+     viewport -- the height the page would have if the toolbars were collapsed --
+     while `window.innerHeight` is the visual viewport, which is what you can
+     currently see. The two differ by the toolbar, so `main` was laying out
+     taller than the screen while the scale was computed against the shorter
+     number: the train ended up centred in a box that extends past the fold,
+     which is dead space at one end and clipping at the other. Desktop never
+     showed it because there the two are equal.
+     `min-height:100svh` on `main` fixes the layout half (svh is the SMALL
+     viewport, never larger than what is visible; the `100vh` before it is the
+     fallback for engines that do not know svh). This is the measuring half. */
+  viewBox() {
+    const vv = window.visualViewport;
+    return { w: (vv && vv.width) || window.innerWidth,
+      h: (vv && vv.height) || window.innerHeight };
+  }
+
+  /* THE QUANTISED LAYOUT INPUTS THE SOLVE READS OFF THE INSTANCE, AND THEIR ONE
+     HOME. solve() consults `_axisRot`, `_tight`, `_spreadBoost` and `_idlerN`, so
+     they have to be seated before the FIRST solve and re-seated whenever the
+     viewport moves -- and if boot seated them anywhere else, the boot values and
+     the resize values would be two copies of the same arithmetic, free to
+     disagree. Before GitHub #135 they were seated only in fitStage(), which is
+     after the first render: solve() carried a partial self-seed for `_axisRot`
+     and `_idlerN` and simply let `_tight` read as 1, so the first composition was
+     laid out at a spacing no viewport had asked for.
+
+     Returns whether anything moved, and does NOT re-render: the caller knows what
+     a change is worth. On a resize it is a full rebuild; at boot it is nothing at
+     all, because no render has happened yet. */
+  seatLayout() {
     const rot = this.axisRot();
     /* More room means longer drive runs: the strands get real straight spans instead of
        being mostly wrap. Quantised so a resize does not re-solve on every pixel. */
@@ -5452,37 +5543,37 @@ class Component extends DCLogic {
        stays a one-line TRAIN edit -- the moment a shipped entry IS linked,
        this same line starts invalidating on it again, with nothing else to
        remember. */
-    if (rot !== this._axisRot || (TRAIN_HAS_LINKED && boost !== this._spreadBoost)
-      || tight !== this._tight || idle !== this._idlerN) {
-      this._axisRot = rot;
-      this._spreadBoost = boost;
-      this._tight = tight;
-      this._idlerN = idle;
-      this._solved = null;
-      this._escKey = null;
-      /* Which wheels wear marks land on is a property of THIS solve (GitHub
-         #112) -- invalidated in the same breath as _solved so the choice is
-         re-made exactly when the train it was chosen from changes, never on
-         a wear-slider drag alone. */
-      this._wearWheels = null;
-      this.forceUpdate();
-    }
+    if (rot === this._axisRot && (!TRAIN_HAS_LINKED || boost === this._spreadBoost)
+      && tight === this._tight && idle === this._idlerN) return false;
+    this._axisRot = rot;
+    this._spreadBoost = boost;
+    this._tight = tight;
+    this._idlerN = idle;
+    this._solved = null;
+    this._escKey = null;
+    /* Which wheels wear marks land on is a property of THIS solve (GitHub
+       #112) -- invalidated in the same breath as _solved so the choice is
+       re-made exactly when the train it was chosen from changes, never on
+       a wear-slider drag alone. */
+    this._wearWheels = null;
+    return true;
+  }
+
+  /* THE FIT SCALE HAS ONE HOME (GitHub #135), and both callers come here for it:
+     gsRender() when the first render needs it and no mount has happened, and
+     fitStage() on every resize. It used to live inside fitStage() alone, so
+     gsRender() had nothing to read but the boot CSS declaration -- which is how
+     the page came to draw its whole composition at a scale it documents as
+     provisional. Its inputs are window metrics and the solve, both available
+     before the first paint -- no getComputedStyle, no layout read, no React
+     state, which is what makes it safe to call from inside a render.
+     What it does WRITE is two readouts and nothing else: `--gsfit` and
+     `_fitBind`, both of which exist so ?hud can report the fit rather than
+     re-deriving it. Neither is read by CSS or by the geometry. */
+  fitScale() {
     const solved = this.solve();
-    /* MEASURE WHAT IS ACTUALLY VISIBLE. On iOS Safari `100vh` is the LARGE
-       viewport -- the height the page would have if the toolbars were collapsed --
-       while `window.innerHeight` is the visual viewport, which is what you can
-       currently see. The two differ by the toolbar, so `main` was laying out
-       taller than the screen while the scale was computed against the shorter
-       number: the train ended up centred in a box that extends past the fold,
-       which is dead space at one end and clipping at the other. Desktop never
-       showed it because there the two are equal.
-       `min-height:100svh` on `main` fixes the layout half (svh is the SMALL
-       viewport, never larger than what is visible; the `100vh` before it is the
-       fallback for engines that do not know svh). This is the measuring half. */
-    const vv = window.visualViewport;
-    const w = (vv && vv.width) || window.innerWidth;
-    const hgt = (vv && vv.height) || window.innerHeight;
-    const rowMode = w > 820 && w > hgt * 1.2;
+    const box = this.viewBox();
+    const w = box.w, hgt = box.h;
     /* THE MACHINE FILLS THE LONG AXIS, EDGE TO EDGE. The ghosts exist to say it
        continues past the frame, so the long side of the screen is what the scale
        must satisfy -- not the smaller of the two axes, and not a shaved fraction
@@ -5719,9 +5810,28 @@ class Component extends DCLogic {
        wholly on screen, and rounding up would spend part of the margin the ghost
        runs are supposed to live in. */
     const gsr = Math.floor(fit * (this.props.gearScale ?? 1) * 100) / 100;
-    if (gsr !== this._gsr) { this._gsr = gsr; this.forceUpdate(); }
+    return gsr;
+  }
+
+  fitStage() {
+    /* Re-seat the quantised layout inputs first: a change to any of them throws
+       the solve away, and everything below is measured against a solve. */
+    if (this.seatLayout()) this.forceUpdate();
+    /* Deliberately not named `gsr`: that anchor is unique in the file and
+       tools/test.js slices the quantising line out by it (GitHub #101/#137). */
+    const scale = this.fitScale();
+    if (scale !== this._gsr) { this._gsr = scale; this.forceUpdate(); }
+    /* Escape runs are computed off wheels the solve has already placed, at the
+       scale they will be drawn at -- which is why this is below the line that
+       settles it, and why gsRender() solving the scale for the first render
+       (GitHub #135) is what stopped this from having to run a second time. */
     this.fitEscapes();
-    root.setProperty('--dir', rowMode ? 'row' : 'column');
+    /* `main`'s axis. It shares the viewport measurement with the fit and nothing
+       else -- a different question about the same two numbers, so it reads the
+       same box rather than taking its own. */
+    const box = this.viewBox();
+    document.documentElement.style.setProperty('--dir',
+      box.w > 820 && box.w > box.h * 1.2 ? 'row' : 'column');
   }
 
   componentDidMount() {
@@ -5781,16 +5891,19 @@ class Component extends DCLogic {
       this._ghostLayer.style.transform = 'translate(' + (-dx).toFixed(1) + 'px,' + (-dy).toFixed(1) + 'px) scale(0.94)';
     };
     window.addEventListener('pointermove', this._onPointer, { passive: true });
-    let saved = null;
-    try { saved = localStorage.getItem('wozi-theme'); } catch (e) {}
-    this.mq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+    this.mq = DARK_MQ;
     this.onSys = (e) => {
-      let stored = null;
-      try { stored = localStorage.getItem('wozi-theme'); } catch (err) {}
-      if (!stored) this.apply(e.matches ? 'dark' : 'light');
+      /* A stored choice wins over the system one in either direction, so the
+         system query is only followed while nobody has chosen -- read fresh each
+         time, because the visitor may have chosen since. */
+      if (!storedChoice('theme')) this.apply(e.matches ? 'dark' : 'light');
     };
     if (this.mq && this.mq.addEventListener) this.mq.addEventListener('change', this.onSys);
-    this.apply(saved || (this.mq && this.mq.matches ? 'dark' : 'light'));
+    /* THE ATTRIBUTE ONLY, because the theme itself is already in state (GitHub
+       #135) -- so the first render drew in it, and calling apply() here would
+       setState the value state already holds. paintTheme is the one home for the
+       attribute's name either way. */
+    this.paintTheme(this.state.theme);
     this.syncVars();
   }
 
@@ -5830,16 +5943,29 @@ class Component extends DCLogic {
     }
   }
 
-  apply(theme) {
+  /* The DOM half of a theme, split out because the two halves are now needed
+     separately: at boot the theme is already in state and only the attribute is
+     missing, while a toggle needs both. One home for the attribute's name. */
+  paintTheme(theme) {
     document.documentElement.setAttribute('data-theme', theme);
+  }
+
+  apply(theme) {
+    this.paintTheme(theme);
     this.setState({ theme });
   }
 
   /* Solve the train: centre distances = sum of pitch radii, alternating spin,
      angular speed inversely proportional to tooth count, tooth phase meshed. */
   solve() {
-    if (this._axisRot === undefined) this._axisRot = this.axisRot();
-    if (this._idlerN === undefined) this._idlerN = this.idlerCount();
+    /* THE LAYOUT INPUTS ARE SEATED BEFORE THE FIRST SOLVE, ALL FOUR OF THEM. This
+       used to seat two -- `_axisRot` and `_idlerN` -- and leave `_tight` reading as
+       1, so the first solve of a cold load spaced the train at a tightness no
+       viewport had asked for and fitStage() then rebuilt it (GitHub #135). One
+       guard covers all four now, because seatLayout() is the one home for them.
+       A stub caller that supplies them (tools/test.js does, for every solve it
+       runs) never reaches this and so never touches `window`. */
+    if (this._axisRot === undefined) this.seatLayout();
     if (this._solved) return this._solved;
     /* Sites are dealt onto the wheels fresh each load, but sibling services stay
        belted to each other: the two belt-linked slots always get a pair. */
