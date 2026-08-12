@@ -8,11 +8,13 @@ physics.
 ring gears are grounded, the sun and the final carrier are the two free ports,
 and a spin ends at a genuine stop rather than settling back to an idle rate.
 
-**A second grounding is implemented as of GitHub #129 and is not reachable
-yet.** `GROUNDED` is one word in the source — `'ring'`, as shipped, or `'sun'` —
-and no gesture, key or URL parameter touches it. See *The other grounding* below
-for the algebra and for what it costs the page's own claim. Everything in the
-sections before it is stated for ring-grounding, which is what ships.
+**A second grounding is implemented as of GitHub #129 and is now reachable four
+ways** — a vertical swipe off the gear, the `ground` button, `g`, and
+Shift+Up/Down. `GROUNDED` is still one word in the source (`'ring'`) and it is
+now only the *starting* grounding rather than the only one. See *The other
+grounding* below for the algebra and for what it costs the page's own claim, and
+*One set at a time* for the layout the swipe arrived with. Everything in the
+sections before those is stated for ring-grounding, which is what boots.
 
 This file records every number the page chose and why, so none of them is a
 mystery later. Nothing below is measured-and-forgotten: each is either derived
@@ -272,6 +274,63 @@ changed — which is the demonstration rather than a shortfall in it.
 
 ---
 
+## One set at a time, and what the shaft became
+
+GitHub #129 parts 3 and 4, and Charles's call: **the page shows one gear set at a
+time, filling the window.** The physics did not move an inch for this — `MODE.ratio`,
+`MODE.jEff`, every body speed and every number in the readout are the compound
+machine's, summed over both stages, and none of them asks what is on screen.
+`VIEW` is a camera position.
+
+**The `ONE SHAFT` tie survives as a stub, and it is the control that travels along
+it.** That was the decision worth arguing, because the tie is not decoration: stage
+1's carrier *is* stage 2's input member, and that is the whole difference between a
+compound set and two sets standing next to each other. Three alternatives were
+rejected:
+
+- **Delete it.** The page would draw a single epicyclic while the readout went on
+  quoting 15.167:1 for a train it no longer shows.
+- **A stub with a caption and nothing else.** The tie then points at a stage that
+  cannot be reached, and the heavy port — which *is* the demonstration — becomes
+  button-only. Following a shaft to the other end of it is what a shaft is for.
+- **Draw the two sets concentrically.** Rejected when the page was first built:
+  the two orbit radii are 21 and 19.5 units, so the teeth interleave into an
+  unreadable mess. Nothing about #129 changes that.
+
+So the stub runs from the visible set's rim off the edge of the window, and a tap,
+Enter or Space on it walks to the other stage. It keeps `S.angle` and `S.rate` —
+that is the difference between `useView()` and `useGrounding()`. A grounding swap
+picks up a *different machine* and its coordinate has to start again; walking down
+one shaft is the same machine seen from somewhere else, so a train spinning down
+keeps spinning down and every re-drawn body lands on exactly the phase it would
+have been at had it been on screen all along.
+
+Every number in the stub's layout is measured or derived, none chosen by eye:
+
+| figure | value | why |
+| --- | --- | --- |
+| the stub's bearing | **along the window's long axis** | The viewBox is square and `meet` letterboxes it, so the unused space is a band either side in landscape and above and below in portrait. A root `<svg>` clips at its element box, not its viewBox, so the stub runs out into that band and is cut by the window edge. Send it the other way and it is clipped instantly. |
+| `SHAFT_INK` / `SHAFT_TARGET` | **0.4 units / 0.2 × R** | Two numbers on purpose: 0.4 is a legible dashed note and an impossible target. The hit width is a share of the ring's radius, so it lands at **63px** on a 1440×900 desk and **27px** on a 390-wide phone where the whole drawing is 4.6× smaller — the drawing's own proportion, not a pixel figure. |
+| the label | **longest of three phrasings that fits** | Measured with `getComputedTextLength`. The band is 405px beside a 1440×900 window and 133px beside a square one, so one phrasing is either cut in half at the first or needlessly terse at the second. Its budget is the band less the chrome strip's own measured height, because the chrome floats *over* the stage (CL#156). |
+| the caption | **on the side the shaft does not leave by** | In portrait they share an axis and a stub leaving upward would be drawn through the caption's letters. Landscape never collides, so the caption stays above. |
+
+**Two things here were caught only by a picture**, and both are recorded in the
+source because the numbers were right while the drawing was wrong. The rotated
+portrait label had its anchor copied from the landscape branch, and the rotation
+already carries the direction there — so it read back down over its own gear. And
+the arrow is a glyph *inside* the rotated label, so a `↑` turned with it renders
+pointing **left**; the rotated branch writes `→` and lets the rotation point it.
+
+**The gear fills 0.700 of the window's shorter edge**, at every viewport, and that
+is `R / (R + margin)` with the margin unchanged from the two-set layout. It is up
+from 527px to **630px** across on a 1440×900 desk, and the composition's ink is
+down from 274,242 to 202,563 pixels — one set instead of two, drawn larger. The
+margin is symmetric because the viewBox is, which is what centres the gear; it
+holds one line of caption and is generous, so **how much of the window the gear
+should fill is a live question and not a settled number.**
+
+---
+
 ## Losses
 
 The three-term coast-down the landing page arrived at over four iterations
@@ -355,10 +414,15 @@ Headless Chrome over CDP, driving real pointer events.
 | identical 180° sweep over 1.5 s at the **sun** | port followed **181.9°** — tracking **101 %** (slight overshoot; ζ=0.28 is deliberately lively) |
 | the same sweep at the **carrier** | port followed **62.2°** — tracking **34.6 %** |
 | same impulse at each port, peak sun speed | 8.17 vs 0.58 rev/s (**14.1×**; the theoretical 15.17 less what losses took in the 50 ms sampling window) |
-| bodies advancing 700 ms apart after a flick | **16 of 21** groups — the 5 static ones are the coupling label, the two set translates and the two **grounded** members' assembly-phase rotations, which is correct. Re-measured after #129: the same 16 advance, and the two static rotations move from the rings to the suns when the grounding does, which is the swap visible in the DOM |
-| rendered SVG, ring-grounded, before and after #129 | **byte-identical** (32 863 bytes, zero diff) with transforms stripped; the only render difference anywhere is `rotate(0.0000)` → `rotate(0.000)` on the rings, because their phase is now written by `applyTransforms` at its 3-decimal precision instead of once as a static attribute |
+| bodies advancing 700 ms apart after a flick | **8 of 10** transform groups, in *both* groundings — the 2 static ones are the set's own translate and the **grounded** member's assembly-phase rotation, which is correct. (It was 16 of 21 while both sets were drawn.) The static rotation moves from the ring to the sun when the grounding does: ring `rotate(0.000)` → `rotate(0.000)` and sun `rotate(0.000)` → `rotate(1926.339)` under ring-grounding, exactly swapped under sun-grounding. That is the swap visible in the DOM |
 | coast from a sun flick | **AT REST after 8.0 s** (a 0.75× `REF_SPEED` flick against a 9.0 s figure quoted at `REF_SPEED`) |
-| console | clean but for the expected `/favicon.ico` 404 |
+| `S.angle` zeroed on a grounding swap | **verified in the DOM, not assumed.** After a swipe every body reads `rotate(0.000)` or its own assembly phase and nothing else — set 2's ring lands on `rotate(-3.000)`, which is `-π/60` exactly, its `ringPhase` for a 21-tooth planet. `useGrounding()` already did this; it needed checking rather than trusting |
+| the swipe, driven as real pointer events | threshold **108px** at 1440×900 (0.12 × the shorter edge). 88px vertical: **no swap**. 400px horizontal: **no swap**. Diagonal dy −150 / dx 300: **no swap**. A tap: **no swap**. A 300px vertical drag **starting on the gear**: no swap, and the sun goes from +7.03 to −7.62 rev/s, so it span the train instead. 200px vertical off the gear: **RINGS → SUNS**, and again back. One 700px drag: **one swap**, not several |
+| `g` and Shift+Up/Down on the focused drawing | swap; unmodified Up/Down still flick the input port |
+| console, both groundings, through every gesture above | **0 messages** — no errors, no warnings, no exceptions. (Served over HTTP; the `/favicon.ico` 404 the earlier note mentions is the harness's own static server, and this run logged none) |
+| `npm test` | **119 passed, 0 failed** — it reads the root `index.html` and is untouched by anything here |
+| root page pixel gate | **0 px differ** at 1440×900 and 390×844, which is the check that this folder stayed inside itself |
+| `/fidget/` pixel gate vs HEAD | **402,810 px** at 1440×900 and **99,083 px** at 390×844 (31.1% and 30.1% of the frame). Deliberate: it is the whole composition moving. Attributed rather than accepted — ink 274,242 → 202,563 px at desk and 82,577 → 51,527 on the phone, the change split evenly top/bottom, which is one set instead of two rather than one band shifting |
 
 ---
 
@@ -384,6 +448,18 @@ From `CLAUDE.md`, and none of them optional:
 - **Touch first.** Pointer events cover mouse, touch and pen on one path, and
   `touch-action: none` plus `overscroll-behavior: none` stop the browser's own
   pan from stealing the gesture. Verified in portrait at 390×760.
+- **The accessibility story survives a mode swap.** The `aria-label` is rewritten
+  from `MODE` and from `VIEW` on every rebuild — the grounding, the overall ratio,
+  which set of how many is on screen, what dragging it turns, and how to reach the
+  other grounding — because a label asserting fixed rings on a page whose suns are
+  grounded is the page describing a machine it is not integrating. The shaft stub
+  is a real `role="button"` with `tabindex`, its own label naming what is at the
+  far end, and Enter and Space.
+- **A gesture is not a keyboard route, so the grounding has three others.** The
+  `ground` button (the discoverable one, labelled with what it will *do*), `g`, and
+  Shift+Up/Down. The shift modifier is what keeps them off the flick keys: an
+  unmodified Up or Down still throws the input port, and the modifier is tested
+  first so one press can never fire both.
 
 ## Not decided here
 
@@ -392,15 +468,24 @@ From `CLAUDE.md`, and none of them optional:
   deploy is a whitelist and adding a file does not publish it.
 - **`COAST_RANGE_S = 9.0`** is a placeholder for Charles's call, in the same
   sense `SPINDOWN_RANGE_MS` was in CL#127 and CL#141.
-- **How the swipe reaches `useGrounding()`.** That function is the whole
-  interface — re-solve, zero the one state, rebuild — and nothing calls it but
-  boot. No gesture, key or URL parameter exists, and `GROUNDED` stays a source
-  constant rather than becoming a URL switch (Charles's call, same reasoning as
-  `ORIGIN_MOUNT` in `index.html`).
-- **Whether showing one gear set at a time replaces the two-set composition.**
-  Decided in principle for #129 and not built here: nothing in this pass touches
-  `layout()`, `CENTRES` or the hit test.
+- **How much of the window the gear should fill.** It is 0.700 of the shorter
+  edge, which is `R / (R + margin)` with `margin = R * 0.42` inherited unchanged
+  from the two-set layout, where it also had to be reconciled against the gap
+  between the sets. It now holds one line of caption and nothing else, and the
+  viewBox is symmetric so the same clearance is left on all four sides to keep the
+  gear centred. Tightening it makes the gear bigger everywhere; it is one
+  expression in `layout()`, and it wants a picture rather than an argument.
+- **Whether the swap should read as animated.** It is instant: the machine is
+  re-solved and re-drawn in one tick. The obvious way to soften it is forbidden
+  outright — no CSS transition may touch anything that turns (#3) — so any easing
+  would have to be integrated in the one rAF loop, which is real work and a design
+  question rather than a polish pass.
+- **Whether the swipe needs an on-screen hint.** The `ground` button says what the
+  gesture does but not that a gesture exists.
 
 **Decided, so no longer open:** sun-grounding **ships** as the second format, with
 the drop from 230× to 3.3× accepted knowingly — see *The other grounding* for why
-it cannot be made louder. The parallel-axis ½ is **corrected**, not deferred.
+it cannot be made louder. The parallel-axis ½ is **corrected**, not deferred. The
+swipe reaches `useGrounding()`, and so do a button and two key bindings; the page
+shows **one set at a time** and the `ONE SHAFT` tie is the control that walks
+between them.

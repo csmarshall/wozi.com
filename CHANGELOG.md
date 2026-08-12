@@ -7,6 +7,59 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Added
 
+- **CL#161 — `/fidget/` shows one set at a time, and the shaft is how you travel
+  between them.** (GitHub #129, parts 3 and 4 — the ticket is now complete.)
+
+  Charles decided one gear at a time and a swipe to change grounding. The question
+  the ticket could not answer in advance was what happens to the `ONE SHAFT` tie,
+  because that tie carries the whole compound-train story: stage 2's sun IS stage
+  1's carrier.
+
+  **The tie became the control.** It stays as a stub leaving the frame, and a tap,
+  Enter or Space on it walks to the other stage — labelled with what is at the far
+  end (`ONE SHAFT → SET 2 · CARRIER`), read off the live mode so it can never
+  describe a grounding the page has left. Following a shaft to its other end is
+  what a shaft is for. Rejected: deleting it (the readout would keep quoting
+  15.167:1 for a train no longer drawn); stub-plus-caption (points at a stage
+  nobody can reach, and makes the *heavy* port — the whole demonstration —
+  button-only); and concentric superposition, already rejected at #123 because
+  orbit radii of 21 and 19.5 units interleave into an unreadable mess.
+
+  **`useView()` deliberately does not zero `S`, and `useGrounding()` does.** Same
+  machine seen from elsewhere versus a different machine: a coasting train keeps
+  coasting across a view change and every redrawn body lands on the phase it would
+  have reached anyway, whereas a grounding swap must reset, since 40 rad of sun is
+  not 40 rad of ring.
+
+  **The swipe hit-tests through `portAt(p) === null`** — the existing test, now
+  answering both questions. There is one grabbable disc and `layout()` decides
+  where it is, so a region-based swipe zone would be a second opinion about that.
+  Threshold is `0.12 × min(innerWidth, innerHeight)` with a 1.5× vertical bias,
+  committing on move and disarming so one drag is one swap. Keyboard route is a
+  `ground` button plus `g` and Shift+Up/Down — Shift tested first, so unmodified
+  arrows still flick the port.
+
+  **Two faults only a picture could catch**, both now commented: the rotated
+  portrait label had its anchor copied from the landscape branch, so it read back
+  down over its own gear (the rotation already carries the direction); and `↑`
+  inside a −90° rotated label renders pointing **left**, so the rotated branch
+  writes `→` and lets the rotation aim it. Also fixed: the label's fit was measured
+  before the browser's first full layout, so `layout()` now runs once more on
+  `load`.
+
+  Verified: zero console messages through every gesture in both groundings; 8 of 10
+  transform groups advancing (the two static are the set translate and the grounded
+  member's phase); the static phases **swap from rings to suns** at DOM level;
+  `S.angle` confirmed zeroed on a grounding swap, with set 2's ring landing on
+  `rotate(-3.000)` = −π/60, its own `ringPhase` exactly. A 300px drag **starting on
+  the gear** does not swap and spins the train instead (+7.03 → −7.62 rev/s), and
+  four off-gear negatives (88px, horizontal, diagonal, tap) also do not.
+  `npm test` 119/0; root-page pixel gate **0px**, so this folder stayed inside
+  itself. The fidget gate moves ~502k px by design — one set instead of two, drawn
+  larger (527px → 630px across at desk) — attributed by ink dropping 274,242 →
+  202,563 px rather than a band shifting.
+
+
 - **CL#159 — the bucket gets the machine, the repo keeps the prose, and the
   gates moved onto the artifact.** (GitHub #113.)
 

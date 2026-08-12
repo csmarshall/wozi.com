@@ -44,6 +44,26 @@
      the ratio is visibly the only thing that changed -- which is the
      demonstration rather than a shortfall in it.
 
+     HOW A VISITOR GETS FROM ONE TO THE OTHER (GitHub #129, parts 3 and 4).
+     ONE STAGE IS ON SCREEN AT A TIME and it fills the window, so there are two
+     separate "which one" questions and they are answered by two different
+     controls, deliberately:
+
+       - WHICH GROUNDING -- a vertical swipe that does NOT start on the gear, the
+         `ground` button, or `g` / Shift+Up / Shift+Down on the focused drawing.
+         Every one of them calls useGrounding(), which is the whole interface:
+         re-solve, zero the one state, rebuild.
+       - WHICH STAGE IS DRAWN -- the ONE SHAFT stub. The shaft is the compound
+         train's whole story (stage 1's carrier IS stage 2's input member), so
+         rather than delete the tie when the second set left the frame, the tie
+         became the way to follow the shaft to the other end of it. It is a real
+         button: pointer, Enter and Space, and its own aria-label.
+
+     THE TWO POINTER PATHS ARE MUTUALLY EXCLUSIVE BY ONE TEST, portAt(p) === null
+     at pointerdown, and never by a screen region. The gear fills the window now,
+     so "off the gear" is not a corner or a strip -- it is whatever is outside the
+     one grabbable disc, which moves and resizes with the layout.
+
      It is standalone by design: it loads nothing from support.js or config.js,
      and it draws its own gears. The palette tokens are copied from index.html's
      :root so the two pages read as one site, and they are the only thing shared.
@@ -90,23 +110,22 @@ button:focus-visible,[tabindex]:focus-visible{outline:3px solid var(--accent);ou
 </head>
 <body>
 
-<!-- PROTOTYPE for GitHub #129 point 1 ("one gear, centered, full-window").
-     CSS/layout only -- no change below this point touches the physics, the
-     integrator, or SET_NODES/CENTRES. The stage used to be a flex row sized
-     by what the button bar and readout left over; the drawing itself already
-     scales to fill whatever box it is given (the SVG's viewBox + default
-     xMidYMid-meet preserveAspectRatio does that), so shrinking the box
-     shrinks the gear. Here the stage IS the whole viewport, and the chrome
-     that used to claim its own rows is a floating overlay pinned to the
-     bottom safe area instead -- present, reachable, but no longer taking a
-     cut of the space the gear draws into. This does NOT decide whether "one
-     gear" also means showing only one of the two stages at a time; see the
-     scoping notes this prototype shipped alongside. -->
+<!-- "ONE GEAR, CENTERED, FULL-WINDOW" (GitHub #129 point 1, CL#156). The stage
+     used to be a flex row sized by what the button bar and readout left over;
+     the drawing itself already scales to fill whatever box it is given (the
+     SVG's viewBox + default xMidYMid-meet preserveAspectRatio does that), so
+     shrinking the box shrank the gear. Here the stage IS the whole viewport,
+     and the chrome that used to claim its own rows is a floating overlay
+     pinned to the bottom safe area instead -- present, reachable, but no
+     longer taking a cut of the space the gear draws into.
+     The other half of "one gear" -- showing one of the two stages at a time
+     rather than both with more room -- is Charles's call and is settled; it
+     lives in layout() and in build()'s one-stage block, not here. -->
 <div style="position:fixed;inset:0;background:var(--bg);overflow:hidden;">
 
   <main id="stage" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;">
-    <!-- The aria-label and the two button captions below are placeholders for
-         the shipped grounding: build() rewrites all three from the grounding
+    <!-- The aria-label and the three button captions below are placeholders for
+         the shipped grounding: build() rewrites all of them from the grounding
          actually in force, because "both ring gears fixed" is a claim about the
          machine and a page that switches grounding must not keep asserting the
          other one. -->
@@ -119,7 +138,7 @@ button:focus-visible,[tabindex]:focus-visible{outline:3px solid var(--accent);ou
   <!-- The chrome is now an overlay strip rather than a sibling row, so it
        costs the drawing nothing. It keeps the bar's own background so text
        stays legible over whatever wheel happens to sit underneath it. -->
-  <div style="position:absolute;left:0;right:0;bottom:0;pointer-events:none;
+  <div id="chrome" style="position:absolute;left:0;right:0;bottom:0;pointer-events:none;
        background:linear-gradient(to top, var(--bg) 0%, var(--bg) 55%, transparent 100%);
        padding-top:18px;">
     <div style="pointer-events:auto;display:flex;gap:6px;flex-wrap:wrap;
@@ -130,6 +149,15 @@ button:focus-visible,[tabindex]:focus-visible{outline:3px solid var(--accent);ou
       <button id="flickOutput" type="button"
          style="font:600 11px/1 'Manrope',system-ui,sans-serif;color:var(--muted);background:var(--chip);
          border:1px solid var(--hair);border-radius:999px;padding:9px 12px;cursor:pointer;box-shadow:var(--shadow);">flick carrier</button>
+      <!-- THE SWIPE'S VISIBLE TWIN. A gesture nobody is told about is a feature
+           nobody finds, and a gesture is not reachable from a keyboard at all --
+           so the grounding swap has a button, and the button, the swipe and the
+           `g` key all call the one function. It is labelled with what it will DO
+           rather than with the state it is in, because "ground rings" on a page
+           whose rings are already grounded reads as a statement, not an offer. -->
+      <button id="ground" type="button"
+         style="font:600 11px/1 'Manrope',system-ui,sans-serif;color:var(--muted);background:var(--chip);
+         border:1px solid var(--hair);border-radius:999px;padding:9px 12px;cursor:pointer;box-shadow:var(--shadow);">ground suns</button>
       <button id="theme" type="button" title="Switch theme" aria-label="Switch theme"
          style="font:600 11px/1 'Manrope',system-ui,sans-serif;color:var(--muted);background:var(--chip);
          border:1px solid var(--hair);border-radius:999px;padding:9px 12px;cursor:pointer;box-shadow:var(--shadow);
@@ -379,6 +407,13 @@ const GROUNDINGS = {
   ring: { stages: ringGroundedStages, held: 'ring', input: 'sun',  plural: 'RINGS' },
   sun:  { stages: sunGroundedStages,  held: 'sun',  input: 'ring', plural: 'SUNS' }
 };
+
+/* The order a swipe or a key steps through them in, taken from GROUNDINGS itself
+   rather than written out a second time -- a hand-written list is a second place
+   to add a grounding and forget. Two entries make up and down the same toggle;
+   they are still stepped by +1 and -1 so that a third grounding needs no new
+   gesture, and so the code does not quietly encode "there are exactly two". */
+const GROUND_ORDER = Object.keys(GROUNDINGS);
 
 /* -------------------------------------------------------- EFFECTIVE INERTIA
    J_eff = sum over every body of J_i * (w_i / w_input)^2 -- the standard
@@ -687,13 +722,43 @@ function ringGear(teeth, opts) {
 
 const svg = document.getElementById('train');
 const readout = document.getElementById('readout');
+/* The floating chrome strip. layout() needs its height, because it is drawn OVER
+   the stage rather than beside it, so it is the one part of the window the drawing
+   has but cannot use. */
+const chromeEl = document.getElementById('chrome');
 
 /* Everything that turns, collected once. Each entry knows only its own speed
    multiple; the loop writes one transform per entry per tick from the single
    master angle, which is the "one clock" rule. */
 const MOVERS = [];
 const SET_NODES = [];
-let TIE = null, TIE_LABEL = null;
+let SHAFT = null, SHAFT_HIT = null, SHAFT_LINE = null, SHAFT_LABEL = null;
+
+/* WHICH STAGE IS ON SCREEN (GitHub #129). It is a DRAWING state and nothing else:
+   MODE.ratio, MODE.jEff, every body speed and every number in the readout are the
+   compound machine's, computed over every stage in SETS, and not one of them asks
+   what is visible. So this is a camera position, not a model -- which is what makes
+   it safe for it to change without touching S. */
+let VIEW = 0;
+
+/* Which free port a stage carries, if it carries one. The first stage carries the
+   input port and the last carries the output; that was already assumed by the old
+   two-centre hit test, and it is written down here now because with one set on
+   screen it also decides whether the visible set is grabbable at all. A middle
+   stage of a longer train carries neither, and would honestly be ungrabbable
+   rather than silently answering with somebody else's port. */
+function portOf(i) {
+  if (!MODE) return null;
+  if (i === 0) return MODE.ports.input;
+  if (i === MODE.stages.length - 1) return MODE.ports.output;
+  return null;
+}
+
+/* The grounding a swipe up, the button or `g` would move to next. Named because
+   the button caption, the aria-label and the actual step all have to agree about
+   it, and three separate `(i + 1) % n` expressions are three chances not to. */
+const nextGrounding = (dir) =>
+  GROUND_ORDER[(GROUND_ORDER.indexOf(MODE.name) + dir + GROUND_ORDER.length) % GROUND_ORDER.length];
 
 function build() {
   while (svg.firstChild) svg.removeChild(svg.firstChild);
@@ -703,32 +768,75 @@ function build() {
      than written down in the markup: an aria-label asserting fixed rings, or a
      button offering to flick a sun that is bolted to the world, would be the
      page describing the other grounding. */
+  const shown = portOf(VIEW), other = GROUNDINGS[nextGrounding(1)];
   svg.setAttribute('aria-label',
-      'A double planetary gear set with both ' + MODE.held + ' gears fixed. Drag the first set to turn the '
-    + MODE.ports.input.member + ', the second to turn the output carrier.');
+      'A double planetary gear set with both ' + MODE.held + ' gears fixed, reducing '
+    + MODE.ratio.toFixed(3) + ' to 1 overall. Set ' + (VIEW + 1) + ' of ' + MODE.stages.length
+    + ' is on screen and fills the window'
+    + (shown ? '; drag it to turn the ' + shown.member : '')
+    + '. Swipe up or down clear of the gear, or press G, to ground the '
+    + other.plural.toLowerCase() + ' instead. The dashed shaft is a button: follow it to the other set.');
   flickIn.textContent = 'flick ' + MODE.ports.input.member;
   flickIn.title = 'Flick the ' + MODE.ports.input.member;
   flickOut.textContent = 'flick ' + MODE.ports.output.member;
   flickOut.title = 'Flick the output ' + MODE.ports.output.member;
+  groundBtn.textContent = 'ground ' + other.plural.toLowerCase();
+  groundBtn.title = 'Ground the ' + other.plural.toLowerCase()
+    + ' instead — the same thing as a swipe up or down clear of the gear, or the G key';
 
-  /* The coupling between stage 1's carrier and stage 2's input member, drawn
-     first so it sits behind the wheels. It is one shaft in reality; side by side
-     is a schematic, so the drawing says so with a tie line and with two index
-     marks that visibly turn in lockstep. Which member it lands on is the
-     grounding's business and not the drawing's -- carrier 1 -> sun 2 with the
-     rings held, carrier 1 -> ring 2 with the suns held, and a carrier tied to a
-     ring is as much one coaxial rotating member as a carrier tied to a sun, so
-     the note stays true either way without being restated. */
-  TIE = el('line', { stroke: 'var(--hair)', 'stroke-width': 0.4, 'stroke-dasharray': '2 2' });
-  svg.appendChild(TIE);
-  TIE_LABEL = el('text', {
-    'text-anchor': 'middle', fill: 'var(--muted)',
-    style: "font:600 2.2px 'Manrope',system-ui,sans-serif;letter-spacing:.06em"
+  /* THE ONE SHAFT STUB -- what became of the coupling when the second set left
+     the frame, and the one thing on this page it would have been worst to delete.
+     The tie is not decoration: stage 1's carrier IS stage 2's input member, and
+     that is the entire difference between a COMPOUND set and two sets standing
+     next to each other. Drop it and the page draws a single epicyclic while the
+     readout goes on quoting 15.167:1 for a train the drawing no longer shows.
+
+     So it stays, as a stub running from the visible set's rim off the edge of the
+     window, and IT IS THE CONTROL THAT TRAVELS ALONG IT. That is why this shape
+     was picked over the alternatives:
+       - deleting it: costs the compound claim, above.
+       - a stub with a caption and nothing else: the tie then points at a stage
+         that cannot be reached, and the heavy port -- the whole demonstration --
+         becomes button-only. Following a shaft to the other end of it is what a
+         shaft is FOR.
+       - drawing the two sets concentrically: rejected at #123 for interleaving
+         two orbit radii 21 and 19.5 units apart into an unreadable mess, and
+         nothing about #129 changes that.
+     Drawn first, so it sits behind the wheels, and given a transparent fat line
+     to be hit by -- a 0.4-unit dashed stroke is a legible NOTE and an impossible
+     TARGET, and those are two different widths.
+
+     Which member is at the far end is the grounding's business and not the
+     drawing's: carrier 1 -> sun 2 with the rings held, carrier 1 -> ring 2 with
+     the suns held. A carrier tied to a ring is as much one coaxial rotating
+     member as a carrier tied to a sun, so the note stays true either way. */
+  SHAFT = el('g', { id: 'shaft', role: 'button', tabindex: '0', cursor: 'pointer' });
+  svg.appendChild(SHAFT);
+  SHAFT_HIT = el('line', { stroke: 'transparent', 'stroke-linecap': 'butt' });
+  SHAFT_LINE = el('line', { stroke: 'var(--hair)', 'stroke-dasharray': '2 2' });
+  SHAFT_LABEL = el('text', {
+    fill: 'var(--muted)',
+    style: "font:600 " + SHAFT_FONT + "px 'Manrope',system-ui,sans-serif;letter-spacing:.06em"
   });
-  TIE_LABEL.textContent = 'ONE SHAFT';
-  svg.appendChild(TIE_LABEL);
+  SHAFT.appendChild(SHAFT_HIT);
+  SHAFT.appendChild(SHAFT_LINE);
+  SHAFT.appendChild(SHAFT_LABEL);
+  SHAFT.addEventListener('click', () => useView(VIEW + 1));
+  /* Enter and Space, because a role="button" that answers to neither is a button
+     in name only. stopPropagation keeps them off the drawing's own key handler. */
+  SHAFT.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Enter' && ev.key !== ' ') return;
+    useView(VIEW + 1);
+    ev.preventDefault();
+    ev.stopPropagation();
+  });
 
-  MODE.stages.forEach((st, i) => {
+  /* ONE SET AT A TIME (GitHub #129, Charles's call). What follows drew every
+     stage; it now draws the one the page is looking at, and the block is left
+     otherwise untouched -- a stage does not know or care whether it is the only
+     one on screen, and neither does anything in the loop. */
+  {
+    const i = VIEW, st = MODE.stages[i];
     const g = el('g', {});
     svg.appendChild(g);
 
@@ -828,8 +936,12 @@ function build() {
       'text-anchor': 'middle', fill: 'var(--muted)',
       style: "font:600 2.9px 'Manrope',system-ui,sans-serif;letter-spacing:.09em"
     });
+    /* "OF 2" is new and is carrying the weight the second set used to: with both
+       sets drawn, that there were two was self-evident. Derived from the stage
+       count, so it cannot disagree with the train. */
     cap.appendChild(document.createTextNode(
-      (i === 0 ? 'SET 1 · ' : 'SET 2 · ') + st.stageRatio.toFixed(3) + ':1 · DRAG FOR '));
+      'SET ' + (i + 1) + ' OF ' + MODE.stages.length + ' · '
+      + st.stageRatio.toFixed(3) + ':1 · DRAG FOR '));
     const strong = el('tspan', { fill: 'var(--accent)', style: 'font-weight:800' });
     strong.textContent = i === 0
       ? MODE.ports.input.label + ' (light)'
@@ -838,66 +950,211 @@ function build() {
     svg.appendChild(cap);
 
     SET_NODES.push({ g, cap, ring: st.spec.ring });
-  });
+  }
 
   layout();
 }
 
-/* Layout is recomputed on resize rather than fixed, because the two sets sit
-   side by side in landscape and stacked in portrait -- a phone held upright has
-   the room in the other direction. Both centres and the viewBox come off the
-   ring's own outer radius, so a tooth-count change moves them by itself. */
-const CENTRES = [{ x: 0, y: 0 }, { x: 0, y: 0 }];
-function layout() {
-  const R = pitchR(SETS[0].ring) + RING_RIM * MODULE;
-  const wide = svg.clientWidth >= svg.clientHeight;
-  /* MARGIN and GAP are separate because they hold different things. The margin
-     holds one line of caption above each set; the gap holds the coupling note,
-     AND in portrait the second set's caption as well -- two things stacked
-     where landscape has one thing lying along the gap. Both come off the ring
-     radius, so a tooth-count change re-spaces the page by itself. */
-  const margin = R * 0.42;
-  const gap = R * (wide ? 0.62 : 0.95);
-  const span = 2 * R + gap;                   /* centre-to-centre */
-  const half = R + margin;
-  CENTRES[0] = { x: half, y: half };
-  CENTRES[1] = wide ? { x: half + span, y: half } : { x: half, y: half + span };
-  svg.setAttribute('viewBox', '0 0 '
-    + (wide ? 2 * half + span : 2 * half) + ' ' + (wide ? 2 * half : 2 * half + span));
-
-  SET_NODES.forEach((n, i) => {
-    n.g.setAttribute('transform', 'translate(' + CENTRES[i].x + ',' + CENTRES[i].y + ')');
-    n.cap.setAttribute('x', CENTRES[i].x);
-    n.cap.setAttribute('y', CENTRES[i].y - R - margin * 0.5);
-  });
-  /* The coupling is drawn only ACROSS THE GAP, not centre to centre: one shaft
-     is the truth, but a line through both sets crosses every wheel on the page
-     and reads as a part rather than as a note. */
-  if (TIE) {
-    const mx = (CENTRES[0].x + CENTRES[1].x) / 2, my = (CENTRES[0].y + CENTRES[1].y) / 2;
-    TIE.setAttribute('x1', wide ? CENTRES[0].x + R : mx);
-    TIE.setAttribute('y1', wide ? my : CENTRES[0].y + R);
-    TIE.setAttribute('x2', wide ? CENTRES[1].x - R : mx);
-    TIE.setAttribute('y2', wide ? my : CENTRES[1].y - R);
-    if (wide) {
-      TIE_LABEL.setAttribute('text-anchor', 'middle');
-      TIE_LABEL.setAttribute('x', mx);
-      TIE_LABEL.setAttribute('y', my - 1.6);
-      TIE_LABEL.setAttribute('transform', '');
-    } else {
-      /* Portrait stacks the note and set 2's caption in one gap: the note takes
-         the TOP of it, hard against set 1, and reads bottom-to-top beside the
-         dashed line. Centring it would put it straight through the caption. */
-      const ay = CENTRES[0].y + R + 1.5;
-      TIE_LABEL.setAttribute('text-anchor', 'end');
-      TIE_LABEL.setAttribute('x', mx);
-      TIE_LABEL.setAttribute('y', ay);
-      TIE_LABEL.setAttribute('transform', 'rotate(-90 ' + mx + ' ' + ay + ') translate(0,-1.8)');
-    }
-  }
-  GRAB_RADIUS = R;
+/* Travelling along the shaft. It re-draws and NOTHING ELSE -- S.angle and S.rate
+   are untouched on purpose, and that is the difference between this and
+   useGrounding(). A grounding swap picks up a different machine, so its
+   coordinate has to start again; walking to the other end of one shaft is the
+   same machine seen from somewhere else, so a train spinning down keeps spinning
+   down and every body it re-draws lands on exactly the phase it would have been
+   at had it been on screen all along (a body's angle is S.angle * rate + phase,
+   and none of those three moved). The grip does go, because the disc the finger
+   was on is no longer the disc under it. */
+function useView(n) {
+  VIEW = ((n % MODE.stages.length) + MODE.stages.length) % MODE.stages.length;
+  S.grip = null;
+  grabbedCentre = null;
+  build();
+  applyTransforms();
+  draw();
 }
+
+/* How far past the window's edge the shaft stub is drawn. Any positive amount
+   does the job -- the point is only that the stub is CUT by the edge rather than
+   ending on it, because a line that stops in mid-air reads as a part that broke
+   off and a line that leaves the frame reads as a machine that continues. Stated
+   in modules because there is nothing it could be derived from. */
+const SHAFT_OVERRUN = 1.5 * MODULE;
+
+/* The stub's INK width and its HIT width, and they are deliberately two numbers
+   rather than one: 0.4 units is a legible dashed note and an impossible target,
+   and a target wide enough for a finger drawn in ink would read as a part of the
+   machine. The hit width is a share of the ring's own radius so it scales with
+   the drawing rather than being correct at one screen size -- it lands at 63px on
+   a 1440x900 desk and 27px on a 390-wide phone, where the whole drawing is 4.6x
+   smaller, so it is the drawing's own proportion and not a pixel figure. */
+const SHAFT_INK = 0.4;
+const SHAFT_TARGET = 0.2;
+
+/* The stub label's own size, and the clearance it keeps from both the rim and the
+   dashed line. The font size is named because the rotated portrait placement has
+   to offset the baseline by a glyph height to keep the letters off the line, so
+   the number is read twice and must be one fact. */
+const SHAFT_FONT = 2.2;
+const SHAFT_LABEL_GAP = 1.6;
+
+/* Layout is recomputed on resize rather than fixed. ONE SET IS ON SCREEN, so
+   there is one centre and the viewBox is SQUARE and symmetric about it -- with
+   preserveAspectRatio at its default xMidYMid meet, that is what puts the gear
+   in the middle of the window at the largest size that fits, which is all
+   "one gear, centred, full-window" asks for. Every length comes off the visible
+   ring's own outer radius, so a tooth-count change re-spaces the page by itself. */
+const CENTRE = { x: 0, y: 0 };
 let GRAB_RADIUS = 0;
+function layout() {
+  const R = pitchR(MODE.stages[VIEW].spec.ring) + RING_RIM * MODULE;
+  /* The margin holds one line of caption above the set. It used to also have to
+     be reconciled with a gap holding the coupling note and the second set's
+     caption; with one set there is nothing else in the frame, so the gap is gone
+     and so is the portrait/landscape special case that came with it. */
+  const margin = R * 0.42;
+  const half = R + margin;
+  CENTRE.x = half; CENTRE.y = half;
+  GRAB_RADIUS = R;
+  svg.setAttribute('viewBox', '0 0 ' + 2 * half + ' ' + 2 * half);
+
+  /* THE STUB LEAVES ALONG THE WINDOW'S LONG AXIS, WHICH IS EXACTLY WHERE THE
+     ROOM IS. The viewBox is square and `meet` letterboxes it, so the space the
+     drawing does not use is a band either side in landscape and above and below
+     in portrait -- and content outside the viewBox is still painted, because a
+     root <svg> clips at its own element box and not at its viewBox. So the stub
+     runs out into that band and is cut by the window edge, with the gear staying
+     centred and full size. Getting this the other way round would send the shaft
+     into the letterbox's short direction and it would be clipped immediately.
+
+     `edge` is the window's half-extent along that axis IN USER UNITS, measured
+     through `meet`'s own scale rather than assumed: the viewBox centre and the
+     window centre coincide, so the edge is that far from CENTRE. Nothing here is
+     a pixel figure. A near-square window has almost no band at all, which is why
+     `edge` is floored at `half` -- the stub is then only as long as the margin,
+     and it still leaves the frame. */
+  const wide = svg.clientWidth >= svg.clientHeight;
+  const scale = Math.min(svg.clientWidth / (2 * half), svg.clientHeight / (2 * half)) || 1;
+  const edge = Math.max((wide ? svg.clientWidth : svg.clientHeight) / 2 / scale, half);
+  const far = (VIEW + 1) % MODE.stages.length;
+  /* Which WAY the far set lies: forward along the axis if its index is ahead of
+     the visible one, back if the walk has wrapped. Two stages make this +1 from
+     set 1 and -1 from set 2, which keeps the old layout's sense -- set 2 was to
+     the right in landscape and below in portrait. */
+  const dir = far > VIEW ? 1 : -1;
+
+  /* THE CAPTION SITS ON THE SIDE THE SHAFT DOES NOT LEAVE BY. In landscape the
+     stub is horizontal and the caption is above, so they never meet; in portrait
+     they share an axis, and a stub leaving upwards would be drawn straight
+     through the caption's own letters. This is the same collision the two-set
+     layout solved by rotating the coupling note bottom-to-top to squeeze past
+     set 2's caption -- with one set there is a whole empty side to use instead. */
+  const capUp = wide || dir > 0;
+  SET_NODES.forEach((n) => {
+    n.g.setAttribute('transform', 'translate(' + CENTRE.x + ',' + CENTRE.y + ')');
+    n.cap.setAttribute('x', CENTRE.x);
+    n.cap.setAttribute('y', capUp ? CENTRE.y - R - margin * 0.5 : CENTRE.y + R + margin * 0.72);
+  });
+
+  if (!SHAFT) return;
+  const reach = edge + SHAFT_OVERRUN;
+  const seg = (r) => wide
+    ? { x: CENTRE.x + dir * r, y: CENTRE.y }
+    : { x: CENTRE.x, y: CENTRE.y + dir * r };
+  const a = seg(R), b = seg(reach);
+  for (const [node, w] of [[SHAFT_LINE, SHAFT_INK], [SHAFT_HIT, R * SHAFT_TARGET]]) {
+    node.setAttribute('x1', a.x); node.setAttribute('y1', a.y);
+    node.setAttribute('x2', b.x); node.setAttribute('y2', b.y);
+    node.setAttribute('stroke-width', w);
+  }
+
+  /* The label names WHAT IS AT THE OTHER END, not merely that there is one -- the
+     free port over there is the reason to go, and it is the port the readout is
+     already quoting a speed and an inertia for. Both come off MODE, so neither
+     can go on describing a grounding the page has left.
+
+     IT IS THE LONGEST OF THREE PHRASINGS THAT FITS THE STUB THAT IS ACTUALLY ON
+     SCREEN, measured with getComputedTextLength rather than estimated from the
+     character count. The band is 405px long beside a 1440x900 desk window and
+     133px beside a square one, so a single phrasing is either cut in half at one
+     of those or needlessly terse at the other. Ordered most to least informative
+     and the last one always wins if nothing fits, because a stub with no note at
+     all is a dashed line to nowhere.
+
+     THE BUDGET IS THE BAND LESS WHATEVER IS DRAWN OVER IT. The chrome strip
+     floats on top of the stage rather than beside it (CL#156), so the room the
+     drawing actually has along the axis the shaft leaves by is the window less
+     that strip -- but only when the shaft leaves by the bottom, which is portrait
+     with the far set below. Its height is read rather than assumed for the same
+     reason `edge` is: it is a wrapped flex row over a safe-area inset, so its
+     height is whatever the device made it. */
+  /* THE ARROW IS A GLYPH INSIDE A ROTATED LABEL, so in portrait the rotation
+     points it and the character must not: the label is turned 90 degrees to read
+     along the stub, and a '↑' turned with it renders pointing LEFT. A '→' turned
+     by +90 renders as '↓' and by -90 as '↑', which is the direction of travel in
+     both cases -- so the rotated branch always writes '→' and only the unrotated
+     one chooses. Caught in a screenshot and not by any measurement here: every
+     number about this label was right while it pointed the wrong way. */
+  const arrow = wide ? (dir > 0 ? '→' : '←') : '→';
+  const port = portOf(far);
+  const blocked = (wide || dir < 0) ? 0 : chromeEl.offsetHeight / scale;
+  /* The text starts at R + GAP and must end before the usable edge, so the room
+     it has is that span and not the whole band -- one GAP, at the near end where
+     the text actually begins, and not one at each end. */
+  const room = edge - blocked - (R + SHAFT_LABEL_GAP);
+  const said = 'ONE SHAFT ' + arrow;
+  const there = ' SET ' + (far + 1);
+  let out = true;
+  for (const text of [said + there + (port ? ' · ' + port.label : ''), said + there, said]) {
+    SHAFT_LABEL.textContent = text;
+    out = SHAFT_LABEL.getComputedTextLength() <= room;
+    if (out) break;
+  }
+
+  /* Placed hard against the rim and reading OUTWARD along the stub, rather than at
+     the middle of the run: at the middle it runs off the frame in a near-square
+     window, and in portrait with the shaft leaving downward the middle is behind
+     the chrome. Against the rim it is neither, at every viewport.
+
+     AND IF EVEN THE SHORTEST PHRASING WILL NOT FIT, IT READS INWARD INSTEAD --
+     back across the ring's own rim, where --muted on the rim's --chip fill is
+     legible and, more to the point, guaranteed to be on screen, because the gear
+     always is. That is the near-square window: 10.7 units of band against 17.8
+     units of the shortest label there is, so no phrasing exists that fits and the
+     choice is between overlapping the wheel and being cut in half by the frame.
+     One flag decides the anchor point and which end of the text is pinned, so the
+     two cases cannot disagree about which way the words run. */
+  const along = R + (out ? SHAFT_LABEL_GAP : -SHAFT_LABEL_GAP);
+  if (wide) {
+    /* Unrotated, so the text advances along +x whichever way the shaft points and
+       the anchor has to carry the direction: a shaft leaving to the LEFT reading
+       outward is text that ENDS at the anchor. Both flips matter and they compose
+       -- reading inward reverses it again. */
+    SHAFT_LABEL.setAttribute('text-anchor', (dir > 0) === out ? 'start' : 'end');
+    SHAFT_LABEL.setAttribute('x', CENTRE.x + dir * along);
+    SHAFT_LABEL.setAttribute('y', CENTRE.y - SHAFT_LABEL_GAP);
+    SHAFT_LABEL.setAttribute('transform', '');
+  } else {
+    /* Turned to read down the stub going down and up the stub going up, which is
+       the ordinary convention for a vertical label and also the direction of
+       travel. The baseline is offset so the GLYPHS clear the dashed line rather
+       than the baseline doing -- they fall on the +x side under rotate(90) and
+       the -x side under rotate(-90), so the offset has to flip with it. */
+    const lx = CENTRE.x + (dir > 0 ? SHAFT_LABEL_GAP : SHAFT_FONT + SHAFT_LABEL_GAP);
+    const ly = CENTRE.y + dir * along;
+    /* HERE THE ROTATION ALREADY CARRIES THE DIRECTION, so the anchor must NOT --
+       rotate(90) advances the text downward and rotate(-90) upward, which is
+       outward in both cases, so `dir` is deliberately absent from this line. It
+       was present once, copied from the landscape branch above, and the label ran
+       back down over its own gear: the two branches look symmetrical and their
+       anchors are not. */
+    SHAFT_LABEL.setAttribute('text-anchor', out ? 'start' : 'end');
+    SHAFT_LABEL.setAttribute('x', lx);
+    SHAFT_LABEL.setAttribute('y', ly);
+    SHAFT_LABEL.setAttribute('transform', 'rotate(' + (dir > 0 ? 90 : -90) + ' ' + lx + ' ' + ly + ')');
+  }
+  SHAFT.setAttribute('aria-label', 'Follow the one shaft to set ' + (far + 1)
+    + ' of ' + MODE.stages.length + (port ? ', whose free port is the ' + port.member : '') + '.');
+}
 
 /* ================================================================== THE LOOP
    ONE state: the sun's angle and its rate. Everything drawn is a multiple of
@@ -976,15 +1233,20 @@ function svgPoint(ev) {
   return pt.matrixTransform(inv);
 }
 
-/* Which set was touched decides which PORT is grabbed, and the whole disc is
-   live rather than the hub alone -- a 44px target on a phone is the floor, and
-   a sun at these proportions is smaller than that on a small screen. */
+/* THE ONE HIT TEST, and it now answers two questions rather than one. It says
+   which PORT is grabbed -- and the whole disc is live rather than the hub alone,
+   because a 44px target on a phone is the floor and a sun at these proportions is
+   smaller than that on a small screen. By returning null it ALSO says the gesture
+   is not on the gear at all, which is what the swipe is gated on.
+
+   That is deliberately the same test and not a second one. The gear fills the
+   window now, so a swipe zone written as a region -- the corners, a strip down
+   one side, the bottom third -- would be a second opinion about where the gear is,
+   drifting out of step with the layout the first time either changed. There is one
+   disc, layout() puts it where it is, and everything outside it is the swipe's. */
 function portAt(p) {
-  for (let i = 0; i < CENTRES.length; i++) {
-    const dx = p.x - CENTRES[i].x, dy = p.y - CENTRES[i].y;
-    if (Math.hypot(dx, dy) <= GRAB_RADIUS) return i === 0 ? MODE.ports.input : MODE.ports.output;
-  }
-  return null;
+  const dx = p.x - CENTRE.x, dy = p.y - CENTRE.y;
+  return Math.hypot(dx, dy) <= GRAB_RADIUS ? portOf(VIEW) : null;
 }
 
 /* Screen y grows downward, so a CCW-positive angle needs y negated. Without
@@ -994,12 +1256,43 @@ const angleAt = (p, c) => Math.atan2(-(p.y - c.y), p.x - c.x);
 
 let prevPointerAngle = 0, grabbedCentre = null;
 
+/* THE SWIPE (GitHub #129). Up or down, off the gear, swaps which member is
+   grounded. Two things about how it is measured are worth stating, because both
+   were choices:
+
+   THE THRESHOLD IS A FRACTION OF THE SHORTER WINDOW EDGE, not a pixel count. A
+   swipe is a movement of a hand across a screen, and 80px is a fifth of a phone's
+   width against a twelfth of a desk monitor's height -- one number that means two
+   gestures. This is the same reasoning index.html's px() exists for.
+
+   IT COMMITS ON MOVE, not on release, so the machine changes under the finger at
+   the moment the gesture is unambiguous rather than after the hand has stopped.
+   The gesture then disarms, so one drag is one swap however far it goes on.
+
+   SWIPE_BIAS is how much more vertical than horizontal the movement has to be. A
+   swipe with no bias test fires on any long diagonal, which is most of what a hand
+   actually does when it means "sideways". */
+const SWIPE_FRACTION = 0.12;
+const SWIPE_BIAS = 1.5;
+let swipe = null;
+
 svg.addEventListener('pointerdown', (ev) => {
   const p = svgPoint(ev);
   if (!p) return;
   const port = portAt(p);
-  if (!port) return;
-  const c = port === MODE.ports.input ? CENTRES[0] : CENTRES[1];
+  if (!port) {
+    /* OFF THE GEAR. The two pointer paths part here and nowhere else, so they
+       cannot both claim a gesture -- and the drag path below is reached only when
+       this test says the finger is on the disc, exactly as before.
+       The shaft stub is excluded because it is a control of its own: a tap on it
+       travels along the shaft, and a swipe that began on it would swap the
+       grounding out from under a button the finger was aiming at. */
+    if (ev.target.closest && ev.target.closest('#shaft')) return;
+    swipe = { x: ev.clientX, y: ev.clientY, id: ev.pointerId };
+    svg.setPointerCapture(ev.pointerId);
+    return;
+  }
+  const c = CENTRE;
   grabbedCentre = c;
   prevPointerAngle = angleAt(p, c);
   /* The grip starts wherever the body already is, so grabbing a spinning train
@@ -1011,6 +1304,18 @@ svg.addEventListener('pointerdown', (ev) => {
 });
 
 svg.addEventListener('pointermove', (ev) => {
+  if (swipe && ev.pointerId === swipe.id) {
+    const dx = ev.clientX - swipe.x, dy = ev.clientY - swipe.y;
+    const need = SWIPE_FRACTION * Math.min(window.innerWidth, window.innerHeight);
+    if (Math.abs(dy) >= need && Math.abs(dy) > SWIPE_BIAS * Math.abs(dx)) {
+      swipe = null;                                  /* one swap per gesture */
+      /* Up steps forward through GROUND_ORDER and down steps back, like a stack
+         of cards being pulled up from underneath. With two groundings both are
+         the same toggle; the sign is kept anyway so a third needs no new gesture. */
+      useGrounding(nextGrounding(dy < 0 ? 1 : -1));
+    }
+    return;
+  }
   if (!S.grip || !grabbedCentre) return;
   const p = svgPoint(ev);
   if (!p) return;
@@ -1027,6 +1332,7 @@ svg.addEventListener('pointermove', (ev) => {
 
 function release() {
   S.grip = null; grabbedCentre = null;
+  swipe = null;
   svg.style.cursor = 'grab';
 }
 svg.addEventListener('pointerup', release);
@@ -1048,13 +1354,31 @@ function flick(port, sign) {
 }
 const flickIn = document.getElementById('flickInput');
 const flickOut = document.getElementById('flickOutput');
+const groundBtn = document.getElementById('ground');
 /* The handlers read MODE.ports at click time rather than closing over a port
    object, so a grounding swap does not leave a button wired to the machine that
    is no longer on screen. */
 flickIn.addEventListener('click', () => flick(MODE.ports.input, 1));
 flickOut.addEventListener('click', () => flick(MODE.ports.output, 1));
+groundBtn.addEventListener('click', () => useGrounding(nextGrounding(1)));
 svg.setAttribute('tabindex', '0');
 svg.addEventListener('keydown', (ev) => {
+  /* THE SWIPE'S KEYBOARD ROUTE, and it is not optional: a gesture is unreachable
+     from a keyboard by definition, so a page whose second machine is only behind
+     a swipe has a machine some visitors cannot get to at all. Two spellings,
+     because they answer two different questions -- Shift+Up/Down is the swipe
+     said in keys, and `g` is the shortcut somebody looking for "grounding" tries.
+     The button in the chrome row is the third and the discoverable one.
+
+     Shift is what keeps them off the flick keys below: an unmodified Up or Down
+     still throws the input port, which is what it has always done, and the
+     modifier is checked FIRST so the two cannot both fire on one press. */
+  if (ev.key === 'g' || ev.key === 'G') {
+    useGrounding(nextGrounding(1)); ev.preventDefault(); return;
+  }
+  if (ev.shiftKey && (ev.key === 'ArrowUp' || ev.key === 'ArrowDown')) {
+    useGrounding(nextGrounding(ev.key === 'ArrowUp' ? 1 : -1)); ev.preventDefault(); return;
+  }
   if (ev.key === 'ArrowRight' || ev.key === 'ArrowUp') { flick(MODE.ports.input, 1); ev.preventDefault(); }
   if (ev.key === 'ArrowLeft' || ev.key === 'ArrowDown') { flick(MODE.ports.input, -1); ev.preventDefault(); }
 });
@@ -1107,20 +1431,42 @@ themeBtn.addEventListener('click', () => {
    for. A grounding swap is picking up the other machine, not the same one
    relabelled.
 
-   This is also the whole of what the swipe GitHub #129 asks for has to call:
-   useGrounding('sun'). It deliberately does not exist yet -- there is no gesture,
-   no key and no URL parameter that reaches it, so the page draws exactly one
-   machine and GROUNDED is the only thing that says which. */
+   This is also the whole of what every control that swaps grounding calls, and
+   there are four of them now -- the vertical swipe, the `ground` button, `g`, and
+   Shift+Up/Down -- with no second path between any of them and the machine. That
+   is the same rule index.html holds its speed control to: moving WHERE a control
+   is drawn, or adding another spelling of it, must never give it a second job.
+
+   WHICH SET IS ON SCREEN IS NOT TOUCHED HERE. VIEW is a camera position and a
+   grounding is a machine; a swipe should leave you looking at the same stage from
+   the same place with the other machine in it, so that the ratio is visibly the
+   only thing that changed. That is the demonstration the page is for.
+
+   applyTransforms() runs before returning because build() creates every node
+   without a transform attribute: without it the rebuilt set is painted once at
+   un-phased zero, and the assembly's own phasing -- the thing that makes the drawn
+   teeth mesh -- would flash wrong for exactly one frame. */
 function useGrounding(name) {
   MODE = solveGrounding(name);
   S.angle = 0; S.rate = 0; S.grip = null;
   grabbedCentre = null;
   build();
+  applyTransforms();
   draw();
 }
 
 useGrounding(GROUNDED);
 window.addEventListener('resize', layout);
+/* AND ONCE MORE AFTER THE FIRST FULL LAYOUT, because two of the things layout()
+   measures are not true yet when this script runs. The chrome strip is a wrapping
+   flex row over a safe-area inset, and it is 95px tall as one row and 155px as two
+   -- and it reports the one-row height at boot on a 390-wide phone, which is 60px
+   of budget the shaft label does not really have. Measured: at boot the label
+   settled on its longest phrasing and ran under the chrome; after one more layout
+   it settles on the middle one and clears it by 17px. Cheap (one layout, once) and
+   the alternative is a hardcoded height, which is the same number written down in
+   a place that cannot see the device that decided it. */
+window.addEventListener('load', layout);
 applyTransforms();
 draw();
 setInterval(draw, 250);
