@@ -21,3 +21,9 @@ scratchpad/
 # cache across ~670 files, and a `git add -A` in a worktree swept exactly that
 # into a commit once. Never wanted, never published, and large enough to matter.
 cp-*/
+
+# Timestamped command logs. Anything Charles is asked to run is teed to
+# `<name>_$(date +"%F-%H%M.%S").log` in the repo root by convention, so the
+# output can be read back without copy-paste and the audit trail survives. They
+# are a working record, not project files, and they accumulate one per run.
+*.log
