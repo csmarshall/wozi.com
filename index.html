@@ -1625,7 +1625,25 @@ const DATUM_ETCH_DEPTH = 0.12;
    IT REACHES THE SEAT, DELIBERATELY. plateSeat() is asked to clear the GROWN
    rectangle, because a search that reserves last size's box for this size's
    lettering is a search answering the wrong question. */
-const DATUM_MARK_GROW = 1.3;
+const DATUM_MARK_GROW = 1.75;
+/* THE AIR BETWEEN THE SCRIBED RULE AND THE NAME'S NEAREST INK, as a multiple of
+   plateMargin(S).pad -- the plate's own corner radius, the one distance the mark
+   already declares about itself. A JUDGED FIGURE and Charles's to set: "I would
+   like the names bigger and closer to the datum line".
+
+   A MULTIPLE OF pad RATHER THAN OF THE TYPE, so this lever and DATUM_MARK_GROW
+   are orthogonal: growing the name does not push it away from the rule, which is
+   the whole of what was asked for. It still travels with the render scale,
+   because pad does.
+
+   MEASURED FROM THE INK, NOT FROM THE RESERVED BOX, which is why 0 is a real
+   boundary rather than an arbitrary small number: at 0 the nearest drawn pixel of
+   the name touches the outer edge of the rule's own hairline, at any size and for
+   any name. Below 0 the rule runs THROUGH the lettering, which is candidate
+   'etch-strike' from the first sweep -- Charles rejected it on sight ("reads like
+   dirt rather than machining"), so 0 is the floor and not a taste preference. */
+const DATUM_MARK_AIR = 1.5;
+
 
 /* HOW MANY IDLERS STAND BETWEEN A CHAIN AND ITS DRIVE. Never zero -- two chains
    meshing directly would read as one machine, and the idlers are what make the
@@ -5150,6 +5168,39 @@ class Component extends DCLogic {
     const w = Math.ceil(this._measureCtx.measureText(text).width);
     this._tw[key] = w;
     return w;
+  }
+
+  /* THE INK'S OWN VERTICAL EXTENT for a string at a given size -- how far the
+     drawn glyphs actually reach above and below their baseline, measured on the
+     same canvas textWidth() measures the width on.
+
+     IT IS WHAT MAKES THE DATUM STANDOFF THE SAME FOR EVERY NAME. A standoff
+     referenced to the reserved box hands a name with a descender less air than
+     one without: "Harper" has a p and "Charles" has nothing below the baseline,
+     so the same box offset puts her ink measurably nearer the rule than his.
+     That is the SAME shape of inconsistency the per-chain standoff was, one
+     scope down, and the fix is the same -- measure the thing, do not assume it.
+
+     THE FALLBACK IS NOT DECORATIVE. actualBoundingBox* is unavailable on older
+     engines, and an undefined here would propagate as NaN into a transform and
+     lose the mark entirely; the fractions are a monospace face's typical cap
+     and descender depth, which is a worse answer than a measurement and a much
+     better one than no mark. */
+  textInk(text, font, fs) {
+    if (!this._ti) this._ti = {};
+    const key = font + '|' + text;
+    if (this._ti[key] !== undefined) return this._ti[key];
+    if (!this._measureCtx) {
+      const c = document.createElement('canvas');
+      this._measureCtx = c.getContext('2d');
+    }
+    this._measureCtx.font = font;
+    const m = this._measureCtx.measureText(text);
+    const num = (v, fallback) => (typeof v === 'number' && isFinite(v)) ? v : fallback;
+    const v = { ascent: num(m.actualBoundingBoxAscent, fs * 0.72),
+                descent: num(m.actualBoundingBoxDescent, fs * 0.21) };
+    this._ti[key] = v;
+    return v;
   }
 
   loadIcons() {
@@ -9051,13 +9102,24 @@ class Component extends DCLogic {
      behind the name and has each glyph cut it out, so the halo has to clear the
      rule itself plus the relief standing either side of it: HAIR + 2 * depth,
      exactly, and nothing to re-measure when either of those moves. */
+  /* HOW THE STAMP SETS ITS TYPE at a given size: where the baseline sits inside
+     the mark, and how far the two relief copies stand off it. One home, because
+     datumLayer() has to place the mark relative to the ink it is about to draw --
+     and the mark's REACH across the rule is its ink PLUS the relief, since the cut
+     copy is raised by exactly this depth. A second copy of either figure is the
+     drift this repo has already paid for in #12, #15 and #51. */
+  datumRelief(fs) {
+    return { base: fs * 0.35, depth: Math.max(1, fs * DATUM_ETCH_DEPTH) };
+  }
+
   datumStamp(label, font, track, pw, ph, fs, INK, HAIR) {
     const h = React.createElement;
-    const depth = Math.max(1, fs * DATUM_ETCH_DEPTH);
+    const depth = this.datumRelief(fs).depth;
     /* Offset by a share of the font size, not by `dominant-baseline`: WebKit puts
        `central` somewhere Blink and Gecko do not, which is what left the rim
        engraving off centre in Safari (#26). */
-    const base = fs * 0.35;
+    const rel = this.datumRelief(fs);
+    const base = rel.base;
     const type = (key, dy, fill, extra) => {
       const p = { key: key, x: 0, y: (base + dy).toFixed(2), textAnchor: 'middle',
         style: Object.assign({ fill: fill, font: font, letterSpacing: track.toFixed(2) + 'px' },
@@ -9267,12 +9329,17 @@ class Component extends DCLogic {
          plateMargin()'s figure, the plate's corner radius floored at half a hairline
          -- and plus half the mark's height, because a centre is being placed and an
          edge has to clear. */
-      if (!markDir) markDir = { x: out * r.nx, y: out * r.ny };
-      const along = (s) => (r.nx * markDir.x + r.ny * markDir.y) * s;
-      const markSign = along(1) >= along(-1) ? 1 : -1;
+      const tickDir = { x: out * r.nx, y: out * r.ny };
+      const away = (s) => -(r.nx * tickDir.x + r.ny * tickDir.y) * s;
+      const markSign = away(1) >= away(-1) ? 1 : -1;
+      const ink = this.textInk(label, font, PLATE_F);
+      const rel = this.datumRelief(PLATE_F);
+      /* The mark's reach toward the rule: the ink on the side that faces it, plus
+         the relief copy standing off that ink. */
+      const nearInk = (markSign > 0 ? ink.ascent : ink.descent) + rel.depth;
       const markT = DATUM_LABEL === 'etch-mark'
-        ? markSign * ((markSign === out ? MAJOR : HAIR / 2)
-                      + this.plateMargin(S).pad + PLATE_H / 2)
+        ? markSign * (HAIR / 2 + DATUM_MARK_AIR * this.plateMargin(S).pad + nearInk)
+          - rel.base
         : 0;
       const c = at(seat.at, markT);
       [[-pw / 2, -PLATE_H / 2], [pw / 2, -PLATE_H / 2], [pw / 2, PLATE_H / 2], [-pw / 2, PLATE_H / 2]]

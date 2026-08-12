@@ -289,6 +289,74 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#166 — the datum label sits opposite the ticks, referenced to its own ink, so
+  the gap is the same for every chain.** (GitHub #139 follow-up.)
+
+  Charles, looking at CL#164 on the live site: *"why on the light mode does the
+  spacing between the name and the datum seem to be inconsistent."* He was right,
+  and it was a bug I shipped. Measured: **17px for Charles against 6px for Harper**
+  at 1440x900 — exactly `MAJOR - HAIR/2`.
+
+  **The cause was two rules I asked for interacting.** CL#164 made the side ONE
+  consistent side for every chain (his own N-chains requirement), but the standoff
+  still cleared *whatever that side happened to carry on this chain*: the full tick
+  length where the consistent side coincided with that chain's own tick direction,
+  a hairline where it did not. Each rule was defensible alone. Together they made
+  the gap depend on which way an individual chain's ticks point. Portrait looked
+  fine only because both chains happened to land the same way — luck.
+
+  **Charles's own fix was the better rule: put the name opposite the ticks.** Then
+  no label ever has a tick to clear and consistency is structural rather than
+  maintained. Which forced the honest finding underneath it: **consistent gap and
+  one consistent screen side are mutually exclusive.** A chain's tick direction
+  mirrors with its own origin, so "opposite the ticks" is per-chain by definition —
+  it gives one gap for N chains and cannot give one side. At four chains, two land
+  on the other side. He chose the gap, having seen both.
+
+  **The standoff is now referenced to the INK, and that closes a second
+  inconsistency before it shipped.** `PLATE_H/2` was doing real work — a centre
+  being placed, an edge having to clear — but it referenced the *reserved box*,
+  which is 0.769x the type and ignores what is drawn. Harper has a descender and
+  Charles does not, so a box- or baseline-referenced standoff hands them different
+  gaps: measured at **3.19 / 4.30 / 5.40px** at the three sizes, up to half the bug
+  just fixed. The eye measures to the nearest *drawn* pixel — which is what Charles
+  did when he caught the 11px — so `textInk()` measures the real extent and the
+  standoff clears that. `MAJOR` disappears entirely; only the air remains judged.
+
+  **`DATUM_MARK_AIR` is a multiple of `pad`, deliberately not of the type**, so
+  growing the name does not push it off the rule. That orthogonality is what makes
+  "bigger AND closer" expressible at all.
+
+  Size 1.75 and air 1.5 are Charles's picks from a 3x4 grid plus references, 64
+  renders. **Verified independently in PIXELS**, because a DOM reading cannot
+  answer this: `getBoundingClientRect` on an SVG `<text>` returns the em box (26px
+  against a 17.1px ink height), so it reports overlap where the ink clears — my own
+  first check said 29px spread and was measuring the wrong thing. Pixel truth:
+  **desk 4.00 / 5.50px, phone 2.50 / 2.50px**, against today's 19 / 8. Bigger,
+  closer, and consistent.
+
+  **The occlusion Charles pre-approved turns out not to occur.** He agreed to the
+  name going behind the machine; measured, **0.0% of the mark's pixels land on
+  metal** in every positive-air cell, both themes, both viewports, to size 2.20 —
+  because the rule is already stood off the chain by `PLATE_TOP_CLEAR`, so a name
+  placed inboard lands in that existing gap. No type-over-type collision with the
+  wheels' own engraved rims arises either; the nearest engraved wheel stays 42-48px
+  away, and the first thing a larger name approaches is a *ghost*, which carries no
+  rim lettering at all.
+
+  **One residual that cannot be removed, and it is why 1.75 rather than 2.20.** The
+  mark is three copies — cut raised, lit dropped, ink between — and *which copy
+  faces the rule flips with the side*, while one of the two is nearly invisible in
+  a given theme. So the visible gap varies by up to one relief depth (`fs x 0.12`),
+  which is the whole of the measured 1.5px desk residual. Making the relief
+  symmetric would contradict the overhead-lighting rule (#10). It grows with size,
+  so it caps how consistent this can ever look.
+
+  Zero `plateSeat` warnings and zero console output in all 64 renders. `npm test`
+  119/0. Contrast flat across the grid and size-invariant, confirming CL#164.
+  `datumRelief()` and `textInk()` are new single homes — `datumStamp()` no longer
+  restates `fs*0.35` or `max(1, fs*DATUM_ETCH_DEPTH)`.
+
 - **CL#165 — the block extractors refuse an ambiguous anchor instead of taking the
   first one.** (GitHub #137, closes it.)
 
