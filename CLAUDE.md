@@ -90,7 +90,7 @@ correctly while making it unparseable to the tools that read it.
 its way past a comment. The version that stops parsing is caught by the tool's own
 `node --check`; the version that does not is caught only by the pixel gate, and
 `tools/mutation_gate.py --only stripper-ate-a-line` is the standing proof of it —
-one line of props deleted out of an object literal passes all 119 of `npm test`
+one line of props deleted out of an object literal passes all 120 of `npm test`
 and moves 2,933 pixels.
 
 `--in-place` **refuses on a file that differs from HEAD.** Overwriting a source
@@ -818,8 +818,13 @@ on the other side reads as a real difference while the control sits at a content
 0px, which is the gate blaming the artifact for its own wobble. The residual it was
 chasing was **rasterisation, not the integrator** — 10 passes under contention
 produced one distinct transform set out of ten, so the master angle never drifts —
-and it only appears under CPU contention *plus* the CI runner's own
-`--no-sandbox --disable-gpu` flags, on the combined stage, at antialiasing scale.
+and it appears under CPU contention, on the combined stage, at antialiasing scale.
+**Contention alone is enough** — this paragraph used to say it needed contention
+*plus* the CI runner's `--no-sandbox --disable-gpu` flags, and that was too strong:
+a laptop running several gates at once printed the `NOTE: needed 3 passes to agree
+with itself` on both a dark and a light run with neither flag set. The flags make it
+likelier, not necessary, which is why `stable_render()` rather than a tolerance is
+what makes the gate trustworthy.
 `DETERMINISTIC_FLAGS` removes Chrome's freedom to raster a pass differently and is
 verified appearance-neutral. **No tolerance was added to either the diff or the
 control**, deliberately: a threshold chosen to turn a red run green measures

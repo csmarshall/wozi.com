@@ -289,6 +289,60 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#184 — `docs/MANUAL-CHECKS.md` denied that `?seed` exists, had no `/fidget/`
+  entries, and every line reference in it had drifted.** (GitHub #160.)
+
+  This file is the list of things **no harness here can answer** — everything in
+  `tools/` is headless Chrome over CDP plus one windowless WKWebView, so none of it
+  has browser chrome, a window manager, a battery or a finger. The page's only mobile
+  oracle is one human, which is the whole reason it is written down. It had drifted
+  into being wrong about the thing that makes it usable. 254 → 526 lines.
+
+  **The `?seed` denial was the worst of it**, because that hook exists *for this
+  file's use case*: it said the hook "does not exist yet" and that "`index.html`
+  parses no `seed` parameter at all". It does, and the section now states what a seed
+  fixes (the **deal**), what it does not (the **fit** — placement is measured off the
+  viewport, so reproducing a machine takes the same seed *and* the same window size),
+  how to confirm it took, and the asymmetry that matters most holding a phone: **the
+  page does not report the seed of an unseeded load**, so a machine that went wrong
+  once is gone. Record device, orientation, theme, window and a photo first; hunt a
+  seed second.
+
+  **Five `/fidget/` checks added, where there had been none** — the grounding swipe
+  against iOS edge gestures and the chrome overlay's own `pointer-events:auto` rows;
+  rubber-band and pinch under `touch-action:none`; the grip spring in Low Power Mode
+  (#164); toolbar collapse; and the shaft stub under a thumb against `/fidget/`'s own
+  `env()` insets, which **no harness measures at all** — `devices.py` and
+  `a11y_audit.py` both default to the root page, and `devices.py` reads root
+  constants. CL#174's own requested check is in as check 8, with its 1px raster
+  recorded as **do not chase**: desk-Chrome rasterisation over a byte-identical DOM,
+  with nothing on a phone for an eye to find.
+
+  **Every line reference had rotted**, which is the more general lesson:
+  `index.html:87-92` was cited for `viewport-fit=cover` and is now palette prose. All
+  of them are symbol anchors now (`viewBox()`, `DEAL_SEED`, `SAFE_DEVICES`,
+  `DEVICES`), the same rule a subagent brief follows. Also corrected: the frame budget
+  reads through `tickRate()`; the retired person picker is gone from check 7, replaced
+  by Wear beside Speed; and a `?hud` section exists, where the file had none at all
+  despite `?hud` being the instrument two of its checks lean on.
+
+  **One correction changes the question rather than the answer.** The file claimed a
+  24px slider disc. It is **16px** (`--thumb`), on a **129×44** input box (#134) — so
+  the manual question is not "is the target big enough", which it comfortably is, but
+  whether a 16px visual cue on a 44px target is *precise* enough under a thumb.
+
+  The report distinguishes what was **verified by reading the tree** from what is
+  **carried forward on trust** because only a real device can settle it — iOS
+  throttling rAF in Low Power Mode, Safari's Reader heuristic, whether iOS fires a
+  plain `resize` on a toolbar collapse. That distinction is this file's entire subject
+  matter, so it is now modelled in the text rather than left implicit.
+
+  **Two live faults fell out of the audit**, filed rather than folded in: #169, fixed
+  in CL#183 above, and **#170** — `fidget/index.html` has **zero** `visualViewport`
+  references against the landing page's six, and its only relayout wiring is
+  `window.addEventListener('resize', layout)`. Projected, not observed, and
+  unobservable by anything in `tools/`; check 12 is that question.
+
 - **CL#183 — `?hud` threw a `ReferenceError` on every solo page, twice a second.**
   (GitHub #169.)
 
