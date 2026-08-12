@@ -92,6 +92,23 @@ and that something is a **CloudFront Function** — `wozi-viewer-request`, on th
 distribution's default cache behaviour, `viewer-request` event — not a line in
 this repo. It also carries the `www` → apex 301 (#22).
 
+**Compression is a cache-policy property, not the `Compress` flag alone** (#113).
+`Compress: true` was set for the whole life of the site and served **gzip only**,
+because the distribution used the legacy `ForwardedValues` block and brotli is
+reachable only through a modern cache policy's `EnableAcceptEncodingBrotli`. It
+now uses managed `CachingOptimized` (`658327ea-…`), which enables both. Two
+things to know if this is ever revisited: the config change alone **looks like it
+failed** — a `br` request keeps returning gzip from cache until an invalidation
+runs — and the real saving is **9.3%** (198,588 vs 218,990 bytes), not the 19%
+#113 estimated from `brotli -q11` offline, because edge compression uses a lower
+quality level than a max-effort local run.
+
+That policy's cache key is no-cookies / no-headers / **no query strings**, which
+is correct here and worth stating so nobody "fixes" it: one object is served to
+every hostname and every `?who=` / `?seed=` / `?hud` / `?kind=` value, all decided
+in the browser (see *What a hostname selects*). The legacy config kept a
+`resource` query key that nothing in the repo has ever referenced.
+
 Its source lives at `infra/cloudfront-viewer-request.js` for the record, but
 **that file is not what is running.** It is not in the publish whitelist above —
 deliberately, since it must never be reachable over HTTP — and nothing deploys it
