@@ -871,16 +871,37 @@ there off the page source before any browser starts, and the run says so rather
 than leaving `--theme` a silent no-op.
 
 **`a11y_audit` runs weekly in `mutation.yml`, not on the deploy path, and not
-because it is slow** — 1.6–2.3s warm against `devices.py`'s 3m38 in CI. It
-fetches `axe-core@4` from unpkg, so somebody else's publish could turn a deploy
-red, and it injects no LCG, so it audits a randomly dealt machine and axe's
-contrast rule reads dealt colours: twelve green runs is green-on-average over an
-unbounded population of deals, not deterministic green. That workflow is now "the
-weekly slow-or-drifting checks" rather than only the mutation gate. Its axe
+because it is slow** — 1.6–2.3s warm against `devices.py`'s 3m38 in CI. Its axe
 `incomplete` bucket is **printed and never failed** — one undecided
 `color-contrast` node per theme, on an `aria-hidden` rim engraving axe cannot
 flatten a background for — on the same #41/#46 reasoning that keeps `moderate`
 out of the verdict.
+
+**Its verdict is reproducible now, and the one thing still keeping it off the
+deploy path is the network** (#165). Two drifts were fixed: the ruleset was
+`axe-core@4`, a major-version *range* off somebody else's server, and is pinned to
+an exact version with the pin **read back off `axe.version`** — because a pin
+nobody verifies is the same fault as a theme planted in localStorage and never
+read, and both `AXE_PATH` and a stale cache are routes to auditing under a ruleset
+nobody named. The cache filename carries the version for that reason. And it
+**injected no LCG at all**, so it audited a randomly dealt machine while axe's
+contrast rule reads dealt colours: twelve green runs was green-on-average over an
+unbounded population, not deterministic green.
+
+What remains is that the bytes still arrive from unpkg at run time, so an outage
+could redden a deploy — **vendoring axe-core is what would close that.** And note
+the limit of the fix: one pinned deal makes the verdict *reproducible*, not
+*complete*. It audits one of the machines the page can draw, and a sweep over
+several seeds is the way to widen it — which is a weekly job's work, not a
+deploy's. That workflow is now "the weekly slow-or-drifting checks" rather than
+only the mutation gate.
+
+**Exit 2 must not print `RESULT: PASS`, and it did.** `a11y_audit` branched its
+final line on the failure list alone, so every path returning 2 — axe unreachable,
+the panel never opening, an unpinned ruleset — signed off as a pass. Nobody greps
+an exit code out of a CI log; they read the last line. It says `RESULT: NOT
+AUDITED` now. Worth checking for in any harness that has both an exit code and a
+verdict line: they are two channels and only one of them gets read.
 
 **The deal decides ±40% of the first render's cost, so an unpinned deal makes a
 load-time measurement incomparable** (#143, measured by `tools/render_cost.py`).

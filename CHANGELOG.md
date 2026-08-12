@@ -289,6 +289,65 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#182 — `a11y_audit`'s green was green-on-average against a floating ruleset,
+  and every run that measured nothing signed off as a pass.** (GitHub #165.)
+
+  Three faults, found by making the gate prove its own verdict rather than reading it.
+
+  **The ruleset was a major-version range off somebody else's server.** It fetched
+  `axe-core@4`, so any 4.x release that added or tightened a rule changed what this
+  gate asserts with nothing here having changed — by this repo's own
+  no-drifting-constants rule, worse than a magic number, because it is a magic number
+  nobody here can read. Pinned to **4.13.0**, which is deliberately *what `axe-core@4`
+  resolved to on the day it was pinned*: anything older would have re-rolled the
+  verdict against a different ruleset rather than freezing the one today's green was
+  measured under. The cost, stated rather than discovered later — new upstream rules
+  stop arriving for free, so an upgrade becomes a task somebody has to do.
+
+  **And the pin is read back off `axe.version`, not assumed.** A version nobody
+  verifies is the same fault as a theme planted in localStorage and never read
+  (CL#171, and `pixel_regress` until CL#179): both `AXE_PATH` and a stale cache are
+  routes to auditing under a ruleset nobody named, and the report would print the
+  pinned number either way. Exit 2 on mismatch, proved by pointing `AXE_PATH` at
+  4.12.1 while the pin said 4.13.0. **The version is in the cache filename** for the
+  same reason — a cache keyed on the name alone serves the previous ruleset forever
+  after a bump, so the pin would read as changed while the gate went on asserting the
+  old rules.
+
+  **It injected no LCG at all**, alone among the gates, while axe's `color-contrast`
+  rule reads dealt colours. So each pass audited a randomly dealt machine, and twelve
+  consecutive green runs was green-on-average over an unbounded population of deals —
+  not deterministic green. A contrast failure reachable by one deal in fifty would
+  have sat here indefinitely, passing. It now injects `dom_invariants.seed_js`, the
+  same one home the other four harnesses use since CL#180, and takes a `--seed`.
+
+  Proved in both halves, because either alone proves nothing: repeat runs at one seed
+  are identical, and a different **injected** seed changes the deal — `SVG <text>
+  nodes: 17` against `15`, which is engraving count and therefore a property of which
+  wheels were dealt. It is the injected LCG and **not** `?seed`, for the reason
+  `CLAUDE.md` gives and #155 demonstrated: a gate dealing through the page's own
+  mechanism cannot see a fault in that mechanism.
+
+  **The third fault was worse than either, and pre-existed both.** The final verdict
+  line branched on the failure list alone, so **every path that returned 2 printed
+  `RESULT: PASS`** — axe-core unreachable, the panel never opening, and now an
+  unpinned ruleset. The exit code was correct and the sentence a human reads was its
+  opposite: #156's lie relocated from the exit code into the reporting layer, which is
+  arguably the more dangerous half, because nobody greps an exit code out of a CI log.
+  It prints `RESULT: NOT AUDITED — … this is not a pass.` A sweep of the other
+  harnesses found no second instance; `dom_invariants` conflates "no wheels on the
+  stage" with a real failure but at least says `FAIL`.
+
+  Verified: `RESULT: PASS`, exit 0, both themes, on the pinned deal. Mismatched
+  ruleset → `RESULT: NOT AUDITED`, exit 2. Workflows parse.
+
+  **What this does not buy, and what remains.** One pinned deal makes the verdict
+  *reproducible*, not *complete* — it audits one of the machines the page can draw,
+  and a sweep over several seeds is how to widen that, which is weekly work rather
+  than deploy work. And the bytes still arrive from unpkg at run time, so an outage
+  could still redden a deploy; **vendoring axe-core is what would close that** and let
+  the job move onto the deploy path. Filed separately rather than folded in.
+
 - **CL#181 — the one manual step in the deploy path could not be run as
   documented.** (GitHub #166.)
 

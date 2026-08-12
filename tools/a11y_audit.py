@@ -58,6 +58,10 @@ import os as _os, shutil as _sh, sys as _sys, tempfile as _tf
 
 _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
 import fontpin  # noqa: E402
+# ONE HOME FOR THE INJECTED LCG (GitHub #155, #165). Four harnesses each carried a
+# copy and all four copies read the seed out of the URL, which is the fault #155 is
+# about — a fifth copy would be a fifth chance to reintroduce it.
+import dom_invariants as _dom  # noqa: E402
 
 
 def _sys_platform_is_darwin():
@@ -78,6 +82,26 @@ _REPO = _os.path.dirname(_HERE)
 OUT = _os.environ.get("WOZI_SCRATCH") or _tf.mkdtemp(prefix="wozi-a11y-")
 AXE = (_os.environ.get("AXE_PATH")
        or _os.path.join(_REPO, "node_modules", "axe-core", "axe.min.js"))
+# THE RULESET IS PINNED TO AN EXACT VERSION (GitHub #165). This fetched
+# `axe-core@4` -- a major-version RANGE off somebody else's server -- so any 4.x
+# release that added or tightened a rule changed what this gate asserts with
+# nothing in this repo having changed. By this repo's own no-drifting-constants
+# rule that is worse than a magic number: it is a magic number nobody here can
+# even read.
+#
+# 4.13.0 IS WHAT `axe-core@4` RESOLVED TO on the day this was pinned, chosen for
+# exactly that reason -- pinning to anything older would have re-rolled the verdict
+# against a different ruleset instead of freezing the one the current green was
+# measured under. What this costs, stated rather than discovered later: new
+# upstream rules stop arriving for free, so an upgrade is now a task somebody has
+# to do. That is the trade — a verdict that is attributable, against a gate that
+# improves silently and can also break silently.
+#
+# THE VERSION IS IN THE CACHE FILENAME, which is not cosmetic: a cache keyed on
+# the name alone would serve the OLD bytes forever after a bump, so the pin would
+# read as changed while the gate went on asserting the previous ruleset.
+AXE_VERSION = "4.13.0"
+AXE_URL = f"https://unpkg.com/axe-core@{AXE_VERSION}/axe.min.js"
 # Containers have no sandbox and a tiny /dev/shm, so Chrome refuses to start
 # without these. Only added off macOS, where they are unnecessary.
 CI_FLAGS = ([] if _sys_platform_is_darwin() else
@@ -92,6 +116,26 @@ _ap.add_argument("--fonts", default="auto", choices=["auto", "pinned", "blocked"
                       "loudly to blocked if it cannot be fetched. pinned: require "
                       "it, exit 2 if unobtainable. blocked: never fetch it — the "
                       "shipped typography is then NOT what gets measured.")
+# THE DEAL IS PINNED, BECAUSE AXE'S CONTRAST RULE READS DEALT COLOURS (GitHub
+# #165). Unlike every gate in deploy.yml this one injected no generator, so each
+# pass audited a randomly dealt machine -- and twelve consecutive green runs is
+# green-on-average over an unbounded population of deals, which is not the same
+# claim as deterministic green. A contrast failure reachable by one deal in fifty
+# would have sat here indefinitely, passing.
+#
+# AND IT IS THE INJECTED LCG, NOT ?seed. CLAUDE.md is explicit: a gate that deals
+# through the same mechanism the page deals through cannot see a fault in that
+# mechanism, because it would agree with the page about a machine they had both got
+# wrong. #155 is what happens when a harness does both -- DEAL_SEED runs at module
+# scope, after any injected script, so the page wins and the injection is dead code.
+#
+# WHAT THIS DOES NOT FIX, said here so nobody reads more into it: one pinned deal
+# makes the verdict REPRODUCIBLE, not COMPLETE. It audits one of the machines the
+# page can draw. Sweeping several seeds is the way to widen that, and the weekly
+# job is the right home for a sweep -- see mutation.yml.
+_ap.add_argument("--seed", type=int, default=20260804,
+                 help="the deal to audit. Injected over Math.random before any page "
+                      "script runs; the verdict is a property of this number")
 _ARGS = _ap.parse_args()
 URL = _ARGS.url
 # THE PORT IS NOT FIXED (#42). Every harness here used a hardcoded DevTools
@@ -282,12 +326,14 @@ async def main(pin):
     # this raised FileNotFoundError on every run afterwards, and nobody noticed
     # because the tool also had no exit code (#47). Cached in a temp dir.
     if not _os.path.exists(AXE):
-        _cache = _os.path.join(_tf.gettempdir(), "wozi-axe.min.js")
+        # Version in the filename: see AXE_VERSION. A cache keyed on the name alone
+        # would serve the previous ruleset forever after a bump.
+        _cache = _os.path.join(_tf.gettempdir(), f"wozi-axe-{AXE_VERSION}.min.js")
         if not _os.path.exists(_cache):
             import urllib.request as _u
-            print(f"   fetching axe-core -> {_cache}")
+            print(f"   fetching axe-core {AXE_VERSION} -> {_cache}")
             try:
-                _u.urlretrieve("https://unpkg.com/axe-core@4/axe.min.js", _cache)
+                _u.urlretrieve(AXE_URL, _cache)
             except Exception as _e:
                 print(f"FATAL: axe-core unavailable and could not be fetched: {_e}")
                 print("       set AXE_PATH=/path/to/axe.min.js to use a local copy")
@@ -314,6 +360,13 @@ async def main(pin):
         # never run -- which reads exactly like an injection that does not work.
         await send("Page.enable")
         await pin.install(send)
+        # THE DEAL, INSTALLED ONCE AND LEFT IN PLACE. It is the same for both themes,
+        # so unlike `prefs` below it does not need removing and re-adding between
+        # navigations -- which is the safer shape, because a remove/re-add pair that
+        # ever failed would leave two generators installed and the last one added
+        # would silently decide both deals (the hazard devices.py guards explicitly).
+        await send("Page.addScriptToEvaluateOnNewDocument",
+                   {"source": _dom.seed_js(_ARGS.seed)})
         await send("Emulation.setDeviceMetricsOverride", {"width": 1400, "height": 900, "deviceScaleFactor": 1, "mobile": False})
 
         for theme in ("dark", "light"):
@@ -363,6 +416,19 @@ async def main(pin):
                     f"{inforce['speed']!r} — the corner departure indicator is "
                     f"display:none at 1x, so it was not audited (GitHub #108)")
             await ev(axe_src)
+            # THE PIN IS READ BACK, NOT ASSUMED (GitHub #165). A version nobody
+            # verifies is the same class of fault as a theme planted in localStorage
+            # and never read: AXE_PATH and a stale cache are both routes to auditing
+            # under a ruleset other than the one named above, and the report would
+            # say the pinned version either way. Exit 2 rather than 1 -- a run under
+            # an unknown ruleset has not measured what it claims to have measured.
+            loaded = await ev("(typeof axe!=='undefined'&&axe.version)||''")
+            if loaded != AXE_VERSION:
+                print(f"FATAL: pinned axe-core {AXE_VERSION} and the page loaded "
+                      f"{loaded or 'nothing'!r} (from {_use}). This audit ran under a "
+                      f"ruleset nobody named, so its verdict is not attributable.")
+                proc.kill()
+                return 2
             # THE NODES COME BACK WITH THE COUNT. A finding stated as
             # "color-contrast x3" is a fact nobody can act on: which three, and
             # by how much? axe already knows -- it is the `any` check's own
@@ -522,7 +588,16 @@ if __name__ == "__main__":
         print(_fatal)
         sys.exit(2)
     _code = asyncio.run(main(_pin))
-    if _FAILURES:
+    # EXIT 2 GETS ITS OWN SENTENCE, and until GitHub #165 it did not: this branched
+    # on _FAILURES alone, so every path that returned 2 -- axe-core unreachable, the
+    # panel never opening, a ruleset that is not the pinned one -- printed
+    # "RESULT: PASS" on its way out. The exit code was right and the line a human
+    # reads was its opposite, which is #156's lie relocated into the reporting layer:
+    # nobody greps an exit code out of a CI log, they read the last line.
+    if _code == 2:
+        print("\nRESULT: NOT AUDITED — see the FATAL above. Nothing has been proved "
+              "either way; this is not a pass.")
+    elif _FAILURES:
         print("\nRESULT: FAIL")
         for f in _FAILURES:
             print("  " + f)

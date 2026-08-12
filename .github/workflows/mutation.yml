@@ -138,16 +138,23 @@ jobs:
   # cache cleared, against devices.py's 3m38 in CI — cost is no argument either
   # way. Two things are:
   #
-  #   1. THE RULESET IS SOMEBODY ELSE'S AND IT FLOATS. The tool fetches
-  #      `axe-core@4` from unpkg, so a 4.x release that adds or tightens a rule
-  #      can turn this red with nothing in this repo having changed. On the deploy
-  #      path that blocks a bucket over an upstream publish; here it is a report
-  #      on a Monday.
-  #   2. IT DOES NOT PIN THE DEAL. Unlike every gate in deploy.yml this one
-  #      injects no LCG, so each pass audits a randomly dealt machine — and axe's
-  #      colour-contrast rule reads dealt colours. 12 consecutive runs came back
-  #      green, which is green-on-average over an unbounded population of deals and
-  #      is not the same claim as deterministic green.
+  #   1. THE RULESET COMES OFF SOMEBODY ELSE'S SERVER. It is now pinned to an exact
+  #      version and the pin is read back off `axe.version` (GitHub #165), so it no
+  #      longer FLOATS — but the bytes still arrive over the network from unpkg at
+  #      run time, so a fetch failure or an unpkg outage can still turn this red
+  #      with nothing in this repo having changed. On the deploy path that blocks a
+  #      bucket over somebody else's uptime; here it is a report on a Monday.
+  #      Vendoring axe-core is what would close this properly and let the job move
+  #      onto the deploy path.
+  #   2. THE DEAL IS PINNED NOW, AND ONE PINNED DEAL IS NOT COMPLETE COVERAGE
+  #      (GitHub #165). This used to inject no LCG at all, so each pass audited a
+  #      randomly dealt machine while axe's colour-contrast rule reads dealt
+  #      colours: 12 consecutive green runs was green-on-average over an unbounded
+  #      population, which is not the same claim as deterministic green. It is
+  #      deterministic now, which makes the verdict reproducible rather than
+  #      exhaustive — it audits ONE of the machines the page can draw. A sweep over
+  #      several seeds is the way to widen that, and a weekly job is the right home
+  #      for a sweep.
   #
   # So this workflow is now "the weekly slow-or-drifting checks", not only the
   # mutation gate, and the two jobs share the trigger for the same reason: both
