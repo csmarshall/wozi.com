@@ -3834,7 +3834,12 @@ function cssVar(block, name) {
 }
 const TOKENS = {
   light: { '--ref-bg': cssVar(CSS_ROOT, '--ref-bg'), '--ref-muted': cssVar(CSS_ROOT, '--ref-muted'),
-    '--bg': cssVar(CSS_ROOT, '--ref-bg'), '--muted': cssVar(CSS_ROOT, '--ref-muted'),
+    /* `--muted` IS READ AS ITSELF, NOT AS --ref-muted (GitHub #152). The two were
+       one declaration and this modelled the alias; they are separate facts now,
+       and while their hexes agree that is invisible -- the moment the ink moves,
+       reading it through the reference would assert the light alpha of a palette
+       the page does not have, and pass. */
+    '--bg': cssVar(CSS_ROOT, '--ref-bg'), '--muted': cssVar(CSS_ROOT, '--muted'),
     '--hair': cssVar(CSS_ROOT, '--hair') },
   dark: { '--ref-bg': cssVar(CSS_ROOT, '--ref-bg'), '--ref-muted': cssVar(CSS_ROOT, '--ref-muted'),
     '--bg': cssVar(CSS_DARK, '--bg'), '--muted': cssVar(CSS_DARK, '--muted'),
@@ -4540,9 +4545,85 @@ test('a datum that cannot read its palette fails visible, never invisible', () =
   ok(!cssVar(CSS_DARK, '--ref-bg') && !cssVar(CSS_DARK, '--ref-muted'),
     'the dark block overrides the reference palette, so the datum solves for the '
     + 'contrast it already has and every theme returns the same alpha');
-  ok(/--bg:\s*var\(--ref-bg\)/.test(CSS_ROOT) && /--muted:\s*var\(--ref-muted\)/.test(CSS_ROOT),
-    'the light --bg/--muted are written out again beside the reference tokens '
-    + 'instead of aliasing them, so the two can drift apart');
+  ok(/--bg:\s*var\(--ref-bg\)/.test(CSS_ROOT) && !/--muted:\s*var\(--ref-muted\)/.test(CSS_ROOT),
+    'the light --bg no longer aliases --ref-bg, or --muted aliases --ref-muted '
+    + 'again (GitHub #152) — the light GROUND is one fact and may alias, the light '
+    + 'INK is two and may not: one hex cannot be both the ink a WCAG ratio binds '
+    + "and the weight the datum was judged at, and re-aliasing restores the cap "
+    + 'that made #120\'s candidates unshippable');
+/* THE INK-ON-ACCENT RULE IS HELD TO ITS OWN FLOORS, FOR EVERY ACCENT (GitHub #153).
+   The ticket's own constraint was that "a fix that cannot be shown to hold for the
+   other four accents just moves the latency" -- and a11y_audit cannot meet it: it
+   renders ONE accent, the one the schema ships, so four of the five are unreachable
+   to it. This test is the other four, and it needs no browser: inkOnAccent() is pure
+   arithmetic over colours, so it is extracted out of index.html and run directly,
+   the same way this suite already treats the geometry.
+
+   HYPOTHETICALS TOO, and that is the point of a derived rule rather than a table of
+   five. A table passes today and says nothing about a sixth accent; a rule can be
+   asserted over colours nobody has chosen yet. The claim it rests on is arithmetic:
+   pure black and pure white contrast equally at ground luminance 0.1791, both at
+   4.58:1, so the better of the two poles is never worse than 4.58 against ANY colour
+   -- which clears both 4.5 and 3 unconditionally. If that ever fails here, the rule
+   is broken rather than the accent unlucky. */
+test('the ink on an accent clears its WCAG floor for every accent, in both themes', () => {
+  const src = grabBlock('function rgbOf(', '{', '}') + '\n'
+    + grabBlock('function relLum(', '{', '}') + '\n'
+    + grabBlock('function contrastAt(', '{', '}') + '\n'
+    + grabBlock('function inkOnAccent(', '{', '}') + '\n'
+    + 'return { inkOnAccent, contrastAt, rgbOf };';
+  const F = new Function(src)();
+  const TEXT = grabNumber('WCAG_TEXT_CONTRAST');
+  const NONTEXT = grabNumber('WCAG_NONTEXT_CONTRAST');
+  ok(TEXT === 4.5 && NONTEXT === 3,
+    'the WCAG floors moved: 1.4.3 wants 4.5 for normal-size text and 1.4.11 wants '
+    + '3 for a non-text component, and this test asserts against the page\'s own '
+    + 'constants so it cannot drift from them');
+
+  /* The five reachable accents are config.js's ACCENTS map: light value -> its dark
+     counterpart. BOTH sides are real accents that get painted, so both are swept --
+     the dark column is not decoration, it is what --accent becomes in dark mode. */
+  const accents = [];
+  for (const [lightVal, darkVal] of Object.entries(loadConfig().ACCENTS || {})) {
+    accents.push(['light', lightVal], ['dark', darkVal]);
+  }
+  ok(accents.length >= 10,
+    'config.js ACCENTS no longer carries the five accents this sweep was written '
+    + 'against — the sweep is now narrower than the page');
+
+  /* Hypothetical accents on a coarse RGB lattice: a rule has to answer for colours
+     nobody has picked, which is the whole reason it is a rule. */
+  for (let r = 0; r <= 255; r += 51)
+    for (let g = 0; g <= 255; g += 51)
+      for (let b = 0; b <= 255; b += 51)
+        accents.push(['hypothetical', 'rgb(' + r + ',' + g + ',' + b + ')']);
+
+  for (const floor of [TEXT, NONTEXT]) {
+    for (const [theme, accent] of accents) {
+      const toks = theme === 'dark'
+        ? [{ name: '--chip', value: cssVar(CSS_DARK, '--chip') },
+           { name: '--ink', value: cssVar(CSS_DARK, '--ink') }]
+        : [{ name: '--chip', value: cssVar(CSS_ROOT, '--chip') },
+           { name: '--ink', value: cssVar(CSS_ROOT, '--ink') }];
+      const ink = F.inkOnAccent(accent, toks, floor);
+      ok(ink !== null,
+        'inkOnAccent returned nothing for ' + accent + ' at floor ' + floor
+        + ' — the caller then keeps the token it shipped with, which is the bet '
+        + 'this rule exists to remove');
+      /* Resolve the answer the way the page would: a var() reference is one of the
+         tokens handed in, anything else is a literal colour. */
+      const m = /^var\((--[\w-]+)\)$/.exec(ink);
+      const resolved = m ? (toks.find(t => t.name === m[1]) || {}).value : ink;
+      const got = F.contrastAt(F.rgbOf(resolved), F.rgbOf(accent), 1);
+      ok(got >= floor,
+        'ink ' + ink + ' on ' + theme + ' accent ' + accent + ' measures '
+        + got.toFixed(3) + ':1 against a floor of ' + floor
+        + ' — the derived rule does not actually reach its own floor, so the '
+        + 'bisection or the pole choice is wrong');
+    }
+  }
+});
+
   /* Solved, both palettes. Light is the reference and returns its alpha by
      construction; dark must reach the SAME contrast, which is what makes its
      answer a derivation rather than a number with a story attached. */

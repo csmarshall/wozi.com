@@ -289,6 +289,75 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#185 — one alias was hiding two facts, and the ink on an accent is now derived
+  rather than guessed.** (GitHub #152, GitHub #153.)
+
+  **#152 — `--muted:var(--ref-muted)` is split, and the split is deliberately a
+  no-op.** `--ref-muted` is now only the weight the datum was judged at; `--muted` is
+  only the light UI ink. Same hex on purpose — moving the value is #120's decision,
+  not this change's — so the split moves no pixel and changes no behaviour, and its
+  entire effect is that the next move becomes *possible*. One hex cannot be both the
+  ink a WCAG ratio binds and the reference weight a datum alpha was solved against;
+  while they were one declaration, the cap on one was a cap on the other, which is
+  what made #120's candidates unshippable.
+
+  **`tools/test.js` asserted the alias, so #152 could not land alone.** The suite read
+  `--muted` *through* `--ref-muted` in `TOKENS.light` and asserted the aliasing text
+  in `:root` — so the harness modelled the very thing being removed, and would have
+  gone on asserting the light alpha of a palette the page no longer has the moment the
+  ink moved. The assertion is **inverted rather than deleted**: the light *ground* may
+  alias `--ref-bg` and is still asserted to, the light *ink* may not, and re-aliasing
+  now fails. That distinction is the finding.
+
+  **#153 — `inkOnAccent(accent, tokens, floor)`, a rule and not a table.** It picks
+  the pole (pure white or black, whichever contrasts more with the accent), takes
+  whichever supplied token sits nearest that pole, returns it as written if it already
+  clears the floor, and only otherwise bisects the smallest mix toward the pole that
+  reaches it. Two named spec floors, because they are two different clauses:
+  `WCAG_TEXT_CONTRAST = 4.5` for the selected row's 13px/600 label (1.4.3) and
+  `WCAG_NONTEXT_CONTRAST = 3` for the toggle knob (1.4.11) — and CL#169 is the reason
+  that boundary is treated as real rather than academic.
+
+  A table of five hand-picked inks would pass today and say nothing about a sixth
+  accent. **The floor is reachable by arithmetic, not by measurement:** black and white
+  contrast equally at ground luminance 0.1791, both at 4.58:1, so the better pole is
+  never worse than 4.58 against *any* colour and clears both floors unconditionally.
+
+  Measured in light, where the old bet lost four times in five — red 3.88 → **row 4.53
+  / knob 3.56**, blue 3.97 → **4.50 / 3.47**, amber **1.85 → 7.44**, green 3.21 →
+  **4.52 / 4.30**. Steel, the accent that ships, is unchanged and pixel-identical; dark
+  is unchanged at all five.
+
+  **One real bug the sweep caught before it shipped:** bisecting the *ideal* mix and
+  rounding afterwards landed red and blue at **4.49:1**, because rounding moves the
+  colour back toward the token — the losing direction. The bisection measures the
+  rounded colour it actually returns.
+
+  **And #153's own constraint is now met in a gate rather than a scratchpad.** The
+  ticket asked that the fix be *shown* to hold for the other four accents, and
+  `a11y_audit` structurally cannot: it renders the one accent the schema ships. So the
+  sweep is a `tools/test.js` test — `inkOnAccent` is pure arithmetic over colours, so
+  it is extracted from `index.html` and run with no browser — over all five accents ×
+  both themes × both floors, plus a lattice of **216 hypothetical accents**, since a
+  rule can be asserted over colours nobody has chosen yet and a table cannot. **Proved
+  able to fail**, twice: forcing the pole to white always (which is amber's 1.85:1
+  case) and returning the unrounded mix (the 4.49 bug above) both turn it red, and the
+  restored tree is green. Suite 120 → **121**.
+
+  **Two premises corrected, both of which had been written down as fact.** #153 said
+  `--accent` is per person and that adding someone would surface this — no `PEOPLE`
+  entry in `config.js` carries an accent; there is one global `accent` prop and
+  `ACCENTS` is a light→dark *map* of the five reachable values, so the ticket's trigger
+  does not exist and the four non-steel accents are unreachable without editing that
+  prop. The fix is still right; the urgency story was not. And `CLAUDE.md` claimed the
+  pixel gate's raster residual needs contention *plus* the CI runner's flags —
+  contention alone was enough to print the `NOTE` on this laptop, on both a dark and a
+  light run, with neither flag set.
+
+  `npm test` 121/0. `a11y_audit` PASS both themes, exit 0, 0 targets under 24×24.
+  `pixel_regress` **0px** on the stage, `--panel` and `--theme light`, controls 0px.
+  `dom_invariants` exit 0 dark and light, 56 inks dark / 64 light.
+
 - **CL#184 — `docs/MANUAL-CHECKS.md` denied that `?seed` exists, had no `/fidget/`
   entries, and every line reference in it had drifted.** (GitHub #160.)
 

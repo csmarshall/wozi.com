@@ -829,10 +829,18 @@ what makes the gate trustworthy.
 verified appearance-neutral. **No tolerance was added to either the diff or the
 control**, deliberately: a threshold chosen to turn a red run green measures
 nothing. A residual now prints a greppable `NOTE:` instead of failing.
-**`tools/pill_clip.py` is the last harness still carrying the unpinned exposure**
-— `devices.py` and `dom_invariants.py` both pin through `fontpin` today — and
-`pill_clip` measures type specifically, so it is the likeliest to flake for this
-exact reason.
+**Every GATE pins the webfont through `fontpin` now** — `pixel_regress`,
+`dom_invariants`, `devices`, `pill_clip`, `verify_motion`, `escape_mesh` and
+`a11y_audit`, the last of them since CL#168. This paragraph named three files as
+"still carrying the unpinned exposure" for a while after they had all stopped, and
+then named `pill_clip` alone for a few hours after that — a stale exemption list is
+worse than none, because it sends someone to fix what is already fixed. What is
+genuinely unpinned is the diagnostic and screenshot tooling (`shots.py`,
+`contact_sheet.py`, `deal_dump.py`, `zoom.py` and the rest), which measures nothing
+and gates nothing. `pill_clip` remains the one whose numbers would move most if it
+were ever unpinned, since it measures type: `--fonts blocked` shifts its worst
+overrun from −0.58px to −1.45px, measured — so its pin is load-bearing rather than
+precautionary.
 
 **A 0px pixel gate can mean "not tested", not "unchanged".** The default deal is
 seven wheels drawn from eleven families, so a change confined to one family has

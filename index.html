@@ -45,13 +45,13 @@
      contrast in whichever palette is in force as it has in light -- the
      treatment that was mocked and judged -- so it needs the light --bg and
      --muted while the dark block is overriding both, and getComputedStyle only
-     ever reports the palette in force. These two carry them; the dark block
-     never overrides them, and the two light declarations below are ALIASES of
-     them, so there is still exactly one place each colour is written.
+     ever reports the palette in force. These two carry them, and the dark block
+     never overrides either.
 
-     AND THAT ALIAS IS WHY `--ref-muted` CANNOT BE MOVED FREELY (GitHub #151).
-     Because `--muted` IS `--ref-muted` in light, this one hex carries two jobs
-     that pull opposite ways:
+     `--ref-muted` IS NO LONGER ALIASED BY `--muted`, AND THE DUPLICATE HEX BELOW
+     IS THE POINT OF THE SPLIT, NOT AN OVERSIGHT (GitHub #152, following #151).
+     The two were one declaration, and that one hex was carrying two facts that
+     pull opposite ways:
 
        as the datum's reference   it fixes the scribe's judged WEIGHT, so
                                   darkening it makes the reference mark stronger
@@ -59,33 +59,51 @@
        as the light UI ink        it is bound from below by a WCAG ratio against
                                   the pop-out panel -- see the window below
 
-     Raising dark's alpha has a hard ceiling, and it is nearer than it looks.
-     datumInk() lifts the dark token by `datumOpacity() / ghostOpacity()`, and
-     dark's --muted #93A5A3 sits at 165 on the green channel over a ground of 34;
-     the lift clamps at 255 once that ratio passes 1.687, i.e. once the solved
-     alpha rounds past 0.28. At 0.29 the mark composites to 71.6 where the solve
-     asked for 74.6 and the scribe has quietly changed weight -- caught by `npm
-     test`'s "no datum is drawn while one chain is on stage", in exactly the terms
-     datumInk()'s own comment predicts ("a clipped channel means too strong").
+     This file's standing rule is one home per fact, and this is the INVERSE case:
+     one home was holding two facts. They were the same number by history rather
+     than by derivation, and nothing derives either from the other -- a judged
+     weight is not a ratio and a ratio is not a judgement. So `--ref-muted` is now
+     only ever the weight the datum was judged at, `--muted` is only ever the
+     light UI ink, and they share a value today because that is the value the ink
+     happens to have. **DO NOT RE-ALIAS THEM TO REMOVE THE REPETITION.** Moving
+     one is meant to leave the other alone; that is the whole change.
 
-     SO THIS TOKEN LIVES IN A WINDOW WITH TWO COMPUTED WALLS, and both of them are
-     gated rather than remembered:
+     WHAT THE ALIAS COST, kept because it is the argument for the split and it is
+     entirely measured. Raising dark's alpha has a hard ceiling, and it is nearer
+     than it looks: datumInk() lifts the dark token by `datumOpacity() /
+     ghostOpacity()`, and dark's --muted #93A5A3 sits at 165 on the green channel
+     over a ground of 34, so the lift clamps at 255 once that ratio passes 1.687 --
+     i.e. once the solved alpha rounds past 0.28. At 0.29 the mark composites to
+     71.6 where the solve asked for 74.6 and the scribe has quietly changed weight,
+     caught by `npm test`'s "no datum is drawn while one chain is on stage", in
+     exactly the terms datumInk()'s own comment predicts ("a clipped channel means
+     too strong"). While the two were one token that made a WINDOW with two
+     computed walls, both gated rather than remembered:
 
        floor  4.5:1 on --chip          #687A79 .. , held by tools/a11y_audit.py
        cap    solved dark alpha <= .28 .. #657876, held by `npm test`
 
-     which is a 0.15-wide band of contrast, and #677977 sits mid-band at 4.59:1
-     with the alpha at 0.2812 against its 0.285 cutoff. That is thin, and it is
-     the honest state of this palette rather than a comfortable answer: #120's own
-     sweep candidates (#5A6E6C, #4F6462) both clear the floor easily and both
-     break the cap, which is why neither of them is what shipped. THE WAY OUT IS
-     TO SPLIT THE ALIAS -- make `--ref-muted` the weight that was judged once and
-     `--muted` the ink a ratio binds, at which point light's own alpha solves to
-     0.40, the lift runs DOWNWARD at 0.87 and cannot clip, the dark scribe never
-     moves, and the ink is free. Measured, not projected: the split was built and
-     both themes' marks composite to within 0.5/255 of the tone they draw today.
-     It is a two-line change here and a one-line change to the assertion above
-     that requires the alias, so it needs a decision rather than a commit.
+     -- a 0.15-wide band of contrast, with #677977 mid-band at 4.59:1 and its alpha
+     at 0.2812 against a 0.285 cutoff. That is what a token carrying two facts
+     looks like from the outside: two unrelated gates closing on one hex from
+     opposite sides, and #120's own sweep candidates (#5A6E6C, #4F6462) clearing
+     the floor easily and breaking the cap.
+
+     THE CAP IS THE ALIAS'S, NOT THE INK'S, AND IT GOES WITH IT. Darken `--muted`
+     now and light's own datum alpha solves DOWN from 0.46 -- the reference pair is
+     fixed, so a firmer light ink reaches the reference contrast at less alpha --
+     which makes datumInk()'s lift run downward, below 1, where it cannot clip.
+     Dark's scribe does not move at all, because dark's alpha is solved against
+     `--ref-muted`/`--ref-bg` and neither of those changed. WHICH VALUE `--muted`
+     SHOULD TAKE IS STILL #120's DECISION and is deliberately not made here: this
+     ships the same hex it always had, so the split is a 0-pixel change whose only
+     effect is that the next move is possible.
+
+     ONE THING TO FIX BEFORE MOVING IT, and it is in the harness rather than here:
+     `tools/test.js` builds its light palette with `'--muted': cssVar(CSS_ROOT,
+     '--ref-muted')`, so the suite MODELS the alias instead of reading `--muted`.
+     While the two hexes agree that is invisible; the moment they differ the suite
+     asserts the light alpha of a palette the page does not have, and passes.
 
      Reading them is then one getComputedStyle call. It used to be a scan of
      document.styleSheets for a rule whose selector text was ':root' exactly --
@@ -131,15 +149,19 @@
      gives up over half of a compaction that was measured and approved, so the ink
      moved instead.
 
-     WHY NOT #120's OWN CANDIDATES. That ticket measured this token as drifted --
-     3.33:1 against the page where dark's --muted holds 6.21:1 -- and was deferred
-     because its two candidates (#5A6E6C, #4F6462) could not be told apart by eye.
-     "Does it clear 4.5:1" is answerable without taste, which is what let it be
-     picked up again, and both of them clear it (5.41 / 6.30 on --chip). Neither
-     can ship: both drive the dark datum's solved alpha past the clamp described
-     above, so both fail `npm test`. #677977 is a hue-preserving step off the
-     retired #6B7E7C, sitting mid-band between the two walls -- a value the two
-     gates chose between them, not one picked by eye.
+     #120's OWN CANDIDATES ARE NOW REACHABLE, WHICH IS WHAT THE SPLIT BOUGHT. That
+     ticket measured this token as drifted -- 3.33:1 against the page where dark's
+     --muted holds 6.21:1 -- and was deferred because its two candidates (#5A6E6C,
+     #4F6462) could not be told apart by eye. "Does it clear 4.5:1" is answerable
+     without taste, which is what let it be picked up again, and both of them clear
+     it (5.41 / 6.30 on --chip). Neither could SHIP while `--muted` was an alias of
+     the datum's reference: both drove the dark datum's solved alpha past the clamp
+     described above and failed `npm test`. That cap belonged to the alias and went
+     with it (GitHub #152), so what is left is #120's original question -- how much
+     of the 3.57 / 6.21 light-versus-dark drift to close -- with the ratio no longer
+     tangled into it. #677977 is what ships until that is answered: a hue-preserving
+     step off the retired #6B7E7C, the value the two gates chose between them while
+     they were both closing on one hex.
 
      Darkening the GROUND was never an option in either direction: --ref-bg at 88%
      L is where a human said the glare stopped, and moving it down lowers ink
@@ -155,7 +177,13 @@
      (CL#140). One home each: the dark block below uses this rather than
      repeating the hex. */
   --ref-bg-dark:#1E2226;
-  --bg:var(--ref-bg); --ink:#20302E; --muted:var(--ref-muted); --hair:#D5DAD6; --chip:#FFFFFF;
+  /* `--bg` IS STILL AN ALIAS AND `--muted` IS DELIBERATELY NOT (GitHub #152).
+     The light ground is one fact wearing two hats that never disagree -- it is
+     the page's background AND the reference the datum was judged over, and it is
+     pinned by a human's judgement about glare either way, so nothing can pull it
+     two ways. The ink is two facts, and the hex is repeated on purpose so each
+     can move alone. See the block above before joining them back up. */
+  --bg:var(--ref-bg); --ink:#20302E; --muted:#677977; --hair:#D5DAD6; --chip:#FFFFFF;
   --accent:#3B7DE8; --shadow:0 1px 2px rgba(20,40,38,.06);
   /* THE METAL AND BRASS RAMPS, kept as a comment rather than as declarations
      (#57). Both sets were referenced ZERO times -- 16 declarations, no var()
@@ -3863,6 +3891,111 @@ function contrastAt(fg, bg, a) {
   const l1 = relLum([0, 1, 2].map(i => bg[i] + (fg[i] - bg[i]) * a)), l2 = relLum(bg);
   return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
 }
+/* THE TWO FLOORS ARE WCAG'S, AND THEY ARE NOT ONE NUMBER (GitHub #153). 1.4.3
+   holds ordinary text to 4.5:1 and LARGE text to 3:1; 1.4.11 holds a UI
+   component's own boundaries and states to 3:1 and says nothing about text.
+   Both are named here because the two things this page paints ON the accent
+   fall under DIFFERENT clauses -- the selected Table-of-Gears row's label is
+   13px/600, which is ordinary text, and the toggle switch's knob is not text at
+   all -- so one shared floor would either under-serve the label or push the knob
+   harder than the spec asks for. Do not collapse them into a single constant.
+
+   THE 4.5/3 BOUNDARY IS NOT ACADEMIC HERE: CL#169 dropped the Speed and Wear
+   readouts from 20px/700 to 13px/700, crossing from large text to ordinary text
+   with no colour change at all, and that alone produced two of the five contrast
+   failures CL#173 had to fix. A floor is a property of the type, so the site
+   picks the clause and this file never guesses. */
+const WCAG_TEXT_CONTRAST = 4.5;
+const WCAG_NONTEXT_CONTRAST = 3;
+/* THE INK THAT GOES ON THE ACCENT, DERIVED FROM THE ACCENT (GitHub #153).
+
+   `--accent` IS ONE GLOBAL PROP, NOT A PER-PERSON CHOICE, and #153's own premise
+   had that wrong -- worth stating because it changes what the urgency is. No
+   `PEOPLE` entry in config.js carries an accent; there is a single `accent` in the
+   `data-props` schema, and config.js's ACCENTS is a light-value -> dark-counterpart
+   MAP of the five reachable values (syncVars writes the chosen one onto the root as
+   an inline style, which is why each needs its own dark adaptation). So adding a
+   person does NOT surface this, and the four non-steel accents are unreachable
+   without editing that prop. The ticket's trigger does not exist.
+
+   What is still true is the shape of the fault: anything painted ON the accent is
+   painted on a colour this file does not know. Two places do it -- the selected
+   row's label and the toggle switch's ON knob -- and both used to name a token
+   outright, which is a bet on one accent. Measured over all five, in both themes,
+   that bet loses four times out of five in light: white-on-amber is 1.85:1 and the
+   row's label needs 4.5.
+
+   A LOOKUP TABLE OF FIVE HAND-PICKED INKS IS THE WRONG ANSWER even though it
+   would pass today, because a sixth accent is the case it cannot answer and
+   nothing would say so. So this is a rule, and it is built out of things the page
+   already knows:
+
+     1  THE POLE is whichever of pure white and pure black contrasts more with
+        the accent. That is not a preference, it is where the contrast is, and it
+        is computed from the accent rather than assumed per theme.
+     2  THE CANDIDATE is whichever supplied token already sits nearest that pole
+        -- in light that is --chip (white) for a dark accent and --ink for a
+        light one, in dark it inverts, and no branch here has to know which theme
+        is on because the tokens themselves have already swapped.
+     3  IF THAT TOKEN ALREADY CLEARS THE FLOOR IT IS RETURNED AS WRITTEN, as
+        `var(--chip)` / `var(--ink)`, so the page keeps painting in tokens and
+        the shipped accent's pixels do not move. Steel clears both floors at both
+        sites, which is why this change is invisible on what ships today.
+     4  ONLY WHEN IT DOES NOT does the token get pushed toward the pole, by
+        bisection, to the SMALLEST mix that reaches the floor. Minimal movement,
+        not a jump to black: a token pushed 30% of the way to black is still
+        recognisably the page's ink.
+
+   AND THE FLOOR IS ALWAYS REACHABLE, which is the part that makes this a rule
+   rather than a hope. Pure black and pure white contrast equally against a
+   ground of relative luminance 0.1791, where both reach 4.58:1 -- so the BETTER
+   of the two poles is never worse than 4.58:1 against any colour whatsoever,
+   which clears 4.5 and 3 for every accent that could ever be added. There is no
+   accent for which this returns something that fails, and no measured number
+   here to re-check when one is.
+
+   Bisection rather than algebra, for the same reason datumOpacity() bisects: the
+   mix is linear in sRGB values but contrast runs through the transfer curve, so
+   it does not invert in closed form.
+
+   AND THE BISECTION MEASURES THE ROUNDED COLOUR, NOT THE IDEAL ONE, WHICH IS THE
+   DIFFERENCE BETWEEN 4.49:1 AND PASSING. A CSS colour is three integers, so the
+   value that ships is the mix ROUNDED -- and rounding moves it back toward the
+   token, which is the direction that loses contrast. Bisecting on the ideal mix
+   and rounding afterwards landed red at 4.49:1 and blue at 4.49:1 against a 4.5
+   floor: right to three figures and wrong, in the one direction that matters,
+   with nothing in the derivation to say so. Rounding is monotone along the mix
+   (every channel moves one way), so bisecting on the rounded value costs nothing
+   and returns the colour it actually measured.
+
+   A FLOOR ABOVE 4.58 IS UNREACHABLE BY CONSTRUCTION, so the guard hands back the
+   pole itself -- the most contrast that exists against that accent, and visibly
+   extreme rather than quietly short. Same rule the rest of this file follows:
+   too strong beats silently wrong.
+
+   Returns null if the accent or either token will not read as a colour, so the
+   caller keeps the value it shipped with rather than drawing an ink derived from
+   nothing -- the tokens come back empty on the first render, before the page's
+   own <style> has been re-inserted, which is the trap datumInk() documents. */
+function inkOnAccent(accent, tokens, floor) {
+  const a = rgbOf(accent);
+  const cand = (tokens || []).map(t => ({ name: t.name, rgb: rgbOf(t.value) }));
+  if (!a || !cand.length || cand.some(c => !c.rgb)) return null;
+  const pole = contrastAt([255, 255, 255], a, 1) >= contrastAt([0, 0, 0], a, 1)
+    ? [255, 255, 255] : [0, 0, 0];
+  const yPole = relLum(pole);
+  const tok = cand.reduce((best, c) => Math.abs(relLum(c.rgb) - yPole)
+    < Math.abs(relLum(best.rgb) - yPole) ? c : best);
+  if (contrastAt(tok.rgb, a, 1) >= floor) return 'var(' + tok.name + ')';
+  const mixAt = (t) => tok.rgb.map((v, i) => Math.round(v + (pole[i] - v) * t));
+  if (contrastAt(pole, a, 1) < floor) return 'rgb(' + pole.join(',') + ')';
+  let lo = 0, hi = 1;
+  for (let i = 0; i < 24; i++) {
+    const mid = (lo + hi) / 2;
+    if (contrastAt(mixAt(mid), a, 1) < floor) lo = mid; else hi = mid;
+  }
+  return 'rgb(' + mixAt(hi).join(',') + ')';
+}
 /* Per person now: a combined stage carries several chains and a service belongs
    to whoever's chain it sits on. Keyed person -> slug -> { label, path, href }.
 
@@ -6037,11 +6170,34 @@ class Component extends DCLogic {
        and reaches the page as real pixel geometry, so nothing has to resolve it
        at used-value time (#37). */
     /* Dark mode gets the lighter counterpart; an accent dark enough to read on
-       the light background disappears against the dark one. */
-    if (this.props.accent) {
-      const pair = ACCENTS[this.props.accent];
-      r.setProperty('--accent', (this.state.theme === 'dark' && pair) || this.props.accent);
-    }
+       the light background disappears against the dark one. Which counterpart is
+       accentColour()'s question now, not this one's -- see it for why. */
+    const accent = this.accentColour();
+    if (accent) r.setProperty('--accent', accent);
+  }
+
+  /* WHICH COLOUR `--accent` IS ABOUT TO BE, and the one home for it (GitHub
+     #153). It was inline in syncVars, which was fine while syncVars was the only
+     thing that cared; the ink that goes ON the accent has to be derived from the
+     SAME colour, and there is no reading it back that gives the right answer.
+
+     `--accent` is written as an INLINE STYLE on the root, and syncVars runs from
+     componentDidMount/componentDidUpdate -- i.e. AFTER the render that draws the
+     selected row and the toggle knob. So a getComputedStyle read of --accent
+     during render returns the STYLESHEET's default on the very first render and
+     the person's accent on every one after: the two sites would derive their ink
+     for a colour they are not painted in, exactly once, only on a cold load, and
+     only for a person whose accent is not the stylesheet's. That is the same
+     shape of latent fault paintTheme() documents next door, and the fix is the
+     same -- ask the source, not the DOM.
+
+     Null when no accent prop is set, exactly as syncVars behaved before: the
+     stylesheet's own --accent then stands, and it is the caller's business to
+     read it from there rather than have this method invent a value syncVars
+     would not have written. */
+  accentColour() {
+    if (!this.props.accent) return null;
+    return (this.state.theme === 'dark' && ACCENTS[this.props.accent]) || this.props.accent;
   }
 
   /* The DOM half of a theme, split out because the two halves are now needed
@@ -10468,6 +10624,39 @@ class Component extends DCLogic {
        shared constant was introduced to end. */
     const ROW_PAD_Y = 4;
     const PANEL_GAP = 2;
+    /* ONE RULE FOR EVERYTHING PAINTED ON THE ACCENT, READ ONCE PER RENDER
+       (GitHub #153). Two sites below sit on `var(--accent)` -- the selected
+       Table-of-Gears row's label and the ON knob of a style-layer switch -- and
+       they take their ink from inkOnAccent() rather than naming a token, because
+       the accent is per person and four of the five in config.js fail on a named
+       token in light. See that function for the rule and why it cannot be a table
+       of five.
+
+       ONE getComputedStyle CALL, NOT ONE PER ROW. Sixteen gear entries and three
+       switches ask the same question about the same two tokens, so the answer is
+       computed here and handed down. Deliberately NOT cached on the instance:
+       both tokens change with the theme and the accent changes with the person,
+       and a cache keyed on either is the trap datumInk() carries a paragraph
+       about -- a render costs one read of two custom properties, which is
+       cheaper than being wrong for the life of the page.
+
+       THE ACCENT COMES FROM accentColour(), NOT FROM THE DOM, because syncVars
+       has not written it yet on the first render. When no accent prop is set
+       syncVars writes nothing, so the stylesheet's own token IS the accent in
+       force and reading it is correct -- that fallback is the only place the DOM
+       is asked. */
+    const paletteNow = getComputedStyle(document.documentElement);
+    const onAccentInk = (floor, fallback) => inkOnAccent(
+      this.accentColour() || paletteNow.getPropertyValue('--accent'),
+      [{ name: '--chip', value: paletteNow.getPropertyValue('--chip') },
+        { name: '--ink', value: paletteNow.getPropertyValue('--ink') }],
+      floor) || fallback;
+    /* The row's label is 13px/600 text, so 1.4.3's ordinary-text floor; the
+       knob is not text, so 1.4.11's. Each fallback is the token that site
+       shipped with, so a palette that will not read draws exactly what it drew
+       before rather than nothing. */
+    const rowOnAccentInk = onAccentInk(WCAG_TEXT_CONTRAST, 'var(--chip)');
+    const knobOnAccentInk = onAccentInk(WCAG_NONTEXT_CONTRAST, 'var(--chip)');
     /* Speed and Wear are the only two rows that both overflow a 44px hit box
        above and below a visually-shortened track (see speedTrackStyle's
        comment) -- every other row in this panel is plain text with no hit
@@ -10729,16 +10918,19 @@ class Component extends DCLogic {
                for its lighter counterpart (#AEB8BF), so the pill stays dark ink
                on a light fill at 6.63:1. Both themes clear the floor with the
                one token, and no branch here has to know which theme is on.
-               The four non-default accents in the `accent` prop's enum still
-               sit under 4.5:1 on this pill -- amber worst at 1.85:1 -- but
-               every one of them is BETTER on --chip than it was on --bg, so
-               this is a strict improvement at every option rather than a fix
-               for the shipped one. Making the ink depend on the accent is a
-               separate decision, and it is the same decision the ON knob of a
-               Machine Settings toggle is waiting on. */
+               AND THE INK IS NOW DERIVED FROM THE ACCENT RATHER THAN NAMED
+               (GitHub #153). --chip beat --bg at all five accents, which is why
+               it shipped, but it still left the four non-default ones under
+               4.5:1 -- amber worst at 1.85:1 -- because no single token can be
+               right for a colour chosen per person. rowOnAccentInk is
+               inkOnAccent() at 1.4.3's ordinary-text floor, and it returns
+               `var(--chip)` unchanged wherever --chip already clears it, which
+               includes the shipped steel accent in both themes. So this line
+               draws exactly what it drew before on what ships, and stops being
+               a bet on one accent for everything else. */
             style: { display: 'block', padding: ROW_PAD_Y + 'px 12px', borderRadius: '9px', textDecoration: 'none',
               font: LIST_ROW_FONT,
-              color: active ? 'var(--chip)' : 'var(--ink)',
+              color: active ? rowOnAccentInk : 'var(--ink)',
               background: active ? 'var(--accent)' : 'transparent' }
           };
         };
@@ -11039,16 +11231,23 @@ class Component extends DCLogic {
            3.26:1 in light and 6.14:1 in dark; on it is --chip against the
            filled slot, 5.69:1 and 6.63:1 at the shipped steel accent.
 
-           THE ON FIGURE DEPENDS ON THE ACCENT AND ONE OF THE FIVE IS WEAK.
-           config.js's ACCENTS are per-person and syncVars writes the chosen one
-           onto the root, so this is not one number: white-on-amber (#F4B32B) is
-           1.86:1 in light, against 3.21-3.98:1 for red, blue, green and steel.
-           Left as it is on purpose -- the pill's own fill has changed colour by
-           then, the knob has MOVED, and the sweep's whole finding was that
-           on-versus-off cannot be carried by colour in light theme at any
-           palette on offer. If that ever needs to stop depending on the accent,
-           it needs a design decision (a contrasting ring, or a knob in --ink at
-           the cost of the lit reading), not a quiet token swap here. */
+           THE ON FIGURE DEPENDED ON THE ACCENT AND ONE OF THE FIVE WAS WEAK,
+           AND IT IS NOW DERIVED (GitHub #153). config.js's ACCENTS are
+           per-person and syncVars writes the chosen one onto the root, so this
+           was never one number: white-on-amber (#F4B32B) measured 1.86:1 in
+           light against 3.21-3.98:1 for red, blue, green and steel -- under
+           1.4.11's 3:1 for a component state. knobOnAccentInk is inkOnAccent()
+           at that floor, so the knob takes whichever of --chip / --ink has the
+           contrast and only leaves the tokens behind if neither does. On steel
+           it returns `var(--chip)` and nothing about the shipped switch moves;
+           on amber it returns `var(--ink)`, which is 7.44:1.
+
+           THE POSITIONAL CUE IS UNTOUCHED AND MUST STAY THAT WAY. #134's sweep
+           found that NO candidate reaches 3:1 for on-versus-off in light at any
+           palette on offer, which is why this control was chosen: the knob
+           MOVES, SWITCH_TRAVEL from one end to the other. Deriving the ink
+           raises the knob-against-its-own-slot ratio and changes nothing about
+           that -- it is not a licence to make the state colour-carried. */
         boxStyle: {
           appearance: 'none', WebkitAppearance: 'none',
           width: SWITCH_W + 'px', height: SWITCH_H + 'px',
@@ -11058,7 +11257,7 @@ class Component extends DCLogic {
           backgroundColor: on ? 'var(--accent)' : 'var(--bg)',
           backgroundImage: 'radial-gradient(circle ' + SWITCH_KNOB_R + 'px at '
             + (on ? SWITCH_ON_CX : SWITCH_OFF_CX) + 'px 50%,'
-            + (on ? 'var(--chip)' : 'var(--muted)') + ' 0 96%,rgba(0,0,0,0) 100%)',
+            + (on ? knobOnAccentInk : 'var(--muted)') + ' 0 96%,rgba(0,0,0,0) 100%)',
           /* The pill reads as a recess in both states; only the knob and the
              fill move. Slightly softer when on so the accent fill is not also
              carrying a shadow that says "still empty". */
