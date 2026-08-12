@@ -810,11 +810,20 @@ nondeterministic by construction. It cost a red deploy to learn. The font is now
 prefetched into the harness and fulfilled from memory, the state is asserted after
 every render by a width probe (`document.fonts.status` and `check()` both lie here
 — with the stylesheet blocked no `@font-face` is registered, so `check` on an
-unknown family trivially agrees), and the working tree is photographed **twice**,
-before and after the ref pass. While those two disagree the run reports *"HARNESS
-NOT REPEATABLE"* and no pixel count is a verdict. It catches asymmetric
-instability; a uniform shift would still slip through, which is written down in the
-file rather than hoped away. **`tools/devices.py`, `tools/dom_invariants.py` and
+unknown family trivially agrees).
+
+**Each side is photographed until it agrees with ITSELF before the two are
+subtracted** (CL#163). Shooting only one side twice is half a control: an odd pass
+on the other side reads as a real difference while the control sits at a contented
+0px, which is the gate blaming the artifact for its own wobble. The residual it was
+chasing was **rasterisation, not the integrator** — 10 passes under contention
+produced one distinct transform set out of ten, so the master angle never drifts —
+and it only appears under CPU contention *plus* the CI runner's own
+`--no-sandbox --disable-gpu` flags, on the combined stage, at antialiasing scale.
+`DETERMINISTIC_FLAGS` removes Chrome's freedom to raster a pass differently and is
+verified appearance-neutral. **No tolerance was added to either the diff or the
+control**, deliberately: a threshold chosen to turn a red run green measures
+nothing. A residual now prints a greppable `NOTE:` instead of failing. **`tools/devices.py`, `tools/dom_invariants.py` and
 `tools/pill_clip.py` still carry the unpinned exposure** — `pill_clip` measures
 type specifically, so it is the likeliest to flake for this exact reason.
 

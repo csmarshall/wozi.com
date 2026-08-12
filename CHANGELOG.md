@@ -220,6 +220,72 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#163 — the pixel gate stops blaming the artifact for its own wobble.**
+  (GitHub #113, superseding part of CL#162's design.)
+
+  CL#162 pinned the webfont, which was right and fixed the first fault. Its
+  **control** — photograph the working tree twice — then caught a *second*,
+  narrower non-determinism on its very first CI run: 1,235px at 1440x900 on the
+  combined stage, max channel delta 10, while `?who=charles` and `/fidget/` were
+  0px. It correctly refused to claim anything about the artifact.
+
+  **The cause is rasterisation, not the integrator** — the leading hypothesis
+  (accumulated phase drifting between renders) is **refuted by measurement**: every
+  `transform` attribute and inline transform was dumped after the 90-frame pump
+  across 10 passes under the contention that produces the flake, and there is **one
+  distinct transform set out of ten**. The master angle does not drift; `step()`
+  reads only the already-pinned `performance.now()`, and `Date.now` appears nowhere
+  in `index.html`.
+
+  It reproduced only under 16-way CPU contention **plus the runner's own flags**
+  (`--no-sandbox --disable-dev-shm-usage --disable-gpu`, which macOS never
+  exercises): 1,214px at delta 10 against CI's 1,235px at delta 10. CPU throttling
+  alone never reproduced it, which is the tell — throttling slows everything
+  proportionally and preserves ordering, whereas contention perturbs it. The
+  mechanism is Chrome's freedom to render a pass differently: partial raster reuse,
+  a capture landing mid-compositing, and the harness window parked at
+  `-4000,-4000`, which is exactly the window Chrome may treat as occluded and
+  deprioritise. Antialiasing-scale, and combined-stage-only because that stage has
+  the most content to raster.
+
+  **`DETERMINISTIC_FLAGS`** removes that freedom without changing what is drawn —
+  ten launch flags (`--run-all-compositor-stages-before-draw`,
+  `--disable-partial-raster`, the occlusion/backgrounding three, the threading two,
+  `--force-color-profile=srgb`, …), **verified appearance-neutral at 0px / max
+  delta 0** against the original pre-CL#162 real-network baseline.
+
+  **And the second bug, which is the one that actually blocked deploys.** CL#162
+  shot the working tree twice and the ref **once**, so an odd pass on the *ref*
+  side left the control reading a contented 0px while the artifact comparison read
+  1,214px — the gate blaming the stripper for a wobble in its own measurement. That
+  happened in **2 of 3** reproduction runs; CI got lucky in the other direction, its
+  odd pass landing on a working pass so the control caught it. `stable_render()`
+  now photographs **each tree until it agrees with itself** (up to 3 attempts) and
+  only then subtracts, with the working tree checked before *and* after the ref so
+  its agreement spans the run. A third pass prints a greppable `NOTE:` naming the
+  flake rather than failing; no two agreeing is a loud exit 2.
+
+  **No tolerance was introduced anywhere** — not on the diff, not on the control. It
+  turned out not to be needed, which is the outcome to prefer over a threshold
+  chosen to make a red run green.
+
+  Independently validated, 14 runs of the combined stage at 1440x900: **0 flakes in
+  14 with the flags** (8 unloaded, 6 under contention), against **2 of 6 without
+  them** — and all six still produced the correct verdict, because `stable_render`
+  absorbed the odd pass instead of misattributing it. So the flags remove the cause
+  and `stable_render` makes any residual survivable and correctly blamed.
+
+  Sensitivity unchanged: `stripper-ate-a-line` still caught at **exactly 2,933px,
+  max Δ52**, control 0px. `npm test` 119/0. Runtime ~15s for two viewports across
+  six passes — still faster than the pre-CL#162 four-pass version, because the
+  condition-based settle replaced 4s of sleep per navigation with a few hundred ms.
+
+  **`--frames 90` was left alone deliberately.** Seven runs at `--frames 0` showed
+  no odd pass, hinting the rotated train's sub-pixel transforms are what give
+  raster something to wobble on — but seven runs against a ~33% rate is not
+  significant (p≈0.05), and dropping the pump would stop exercising
+  `applyRotation()` entirely.
+
 - **CL#162 — the pixel gate pins the webfont, proves it did, and shoots a control.**
   (GitHub #113, found by CL#159's first real deploy.)
 
@@ -267,6 +333,15 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
   31558915146 should have said. Honest limitation, documented in the file: a
   **uniform** shift lands all passes in the same regime and still reports PASS — the
   control catches asymmetric instability, which is what the real fault was.
+
+  **SUPERSEDED IN PART BY CL#163, and the way it was wrong is worth keeping.** This
+  control shot the working tree twice and the ref only **once**, so an odd pass on
+  the *ref* side left the control reading a contented 0px while the artifact
+  comparison read a real-looking difference — the gate blaming the artifact for a
+  wobble in its own measurement, in 2 of 3 later reproduction runs. The control
+  earned its keep anyway (it caught the residual on its first CI run and refused to
+  claim anything), but "photograph one side twice" is half a control. CL#163 makes
+  **each** side agree with itself before they are subtracted.
 
   Rejected and worth recording: **DOM quiescence via MutationObserver** — written
   first and unusable, since `fidget/index.html` runs `setInterval(draw, 250)` so a

@@ -1025,8 +1025,20 @@ let GRAB_RADIUS = 0;
    way, a wanted fill f is this = 1/f - 1: 0.78 -> 0.2821, 0.85 -> 0.1765,
    0.92 -> 0.0870. Note the drawn ink runs about 11.6% past R (the outrigger
    hairs outside the rim), so the ink meets the caption before this arithmetic
-   says the rim does. */
-const GEAR_MARGIN = 0.42;
+   says the rim does.
+
+   0.2821 IS CHARLES'S PICK FROM A SWEEP (#129), i.e. a fill of 0.78, and it is
+   the largest of 0.70/0.78/0.85/0.92 that clips nothing at either viewport.
+   What bounds it is NOT the vertical room the desk appears to have: the caption
+   is sized in user units, so it scales with the gear, and in PORTRAIT the window
+   runs out SIDEWAYS while +117px of vertical clearance is still going spare --
+   0.85 makes the caption 102% of a 390px window and cuts it off. Going past this
+   therefore means decoupling the caption from the gear's scale first, not finding
+   more margin. At this value the gear ink deliberately overlaps the floating
+   chrome by 16px at the button row and 34px into its gradient, which is a look
+   Charles chose from the pictures rather than an oversight -- the chrome has been
+   an overlay since CL#156 precisely so the drawing may run under it. */
+const GEAR_MARGIN = 0.2821;
 
 function layout() {
   const R = pitchR(MODE.stages[VIEW].spec.ring) + RING_RIM * MODULE;

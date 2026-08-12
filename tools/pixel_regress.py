@@ -95,15 +95,26 @@ perfectly is the one failure this gate may not have.
 An absolute budget on the arrival was tried as the guard against that and is
 refuted -- see ARRIVAL_JS for the two measurements that killed it, and note that
 the obvious derived condition (arrived before first paint) is refuted by the same
-pair. So the guard is not a model of the mechanism at all. IT IS A CONTROL: the
-working tree is photographed TWICE, once before the ref pass and once after, and
-while those two disagree no pixel count from the run is reported as a verdict
-about the ref. That is what the gate was missing. Every other guard here refuses
-one named mechanism, and the fault that got through was a mechanism nobody had
-named yet; a control refuses all of them, including the next one. Verified
-against a coin-flip reproduction of the original fault -- half the navigations
-paying a slow fetch, half not -- where it reports HARNESS NOT REPEATABLE and 383
-or 999 px, instead of the artifact verdict CI printed.
+pair. So the guard is not a model of the mechanism at all. IT IS A CONTROL, and
+every guard above it refuses one NAMED mechanism while the faults that keep
+getting through are mechanisms nobody had named yet. A control refuses all of
+them, including the next one.
+
+NEITHER SIDE OF A SUBTRACTION MAY BE A SINGLE SAMPLE. CL#162 shot the working
+tree twice and the ref once, and that asymmetry was itself a bug: an odd pass on
+the ref side leaves the control reading a contented 0 px while the artifact
+comparison reads over a thousand, so the gate blames the stripper for a wobble in
+its own measurement. Measured under CPU contention with the runner's flags, the
+odd pass landed on the ref side in two runs out of three. So each tree is now
+photographed until it agrees with ITSELF (stable_render, up to STABLE_ATTEMPTS),
+and only then are the two agreed renders subtracted. The working tree is done
+twice, before and after the ref, so its agreement spans the whole run instead of
+one burst. A tree that needs a third pass is reported as a flake rather than
+smoothed over, and a tree that never agrees stops the run at exit 2.
+
+Verified against a coin-flip reproduction of the font fault -- half the
+navigations paying a slow fetch, half not -- where it refuses instead of
+returning the artifact verdict CI printed.
 
 And with the font off the network there is nothing left to sleep for, so the
 fixed four seconds is gone. Readiness is a CONDITION: document load complete,
@@ -111,7 +122,9 @@ document.fonts.ready settled, and then two screenshots STABLE_SAMPLE_MS apart
 that come back byte-identical. The settle is deliberately in pixels rather than
 in DOM mutations -- see STABLE_SAMPLE_MS for the page that makes a quiet-DOM
 test impossible -- and it catches the #98 re-render whenever it lands rather
-than waiting it out. It is also about four times faster.
+than waiting it out. A navigation that took a flat 4s now takes a few hundred
+milliseconds, which is what pays for tripling the number of passes: six passes
+of two viewports come in under the old four's.
 
 Exit 0 if every viewport matches, 1 if any pixel differs, 2 if it could not
 photograph -- OR COULD NOT COMPARE, OR COULD NOT PIN THE FONT. Those used to be
@@ -144,8 +157,59 @@ CHROME = (os.environ.get("CHROME")
           or "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
 # Containers have no sandbox and a tiny /dev/shm, so Chrome refuses to start
 # without these. Only added off macOS, where they are unnecessary.
-CI_FLAGS = ([] if sys.platform == "darwin" else
+CI_FLAGS = ([] if sys.platform == "darwin" and not os.environ.get("WOZI_PX_CI_FLAGS") else
             ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"])
+
+# PINNING THE RENDERER, for the same reason the clock and the deal are pinned.
+# CL#162's control caught a residual: ~1,200 px at a max channel delta of 10 --
+# antialiasing scale, not structural -- on the combined stage at 1440x900 only,
+# appearing in roughly one render pass in several. Reproduced on a desk only under
+# heavy CPU contention with the runner's own flags, which is why it was invisible
+# here and red there.
+#
+# None of these change what the page looks like; every one removes a decision
+# Chrome is otherwise free to make differently on two runs of identical bytes:
+#
+#   run-all-compositor-stages-before-draw  finish compositing before the frame is
+#       drawn, so a capture cannot land mid-stage. The most direct answer to a
+#       difference that is pure antialiasing.
+#   disable-new-content-rendering-timeout  never draw a partial frame because a
+#       deadline passed -- a deadline is wall-clock, and wall-clock is the input
+#       this harness exists to remove.
+#   disable-partial-raster  raster the tile, never reuse part of the previous
+#       one. Incremental reuse is a known source of AA differences between frames
+#       that ought to be identical.
+#   disable-background-timer-throttling, disable-renderer-backgrounding,
+#   disable-backgrounding-occluded-windows  the window is deliberately parked at
+#       -4000,-4000 (off every screen), so it is exactly the window Chrome is
+#       entitled to treat as occluded and deprioritise. Under contention that is
+#       a coin toss about how much work a pass gets to finish.
+#   disable-threaded-animation, disable-threaded-scrolling  keep the work on one
+#       thread, so ordering does not depend on how many cores were free.
+#   force-color-profile=srgb  pin colour management, which otherwise follows the
+#       host display and is a real local-vs-CI difference.
+#
+# force-device-scale-factor=1 restates the deviceScaleFactor the emulation
+# override already sets, so a browser launched on a HiDPI desk cannot start out
+# rastering at 2x before the override lands.
+# WOZI_PX_NO_DET_FLAGS=1 launches without them, which is the third stress knob and
+# the only way to check that this list still earns its place. A flag list is
+# exactly the kind of thing that accretes and is never re-measured; with this, the
+# claim "removing these brings the flake back" stays testable instead of becoming
+# folklore. Measured under 16-way CPU contention with the runner's flags: without
+# the list, 2 runs in 6 needed a discarded pass; with it, 0 in 14.
+DETERMINISTIC_FLAGS = [] if os.environ.get("WOZI_PX_NO_DET_FLAGS") else [
+    "--run-all-compositor-stages-before-draw",
+    "--disable-new-content-rendering-timeout",
+    "--disable-partial-raster",
+    "--disable-background-timer-throttling",
+    "--disable-renderer-backgrounding",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-threaded-animation",
+    "--disable-threaded-scrolling",
+    "--force-color-profile=srgb",
+    "--force-device-scale-factor=1",
+]
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # The two hosts index.html reaches for Manrope. Named once; the interception
@@ -174,6 +238,10 @@ STABLE_SAMPLE_MS = 150
 # not a fallback -- a page that never goes quiet has not been photographed, and
 # saying so is the whole point of CL#159's exit 2.
 READY_TIMEOUT_S = 25.0
+# How many passes a single tree may take to agree with itself before the run is
+# abandoned. Three, so a lone odd pass is survivable and reported, and two odd
+# passes out of three is not quietly averaged into a verdict.
+STABLE_ATTEMPTS = 3
 # Chrome asks Google Fonts for woff2 and unicode-range subsets; urllib's own
 # User-Agent gets served legacy TTF with no subsetting, which is a different
 # face with different metrics. Prefetching under Chrome's UA is what makes the
@@ -189,6 +257,14 @@ PREFETCH_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.
 # trees under it. It is off unless the variable is set, it is announced when it
 # is on, and no gate ever sets it.
 FONT_DELAY_S = float(os.environ.get("WOZI_PX_FONT_DELAY_S", "0") or 0)
+# The second stress knob, and the one that reproduces a CI runner rather than a
+# network. WOZI_PX_CPU_THROTTLE=6 slows every render 6x through
+# Emulation.setCPUThrottlingRate, which is what a shared 2-core runner does to a
+# 600KB page. It exists because the first residual this gate caught was invisible
+# on a fast desk and reproducible on CI, and a fault that can only be seen on the
+# machine that is blocked by it cannot be worked on. Off unless set, announced
+# when on, and no gate sets it.
+CPU_THROTTLE = float(os.environ.get("WOZI_PX_CPU_THROTTLE", "0") or 0)
 
 
 def free_port():
@@ -396,7 +472,7 @@ async def shoot(url, viewports, seed, frames, theme, fonts, cache, families):
         [CHROME, "--headless=new", "--window-position=-4000,-4000",
          f"--remote-debugging-port={port}", f"--user-data-dir={profile}",
          "--hide-scrollbars", "--no-first-run", "--no-default-browser-check",
-         *CI_FLAGS, "about:blank"],
+         *DETERMINISTIC_FLAGS, *CI_FLAGS, "about:blank"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     ws_url = None
@@ -505,6 +581,8 @@ async def shoot(url, viewports, seed, frames, theme, fonts, cache, families):
 
         await send("Page.enable")
         await send("Runtime.enable")
+        if CPU_THROTTLE:
+            await send("Emulation.setCPUThrottlingRate", {"rate": CPU_THROTTLE})
         await send("Fetch.enable",
                    {"patterns": [{"urlPattern": f"https://{h}/*"} for h in FONT_HOSTS]})
         await send("Page.addScriptToEvaluateOnNewDocument",
@@ -687,14 +765,58 @@ def main():
               f"comparison, because both sides are held to the same state.")
         expect = "fallback"
 
-    srv, base = serve(ROOT)
-    try:
-        now, now_fonts, now_ms = asyncio.run(shoot(base + a.path + a.query, vps, a.seed,
-                                                   a.frames, a.theme, mode, cache, families))
-    finally:
-        srv.kill()
+    def stable_render(directory, who):
+        """Photograph one tree until it agrees with itself, and say so if it did not
+        the first time.
+
+        WHY BOTH SIDES NEED THIS, and why CL#162's single control was not enough.
+        That control sampled the WORKING tree twice and the ref once, so it could
+        only ever catch an odd pass on one side of the comparison. Reproduced under
+        contention, the odd pass landed on the REF side twice in three runs -- and
+        then the control reads a contented 0 px while the artifact comparison reads
+        1,214 px. The gate blamed the stripper for a fault in its own measurement,
+        which is the exact failure it was written to stop. A side that has not been
+        shown to agree with itself is not a side you can subtract.
+
+        Two consecutive identical passes, up to STABLE_ATTEMPTS of them. A run that
+        needs a third pass is a FLAKE THAT GETS REPORTED -- named, on its own NOTE
+        line, so it is greppable in a CI log and countable over time rather than
+        smoothed away. Majority is not silently taken: if no two passes agree, the
+        run stops with exit 2 and nothing is claimed.
+        """
+        srv_, base_ = serve(directory)
+        try:
+            passes = []
+            for _ in range(STABLE_ATTEMPTS):
+                passes.append(asyncio.run(shoot(base_ + a.path + a.query, vps, a.seed,
+                                                a.frames, a.theme, mode, cache, families)))
+                if len(passes) < 2:
+                    continue
+                # Compared as PNG bytes, per viewport: same encoder, same settings,
+                # so identical pixels are identical bytes. No Pillow needed to
+                # decide whether to keep shooting.
+                for older in range(len(passes) - 1):
+                    if all(passes[older][0][k] == passes[-1][0][k] for k in passes[-1][0]):
+                        if len(passes) > 2:
+                            print(f"   NOTE: {who} needed {len(passes)} passes to agree "
+                                  f"with itself; discarded {len(passes) - 2} odd pass(es). "
+                                  f"The machine is not rendering repeatably — this run is "
+                                  f"still valid, but the flake is real and worth chasing.")
+                        return passes[-1]
+            print(f"FATAL: {who} never agreed with itself in {STABLE_ATTEMPTS} passes of "
+                  f"identical bytes. This is a fault in the harness or the machine, not "
+                  f"in the artifact, and nothing has been proved either way.")
+            raise SystemExit(2)
+        finally:
+            srv_.kill()
 
     if a.shot:
+        srv, base = serve(ROOT)
+        try:
+            now, now_fonts, now_ms = asyncio.run(shoot(base + a.path + a.query, vps, a.seed,
+                                                       a.frames, a.theme, mode, cache, families))
+        finally:
+            srv.kill()
         # Same diagnostics as the comparison path, because --shot is what a human
         # uses to look at one render, and "which typography is this, and did it get
         # there in time" is exactly as load-bearing for a shot as for a diff.
@@ -707,6 +829,11 @@ def main():
             print(f"wrote {p}")
         return 0
 
+    # ---- EACH SIDE IS ESTABLISHED BEFORE EITHER IS SUBTRACTED -----------------
+    # The working tree first, so its two passes straddle the ref's in time and
+    # catch drift across the run rather than only within a burst.
+    now, now_fonts, now_ms = stable_render(ROOT, "the working tree")
+
     work = tempfile.mkdtemp(prefix="wozi-ref-")
     tree = os.path.join(work, "t")
     r = subprocess.run(["git", "-C", ROOT, "worktree", "add", "--detach", tree, a.ref],
@@ -715,38 +842,16 @@ def main():
         print("FATAL: could not check out " + a.ref + "\n" + r.stderr.strip())
         return 2
     try:
-        srv2, base2 = serve(tree)
-        try:
-            ref, ref_fonts, ref_ms = asyncio.run(shoot(base2 + a.path + a.query, vps, a.seed,
-                                                       a.frames, a.theme, mode, cache, families))
-        finally:
-            srv2.kill()
+        ref, ref_fonts, ref_ms = stable_render(tree, a.ref)
     finally:
         subprocess.run(["git", "-C", ROOT, "worktree", "remove", "--force", tree],
                        capture_output=True)
         shutil.rmtree(work, ignore_errors=True)
 
-    # ---- THE CONTROL: the same tree, photographed a second time ---------------
-    # Deliberately AFTER the ref pass rather than back-to-back with the first, so
-    # the two samples of one tree straddle the ref's in time and catch drift
-    # across the run rather than only within a burst.
-    #
-    # This is the check the gate did not have, and its absence is why the original
-    # failure was reported as an artifact fault. Every guard above is specific to a
-    # mechanism -- the seed, the clock, the font state -- and a guard can only
-    # refuse the fault it was written for. This one asks the question none of them
-    # do and that subsumes all of them: given the SAME bytes twice, does this
-    # machine draw the same picture? While the answer is no, no pixel count from
-    # this run means anything at all, whatever caused it -- a font, a GPU, a
-    # thermal throttle, a mechanism nobody has thought of yet. It costs one extra
-    # pass, which the condition-based settle has already more than paid for.
-    srv3, base3 = serve(ROOT)
-    try:
-        again, again_fonts, again_ms = asyncio.run(shoot(base3 + a.path + a.query, vps,
-                                                        a.seed, a.frames, a.theme,
-                                                        mode, cache, families))
-    finally:
-        srv3.kill()
+    # And one more pass of the working tree AFTER the ref, which is what makes the
+    # working side's agreement span the whole run. stable_render's own two passes
+    # are back-to-back; this is the straddle.
+    again, again_fonts, again_ms = stable_render(ROOT, "the working tree (again)")
 
     print(f"\nworking tree vs {a.ref}   seed {a.seed}, {a.frames} frames, "
           f"{a.theme} theme, /{a.path}{a.query}, "
