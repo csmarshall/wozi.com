@@ -64,9 +64,24 @@ Parallelism is bounded by *file contention*, not by ticket count. In this repo:
 - Read-only evaluation (measurement, research, audits) never needs isolation and
   can always run alongside.
 
+**The injected `CLAUDE.md` is a snapshot taken at session start, and it goes stale
+inside a long session.** A senior review this way asserted the repo was still
+private, quoting the rulebook, hours after the paragraph had been rewritten to say
+PUBLIC — because it trusted the copy in its context rather than reading the file.
+The orchestrator carries the same stale snapshot and is no less exposed. So: **a
+claim about the repo's CURRENT state — visibility, what a gate runs, what a
+constant is set to — needs a read of the working tree, exactly like any other
+prose-versus-reality check.** Quoting the injected rulebook as evidence about now
+is quoting an instrument that stopped.
+
+Related trap: `.claude/worktrees/*/` are other agents' checkouts pinned to
+arbitrary older commits, each with its own stale `CLAUDE.md` and `CHANGELOG.md`.
+Read docs from the repo root only.
+
 Every subagent brief must carry, without exception:
 
-- **Read `CLAUDE.md` first**; it overrides their defaults.
+- **Read `CLAUDE.md` first**; it overrides their defaults. Tell them to read it
+  **from disk at the repo root**, not from whatever snapshot arrived in context.
 - **The invariants their work could break**, named specifically — the one-clock
   rule, no CSS animation on anything that turns, no hardcoded geometry, inline
   styling only, the deploy whitelist, `tools/test.js` reading constants out of
