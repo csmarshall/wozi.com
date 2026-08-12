@@ -167,6 +167,59 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#160 — the datum plate is stamped at the end of its mark furthest from the
+  wordmark.** (GitHub #131.)
+
+  Charles: *"shift datum name badges to be on the right (landscape) and top
+  (portrait) - this should help with spacing when near 'wozi.com' badge."* The
+  crowding turned out to be worse than crowding: at 1440x900 Harper's plate
+  **intersected the wordmark's box on both axes** (x −84.3, y −21.4), and
+  Charles's overlapped it in x by 93.4px while clearing it vertically.
+
+  **The rule is deliberately not written down as "right in landscape, top in
+  portrait."** That phrasing is a handedness stated in screen terms over a
+  direction that comes from `_axisRot` — the #67 trap exactly, and its mirror
+  image passes every measurement taken along the axis. Instead the wordmark is
+  measured into `_brandBox` and the plate takes whichever end of its mark stands
+  furthest from it, by a screen-space dot product. A signed distance cannot be got
+  the wrong way round without the sign being wrong, which is checkable. Charles's
+  two cases then **fall out** rather than being encoded: the mark runs along the
+  travel axis and the brand is bottom-left in both orientations.
+
+  The wordmark is **measured, not restated** — its box is a `clamp()`ed font size
+  plus a safe-area inset, so only CSS knows it, and a restated corner would drift
+  the first time `--offleft`, `--offbot` or the type size moved.
+  `PLATE_START_ALONG` stayed one number and became one signed step, so the
+  mark's-own-end-vs-frame rule is one rule rather than a start reading with a
+  far-end special case.
+
+  **CL#152's clearance search still bites at the new anchor**, which landscape
+  proves rather than merely permits: Charles lands flush at exactly
+  `PLATE_START_ALONG` from the far edge, while Harper **slid 131.4px inboard** of
+  that flush point with a clean console — `plateExcluded`/`plateNearestClean`
+  moving her off the ghost wheels at the right of her row and finding an
+  uncrowded seat, rather than falling back or emitting the crowd warning.
+
+  **Portrait was already top-anchored** and comes out byte-identical: the travel
+  axis is +y there, so the mark's start IS the top, and the new rule agrees with
+  the ask instead of flipping it. So this is a landscape-only change, which is why
+  `pixel_regress` reports 12,374px at 1440x900 and **0px at 390x844** — expected,
+  not "not tested", and confirmed independently by measured plate rects.
+  `?who=charles` is 0px at both because a solo page carries one chain,
+  `datumRuns()` returns `[]`, and no plate is drawn — this change cannot reach
+  that path.
+
+  `npm test` 119/0 including *"a plate gives way to the metal, even when that
+  costs more slide"*; `dom_invariants` 8 meshing pairs / 2 components / worst
+  residual 0.0008px; `verify_motion` 40/40 advancing with 0 console errors;
+  `devices.py` 24/24 and 4/4. Corner buttons re-measured since the plate moved
+  toward them — 315px clear in landscape, and portrait's 5.3px is unchanged from
+  before this ticket.
+
+  One line in `tools/test.js`: the lifted `fitEscapes` ctx needed `_colRef`
+  supplied unattached, the same dependency injection `_stageRef` already gets,
+  since the harness has no DOM. No test was changed or weakened.
+
 - **CL#157 — a timing mark only exists where there is metal, and an epicyclic
   is marked where a real one would be.** (GitHub #132, #133.)
 

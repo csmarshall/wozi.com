@@ -3041,6 +3041,14 @@ function fitEscapesOn(solved, axisRot, spineSlug, margin) {
     _axisRot: axisRot,
     _stageRef: { current: { getBoundingClientRect: () => (
       { width: solved.w, height: solved.h, left: margin, top: margin }) } },
+    /* fitEscapes also measures the wordmark now, so the datum plate can be
+       stamped at the end of its mark furthest from it (GitHub #131). There is no
+       DOM here, so the ref is present and unattached -- which is the state the
+       page itself is in for the frame before its first fit, and plateSeat's own
+       fallback covers it. Supplied for the same reason _stageRef is: a lifted
+       function reaching for a ref the harness never gave it throws, and these
+       tests are about escape runs rather than about the plate. */
+    _colRef: { current: null },
     solve: () => solved,
     chainAxes: new Function('SPINE_SLUG',
       'return function ' + grabBlock('  chainAxes(solved) {', '{', '}') + ';')(

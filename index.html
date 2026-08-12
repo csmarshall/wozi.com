@@ -1461,16 +1461,22 @@ const DATUM_PLATE = {};
    top of the placard -- is what the figure names. */
 const PLATE_TOP_CLEAR = 20;
 
-/* HOW FAR ALONG THE LINE THE PLATE SITS FROM WHERE THE MARK STARTS, in RENDERED
-   PIXELS -- "seat the datum plate 25px from the start of the datum line" --
+/* HOW FAR ALONG THE LINE THE PLATE SITS FROM THE END OF THE MARK IT IS STAMPED
+   AT, in RENDERED PIXELS -- "seat the datum plate 25px from the start of the
+   datum line" --
    Charles, GitHub #87. Twenty-five is the owner's figure, in the pixels a viewer
    actually sees, and the same reasoning that keeps PLATE_TOP_CLEAR out of module
    units keeps this out of them.
 
+   WHICH END IT IS MEASURED FROM IS NO LONGER ALWAYS THE START (GitHub #131). The
+   figure is the same distance in from whichever end of the mark the plate rides,
+   and plateSeat() decides which -- so this stayed one number and one signed step,
+   rather than growing a second figure for the far end.
+
    IT IS A DIFFERENT QUANTITY ON A DIFFERENT AXIS FROM PLATE_TOP_CLEAR, and the
    names say which: TOP_CLEAR is measured ACROSS the line, from the chain's
    extreme border out to the top of the placard; this is measured ALONG the line,
-   from the start of the mark in to the plate's near edge. They are neighbours
+   from that end of the mark in to the plate's near edge. They are neighbours
    and they are unrelated -- one decides where the line is scribed, the other
    decides where along it the plate is stamped. The pair of them was filed
    twice over as one ambiguous "20px" (GitHub #77) before either was written
@@ -4179,6 +4185,31 @@ class Component extends DCLogic {
        past the cross axis (CROSS_BLEED), because a machine that continues past
        the frame is the composition. This is for the marks that may not. */
     this._vpBox = { x0: -rect.left, y0: -rect.top, x1: vw - rect.left, y1: vh - rect.top };
+    /* AND WHERE THE WORDMARK IS, in that same space, because the datum plate is
+       now stamped at whichever end of its mark is FURTHEST FROM IT (GitHub #131).
+       Measured here for exactly the reason the viewport box is: this is the one
+       place that already holds the stage's own rect, so the conversion happens
+       once, and a second read downstream would be a second opinion about where
+       the stage is.
+
+       THE ELEMENT IS MEASURED, NOT THE CORNER IT IS PINNED TO. The wordmark is
+       a clamp()ed font size plus that edge's safe-area inset, so how big it is
+       and how far in it sits are known to CSS and to nothing else -- a corner
+       restated here would be a constant that drifts the first time --offleft,
+       --offbot or the type size moves, and the whole point of measuring is that
+       moving the brand to another corner moves the plate to the other end by
+       itself.
+
+       Left undefined until the ref is attached, and plateSeat() then seats from
+       the end it always used -- the same standing-in the natural side does for an
+       unmeasured viewport. Both are measured together from here on, so the two
+       fallbacks fire on the same single frame. */
+    const col = this._colRef.current;
+    if (col) {
+      const cb = col.getBoundingClientRect();
+      this._brandBox = { x0: cb.left - rect.left, y0: cb.top - rect.top,
+        x1: cb.right - rect.left, y1: cb.bottom - rect.top };
+    }
     /* AND A SEAT THAT HAS GONE STALE IS RE-SEATED. Publishing the box is not
        enough on its own: the datum plate is placed during render, and a render
        only happens when something QUANTISED moves -- the 1% render scale, the
@@ -8418,9 +8449,11 @@ class Component extends DCLogic {
        1. WHICH SIDE. A reference line may be laid either side of the parts it
           references; datumRuns() hands both origins over, clear of every tooth
           by the same module of air.
-       2. WHERE ALONG IT. The plate is stamped a stated distance in from where
-          the mark starts, and sliding it further along the same line is a
-          placement, not a compromise.
+       2. WHERE ALONG IT. The plate is stamped a stated distance in from ONE END
+          of the mark, and sliding it further along the same line is a
+          placement, not a compromise. WHICH end is not one of these freedoms and
+          is not spent here: it is decided outright, by the wordmark, before
+          either of them (GitHub #131).
      The natural side and the natural station win every tie, so a load that was
      already right is untouched -- and the smaller slide wins otherwise, so the
      mark moves as little as the page allows.
@@ -8627,23 +8660,74 @@ class Component extends DCLogic {
 
   plateSeat(r, S, pw, ph, past, box, metal) {
     const nat = { ox: r.o.x * S, oy: r.o.y * S };
+    const vp = this._vpBox;
+    /* WHICH END OF THE MARK THE PLATE IS STAMPED AT (GitHub #131). Charles asked
+       for the plate "on the right (landscape) and top (portrait) -- this should
+       help with spacing when near 'wozi.com' badge", and those two halves are one
+       rule: the wordmark is fixed furniture pinned to a corner of the viewport,
+       so the plate is stamped at whichever end of the mark stands FURTHEST FROM
+       IT. Right-in-landscape and top-in-portrait then fall out of the geometry
+       instead of being written down -- the mark runs along the stage's travel
+       axis, which is horizontal in landscape and vertical in portrait, and the
+       brand is in the bottom-left corner of both.
+
+       DERIVED FROM THE MEASURED WORDMARK, NOT FROM THE ORIENTATION, and that is
+       the #67 lesson taken at face value. "High end in landscape, low end in
+       portrait" is a handedness stated in screen terms over a direction that
+       comes from _axisRot: it is a legal mirror image of itself, so every
+       measurement taken ALONG the run passes either way and only a screenshot
+       could tell. What is written instead is a screen-space dot product -- the
+       viewport's centre minus the wordmark's, resolved onto the run -- so
+       getting it the wrong way round would mean the sign of a measured distance
+       being wrong, which nothing can quietly be.
+
+       +1 SEATS FROM THE START OF THE MARK, measuring forward along the run; -1
+       from its finish, measuring back. +1 is what shipped before this, and it is
+       what stands in when there is no measured wordmark, for the same reason the
+       natural side stands in for an unmeasured viewport below.
+
+       THE LOW END WINS A TIE, so a brand centred on the run keeps the seat it
+       already had rather than changing ends on the sign of rounding noise. */
+    const brand = this._brandBox;
+    let anchor = 1;
+    if (vp && brand) {
+      const away = ((vp.x0 + vp.x1) / 2 - (brand.x0 + brand.x1) / 2) * r.ux
+                 + ((vp.y0 + vp.y1) / 2 - (brand.y0 + brand.y1) / 2) * r.uy;
+      if (away > 0) anchor = -1;
+    }
+    /* WHICH END OF A SLAB CLIP THIS ANCHOR READS. Named once: the mark's own
+       extent, the drawn area and the viewport are all clipped by the same
+       function, and all three have to be asked about the same end of the run. */
+    const END = anchor > 0 ? 0 : 1;
     /* THE PLATE'S NEAR EDGE IS WHAT THE FIGURE MEASURES TO, so half the plate's
        measured width is carried here: what the eye compares is the gap between
-       the start of the mark and the metal, not the distance to a centre it
-       cannot see. */
-    const from = (start) => start + PLATE_START_ALONG + pw / 2;
-    /* WHERE THE MARK STARTS, along the line, in rendered pixels -- the same
-       arithmetic datumLayer draws the line with, and the referent that replaced
-       the old wheel anchor (#95). The mark runs `past` beyond whichever reaches
-       further out, the assembly or the drawn area it is clipped to, so this is
-       the first drawn pixel of the line and not merely the first wheel on it. */
-    const startOf = (O) => Math.min(r.d0 * S, this.slabClip(O.ox, O.oy, r.ux, r.uy, box)[0]) - past;
-    const vp = this._vpBox;
+       that end of the mark and the metal, not the distance to a centre it
+       cannot see. The figure is stepped INWARD from the end, so `anchor` turns it
+       round with the end it is measured from -- one signed step rather than two
+       copies of the same arithmetic pointing opposite ways. */
+    const from = (edge) => edge + anchor * (PLATE_START_ALONG + pw / 2);
+    /* WHERE THE MARK BEGINS -- or ENDS, at the far anchor -- along the line, in
+       rendered pixels: the same arithmetic datumLayer draws the line with, and
+       the referent that replaced the old wheel anchor (#95). The mark runs `past`
+       beyond whichever reaches further out, the assembly or the drawn area it is
+       clipped to, so this is the outermost drawn pixel of the line at that end
+       and not merely the wheel nearest it. `d0` and `d1` are that pair of
+       extents, and the run-out is signed with the anchor for the same reason the
+       figure above is. */
+    const edgeOf = (O) => {
+      const cut = this.slabClip(O.ox, O.oy, r.ux, r.uy, box);
+      return anchor > 0 ? Math.min(r.d0 * S, cut[END]) - past
+                        : Math.max(r.d1 * S, cut[END]) + past;
+    };
+    /* WHICHEVER OF TWO STATIONS ALONG THE RUN IS FURTHER INBOARD of this anchor's
+       end -- the later one at the start, the earlier one at the finish. What it
+       is for is below, where the mark's own end and the frame's argue it out. */
+    const inboard = (a, b) => anchor > 0 ? Math.max(a, b) : Math.min(a, b);
     /* Before the first fitEscapes() there is no measured viewport, and guessing
        one would be a second opinion about where the stage is. The natural side
        stands for that one frame; the fit runs out of componentDidUpdate, so the
        next one is measured. */
-    if (!vp) return { ox: nat.ox, oy: nat.oy, at: from(startOf(nat)), side: 1 };
+    if (!vp) return { ox: nat.ox, oy: nat.oy, at: from(edgeOf(nat)), side: 1 };
     /* The plate turns with its chain, so what has to fit inside the viewport is
        the axis-aligned box of a ROTATED rectangle -- half its width along the
        run plus half its height across it, resolved onto each screen axis. Both
@@ -8702,10 +8786,11 @@ class Component extends DCLogic {
     [nat, alt].forEach(O => {
       const iv = window_(O);
       if (!iv) return;
-      /* THE START OF THE MARK, OR THE START OF AS MUCH OF IT AS THE PAGE SHOWS.
-         The later of the two wins, and that is the whole of the rule: the mark's
-         own start decides while it can be seen, and the frame decides once it
-         cannot.
+      /* THE ANCHOR END OF THE MARK, OR OF AS MUCH OF IT AS THE PAGE SHOWS.
+         The more inboard of the two wins, and that is the whole of the rule: the
+         mark's own end decides while it can be seen, and the frame decides once
+         it cannot. It reads the same end of both clips (`END`), so the rule is
+         one rule and not a start-only reading with a far-end special case.
 
          ON THIS COMPOSITION THE FRAME ALMOST ALWAYS DECIDES, and it was measured
          before it was written. An escape run is grown until it is 120px past the
@@ -8717,17 +8802,19 @@ class Component extends DCLogic {
          no viewer can see could never once have been honoured -- which is the
          reason this does not simply anchor on `d0` as GitHub #87 proposed. The
          mark's
-         own start is the floor under it, for the cases where the drawing does
+         own end is the bound under it, for the cases where the drawing does
          stop inside the frame: before the first fit there are no ghosts to widen
-         the drawn area, and a chain may be dealt one that leaves by the far end
-         only.
+         the drawn area, and a chain may be dealt a run that leaves by one end
+         only -- which is now either end, since the plate may be stamped at
+         either (GitHub #131).
 
          AND THE PAGE IS THE ONLY REFERENT THAT ANSWERS GitHub #82. A chain with
          no
-         leading run starts at its own first gear, so every reading that anchors
+         escape run at this end stops there at its own last gear, so every
+         reading that anchors
          on the machine seats that chain's plate within a wheel's radius of the
          one wheel it owns -- which is the complaint, restated at 25px. */
-      const want = from(Math.max(startOf(O), this.slabClip(O.ox, O.oy, r.ux, r.uy, vp)[0]));
+      const want = from(inboard(edgeOf(O), this.slabClip(O.ox, O.oy, r.ux, r.uy, vp)[END]));
       /* THE UNSEARCHED POSITION, AND WHAT IT COSTS: kept as the fallback for
          when no point in this window clears the metal at all, and as what
          `slide` is measured against either way -- the figure this file states
@@ -8750,7 +8837,7 @@ class Component extends DCLogic {
         console.warn('wozi: neither side of chain "' + r.person + '" has room for its '
           + 'datum plate — the mark is drawn where it falls');
       }
-      return { ox: nat.ox, oy: nat.oy, at: from(startOf(nat)), side: 1 };
+      return { ox: nat.ox, oy: nat.oy, at: from(edgeOf(nat)), side: 1 };
     }
     /* A CROWDED PLATE IS ANNOUNCED, NOT HIDDEN -- the same rule the crossing
        bridge and the chain-overlap pass already answer to. Both sides were
