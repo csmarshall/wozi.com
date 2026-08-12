@@ -220,6 +220,72 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#162 — the pixel gate pins the webfont, proves it did, and shoots a control.**
+  (GitHub #113, found by CL#159's first real deploy.)
+
+  CL#159's artifact gate went red in CI — 195px and 2,016px on two different
+  viewports of two different checks — while the identical build measured **0px at
+  every viewport locally**. The stripper was innocent; the harness was not.
+
+  **The cause is not cache warmth** (the first hypothesis, refuted: `fromDiskCache`
+  is `False` on every navigation, so all four navigations per check re-race
+  independently — which is why the failing viewport differed between checks). It is
+  that **the drawing depends on WHEN Manrope arrives relative to the page's own
+  first render**, and that time comes off a third party's network. `index.html`
+  clears its `textWidth` memo on `document.fonts.ready` (GitHub #98), so engraving
+  metrics are measured early and only partly re-measured.
+
+  Measured by holding only the font requests — a clean **step function**, identical
+  at every delay past the boundary: held 0–1.2s gives 0px, held 1.4–3.6s gives
+  2,941px at 390x844 (nine narrow row bands, one per wheel: the engraved
+  lettering), held forever gives 329,160px. **The corroboration that settles it:
+  `/fidget/` is the only published page with no Google Fonts link, and it was the
+  only check that passed both viewports in CI.**
+
+  **The font is now pinned off the network** the same way `Math.random` and
+  `performance.now` already are: the CSS and every face are prefetched into the
+  process before any browser starts — under a Chrome UA, because Google serves
+  legacy TTF with different metrics otherwise — and fulfilled from memory. The
+  pinned render is **byte-identical to the old harness's real-network render**, so
+  real typography is preserved rather than traded away. One state is chosen once per
+  run and enforced on both trees, and **verified after every render by a width
+  probe** (640.4 vs 698.4px discriminates, where `document.fonts` does not).
+
+  Note why the Font Loading API cannot answer this: with the requests blocked,
+  `document.fonts.status` is `loaded` and `check('600 13px Manrope')` is `true`,
+  because the stylesheet never arrived, so no `@font-face` was ever registered and
+  `check` on an unknown family trivially agrees.
+
+  **`sleep(4.0)` is gone.** Readiness is a condition — load complete, `fonts.ready`
+  settled, then two screenshots 150ms apart that come back byte-identical — with a
+  loud timeout naming the binding term. ~20s to ~7.5s per check.
+
+  **And the gate now shoots a control**: the working tree twice, once before the ref
+  pass and once after. While those disagree, no pixel count is reported as a
+  verdict. Under a coin-flip reproduction of the CI fault it prints *"HARNESS NOT
+  REPEATABLE — the SAME bytes photographed twice disagree"*, which is what run
+  31558915146 should have said. Honest limitation, documented in the file: a
+  **uniform** shift lands all passes in the same regime and still reports PASS — the
+  control catches asymmetric instability, which is what the real fault was.
+
+  Rejected and worth recording: **DOM quiescence via MutationObserver** — written
+  first and unusable, since `fidget/index.html` runs `setInterval(draw, 250)` so a
+  quiet DOM is unreachable there; **warming the cache** (nothing to warm); and **an
+  absolute budget on font arrival**, implemented then removed after measurement
+  showed it anti-correlated — 310ms settled with 53ms first paint gave the *correct*
+  picture while 131ms settled with 202ms first paint gave a 999px wrong one. A
+  constant that does not measure what it claims is worse than none; both numbers are
+  still reported as diagnostics.
+
+  Sensitivity preserved and proven rather than assumed: `mutation_gate.py --only
+  stripper-ate-a-line` is still **caught at exactly 2,933px, max Δ52** — the
+  identical count the old harness produced — with the control at 0px, so it is
+  correctly attributed to the artifact. Five consecutive repeat runs PASS. `npm
+  test` 119/0.
+
+  **The artifact is exonerated:** on the real stripped build, `/`, `?who=charles`
+  and `/fidget/` are all **0px at both viewports**, controls 0px throughout.
+
 - **CL#160 — the datum plate is stamped at the end of its mark furthest from the
   wordmark.** (GitHub #131.)
 

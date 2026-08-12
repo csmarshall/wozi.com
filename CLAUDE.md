@@ -802,6 +802,22 @@ bigger bore makes gear sets reachable that nothing has ever measured. Change one
 and re-run the suite before pushing.
 
 
+**The pixel gate pins the webfont, and it shoots a control** (CL#162). The page's
+drawing depends on WHEN Manrope arrives relative to its own first render —
+`index.html` clears its `textWidth` memo on `document.fonts.ready` (#98) — and
+that time comes off a third party's network, so an unpinned gate is
+nondeterministic by construction. It cost a red deploy to learn. The font is now
+prefetched into the harness and fulfilled from memory, the state is asserted after
+every render by a width probe (`document.fonts.status` and `check()` both lie here
+— with the stylesheet blocked no `@font-face` is registered, so `check` on an
+unknown family trivially agrees), and the working tree is photographed **twice**,
+before and after the ref pass. While those two disagree the run reports *"HARNESS
+NOT REPEATABLE"* and no pixel count is a verdict. It catches asymmetric
+instability; a uniform shift would still slip through, which is written down in the
+file rather than hoped away. **`tools/devices.py`, `tools/dom_invariants.py` and
+`tools/pill_clip.py` still carry the unpinned exposure** — `pill_clip` measures
+type specifically, so it is the likeliest to flake for this exact reason.
+
 **A 0px pixel gate can mean "not tested", not "unchanged".** The default deal is
 seven wheels drawn from eleven families, so a change confined to one family has
 about an even chance of not appearing in the shot at all. CL#138 rebuilt
