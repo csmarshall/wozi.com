@@ -53,12 +53,72 @@ function loadConfig() {
 
 /* ---- extraction: pull the real thing out of the real page ---------------- */
 
-/* Comments stripped once, up front, for grabNumber() -- block comments only,
-   the same idiom already used four times further down in this file. Without
-   it a name merely DISCUSSED in prose, or sitting in a retired branch someone
-   commented out rather than deleted, reads exactly like a live declaration
-   (GitHub #101). */
-const STRIPPED_SRC = SRC.replace(/\/\*[\s\S]*?\*\//g, '');
+/* COMMENTS ARE MASKED, NOT DELETED, AND THE MASK IS LENGTH-PRESERVING (GitHub
+   #101, #137). Every extractor below matches against the mask and then slices
+   the ORIGINAL, so an anchor can never be satisfied by prose while the text
+   handed back to the suite is still the real page, comments and all -- which
+   matters, because two tests regex the extracted block for things a comment is
+   allowed to mention (`applyRotation()` and its clocks, `approachSpeed()` and
+   the formula it retired).
+
+   Length-preserving is what makes that possible: a deleted comment moves every
+   offset after it, so a match position in the stripped text says nothing about
+   where the block starts in the file. Spaces keep the two in lockstep, and they
+   are strictly safer than deletion for grabNumber() too -- deleting the comment
+   in `A =<block comment> 3` joins two tokens that were never adjacent.
+
+   THE SCANNER IS DELIBERATELY NAIVE, AND THE DIRECTION OF ITS ERROR IS THE
+   ARGUMENT. `tools/strip_comments.py` needs a real state machine because it
+   REMOVES text from a file that then has to run: it must not mistake
+   `'https://…'`, a template literal or the `/*` inside a regex literal for a
+   comment. This mask is only ever used to LOCATE an anchor, so its two failure
+   modes are not symmetric:
+
+     - mask something that was live code -> the anchor vanishes or moves, and
+       every caller throws. LOUD.
+     - leave a comment unmasked -> prose satisfies an anchor again. SILENT, and
+       exactly the bug being closed.
+
+   So it errs toward masking: block comments and markup comments, first match
+   wins, no string or regex awareness. Checked against the file it reads rather
+   than assumed -- index.html carries 722 `/*` and 9 `<!--`, they pair up (so
+   nothing nests), it has no `//` line comments at all, and masking all 731
+   leaves every `<script>` body still passing `node --check`, which is the proof
+   that no `/*` in this file lives inside a string, a template or a regex today.
+   If one ever does, the anchors in that region go missing and the suite says so.
+   Line comments are not handled for the same reason they need care: `//` in
+   `'https://fonts.googleapis.com'` is not a comment, and neither file has a real
+   one to gain by guessing. */
+function maskComments(src) {
+  const out = src.split('');
+  let i = 0;
+  while (i < src.length) {
+    let end = -1;
+    if (src.startsWith('<!--', i)) {
+      const j = src.indexOf('-->', i + 4);
+      end = j < 0 ? src.length : j + 3;
+    } else if (src.startsWith('/*', i)) {
+      const j = src.indexOf('*/', i + 2);
+      end = j < 0 ? src.length : j + 2;
+    }
+    if (end < 0) { i++; continue; }
+    for (let k = i; k < end; k++) if (out[k] !== '\n') out[k] = ' ';
+    i = end;
+  }
+  return out.join('');
+}
+
+/* Memoised per source string. grabBlockFrom() is called ~37,000 times in a run
+   over a 632KB file, and the mask is O(n) -- one per distinct src (index.html,
+   config.js, and one small fragment per person) rather than one per call. */
+const MASKED = new Map();
+function maskedOf(src) {
+  let m = MASKED.get(src);
+  if (m === undefined) { m = maskComments(src); MASKED.set(src, m); }
+  return m;
+}
+
+const STRIPPED_SRC = maskedOf(SRC);
 
 /* CONTRACT (GitHub #101, CL#112): returns the value of the ONE live
    `NAME = <number>` assignment in index.html. Throws if NAME is assigned more
@@ -98,13 +158,148 @@ function grabNumber(name) {
   return parseFloat(m[1]);
 }
 
+/* WOZI_ANCHOR_DUMP=<path>: append every extraction -- where it came from, the
+   anchor that found it, its length and its text. Nothing reads this in CI. It
+   exists because the only honest way to change an extractor is to prove all 66
+   anchors still resolve to the same bytes: dump, change, dump, diff. Hardening
+   this file (GitHub #137) was verified that way, and the next edit to it can be
+   too, which is why the hook stays rather than being deleted with the diff it
+   was written for. Read once, not per call: the suite resolves ~37,000 anchors
+   and an instrument is not allowed to cost anything when it is switched off. */
+const ANCHOR_DUMP = process.env.WOZI_ANCHOR_DUMP || '';
+function noteAnchor(where, decl, text) {
+  if (ANCHOR_DUMP) {
+    fs.appendFileSync(ANCHOR_DUMP,
+      '=== ' + where + ' :: ' + JSON.stringify(decl) + ' :: ' + text.length + '\n' + text + '\n');
+  }
+  return text;
+}
+
+/* AN ANCHOR NEVER CARRIES INDENTATION, IN EITHER DIRECTION (GitHub #137).
+   Turning `  solve() {` into a pattern: leading whitespace is dropped, and every
+   newline inside the anchor matches a newline plus whatever indentation the file
+   happens to use. So an anchor says WHICH LINES, never HOW FAR IN, and
+   re-indenting a method -- moving it into or out of a block, changing the file's
+   indent width -- cannot break the suite without changing a line of logic. The
+   old anchors baked two spaces into 21 of the 66 strings, which made
+   `git diff -w`-clean edits load-bearing.
+
+   The lead is not thrown away, though: PRESENT means "first thing on its line",
+   at any indentation. That is what keeps `  solve() {` off `this.solve() {`-shaped
+   text elsewhere, and it is a property of the source's structure rather than of
+   its whitespace. Absent means "anywhere", which is what the method-in-a-class
+   anchors (`gearSvg(g, S) {`) have always relied on. */
+function anchorPattern(decl) {
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return decl.split(/\r?\n[ \t]*/).map(esc).join('\\n[ \\t]*');
+}
+
+/* CONTRACT (GitHub #137, the #101 fault in the sibling function): returns the
+   offset in `src` of the ONE place the anchor matches with comments masked, and
+   REFUSES rather than guessing when there is more than one.
+
+   `grabBlockFrom` had none of CL#112's hardening and 66 anchors against
+   grabNumber's 13. It took the first `indexOf` of its anchor, in the raw file,
+   so a second occurrence -- a copy of the same `forEach` further down, or the
+   anchor's own text quoted in the prose above it -- silently yielded a different
+   block. That does not fail: it makes a PASSING TEST MEASURE THE WRONG CODE,
+   which is the one outcome a suite must never produce, and it became load-bearing
+   twice over when CL#159 started running this suite against the stripped artifact
+   as the only gate that reads the page as text.
+
+   Ambiguity is the caller's to resolve, exactly as in grabNumber: extend the
+   anchor over the next line until it is unique (`\n` costs nothing now that it
+   ignores indentation), or scope the search by passing a narrower `src` -- the
+   parameter grabNumber's docstring wishes it had. Two anchors needed the first of
+   those, `BRIDGES.forEach(b => {` and `ORIGINS.forEach(o => {`, both of which
+   solve() carries a second copy of; they had been reading the right block by
+   luck of file order alone.
+
+   The not-found path distinguishes the two ways of missing. An anchor that is
+   nowhere is a stale anchor; an anchor that is in the file but only inside a
+   comment is the #101 trap itself, and saying which one it is turns a five-minute
+   grep into a sentence.
+
+   Memoised for the same reason maskedOf() is: the suite resolves ~37,000 anchors,
+   all of them one of ~114 distinct strings against one of a handful of sources,
+   and a global regex over 632KB per call turns an 8-second gate into a 35-second
+   one. Both `src` and the answer are immutable, so the cache cannot go stale
+   within a run -- and a throw is cached as a throw, so a refusal stays a refusal
+   however many callers ask, rather than being loudest for the first caller and
+   silent for the rest. */
+const ANCHOR_AT = new Map();
+function locateAnchor(src, where, what, decl) {
+  let byDecl = ANCHOR_AT.get(src);
+  if (byDecl === undefined) ANCHOR_AT.set(src, byDecl = new Map());
+  const hit = byDecl.get(decl);
+  if (hit !== undefined) {
+    if (typeof hit === 'number') return hit;
+    throw hit;
+  }
+  try {
+    const at = locateAnchorOnce(src, where, what, decl);
+    byDecl.set(decl, at);
+    return at;
+  } catch (e) {
+    byDecl.set(decl, e);
+    throw e;
+  }
+}
+function locateAnchorOnce(src, where, what, decl) {
+  const lead = /^[ \t]*/.exec(decl)[0];
+  const body = decl.slice(lead.length);
+  const masked = maskedOf(src);
+  const re = new RegExp(anchorPattern(body), 'g');
+  const hits = [];
+  let m;
+  while ((m = re.exec(masked)) !== null) {
+    re.lastIndex = m.index + 1;   /* overlapping occurrences are occurrences too */
+    let at = m.index;
+    if (lead) {
+      let p = at;
+      while (p > 0 && (masked[p - 1] === ' ' || masked[p - 1] === '\t')) p--;
+      if (p !== 0 && masked[p - 1] !== '\n') continue;
+      /* Back over the real indentation so the block reads as it does in the
+         file. Over the MASK for the line test and over the SOURCE here, and the
+         difference is load-bearing on the stripped artifact: its line is a
+         backlink marker followed by `  solve() {`, and the marker is whitespace
+         to the line test while having to stay out of the extracted text. */
+      while (at > 0 && (src[at - 1] === ' ' || src[at - 1] === '\t')) at--;
+    }
+    hits.push(at);
+  }
+  if (hits.length > 1) {
+    throw new Error(what + ' anchor ' + JSON.stringify(decl) + ' matches ' +
+      hits.length + ' places in ' + where + ' with comments masked -- ' +
+      'the extractor cannot tell which one ships (the CELL_MIN trap, GitHub ' +
+      '#101, in grabBlockFrom this time: GitHub #137). Extend the anchor over ' +
+      'the next line until it is unique -- indentation inside it is ignored -- ' +
+      'or scope the search by passing a narrower src.');
+  }
+  if (!hits.length) {
+    const inProse = new RegExp(anchorPattern(body)).test(src);
+    throw new Error(what + ' not found in ' + where + ': ' + decl +
+      (inProse ? ' -- it IS in the file, but only inside a comment, so nothing '
+        + 'live matches it (GitHub #101/#137). The declaration it names has '
+        + 'probably been renamed or commented out.' : ''));
+  }
+  return hits[0];
+}
+
+/* Brace-matched from the anchor, counted over the MASK: a `{` in prose used to
+   count toward the depth, so a comment inside the block carrying an unbalanced
+   brace -- or a `}` in a sentence before the real one -- ended the block early.
+   The slice comes off `src`, so what the suite executes is still the page's own
+   text with its own comments in it. */
 function grabBlockFrom(src, where, decl, open, close) {
-  const i = src.indexOf(decl);
-  if (i < 0) throw new Error('block not found in ' + where + ': ' + decl);
-  let j = src.indexOf(open, i), depth = 0;
-  for (let k = j; k < src.length; k++) {
-    if (src[k] === open) depth++;
-    else if (src[k] === close) { depth--; if (depth === 0) return src.slice(i, k + 1); }
+  const i = locateAnchor(src, where, 'block', decl);
+  const masked = maskedOf(src);
+  const j = masked.indexOf(open, i);
+  if (j < 0) throw new Error('block never opens with ' + open + ' in ' + where + ': ' + decl);
+  let depth = 0;
+  for (let k = j; k < masked.length; k++) {
+    if (masked[k] === open) depth++;
+    else if (masked[k] === close) { depth--; if (depth === 0) return noteAnchor(where, decl, src.slice(i, k + 1)); }
   }
   throw new Error('unterminated block: ' + decl);
 }
@@ -996,13 +1191,19 @@ function wheelSpanOf(train) {
 
 /* One `const NAME = ...;` declaration, verbatim from index.html. For the
    one-line derivations the builder closes over: executing the page's line is
-   the difference between measuring what ships and measuring a copy of it. */
+   the difference between measuring what ships and measuring a copy of it.
+
+   Same locator as grabBlockFrom, for the same reason -- 47 of these anchors sit
+   in the same file, and `const px = (want, lo, hi) =>` appearing a second time
+   in a comment discussing it is the whole of GitHub #101. The `;` is found on
+   the mask too: a semicolon in the prose between the anchor and the end of the
+   line would otherwise truncate the declaration into something that still
+   parses. */
 function grabDecl(decl) {
-  const i = SRC.indexOf(decl);
-  if (i < 0) throw new Error('declaration not found in index.html: ' + decl);
-  const j = SRC.indexOf(';', i);
+  const i = locateAnchor(SRC, 'index.html', 'declaration', decl);
+  const j = maskedOf(SRC).indexOf(';', i);
   if (j < 0) throw new Error('unterminated declaration: ' + decl);
-  return SRC.slice(i, j + 1);
+  return noteAnchor('index.html decl', decl, SRC.slice(i, j + 1));
 }
 
 /* Executes the real TRAIN builder out of index.html rather than modelling it.
@@ -1860,10 +2061,17 @@ function runSolve(people, opts) {
      the same reason everything else here is: a harness that keeps its own copy of
      "which run does this wheel belong to" can agree with itself while the page
      disagrees with both. */
+  /* BOTH ANCHORS RUN ONTO THEIR SECOND LINE, and have to (GitHub #137): solve()
+     walks BRIDGES and ORIGINS itself, so `BRIDGES.forEach(b => {` occurs twice
+     in the page and `ORIGINS.forEach(o => {` three times. The old extractor took
+     the first `indexOf` and happened to be right only because these load-time
+     lookups are written above solve(); it would have started measuring the
+     solver's parking loop the day anything moved. Indentation inside an anchor
+     is ignored, so the continuation costs nothing but the disambiguation. */
   const lookups = grabDecl('const BRIDGE_FROM =') + '\n'
-    + grabBlockFrom(SRC, 'index.html', 'BRIDGES.forEach(b => {', '{', '}') + ');\n'
+    + grabBlockFrom(SRC, 'index.html', 'BRIDGES.forEach(b => {\nBRIDGE_FROM[', '{', '}') + ');\n'
     + grabDecl('const ORIGIN_OF =') + '\n'
-    + grabBlockFrom(SRC, 'index.html', 'ORIGINS.forEach(o => {', '{', '}') + ');';
+    + grabBlockFrom(SRC, 'index.html', 'ORIGINS.forEach(o => {\no.idlers.forEach(ix => {', '{', '}') + ');';
   const body = grabBlock('  solve() {', '{', '}').replace(/^\s*solve\(\)\s*/, '');
   /* CHAIN_RANK is the page's own line too, run against the order buildTrain got
      from executing the page's CHAIN_ORDER -- not a second sort of the fixture. */

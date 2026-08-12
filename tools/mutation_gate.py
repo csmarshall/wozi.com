@@ -29,13 +29,25 @@ the UNMUTATED tree and passes every time. The consequence is worth stating out
 loud — this gate measures the COMMITTED tree, so uncommitted work is invisible
 to it, and it says so at startup when the tree is dirty.
 
-TWO KINDS OF EXPECTATION. Most mutants are `caught`: the gate must go red. A
+THREE KINDS OF EXPECTATION. Most mutants are `caught`: the gate must go red. A
 few are `survives`, a gap that is known, filed and deliberately not papered
 over. Those are asserted to survive, so the day somebody strengthens the gate
 this runner fails with "the documented gap has closed" and the registry gets
 updated instead of quietly keeping a stale excuse.
 
-Exit 0 only if every mutant met its expectation and every control run was green.
+The third is `tolerated`, and it is the opposite claim: the substitution is a
+LEGITIMATE edit and the gate must stay GREEN. A gate can fail in two directions
+and only one of them is a false negative — `tolerated` is how the other is kept
+proved. It exists because a gate that reads the page as TEXT can be broken by an
+edit that changes no behaviour at all: `tools/test.js` extracts 66 blocks out of
+`index.html` by literal anchor, and until GitHub #137 twenty-one of those anchors
+baked in two spaces of indentation, so re-indenting a method — a `git diff -w`
+no-op — turned the suite red for nothing. A `tolerated` mutant is not a gap and
+not a bug; it is the negative control that says the refusal is aimed at real
+faults and not at whitespace.
+
+Exit 0 only if every mutant met its expectation (red for `caught`, green for
+`survives` and `tolerated`) and every control run was green.
 Exit 1 on any survivor, any closed gap, or any control that could not go green.
 Exit 2 if a mutation could no longer be applied — the string it edits is gone,
 which means the page moved out from under the registry and these mutants have
@@ -130,6 +142,59 @@ MUTANTS = [
                "the guard stayed green while the file stopped being published. The "
                "assertion now reads the aws s3 commands rather than the prose, the gap "
                "is closed, and the mutant is kept as the proof of it (CHANGELOG #104).",
+    },
+    {
+        "id": "anchor-declared-twice",
+        "gate": "suite",
+        "file": "index.html",
+        "find": "  driveCap() { return Math.abs(this.rateAt(SPEED_CEIL)); }",
+        "repl": "  driveCap() { return Math.abs(this.rateAt(SPEED_CEIL)); }\n"
+                "  driveCap() { return 8; }",
+        "expect": "caught",
+        "why": "THE SUITE'S OWN READING MECHANISM, mutated (GitHub #137). test.js "
+               "extracts 66 blocks out of index.html by literal anchor, and until this "
+               "was hardened it took the first indexOf with no ambiguity check — the "
+               "#101 fault in the sibling of the function CL#112 fixed. A second "
+               "`driveCap() {` LATER in the class body is the shape that matters: "
+               "JavaScript lets the later definition win, so the page runs `return 8` "
+               "while the suite measures the real line above it and reports 119 passed. "
+               "Verified: with the pre-#137 extractor this mutant scores 119/0 and exits "
+               "0. It now refuses by name instead, which is the only outcome that is not "
+               "a passing test measuring the wrong code.",
+    },
+    {
+        "id": "anchor-only-in-a-comment",
+        "gate": "suite",
+        "file": "index.html",
+        "find": "const ORIGIN_MOUNT = 'edge';",
+        "repl": "/* retired: const ORIGIN_MOUNT = 'edge'; */",
+        "expect": "caught",
+        "why": "GitHub #101 restaged verbatim, in the extractor it was never fixed in: a "
+               "declaration commented out rather than deleted. index.html is roughly two "
+               "thirds comment, and the anchors used to match raw text, so prose "
+               "satisfied them — CLAUDE.md records the same trap for `<style>`, five "
+               "occurrences of which only one is a tag. Here the page loses ORIGIN_MOUNT "
+               "entirely and every fixture in the suite is built at whatever the COMMENT "
+               "says, which is the same word, so nothing looks wrong. Verified: with the "
+               "pre-#137 extractor this mutant scores 119/0 and exits 0. It now says "
+               "the anchor is in the file but only inside a comment.",
+    },
+    {
+        "id": "anchor-reindented",
+        "gate": "suite",
+        "file": "index.html",
+        "find": "\n  applyRotation() {\n",
+        "repl": "\napplyRotation() {\n",
+        "expect": "tolerated",
+        "why": "THE NEGATIVE CONTROL for the two above, and the reason `tolerated` "
+               "exists (GitHub #137). Twenty-one of the 66 anchors used to carry two "
+               "spaces of indentation, so this — a whitespace-only edit that changes no "
+               "logic and no pixel — made the old suite fail with 'block not found', "
+               "which is a gate objecting to `git diff -w` noise. Verified in both "
+               "directions: with the pre-#137 extractor this mutant is RED, and it must "
+               "now stay GREEN. An anchor states which lines it wants, never how far in "
+               "they are indented; if this one ever goes red again, indentation has been "
+               "baked back into an anchor.",
     },
     {
         "id": "ssh-key-off-the-whitelist",
@@ -347,7 +412,9 @@ def main():
             print(f"\n{gate:<8} {GATES[gate]['what']}")
             for m in chosen:
                 if m["gate"] == gate:
-                    mark = "must be caught" if m["expect"] == "caught" else "KNOWN GAP — must survive"
+                    mark = {"caught": "must be caught",
+                            "survives": "KNOWN GAP — must survive",
+                            "tolerated": "LEGITIMATE EDIT — must stay green"}[m["expect"]]
                     print(f"  {m['id']:<28} {m['file']:<28} {mark}")
                     print(f"    {m['why']}")
         return 0
@@ -393,8 +460,13 @@ def main():
                 left = restore(tree, m)
                 want_red = m["expect"] == "caught"
                 good = (rc != 0) if want_red else (rc == 0)
-                verdict = ("CAUGHT" if rc else "SURVIVED") if want_red else \
-                          ("survived — known gap" if rc == 0 else "GAP CLOSED")
+                if want_red:
+                    verdict = "CAUGHT" if rc else "SURVIVED"
+                elif m["expect"] == "tolerated":
+                    verdict = "tolerated — still green" if rc == 0 else \
+                              "REJECTED A LEGITIMATE EDIT"
+                else:
+                    verdict = "survived — known gap" if rc == 0 else "GAP CLOSED"
                 print(f"  {'ok  ' if good else 'FAIL'} {m['id']:<28} "
                       f"exit {rc}  {verdict}  ({secs:.0f}s)")
                 for line in tail:
@@ -445,10 +517,12 @@ def main():
 
     caught = [r for r in results if r[0]["expect"] == "caught"]
     gaps = [r for r in results if r[0]["expect"] == "survives"]
+    tol = [r for r in results if r[0]["expect"] == "tolerated"]
     bad = [r for r in results if not r[2]] + \
           [(None, c, False) for c in controls.values() if c]
     print(f"\n{sum(1 for r in caught if r[2])}/{len(caught)} mutants caught, "
-          f"{len(gaps)} known gap(s) still open, "
+          + (f"{sum(1 for r in tol if r[2])}/{len(tol)} legitimate edit(s) tolerated, " if tol else "")
+          + f"{len(gaps)} known gap(s) still open, "
           f"{sum(1 for c in controls.values() if c == 0)}/{len(controls)} controls green "
           f"— {time.time() - t_all:.0f}s")
     for m, rc, good in gaps:

@@ -289,6 +289,70 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#165 — the block extractors refuse an ambiguous anchor instead of taking the
+  first one.** (GitHub #137, closes it.)
+
+  `tools/test.js` reads its constants, the two-row menu and the sizing functions
+  **out of `index.html`** so the suite measures what actually ships. CL#112
+  hardened `grabNumber` under #101 to throw on ambiguity. The block extractors got
+  none of that, and the scope turned out wider than the ticket: **`grabBlockFrom`
+  has 66 anchors, `grabDecl` had the identical fault with 47 more**, and
+  `tools/mesh_extract.js` was a third copy of it.
+
+  **Two anchors were already ambiguous in live code** — `BRIDGES.forEach(b => {`
+  occurs twice and `ORIGINS.forEach(o => {` three times, because `solve()` walks
+  the same lists — and were resolving correctly *by file order alone*. Both now
+  carry their second line. That is a latent fault found, not a hypothetical one
+  guarded against.
+
+  **The fix masks comments to SPACES rather than deleting them**, so offsets found
+  on the mask still point into the real file: every extractor now *matches on the
+  mask and slices the original*, which is what keeps the text handed to the suite
+  the page as written (two tests regex an extracted block for things a comment is
+  allowed to mention) and keeps a stripped artifact's `/*L1234*/` backlink out of
+  it. `STRIPPED_SRC` became the same one home rather than a second idiom.
+
+  **The scanner is deliberately naive and the asymmetry is the argument**: this
+  mask only *locates*, so mis-masking live code makes an anchor **vanish loudly**
+  while leaving a comment unmasked lets prose satisfy an anchor **silently** —
+  which is the bug. Rather than duplicate `strip_comments.py`'s state machine, the
+  naive mask was verified empirically against this file: 722 `/*` and 9 `<!--` pair
+  up exactly with no nesting, there are **zero `//` line comments** in either
+  `index.html` or `config.js`, and masking all 731 leaves every `<script>` body
+  passing `node --check` — so no `/*` currently lives inside a string, template or
+  regex, and if one ever does the anchors in that region go missing rather than
+  going wrong.
+
+  Indentation is out of the anchors both ways: leading whitespace now means "first
+  thing on its line, at any indentation", and 21 anchors had two spaces baked in.
+  Brace and `;` matching moved onto the mask too — a `{` in prose used to count.
+
+  **Proven by mutation, and the old extractor fails silently in two of three:**
+  a second `driveCap() {` declared after the real one (JS lets the later win, so
+  the page runs `return 8`) passed **exit 0, 119 tests green** before and refuses
+  now; an anchor commented out passed **exit 0, 119 green** before and now names
+  the difference between a stale anchor and one that "IS in the file, but only
+  inside a comment"; and a whitespace-only re-indent was **red before** on a
+  `git diff -w` no-op and is green now. That third case needed a new expectation
+  kind — `tolerated`, a legitimate edit the gate must stay green on — because an
+  extractor that *refuses* a re-indent is the weakness, not the guard, so the
+  honest assertion is the negative control rather than a fake "known gap".
+
+  Full sweep: **12/12 mutants caught, 1/1 legitimate edit tolerated, 0 known gaps,
+  5/5 controls green.** Every pre-existing mutant still caught, `stripper-ate-a-line`
+  included.
+
+  **Extraction is byte-identical**: 117 instrumented records over a full run, 116
+  distinct anchors, **all hashes unchanged** — the only lines that move in the
+  keyed diff are the two anchor strings that were extended, and both extract the
+  same bytes. The stripped artifact resolves the same 116-key set, and `npm test`
+  passes against it (632,729 → 192,834 B), which matters because CL#159 made that
+  run the only gate reading the page as text.
+
+  Memoising anchor resolution left it **faster than before** despite far more work
+  per lookup — 7.4s against an 8.6s baseline, where an unmemoised mask would have
+  been 35s.
+
 - **CL#163 — the pixel gate stops blaming the artifact for its own wobble.**
   (GitHub #113, superseding part of CL#162's design.)
 
