@@ -256,6 +256,12 @@ not squared into irrelevance.
 | grip response period, input | 0.105 s | 0.105 s |
 | grip response period, carrier | 1.588 s (**15.2×**) | 0.191 s (**1.8×**) |
 
+**Those two carrier periods are `HAND_FREQ / RATIO` and were a claim rather than a
+measurement until #158** — the shipped spring term divided by the ratio twice, so
+the carrier's real period was 6.2 s ring-grounded and it did not ring at all. They
+are what the page now does; measured 1.645 s against the 1.588 s undamped figure,
+the difference being ζ=0.28's own `√(1−ζ²)`.
+
 **The claim does not invert, but it goes quiet.** The square law is intact and is
 still the only thing producing either number — 230.0 and 3.31 are both `RATIO²`,
 and neither is written down. But 3.3× is a difference a hand can *just* notice and
@@ -403,16 +409,78 @@ rather than picking it). At the carrier the same stiffness gives
 buttons and the arrow keys reach the same integrator a finger does and nothing
 else.
 
+### The square is TWO divisions, and each term carries exactly one
+
+GitHub #158, found by an adversarial review and confirmed by simulating the
+shipped ODE. Everything above was the *claim*; `step()` was applying the square
+twice and the heavy port was not doing any of it.
+
+A torque at a port maps onto the generalised coordinate by dividing by that port's
+`gear`, **and** the port's own angle is the coordinate's divided by the same
+`gear` — two divisions, and their product is the square. In the loop the second
+one has already happened, on the line that computes `portAngle`. What each term
+then owes is the *first* one, once:
+
+```
+Q = [ k·(target − θ_port) − c·θ̇_port ] / gear        ← one gear, both terms
+```
+
+The damper had it right and the spring was written `/ (p.gear * p.gear)`, which
+reads exactly like the square this section describes and **is** the square applied
+on top of the already-divided angle. The consequences, all of them at the heavy
+port:
+
+- `ω_n` came out `HAND_FREQ / RATIO^1.5` = **1.02 rad/s**, not `HAND_FREQ / RATIO`
+- `ζ` came out `0.28·√RATIO` = **1.09**, overdamped, against the "same at either
+  port" this table claims — so the carrier **never oscillated about the finger at
+  all**
+- and it did not merely lag, it **stopped short**: at 1.02 rad/s the spring torque
+  near the target falls below the Coulomb residue, so a 60° twist settled at 56.1°
+  after 8 s and stayed there
+- `flick()` was never wrong, so the flick buttons and the drag were demonstrating
+  two different laws on a page that exists to demonstrate one
+
+**`HAND_DAMPING` needed no re-tuning, and the reason is structural rather than
+lucky.** `MODE.damper` is `2·HAND_DAMPING·√(stiffness × port.inertia)`, which is a
+fraction of critical damping *in the port's own coordinate*; with the spring mapped
+by one gear the port-referred equation is
+`J_eff·gear²·θ̈ = k(target − θ) − c·θ̇`, so `ω_n = √(k/J_eff·gear²) = HAND_FREQ/gear`
+and `ζ = c/(2√(k·J_eff·gear²)) = HAND_DAMPING` — **exactly, at both ports and in
+both groundings**, verified numerically rather than asserted. The two terms only
+have to divide by the same thing; nothing is left to tune.
+
+**One thing the fix does not reach, stated because it is easy to attribute to it.**
+The grip spring is integrated explicitly, so the input port's `HAND_FREQ · dt` is
+**1.0 at 60 fps** — comfortably inside stability, but far enough into it that the
+tick, not the model, sets the shape: the measured first overshoot is 90 % where the
+continuous ζ=0.28 predicts 40 %, and it converges on 40.3 % as `dt` shrinks. Below
+about 50 fps that margin is gone (`ω_n·dt` past ~1.3 diverges into a limit cycle
+bounded only by `MAX_SPEED` and the losses; at the `dt` clamp of 0.05 s a 1-rad
+step excursions to 8 rad). **This is unchanged by #158** — the input port's `gear`
+is 1, so the two laws are the same expression there, and it measured identically
+before and after. It matters because Low Power Mode on a phone is 30 fps, and it is
+a `HAND_FREQ`-versus-integrator question rather than a mapping one. The heavy port
+is nowhere near it: `ω_n·dt` = 0.066 at 60 fps.
+
 ---
 
 ## Measured
 
 Headless Chrome over CDP, driving real pointer events.
 
+**The grip rows below were re-measured for #158** and the carrier's are the fix,
+before and after. Everything else in the table predates it and is unaffected: the
+flick path, the coast, the swipe and the swap never went through the spring term.
+
 | | result |
 | --- | --- |
-| identical 180° sweep over 1.5 s at the **sun** | port followed **181.9°** — tracking **101 %** (slight overshoot; ζ=0.28 is deliberately lively) |
-| the same sweep at the **carrier** | port followed **62.2°** — tracking **34.6 %** |
+| identical 180° sweep over 1.5 s at the **sun** | port followed **180.8°** — tracking **100.4 %**, and **unchanged by the fix** (100.5 % after): the input port's `gear` is 1, so the two laws are the same expression there |
+| the same sweep at the **carrier** | **17.0 % before the fix, 92.0 % after** — port followed 29.8° then 165.7° of 180°. The 91.0 % the ODE predicts, met by the page |
+| the old **34.6 %** in this row, accounted for | it was the same gesture sampled **1.0 s after release**, not at the end of the sweep: an overdamped port goes on creeping toward a target the finger has left. Re-measured that way it is **36.5 %** before the fix, which is the number that was recorded — so this table had the symptom in it all along, one sampling instant away from being read as one |
+| step response at the **carrier**, held still after a 60° twist | **before:** no oscillation, `t90` **6.26 s**, and it stalled at 56.1° of 60° — the spring torque near the target under the Coulomb residue. **after:** `t90` **0.411 s**, first overshoot **33.6 %**, ring period **1.645 s** → ω_d 3.82 rad/s against the model's 3.80. Both measured in the page, off the DOM transform |
+| the same, simulated off the shipped ODE at the shipped tick | **carrier:** ω_n 1.02 → **3.96 rad/s**, ζ 1.09 → **0.280**, `t90` 6.35 s → **0.467 s**. **sun:** ω_n 60, ζ 0.280, `t90` 0.030 s, identical either side of the fix. Sun-grounded carrier: ω_n 24.4 → **33.0**, ζ 0.378 → **0.280** |
+| the ratio between the ports, which is what the page is for | **ω_n ratio is now `RATIO` exactly — 15.17×** (it was `RATIO^1.5` = 59.0×, which is the same overweighting seen from the other side). `t90` ratio at the shipped 60 fps tick: **14.2×**, 0.467 s against 0.033 s |
+| sun-grounded, the same sweep at the carrier | 99.0 % → **99.9 %**. The fix is nearly invisible there and that is the ratio talking: at `gear` 1.82 an extra division is a small error, at 15.17 it is everything |
 | same impulse at each port, peak sun speed | 8.17 vs 0.58 rev/s (**14.1×**; the theoretical 15.17 less what losses took in the 50 ms sampling window) |
 | bodies advancing 700 ms apart after a flick | **8 of 10** transform groups, in *both* groundings — the 2 static ones are the set's own translate and the **grounded** member's assembly-phase rotation, which is correct. (It was 16 of 21 while both sets were drawn.) The static rotation moves from the ring to the sun when the grounding does: ring `rotate(0.000)` → `rotate(0.000)` and sun `rotate(0.000)` → `rotate(1926.339)` under ring-grounding, exactly swapped under sun-grounding. That is the swap visible in the DOM |
 | coast from a sun flick | **AT REST after 8.0 s** (a 0.75× `REF_SPEED` flick against a 9.0 s figure quoted at `REF_SPEED`) |
@@ -420,7 +488,9 @@ Headless Chrome over CDP, driving real pointer events.
 | the swipe, driven as real pointer events | threshold **108px** at 1440×900 (0.12 × the shorter edge). 88px vertical: **no swap**. 400px horizontal: **no swap**. Diagonal dy −150 / dx 300: **no swap**. A tap: **no swap**. A 300px vertical drag **starting on the gear**: no swap, and the sun goes from +7.03 to −7.62 rev/s, so it span the train instead. 200px vertical off the gear: **RINGS → SUNS**, and again back. One 700px drag: **one swap**, not several |
 | `g` and Shift+Up/Down on the focused drawing | swap; unmodified Up/Down still flick the input port |
 | console, both groundings, through every gesture above | **0 messages** — no errors, no warnings, no exceptions. (Served over HTTP; the `/favicon.ico` 404 the earlier note mentions is the harness's own static server, and this run logged none) |
-| `npm test` | **119 passed, 0 failed** — it reads the root `index.html` and is untouched by anything here |
+| `npm test` | **120 passed, 0 failed** — it reads the root `index.html` and is untouched by anything here |
+| `/fidget/` pixel gate vs HEAD, for #158 | **0 px** at both viewports, and that is the gate agreeing about a picture it cannot take: the resting pose is `S.angle = 0` with no finger down, and the spring term is only reached while a grip exists. A change to how the page *responds* is invisible to a still, exactly as CLAUDE.md's "a 0 px gate can mean not tested" warns |
+| the two Willis guards, mutation-tested again after the edit | perturbing `stageRatio` by one part in a million still throws in both: `ring is not grounded: -4.0e-7` at boot, and `sun is not grounded: -2.5e-6` on the swap. Unperturbed, **0 console messages** in both groundings |
 | root page pixel gate | **0 px differ** at 1440×900 and 390×844, which is the check that this folder stayed inside itself |
 | `/fidget/` pixel gate vs HEAD | **402,810 px** at 1440×900 and **99,083 px** at 390×844 (31.1% and 30.1% of the frame). Deliberate: it is the whole composition moving. Attributed rather than accepted — ink 274,242 → 202,563 px at desk and 82,577 → 51,527 on the phone, the change split evenly top/bottom, which is one set instead of two rather than one band shifting |
 
@@ -463,9 +533,22 @@ From `CLAUDE.md`, and none of them optional:
 
 ## Not decided here
 
-- **Whether it ships, and at what path.** Nothing has been added to
-  `.github/workflows/deploy.yml`, so this folder does **not** publish. The
-  deploy is a whitelist and adding a file does not publish it.
+- **Whether the corrected heavy port feels right.** GitHub #158's fix makes the
+  carrier **much lighter than it has ever been** — `t90` 6.26 s → 0.411 s, and it
+  now rings once about the finger instead of creeping and stalling short of it.
+  That is the model the README, the readout and `flick()` have all been asserting,
+  so the code was the odd one out; but nobody has ever *felt* the page this way,
+  and 230× reflected inertia arriving in 0.4 s is a different demonstration from
+  230× arriving never. If it now reads as too eager, the lever is `HAND_FREQ` (the
+  whole grip, both ports) or `HAND_DAMPING` (the ringing) — **not** the mapping,
+  which is no longer a free parameter. See *The hand* for what a re-tune may and
+  may not touch.
+- **Whether `HAND_FREQ = 60` survives a 30 fps phone.** The grip spring is
+  integrated explicitly and `ω_n·dt` reaches 1.0 at 60 fps and diverges below about
+  50 — pre-existing, unchanged by #158, and only reachable at the input port. The
+  cheap fixes are a lower `HAND_FREQ`, a sub-stepped grip, or an implicit update of
+  the spring term; all three change how the light port feels, so none is a silent
+  fix.
 - **`COAST_RANGE_S = 9.0`** is a placeholder for Charles's call, in the same
   sense `SPINDOWN_RANGE_MS` was in CL#127 and CL#141.
 - **How much of the window the gear should fill.** It is 0.700 of the shorter
@@ -488,4 +571,10 @@ the drop from 230× to 3.3× accepted knowingly — see *The other grounding* fo
 it cannot be made louder. The parallel-axis ½ is **corrected**, not deferred. The
 swipe reaches `useGrounding()`, and so do a button and two key bindings; the page
 shows **one set at a time** and the `ONE SHAFT` tie is the control that walks
-between them.
+between them. **It ships**, at `/fidget/`: `fidget/index.html` is in the deploy's
+include list, comment-stripped on the way out like the landing page (CL#159), and
+the delivered body is grepped for `planetary` after every deploy.
+
+**The mapping is no longer a free parameter** (#158). One gear division per term,
+the damper's own definition is the proof, and both are checked by the port figures
+coming out at `HAND_FREQ / gear` and `HAND_DAMPING` exactly.

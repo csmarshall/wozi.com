@@ -552,7 +552,13 @@ const retard = (w) => COULOMB + VISCOUS * w + WINDAGE * w * w;
    tracks the finger the same way. At the output port the same stiffness gives
    HAND_FREQ / RATIO, which is the square-law showing up as something your hand
    can notice -- and it is the honest measure of how much of this page survives a
-   grounding swap, because RATIO is the only thing in it that changes. */
+   grounding swap, because RATIO is the only thing in it that changes.
+
+   BOTH FIGURES ARE CLAIMS ABOUT THE CONTINUOUS MODEL, and step() has to actually
+   deliver them -- it did not until #158, when the spring term was divided by the
+   gear ratio twice and the output port came out overdamped at 1.09. They hold now
+   at both ports and in both groundings: wn = HAND_FREQ / gear and zeta =
+   HAND_DAMPING exactly, neither written down. */
 const HAND_FREQ = 60;                          /* rad/s at the input port */
 const HAND_DAMPING = 0.28;                     /* damping ratio, at either port */
 
@@ -1226,13 +1232,33 @@ function step(now) {
   /* The hand, as a generalised force. A torque applied at a port maps onto the
      input-port coordinate by dividing by that port's gear ratio, and the port's
      own angle is the coordinate's divided by the same -- which is where the
-     SQUARE comes from, without it ever being written as a square. */
+     SQUARE comes from, without it ever being written as a square.
+
+     THE SQUARE IS THE PRODUCT OF THOSE TWO DIVISIONS, SO EACH LINE BELOW CARRIES
+     EXACTLY ONE OF THEM (GitHub #158). `portAngle` and `portRate` are the second
+     division, already done, on the line above. What remains for the spring and
+     the damper alike is the FIRST one -- mapping the torque back onto the
+     coordinate -- and it is `/ p.gear`, once, for both. Writing the spring as
+     `/ (p.gear * p.gear)` reads like the square the comment describes and is the
+     square applied TWICE: it shipped, and it cost the heavy port everything the
+     page is for. The output port came out at HAND_FREQ / RATIO^1.5 rather than
+     HAND_FREQ / RATIO, its damping ratio at 0.28 * sqrt(RATIO) = 1.09 instead of
+     the 0.28 the README claims "at either port" -- so it did not oscillate at
+     all, took 6.3 s to reach 90% of a step against 0.47 s, and stalled ~6% short
+     of the finger for good, the spring torque having fallen under the Coulomb
+     residue. flick() below had the same algebra right all along, so the buttons
+     and the drag were demonstrating two different laws.
+
+     THE DAMPER IS THE PROOF, not a second opinion: MODE.damper is
+     2 * zeta * sqrt(stiffness * port.inertia), which is critical damping in the
+     PORT's own coordinate, and it only yields zeta at the port if the spring is
+     mapped by one gear too. The two terms have to divide by the same thing. */
   let accel = 0;
   if (S.grip) {
     const p = S.grip.port;
     const portAngle = S.angle / p.gear;
     const portRate = S.rate / p.gear;
-    const torque = MODE.stiffness * (S.grip.target - portAngle) / (p.gear * p.gear)
+    const torque = MODE.stiffness * (S.grip.target - portAngle) / p.gear
                  - MODE.damper(p) * portRate / p.gear;
     accel = torque / MODE.jEff;
   }

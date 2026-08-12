@@ -289,6 +289,78 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#178 — `/fidget/`'s grip spring was divided by gear twice, so the drag and the
+  flick buttons demonstrated different laws.** (GitHub #158.)
+
+  `portAngle` and `portRate` are already in the port's coordinate, so each term of the
+  torque owes exactly **one** further division to map back onto the generalised
+  coordinate: `Q = [k(target − θ_p) − c·θ̇_p] / gear`. The damper did that; the spring
+  did it twice. One token.
+
+  **The damper is an independent proof rather than a second opinion.** `MODE.damper` is
+  `2ζ√(stiffness × port.inertia)` — critical damping *in the port's coordinate* — which
+  only yields ζ at the port if the spring is mapped by one gear too.
+
+  **Measured by simulating the shipped `step()` verbatim, and by a step response driven
+  in the page over CDP:**
+
+  | ring-grounded carrier | before | after |
+  | --- | --- | --- |
+  | ω_n | 1.02 (`HAND_FREQ/RATIO^1.5`) | **3.956** (`HAND_FREQ/RATIO`) |
+  | ζ | **1.090**, overdamped | **0.280** |
+  | t90 | 6.35s sim / **6.26s in-page** | 0.467s sim / **0.411s in-page** |
+  | rings? | never | yes — measured period **1.645s**, ω_d 3.82 against a model 3.798 |
+
+  The input port is confirmed **exactly** unchanged, and structurally so: `gear` is 1
+  there, so the two laws are the same expression.
+
+  **The bug was overstating the page's own demonstration.** The ω_n ratio between the
+  ports was `RATIO^1.5` = **59.0×** where the physics gives `RATIO` = **15.17×** — so
+  the heavy port felt nearly four times heavier than the machine justifies, on a page
+  that exists to make that exact ratio felt. t90 ratio at the shipped tick is now 14.2×.
+
+  **Two things the before-simulation turned up.** Pre-fix the heavy port did not merely
+  lag, it **stalled**: a 60° twist settled at 56.1° after 8s, the spring torque near
+  the target having fallen under the Coulomb residue. And the README's unexplained
+  **34.6%** carrier-tracking figure is now attributed — it is that sweep sampled ~1s
+  *after* release, which re-measures at 36.5% pre-fix; the at-end-of-gesture figure is
+  **17.0% → 92.0%**, against an ODE prediction of 16.1 → 91.0.
+
+  **`HAND_DAMPING` needed no re-tune, and that is structural.** With the spring mapped
+  by one gear the port-referred equation is `J_eff·gear²·θ̈ = k(target−θ) − c·θ̇`, giving
+  `ω_n = HAND_FREQ/gear` and `ζ = HAND_DAMPING` **exactly** at both ports in both
+  groundings — verified numerically to 1e−12. The 1.09 was an artefact of the mapping,
+  not a damping choice. The mapping is no longer a free parameter.
+
+  **Dimensional sweep of the whole file, all sound** — because CL#158 had already
+  corrected a different factor of two here (the parallel-axis term in `disc()`), so one
+  more was worth looking for: `disc` (½r⁴) and `mass` (r²); `ringInertia` checked
+  against a direct ∫2r³dr, exact; all five `effectiveInertia` terms; the parallel-axis
+  ratio coming out **2.0000** in all four stage×grounding cases with the rolling
+  identity exact in the ground frame; Willis in both groundings by a **third**
+  independent route; `port.inertia = J·gear²`; `stiffness = ω²J`; `flick()`'s
+  `L/(J·gear)`; and the loss model (`retard(REF)/retard(0)` = 60.000 = `DRAG_RANGE`,
+  bisected coast 8.998s against a stated 9.0). Every J_eff figure in both README tables
+  reproduced digit-for-digit, so this fix moves no inertia number.
+
+  **One pre-existing hazard found and NOT fixed, filed separately:** the grip spring is
+  integrated explicitly, so the *input* port's `ω_n·dt` is **1.0 at 60fps** — the tick,
+  not the model, sets the shape there (measured first overshoot 90% against the
+  continuous 40%). Past about 1.3, below ~50fps, it **diverges into a limit cycle**
+  bounded only by `MAX_SPEED` and the losses. Low Power Mode is 30fps. Identical before
+  and after this fix, since gear is 1 at that port, and the heavy port is nowhere near
+  it (`ω_n·dt` 0.066).
+
+  `pixel_regress --path fidget/` **0px** — and this is the "0px can mean *not tested*"
+  case rather than a pass: the resting pose is `S.angle = 0` with no finger down, and
+  the spring term is only reached while a grip exists. The drag probes are the
+  measurement that can see this. `npm test` 120/0. Boots in both groundings with **0
+  console messages**, transforms advancing. Both Willis guards re-mutation-tested at the
+  fixed tree and still throwing. `planetary` survives the strip, 3× in the stripped body.
+
+  The README also claimed this folder does not publish, which has been false since
+  `fidget/index.html` joined the deploy whitelist. Corrected.
+
 - **CL#177 — the datum's ink caches are discarded when the palette in force changes,
   and the latent failure was reproduced before it was fixed.** (GitHub #159.)
 
