@@ -78,6 +78,14 @@ Related trap: `.claude/worktrees/*/` are other agents' checkouts pinned to
 arbitrary older commits, each with its own stale `CLAUDE.md` and `CHANGELOG.md`.
 Read docs from the repo root only.
 
+**Port advice decays: the ports agents were told to use are now contended too.**
+Telling each agent "serve above 19010" worked until three agents did it — one found
+**19077 already held by another agent** while 8765 sat free. So the instruction that
+matters is not a number, it is the *habit*: **pick a port, check it with `lsof`
+first, and confirm what you are measuring** by grepping the served bytes for a
+string only your own tree contains. A number in a brief is a number every brief
+will copy.
+
 **Port 8765 is a shared resource, and two concurrent agents will measure each
 other's tree.** Several harnesses default to `http://127.0.0.1:8765/` and none of
 them serve — so whichever agent starts a server first owns the port, and the

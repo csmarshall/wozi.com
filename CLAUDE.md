@@ -63,9 +63,15 @@ Published: `index.html`, `support.js`, `config.js`, `assets/`, `keybase.html`,
 `fidget/index.html` go through `tools/strip_comments.py` on the way to the bucket,
 which removes the commentary — about two thirds of both files — and leaves a
 compact `/*L1234*/` backlink where each comment was, naming the source line.
-602,972 → 188,901 B raw and 172,917 → 45,435 B brotli on the landing page; the
-markers themselves cost 7,146 B raw / 2,517 B brotli, 3.8% of the delivered file,
-which is what buys the file its way back to the prose. The banner carries the one
+**708,247 → 198,985 B raw** on the landing page — 71.9% off — and the markers
+themselves cost **7,898 B raw over 771 markers**, 4.0% of the delivered file, which
+is what buys the file its way back to the prose. **These figures go stale every
+time the prose grows**, and they had drifted two rewrites behind before anyone
+re-measured; treat them as an order of magnitude, not a fact, and re-run the tool
+if a number matters. **And do not quote a local `brotli -q11` figure as what a
+reader receives** — the edge compresses at a lower quality level, which is #113's
+own lesson (the real saving was 9.3%, not the 19% predicted offline). Measured on
+the live site: **54,100 B brotli against 58,085 gzip**. The banner carries the one
 URL they all hang off, **pinned to the deployed commit** — `blob/main/…` would rot
 the moment anything above a marked line moved, so the SHA is `github.sha` in CI
 and `git rev-parse HEAD` locally, and a build from a modified working copy says so
@@ -90,8 +96,12 @@ correctly while making it unparseable to the tools that read it.
 its way past a comment. The version that stops parsing is caught by the tool's own
 `node --check`; the version that does not is caught only by the pixel gate, and
 `tools/mutation_gate.py --only stripper-ate-a-line` is the standing proof of it —
-one line of props deleted out of an object literal passes all 120 of `npm test`
-and moves 2,933 pixels.
+one line of props deleted out of an object literal passes the whole of
+`npm test` — 121 assertions at the time of writing — and moves 2,933 pixels.
+**The count is deliberately not the point and should not be quoted as one:** it
+was corrected 119 → 120 → 121 in a single day, because every new test moves it,
+so a number written down here is a number that is wrong by the next commit. Run
+the suite for the current figure.
 
 `--in-place` **refuses on a file that differs from HEAD.** Overwriting a source
 carrying uncommitted prose is the one version of this mistake nothing can undo; a
