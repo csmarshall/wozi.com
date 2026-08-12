@@ -1458,7 +1458,22 @@ const DATUM_PLATE = {};
    It bounds the plate's OUTER edge, not the line: the line is scribed at
    whatever air is left once the plate's own half-height is paid for
    (datumClear), so what the eye measures -- the gap between the teeth and the
-   top of the placard -- is what the figure names. */
+   top of the placard -- is what the figure names.
+
+   AND SINCE CL#163 IT BOUNDS THE SCRIBE'S STANDOFF, NOT THE LABEL'S -- KNOWN,
+   DECIDED, AND NOT A DRIFTING NUMBER (GitHub #139). `DATUM_LABEL = 'etch-mark'`
+   strikes the name CLEAR of the line rather than straddling it, so the outer edge
+   this figure was written about is no longer the outermost ink: measured at
+   1440x900 the lettering's far edge sits about 39px outside the line against a
+   figure of 20. datumClear() still pays plateMetrics().h / 2 -- the ungrown
+   plate's half-height -- which is now the standoff of the LINE and nothing else.
+
+   CHARLES CHOSE TO LEAVE IT, deliberately, over the alternative of making
+   datumClear() pay the mark's real reach: that alternative pulls the scribe closer
+   to the teeth at every viewport, so it changes where every datum line sits and is
+   its own ticket with its own sweep rather than something that rides along on a
+   label decision. What is NOT acceptable is the figure quietly meaning something
+   other than it says, so it says it here. */
 const PLATE_TOP_CLEAR = 20;
 
 /* HOW FAR ALONG THE LINE THE PLATE SITS FROM THE END OF THE MARK IT IS STAMPED
@@ -1487,6 +1502,130 @@ const PLATE_TOP_CLEAR = 20;
    too narrow to hold the plate that far in, the seat wins and the figure is not
    honoured. See plateSeat(). */
 const PLATE_START_ALONG = 25;
+
+/* HOW THE CHAIN'S NAME IS STAMPED ON THE MARK, and it is AWAITING CHARLES'S CALL
+   (GitHub #139). One word in this file and deliberately NOT a URL parameter, for
+   the reason ORIGIN_MOUNT is not one either: `?seed` is the only determinism
+   affordance shipped code carries, and a second switch reachable from the
+   address bar is a second way for the page to draw something no gate
+   photographs.
+
+   THE COMPLAINT IT ANSWERS is that the two halves of the mark disagree about
+   what they are. The scribed line and its ticks are background ink -- part of
+   the machine being looked at -- while the name rode on a filled, bordered,
+   rounded rect: a UI chip laid ON the page. Charles: "change the datum label to
+   a label that looks *etched* into the background ... so the datum line looks
+   like a piece of the system we're looking at on the page and the lines names
+   are faint overlays with the datum line?"
+
+   THE FIVE TREATMENTS, and what separates them:
+
+     'chip'        the plate as it shipped -- INK.plate body, INK.line border,
+                   the name inside it. The baseline a sweep is unreadable
+                   without.
+     'etch'        no plate at all. The rule is BROKEN around the lettering and
+                   the name is struck into the page in its place: a cut copy
+                   above the glyph, a lit copy below, the ink copy between them.
+     'etch-strike' no plate and no break -- the rule runs behind the name, and
+                   each glyph knocks it out with a page-coloured halo. The name
+                   reads as cut INTO the line rather than as sitting in a gap in
+                   it, and the interruption is the glyph's own shape, so there is
+                   no gap width to choose.
+     'etch-pocket' a milled recess rather than a chip: the body, no border, and
+                   the etched lettering on it. Light mode has the least contrast
+                   headroom of the two themes, and this is the variant that keeps
+                   a ground under the type to spend it on.
+     'etch-mark'   the name struck CLEAR OF the rule -- above it or below it, never
+                   in its path -- and set slightly larger, so it reads as an
+                   annotation added to the drawing after the fact rather than as
+                   part of the line. The rule runs UNBROKEN underneath. Charles,
+                   having seen the first sweep: "I had thought the name could be
+                   slightly larger and etched either below or above the line --
+                   almost as a marker added after the fact?" DATUM_MARK_GROW is its
+                   one lever; WHICH side is derived and has no constant -- see the
+                   note where DATUM_MARK_SIDE used to be.
+     'drop'        the same plateless break as 'etch', with a CSS drop-shadow
+                   filter instead of the two-copy relief. Kept as a candidate
+                   because it was asked about, and NOT the default: #6 is the
+                   standing evidence that a filter on this page is not free, and
+                   this one buys nothing the two copies do not.
+
+   WHICHEVER WAY IT LANDS, THE SEAT IS UNTOUCHED. plateSeat() is still asked for
+   a rectangle pw wide by PLATE_H tall, in every treatment, so CL#152's clearance
+   search and CL#160's far-end anchor solve the same problem they always did. A
+   plateless label INKS less of that rectangle than it reserves, which means the
+   search could be relaxed -- but relaxing it is a separate change with its own
+   sweep, not a side effect of this one. */
+const DATUM_LABEL = 'etch-mark';
+
+/* HOW DEEP THE STRUCK LETTERING READS, as a fraction of the label's own font
+   size -- the ONE tuned number in this feature, and the one Charles is expected
+   to revise once he can see it.
+
+   IT IS THE OFFSET OF THE TWO RELIEF COPIES, not an opacity: the cut copy is
+   raised by this much and the lit copy dropped by it, which is the same
+   displaced-material trick the rim engravings use and for the same reason --
+   LIGHTING ON THIS PAGE IS FROM DIRECTLY ABOVE (#10), so shadow goes ABOVE a
+   cut glyph and highlight BELOW it. Any diagonal offset would fight every other
+   surface on the page.
+
+   STATED AS A FRACTION OF THE TYPE, so it travels with a label that grows and
+   shrinks with the machine, and FLOORED AT ONE RENDERED PIXEL for the reason the
+   hairline is (#61): under a device-independent pixel the rasteriser turns a
+   relief edge into a grey wash instead of an edge.
+
+   0.12 CLEARS THAT FLOOR AND 0.07 DID NOT. Measured: at 0.07 the offset was
+   0.89px on a 1440x900 desk and 0.52px on a 390x844 phone, so the floor bound at
+   BOTH and the relief did not scale with the type at all -- it was one pixel
+   everywhere, which made it proportionally deeper on the phone than on the desk.
+   0.12 gives 1.52px at desk scale, off the floor and travelling with the type as
+   this is written to. The phone is still on the floor (0.89px) and that is the
+   honest limit of a one-pixel-minimum relief on a small viewport, not a number to
+   chase. */
+const DATUM_ETCH_DEPTH = 0.12;
+
+/* THERE IS NO CONSTANT FOR WHICH SIDE OF THE RULE THE NAME SITS ON, and that is
+   the answer rather than an omission (GitHub #139). It was briefly an
+   'out'/'in' switch -- outboard or inboard of the chain the line references --
+   and Charles retired the whole idea for a reason neither sweep had weighted:
+
+     "I think one consistent side is the way to go as remember we need to support
+      N# of chains"
+
+   OUTBOARD-OF-ITS-OWN-CHAIN IS A RULE THAT DOES NOT SCALE. With two chains it
+   reads as an arbitrary mirror -- measured, one name landed left of its rule and
+   the other right of its own, in portrait, because each chain's normal is
+   mirrored with its origin. With N chains it is worse than arbitrary: labels
+   scatter over both sides with no rule a reader can infer, and the composition
+   stops being predictable as chains are added. CHAIN_ORDER already supports any
+   number of chains (config.js plus the depth-first tree walk), so the rule has to
+   hold for N and not for 2.
+
+   SO THE SIDE IS DERIVED, ONCE, IN BRIDGE_BEARING'S OWN SHAPE: the direction is
+   taken from the SPINE's outboard normal and every other chain COMPARES BOTH OF
+   ITS CANDIDATE SIDES against it, rather than any sign being written down. See
+   datumLayer() for the geometry and for why the reference is the assembly rather
+   than the origin corner -- that alternative is the same rule and was measured to
+   put every name on the side facing the machine on this composition. The
+   compare-never-assert phrasing is load-bearing and it is the second half of the
+   #67 lesson, the half this file has now had to learn three times: a handedness
+   with a hard-coded sign is a legal mirror image of itself, so every measurement
+   taken along the mark passes either way and only a screenshot can tell. Nothing
+   about it is a screen constant -- turn the stage and the answer turns with it --
+   and nothing about it is per-chain, which is the whole point. */
+
+/* HOW MUCH LARGER AN 'etch-mark' NAME IS SET THAN THE PLATE'S OWN LETTERING --
+   "slightly larger", which is a judgement and so is a sweep, not a derivation.
+
+   A MULTIPLIER ON THE EXISTING MODULE MULTIPLE, so 1 is exactly today's size and
+   nothing about the ratio between the type and the box it reserves moves: the
+   label's height is scaled by the same factor, which is what keeps a grown mark
+   the same proportions as an ungrown one instead of type crowding a fixed box.
+
+   IT REACHES THE SEAT, DELIBERATELY. plateSeat() is asked to clear the GROWN
+   rectangle, because a search that reserves last size's box for this size's
+   lettering is a search answering the wrong question. */
+const DATUM_MARK_GROW = 1.3;
 
 /* HOW MANY IDLERS STAND BETWEEN A CHAIN AND ITS DRIVE. Never zero -- two chains
    meshing directly would read as one machine, and the idlers are what make the
@@ -8877,6 +9016,86 @@ class Component extends DCLogic {
      the edge of it and a little past, which is what makes it leave the drawing
      the way a scribed datum runs past the parts it references -- derived from
      what is actually on stage rather than from a guessed length. */
+  /* THE NAME AS IT IS STAMPED ON THE MARK, in the label's own rotated frame:
+     the origin sits on the line, x runs along it and y across it. Which
+     treatment is drawn is DATUM_LABEL's to say -- see its comment for what each
+     one is, and for why the list is still open (GitHub #139).
+
+     THE RELIEF IS TWO EXTRA COPIES OF THE SAME TEXT, never a filter, in every
+     treatment but 'drop'. That is the vocabulary the rim engravings already
+     speak: a cut copy raised by DATUM_ETCH_DEPTH and a lit copy dropped by it,
+     with the ink copy between them, so the glyph reads as displaced material
+     rather than as type laid over the page. #6 is why a filter is the exception
+     here and not the rule -- nine of them re-rasterising per frame was the
+     dominant frame cost of this page once already, and the plate not turning
+     makes that cheaper, not free.
+
+     THE CUT AND THE HIGHLIGHT ARE --edge AND --gloss, the page's own two
+     surface-lighting tokens, and they are NOT lifted the way datumInk() lifts
+     the ink. Both are already stated as rgba with an alpha of their own, so there
+     is nothing opaque to lift; and what they carry is a RELATIVE cue about which
+     way the surface falls, while the legibility is entirely the ink copy's job.
+     One colour solve, in one place, for the one colour that has to be legible.
+
+     THE DECORATIVE COPIES ARE aria-hidden. The name is the only thing telling a
+     screen-reader user which chain this is, and three copies of it is three
+     announcements of the same word: the relief is a surface, not a reading.
+
+     THE HAIRLINE STROKE ON THE INK COPY is #36's lesson at the one size on this
+     page where it bites hardest. A full letter has body to spare and barely
+     moves; a stroke-only glyph has nothing BUT edge, so the same width buys it
+     most of its opacity back -- and this is the smallest lettering the page sets,
+     drawn inside the ghost layer's own dimming.
+
+     THE KNOCKOUT HALO IS DERIVED, NOT CHOSEN. 'etch-strike' lets the rule run
+     behind the name and has each glyph cut it out, so the halo has to clear the
+     rule itself plus the relief standing either side of it: HAIR + 2 * depth,
+     exactly, and nothing to re-measure when either of those moves. */
+  datumStamp(label, font, track, pw, ph, fs, INK, HAIR) {
+    const h = React.createElement;
+    const depth = Math.max(1, fs * DATUM_ETCH_DEPTH);
+    /* Offset by a share of the font size, not by `dominant-baseline`: WebKit puts
+       `central` somewhere Blink and Gecko do not, which is what left the rim
+       engraving off centre in Safari (#26). */
+    const base = fs * 0.35;
+    const type = (key, dy, fill, extra) => {
+      const p = { key: key, x: 0, y: (base + dy).toFixed(2), textAnchor: 'middle',
+        style: Object.assign({ fill: fill, font: font, letterSpacing: track.toFixed(2) + 'px' },
+          extra || {}) };
+      if (key !== 'ink') p['aria-hidden'] = 'true';
+      return h('text', p, label);
+    };
+    const pocket = (stroke) => h('rect', { key: 'body',
+      x: (-pw / 2).toFixed(2), y: (-ph / 2).toFixed(2),
+      width: pw.toFixed(2), height: ph.toFixed(2), rx: (ph * 0.1).toFixed(2),
+      style: stroke ? { fill: INK.plate, stroke: INK.line, strokeWidth: HAIR.toFixed(2) + 'px' }
+                    : { fill: INK.plate } });
+    const out = [];
+    if (DATUM_LABEL === 'chip') return [pocket(true), type('ink', 0, INK.line)];
+    /* 'etch-mark' draws NOTHING but the struck lettering: no body, no knockout and
+       no break in the rule. Where it sits is datumLayer's to say -- it is a
+       translation along the mark's normal, and putting it here would be a second
+       opinion about a distance the layer derives from what is already drawn. */
+    /* No border on the pocket: a recess is a change of level, and an outline is
+       most of what made the chip read as a widget sitting on the page. */
+    if (DATUM_LABEL === 'etch-pocket') out.push(pocket(false));
+    if (DATUM_LABEL === 'etch-strike') out.push(type('knock', 0, 'var(--bg)',
+      { stroke: 'var(--bg)', strokeWidth: (HAIR + 2 * depth).toFixed(2) + 'px',
+        strokeLinejoin: 'round' }));
+    if (DATUM_LABEL === 'drop') {
+      /* Straight DOWN, never diagonal (#10). The blur is twice the offset so the
+         shadow reads as air under an edge rather than as a second glyph. */
+      out.push(type('ink', 0, INK.line, { filter: 'drop-shadow(0 ' + depth.toFixed(2)
+        + 'px ' + (depth * 2).toFixed(2) + 'px var(--edge))' }));
+      return out;
+    }
+    out.push(type('cut', -depth, 'var(--edge)'));
+    out.push(type('lit', depth, 'var(--gloss)'));
+    out.push(type('ink', 0, INK.line, { stroke: INK.line,
+      strokeWidth: (fs * ENGRAVE_STROKE).toFixed(3) + 'px', strokeLinejoin: 'round' }));
+    return out;
+  }
+
   datumLayer(solved, S, box, metal) {
     const h = React.createElement;
     const runs = this.datumRuns(solved, this.state.ghosts, S);
@@ -8891,7 +9110,16 @@ class Component extends DCLogic {
        back as ink (#81). */
     const INK = this.datumInk();
     const MAJOR = MODULE * 1.2 * S, PAST = MODULE * 2 * S;
-    const PLATE_H = MARK.h, PLATE_F = MODULE * 1.3 * S;
+    /* GROW REACHES BOTH DIMENSIONS OR NEITHER. It scales the type and the box the
+       type is set inside by the same factor, so a grown mark is the same shape as
+       an ungrown one rather than lettering crowding a fixed rectangle -- and it is
+       1 in every treatment but 'etch-mark', which is what keeps the shipped chip
+       byte-identical while the lever exists. MARK.h stays UNSCALED and is what
+       fitEscapes and datumClear() go on reading: those two ask about the plate's
+       stroke overhang and about #76's bound, neither of which this lever is
+       entitled to answer for them. See the DECISIONS on datumClear(). */
+    const GROW = DATUM_LABEL === 'etch-mark' ? DATUM_MARK_GROW : 1;
+    const PLATE_H = MARK.h * GROW, PLATE_F = MODULE * 1.3 * S * GROW;
     /* A WINDOWS FACE IN THE STACK. ui-monospace covers Apple, Menlo is the older
        macOS name and DejaVu Sans Mono is what Linux ships -- and nothing here
        named anything a Windows machine has, so the generic `monospace` resolved
@@ -8901,6 +9129,10 @@ class Component extends DCLogic {
        generic stays behind it. */
     const MONO = "ui-monospace, Menlo, Consolas, 'DejaVu Sans Mono', monospace";
     const els = [];
+    /* THE ONE SIDE EVERY CHAIN'S NAME IS STRUCK ON, filled in from the spine on the
+       first pass through the loop below and read by every chain after it. Outside the
+       loop because that is what makes it one decision rather than N. */
+    let markDir = null;
     let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
     const mk = (x, y) => {
       if (x < bx0) bx0 = x;
@@ -8939,7 +9171,31 @@ class Component extends DCLogic {
       const d0 = Math.min(r.d0 * S, edge[0]) - PAST;
       const d1 = Math.max(r.d1 * S, edge[1]) + PAST;
       const a = at(d0, 0), z = at(d1, 0);
-      seg('s' + ri, a.x, a.y, z.x, z.y);
+      /* WHERE THE LETTERING BREAKS THE RULE, and only the treatments that need a
+         break get one: 'chip' and 'etch-pocket' cover the line with a body, and
+         'etch-strike' has each glyph knock it out, so those three draw one
+         unbroken scribe exactly as it always was.
+
+         THE GAP IS THE TYPE'S OWN WIDTH plus one of the plate's corner radii of
+         air each side. `pw` is the measured type plus the plate's padding
+         (PLATE_H * 0.8, added where it is measured above), so taking that padding
+         back off is what leaves the ink; plateMargin()'s `pad` is the same
+         distance the plate is already seated with. Both are distances the shape
+         declares about itself -- there is no gap width chosen here to look right.
+
+         AND THE BREAK ONLY HAPPENS IF IT LEAVES A LINE EITHER SIDE OF IT. A seat
+         within the gap of an end of the mark would otherwise turn one scribe into
+         one shorter scribe plus a stub, and the whole point of a datum is that it
+         runs past the parts it references. */
+      const brk = (DATUM_LABEL === 'etch' || DATUM_LABEL === 'drop')
+        ? (pw - PLATE_H * 0.8) / 2 + this.plateMargin(S).pad : 0;
+      if (brk > 0 && seat.at - brk > d0 && seat.at + brk < d1) {
+        const b0 = at(seat.at - brk, 0), b1 = at(seat.at + brk, 0);
+        seg('s' + ri + 'a', a.x, a.y, b0.x, b0.y);
+        seg('s' + ri + 'b', b1.x, b1.y, z.x, z.y);
+      } else {
+        seg('s' + ri, a.x, a.y, z.x, z.y);
+      }
       /* THE TICKS ARE NOT NUMBERED, and that was measured rather than assumed.
          A numeral set as a module multiple, like everything else here, renders
          at 11.4 CSS px on a 1440-wide display, 6.7 on a 390 phone and 4.4 on a
@@ -8963,20 +9219,80 @@ class Component extends DCLogic {
          guessed from a per-character average -- the same lesson the hover pill
          cost, where an estimate clipped the longest label on the first try.
          Measured above, with the rest of the placement it decides. */
-      const c = at(seat.at, 0);
+      /* WHICH SIDE OF THE RULE AN 'etch-mark' NAME STANDS ON: ONE SIDE FOR THE
+         WHOLE STAGE, at any chain count, decided once and compared against
+         thereafter (GitHub #139). Charles: "one consistent side is the way to go as
+         remember we need to support N# of chains."
+
+         WHY A CONSISTENT SIDE AT ALL. Outboard-of-its-own-chain was the obvious
+         reading and it does not scale: a chain's outboard direction mirrors with
+         its own origin, so with two chains it reads as an arbitrary mirror --
+         measured, one name left of its rule and the other right of its own, in
+         portrait -- and with N chains labels scatter over both sides with no rule a
+         reader can infer. CHAIN_ORDER already takes any number of chains, so the
+         rule has to hold for N.
+
+         THE DIRECTION IS TAKEN FROM THE SPINE AND THEN COMPARED AGAINST, WHICH IS
+         WHAT MAKES IT ONE SIDE RATHER THAN N AGREEING SIDES. `markDir` is the
+         spine's own outboard normal in screen space -- runs[0] is the spine, since
+         datumRuns() walks CHAIN_ORDER and CHAIN_ORDER[0] === SPINE by construction
+         -- and every chain then takes whichever of its two candidate sides points
+         along it. Nothing here is a written sign: the spine's own `out` comes from a
+         seat that already compared both origins, and each chain's side comes from
+         comparing both candidates against that. That is BRIDGE_BEARING's
+         construction -- compare, never assert -- for the reason it exists there: a
+         hard-coded handedness is a legal mirror image of itself, so it passes every
+         measurement taken ALONG the mark and only a screenshot can tell. This file
+         has now had to learn that three times.
+
+         AND THE REFERENCE IS THE ASSEMBLY, NOT THE ORIGIN CORNER, WHICH WAS
+         MEASURED RATHER THAN ASSUMED. `markDir = {x: 1, y: 1}` -- away from the
+         low-x low-y corner, exactly what BRIDGE_BEARING compares against -- is the
+         same shape of rule and it was tried first. On this composition the datum is
+         scribed on the side of its chain NEAREST that corner, so away-from-origin
+         is systematically the side facing the MACHINE: every chain lost its
+         clearance rather than some chains losing it, 17.4px on the spine at
+         1440x900, and the name sat over metal where the chip had cleared. Away from
+         the assembly is one side just as strictly and keeps the standoff, so that is
+         the reference. Swap this one line to compare the two again.
+
+         `r.n` IS ALREADY IN SCREEN SPACE -- datumRuns() builds it through the
+         stage's own travel angle -- so nothing here needs a second opinion about
+         _axisRot, and turning the stage turns the answer with it.
+
+         WHAT THE CONSISTENCY COSTS is that the chosen side is no longer always the
+         TICKS' side, so the STANDOFF is derived per chain from what is actually
+         drawn there: past the tick tips where the two coincide, clear of the
+         scribe's own half-width where they do not. Plus `pad` either way --
+         plateMargin()'s figure, the plate's corner radius floored at half a hairline
+         -- and plus half the mark's height, because a centre is being placed and an
+         edge has to clear. */
+      if (!markDir) markDir = { x: out * r.nx, y: out * r.ny };
+      const along = (s) => (r.nx * markDir.x + r.ny * markDir.y) * s;
+      const markSign = along(1) >= along(-1) ? 1 : -1;
+      const markT = DATUM_LABEL === 'etch-mark'
+        ? markSign * ((markSign === out ? MAJOR : HAIR / 2)
+                      + this.plateMargin(S).pad + PLATE_H / 2)
+        : 0;
+      const c = at(seat.at, markT);
       [[-pw / 2, -PLATE_H / 2], [pw / 2, -PLATE_H / 2], [pw / 2, PLATE_H / 2], [-pw / 2, PLATE_H / 2]]
         .forEach(p => mk(c.x + r.ux * p[0] + r.nx * p[1], c.y + r.uy * p[0] + r.ny * p[1]));
+      /* WHAT IS DRAWN AT THE SEAT IS datumStamp()'S TO DECIDE (GitHub #139). The
+         seat and the reserved rectangle are the same in every treatment -- only the
+         ink inside them changes, and where that rectangle is CENTRED -- so CL#152's
+         clearance search and CL#160's far-end anchor go on solving the problem they
+         already solved.
+
+         WHICH IS EXACTLY THE LIMIT WORTH KNOWING ABOUT 'etch-mark'. plateSeat()
+         cleared a box centred ON the line; `markT` then moves the drawn mark off
+         it. The search's answer is still true about the box it was asked about and
+         says nothing about the box that was drawn, so the clearance an offset mark
+         actually gets is MEASURED rather than solved. See the DECISIONS: on the
+         'out' side there is no metal to foul by construction, and on the 'in' side
+         there is, which is why the two are not interchangeable. */
       els.push(h('g', { key: 'p' + ri,
         transform: 'translate(' + c.x.toFixed(2) + ',' + c.y.toFixed(2) + ') rotate(' + r.deg.toFixed(2) + ')' },
-        h('rect', { x: (-pw / 2).toFixed(2), y: (-PLATE_H / 2).toFixed(2),
-          width: pw.toFixed(2), height: PLATE_H.toFixed(2), rx: (PLATE_H * 0.1).toFixed(2),
-          style: { fill: INK.plate, stroke: INK.line, strokeWidth: HAIR.toFixed(2) + 'px' } }),
-        /* Offset by a share of the font size, not by `dominant-baseline`:
-           WebKit puts `central` somewhere Blink and Gecko do not, which is what
-           left the rim engraving off centre in Safari (#26). */
-        h('text', { x: 0, y: (PLATE_F * 0.35).toFixed(2), textAnchor: 'middle',
-          style: { fill: INK.line, font: font, letterSpacing: track.toFixed(2) + 'px' } },
-          label)));
+        this.datumStamp(label, font, track, pw, PLATE_H, PLATE_F, INK, HAIR)));
     });
     /* THE SVG MUST CONTAIN WHAT IT PAINTS (#21). The viewBox is the box, so the
        coordinates above stay absolute in stage space and nothing has to be

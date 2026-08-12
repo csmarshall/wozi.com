@@ -7,6 +7,75 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Added
 
+- **CL#164 — the datum label is etched clear of an unbroken rule, on one side for
+  every chain.** (GitHub #139.)
+
+  Charles: *"change the datum label to a label that looks etched into the
+  background ... so the datum line looks like a piece of the system we're looking
+  at."* Then, on seeing five candidates: *"the name could be slightly larger and
+  etched either below or above the line - almost as a marker added after the
+  fact."* The plate is gone; the scribe runs unbroken; the name stands off it in
+  relief at 1.3x, cut copy raised and lit copy dropped, which is `engraving()`'s
+  own vocabulary and obeys the overhead-lighting rule (#10).
+
+  **The plate was costing contrast, not buying it.** Its `--hair`-derived fill sat
+  between the ink and the page, so removing it RAISES the ratio in both themes —
+  1.56/1.50 to **1.64:1 in both** — and closes the light/dark gap. The "faint
+  versus legible" tension this was expected to trade against does not exist here.
+  Contrast is also size-invariant by construction, not by luck: the hairline is
+  `fs × ENGRAVE_STROKE`, so the stroke-to-glyph ratio cannot move with the size.
+
+  **The side is DERIVED, and the switch that used to choose it is gone.** No `+1`
+  appears anywhere: both candidate sides are compared against a direction taken
+  from the spine's own outboard normal, which itself comes from a seat that already
+  compared both origins. That is the compare-never-assert construction the bridge
+  handedness fix arrived at, and this is the third piece of geometry to need it
+  (#67, the bridge's sign, and nearly this) — a legal mirror image passes every
+  measurement taken along the axis, so the handedness has to be derived or it is
+  guessed. It is axis-relative rather than screen-absolute, so rotating the stage
+  in portrait turns the answer with it.
+
+  **One side for N chains, because Charles caught that outboard-of-its-own-chain
+  does not generalise.** The first implementation put each name outboard of the
+  chain it named, which measured *better* (+14 to +28px of clearance) and looked
+  correct with two chains — and would scatter labels across both sides with no
+  inferable rule once `CHAIN_ORDER` carries more. Verified consistent at **2, 3 and
+  4 chains**, at both viewports, using staged config copies; the checkout's
+  `config.js` was never touched.
+
+  **The referent is the assembly, not the origin corner, and that was measured
+  rather than assumed.** Away-from-origin is `BRIDGE_BEARING`'s own referent and
+  was the obvious guess, so it was implemented and measured first: on this
+  composition the datum is scribed on the side of its chain *nearest* that corner,
+  so away-from-origin puts the name toward the machine and **every** chain loses —
+  the spine by 17.3px, with lettering over metal where the chip had cleared. Away
+  from the assembly instead: Charles +24.1, Harper +27.9 at 1440x900, Charles
+  +15.4 on a phone, and **Harper on the phone down 10.0px** — one chain out of four
+  chain-and-viewport pairs, stated because it is the trade being bought.
+
+  Known and accepted: the assembly referent is consistent *within* a composition
+  but its screen side can **flip as chains are added** (above at 2-3 chains, below
+  at 4). Adding a chain re-solves the whole composition anyway, so a label side
+  moving with it is consistent with everything else moving; the origin referent
+  would be stable across chain count too, and is left as a one-line swap with the
+  measurement written at the site.
+
+  `PLATE_TOP_CLEAR` is untouched and now documented as bounding **the scribe's
+  standoff rather than the label's** — with the mark offset, the real outer edge is
+  33-39px against a figure stated as 20. Filed as **#141** rather than fixed here,
+  because making `datumClear()` pay the mark's true reach pulls the scribe toward
+  the teeth and moves every datum line at every viewport.
+
+  `npm test` 119/0. `pixel_regress` **14,588px** across the two viewports, control
+  0px, fonts pinned, no harness warning — intended, and the record of what moved.
+  `?who=charles` **0px**, correct by construction: a solo page draws no datum at
+  all, which is also the trap that made the first sweep photograph nothing.
+  `a11y_audit` PASS both themes, with 16/16 SVG `<text>` already hidden from the
+  a11y tree — chain identity reaches a screen reader through the link names, never
+  the plate — and the relief copies carry `aria-hidden` so they could not treble an
+  announcement. `verify_motion` 40/40 with 0 console errors; `dom_invariants` 2
+  components, no orphans. Frame cost unchanged at 33.3ms p50, 0 dropped ticks.
+
 - **CL#161 — `/fidget/` shows one set at a time, and the shaft is how you travel
   between them.** (GitHub #129, parts 3 and 4 — the ticket is now complete.)
 
