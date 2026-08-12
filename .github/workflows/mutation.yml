@@ -89,7 +89,15 @@ jobs:
       (github.event_name == 'pull_request' &&
        contains(toJSON(github.event.pull_request.labels.*.name), 'harness'))
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 45, NOT 30, BECAUSE THE REGISTRY GREW AND THIS NUMBER DID NOT (GitHub #155).
+    # Registering the `dom` and `escape` gates took the full sweep from 406s to
+    # **532s locally** — and escape_mesh alone is ~37s per invocation, run once per
+    # mutant plus once as the restored-tree control. A CI runner is slower than this
+    # laptop by more than the 30-minute headroom left, and a sweep killed by its own
+    # timeout goes red for a reason that has nothing to do with the page: the worst
+    # kind of red, because it trains everyone to ignore the workflow. Raise this
+    # whenever the registry grows; it is a bound on the harness, not on the tree.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: browser-actions/setup-chrome@v1

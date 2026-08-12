@@ -2,6 +2,7 @@
 """Break the page on purpose and prove the gate that should catch it goes red.
 
     tools/mutation_gate.py                 # every mutant, every gate  (~9 min)
+                                           #   532s at 17 mutants / 8 gates, local
     tools/mutation_gate.py --gate suite    # one gate's mutants        (~19 s)
     tools/mutation_gate.py --only sleep-latched
     tools/mutation_gate.py --list          # the registry, no browsers
