@@ -1645,25 +1645,29 @@ const DATUM_PLATE = {};
    a mark standing a fixed number of modules off its chain stands twice as far
    off on a viewport that renders the machine twice as big, which is the
    half of #76 that made the line look detached from what it references.
-   It bounds the plate's OUTER edge, not the line: the line is scribed at
-   whatever air is left once the plate's own half-height is paid for
-   (datumClear), so what the eye measures -- the gap between the teeth and the
-   top of the placard -- is what the figure names.
+   It bounds THE MARK'S OUTERMOST INK, not the line: the line is scribed at
+   whatever air is left once that reach is paid for (datumClear), so what the eye
+   measures -- the gap between the teeth and the outermost thing the mark draws --
+   is what the figure names.
 
-   AND SINCE CL#163 IT BOUNDS THE SCRIBE'S STANDOFF, NOT THE LABEL'S -- KNOWN,
-   DECIDED, AND NOT A DRIFTING NUMBER (GitHub #139). `DATUM_LABEL = 'etch-mark'`
-   strikes the name CLEAR of the line rather than straddling it, so the outer edge
-   this figure was written about is no longer the outermost ink: measured at
-   1440x900 the lettering's far edge sits about 39px outside the line against a
-   figure of 20. datumClear() still pays plateMetrics().h / 2 -- the ungrown
-   plate's half-height -- which is now the standoff of the LINE and nothing else.
+   AND THE REACH IS THE STATION TICKS, WHICH IS WHAT IT WAS NOT (GitHub #141,
+   closed). datumClear() paid `plateMetrics().h / 2` -- the reserved rectangle's
+   own half-height -- from the day this figure was written, on the reading that the
+   plate straddles the line. The ticks are struck 1.2 modules out and the plate
+   reaches 1.0, so ink stood 1.200x further out than the payment allowed for, in
+   every label treatment including the original chip: 11.67px against 9.73px at
+   1440x900. It is plateMetrics().reach now -- a max over every term the shape puts
+   outboard of its own line, in the one place the drawing reads its tick length
+   from -- so the figure means what it says without a second constant restating it.
 
-   CHARLES CHOSE TO LEAVE IT, deliberately, over the alternative of making
-   datumClear() pay the mark's real reach: that alternative pulls the scribe closer
-   to the teeth at every viewport, so it changes where every datum line sits and is
-   its own ticket with its own sweep rather than something that rides along on a
-   label decision. What is NOT acceptable is the figure quietly meaning something
-   other than it says, so it says it here. */
+   #139 IS NOT WHAT MADE IT WRONG, though that is where it was noticed. #141 was
+   filed against CL#164's geometry, where the name sat on one consistent side and
+   so reached 33-39px outboard on the chains where that side was the outboard one.
+   CL#166 replaced that rule with "opposite the ticks", which puts the name INBOARD
+   of the rule on every chain -- so it reaches nothing this figure bounds, and what
+   holds it clear of the metal on that side is plateSeat()'s own search. Measured
+   at the shipped size and air: 0px of label ink outboard of the scribe, both
+   chains, both viewports. */
 const PLATE_TOP_CLEAR = 20;
 
 /* HOW FAR ALONG THE LINE THE PLATE SITS FROM THE END OF THE MARK IT IS STAMPED
@@ -4512,7 +4516,7 @@ class Component extends DCLogic {
          render scale -- at the fit a 1440-wide window deals, the plate's outer
          edge stood better than 20 rendered px off the extreme border, and the
          line reads as belonging to the page rather than to the chain. datumClear
-         hands back whatever air is left once the plate's own half-height is paid
+         hands back whatever air is left once the mark's own outboard reach is paid
          for out of the owner's figure, so it is the module of air wherever that
          fits inside it and less where it does not.
 
@@ -9111,14 +9115,48 @@ class Component extends DCLogic {
      re-renders when the stage has drifted further than this margin's real
      clearance -- see plateMargin(). The margin absorbs the stroke; the re-seat
      absorbs the movement. */
-  /* THE TWO SIZES OF THE MARK THAT ANYTHING OUTSIDE datumLayer NEEDS, at a given
-     render scale. Both are module multiples like everything else here. They are
-     named here rather than left inline because fitEscapes has to know how far the
-     stage may move before a seat it published stops being true, and a second copy
-     of either derivation is the drift this repo has already paid for in #12, #15
-     and #51. */
+  /* THE SIZES OF THE MARK THAT ANYTHING OUTSIDE datumLayer NEEDS, at a given
+     render scale. All of them are module multiples like everything else here. They
+     are named here rather than left inline because fitEscapes has to know how far
+     the stage may move before a seat it published stops being true, and a second
+     copy of any of these derivations is the drift this repo has already paid for
+     in #12, #15 and #51.
+
+     `tick` IS THE STATION TICK'S LENGTH, and it is here rather than inline in
+     datumLayer because datumClear() is the other reader of it (GitHub #141). It
+     was `const MAJOR = MODULE * 1.2 * S` in datumLayer and nothing outside that
+     method could see it, which is exactly how the bound below came to be paid in
+     a quantity 20% short of the ink it was bounding.
+
+     `reach` IS HOW FAR OUTBOARD OF THE SCRIBE THE MARK ACTUALLY DRAWS, which is
+     what #76's figure bounds and what datumClear() pays out of it. It is a MAX
+     over the three things this shape puts on the outboard side of its own line,
+     so it stays true if any one of them is retuned rather than being true because
+     one of them happens to be biggest today:
+
+       tick     the station ticks, struck along `out * MAJOR`. The winner at every
+                render scale the fit can produce, and the term that was missing.
+       h / 2    the reserved rectangle's own outboard edge, for the treatments
+                that centre that rectangle ON the line ('chip', 'etch',
+                'etch-strike', 'etch-pocket', 'drop'). UNGROWN deliberately --
+                DATUM_MARK_GROW belongs to the one treatment that offsets the
+                rectangle clear of the line, where its outboard edge is nearer
+                than this rather than further.
+       hair / 2 the scribe's own stroke overhang. Below the fit's range it is the
+                only term left, since the other two vanish with the scale and this
+                one is floored at one rendered pixel (#61).
+
+     WHAT IS NOT IN IT is anything per-chain -- the offset an 'etch-mark' label is
+     drawn at depends on that chain's own ink, and datumRuns() asks for this once
+     for the whole stage because the standoff is a property of the render scale.
+     The label is struck OPPOSITE the ticks (CL#166), so it stands inboard of the
+     rule and reaches nothing outboard for this to bound; what clears it against
+     the metal on that side is plateSeat()'s own search, not this figure. */
   plateMetrics(s) {
-    return { h: MODULE * 2 * s, hair: Math.max(1, MODULE * 0.13 * s) };
+    const h = MODULE * 2 * s, hair = Math.max(1, MODULE * 0.13 * s);
+    const tick = MODULE * 1.2 * s;
+    return { h: h, hair: hair, tick: tick,
+      reach: Math.max(tick, h / 2, hair / 2) };
   }
 
   /* THE MARGIN THE PLATE IS SEATED WITH, and how much of it is real clearance.
@@ -9137,11 +9175,30 @@ class Component extends DCLogic {
        "put the datum straight along the side such that the top of the label box
         is no more than 20px outside the extreme border of the side"
 
-     WHAT IS BOUNDED IS THE PLATE'S OUTER EDGE, NOT THE LINE, because that edge
-     is the thing the eye measures the gap to -- the plate straddles the line, so
-     it reaches half its own height further out than the scribe does. Pay that
-     half-height out of PLATE_TOP_CLEAR first and what is left is the air the
-     line may stand off in.
+     WHAT IS BOUNDED IS THE MARK'S OUTERMOST INK, NOT THE LINE, because that edge
+     is the thing the eye measures the gap to -- the mark reaches further out than
+     the scribe does. Pay that reach out of PLATE_TOP_CLEAR first and what is left
+     is the air the line may stand off in.
+
+     AND THE REACH IS plateMetrics().reach, WHICH IS NOT THE PLATE'S HALF-HEIGHT
+     (GitHub #141). This paid `plateMetrics(S).h / 2` for the whole life of the
+     figure, on the reading that the plate straddles the line and so its own
+     outboard edge is the outermost thing on that side. THE STATION TICKS WERE
+     ALWAYS LONGER THAN THAT -- `MODULE * 1.2 * S` against `MODULE * S`, so 1.200x,
+     measured 11.67px against the 9.73px paid at 1440x900 -- and they were declared
+     inline in datumLayer where nothing here could see them. So the bound was
+     honoured against a box while ink stood 20% further out than the box did, in
+     every label treatment this page has ever shipped, chip included. #139's
+     'etch-mark' did not cause that and does not change it: the name is struck
+     OPPOSITE the ticks (CL#166), so it stands inboard of the rule and puts no ink
+     on this side at all. The 33-39px outer edge #141 was filed about was CL#164's
+     one-consistent-side geometry, which CL#166 replaced.
+
+     ONE HOME, NOT A SECOND FIGURE. `reach` is derived in plateMetrics() from the
+     shape's own three outboard terms and is read by the drawing as well as by this
+     bound, so datumLayer's `MAJOR` and this payment cannot come to disagree. A
+     constant here would have been a number chosen to match the ticks and nothing
+     in the file would have said so.
 
      THE CONVERSION IS DONE ONCE, HONESTLY, AND IN THE RIGHT DIRECTION. Both
      candidates are compared in RENDERED PIXELS, which is the only space the
@@ -9158,19 +9215,28 @@ class Component extends DCLogic {
      the teeth" is the rule the max in datumRuns() already exists to keep, and
      this is the same rule stated as a floor.
 
-     AND THE FLOOR IS REACHED IN PRACTICE, on a wide desktop. The plate is two
-     modules tall like everything else here, so past a render scale of about 2.86
-     its half-height alone has spent the whole figure: measured at 3440x1440 the
-     fit deals about 3.4, a 48px plate, and NO non-negative air satisfies 20px
-     there. The bound cannot be met, so what it does instead is get as close as
-     the geometry allows -- the plate's outer edge lands ~24px out rather than
-     the ~48px a full module of air would give -- and the scribe grazes the
-     deepest tooth tip. That is a real change of look on an ultrawide, taken
-     deliberately: the figure is a bound on the mark's distance from the machine,
-     and honouring it as closely as the plate's own height permits is nearer to
-     what it asks for than ignoring it at exactly the scales it binds hardest. */
+     AND THE FLOOR IS REACHED IN PRACTICE, on a wide desktop. The ticks are 1.2
+     modules long, so past a render scale of 20 / (MODULE * 1.2) -- about 2.38 --
+     the reach alone has spent the whole figure: measured at 3440x1440 the fit
+     deals about 3.4, and NO non-negative air satisfies 20px there. The bound
+     cannot be met, so what it does instead is get as close as the geometry allows
+     and the scribe grazes the deepest tooth tip. That is a real change of look on
+     an ultrawide, taken deliberately: the figure is a bound on the mark's distance
+     from the machine, and honouring it as closely as the mark's own reach permits
+     is nearer to what it asks for than ignoring it at exactly the scales it binds
+     hardest.
+
+     WHICH SCALES MOVED WHEN THE REACH WAS CORRECTED, measured rather than
+     projected. The bound takes over from the module of air at 20 / (MODULE * 2.2),
+     about 1.299, where before it waited until 20 / (MODULE * 2) = 1.429. So a
+     390x844 phone at --gsfit 0.824 is untouched -- the module of air was never the
+     loser there -- and a 1440x900 desk at 1.396 moves the scribe 1.41px toward the
+     teeth, from a module of air to 8.32px of it. Above 2.38 nothing moves either,
+     because the air was already floored at zero. The change is confined to the
+     band between those two crossovers, which is where a desk sits and a phone does
+     not. */
   datumClear(S) {
-    const air = Math.min(MODULE * S, PLATE_TOP_CLEAR - this.plateMetrics(S).h / 2);
+    const air = Math.min(MODULE * S, PLATE_TOP_CLEAR - this.plateMetrics(S).reach);
     return Math.max(0, air) / S;
   }
 
@@ -9385,8 +9451,8 @@ class Component extends DCLogic {
     const alt = { ox: r.alt.x * S, oy: r.alt.y * S, side: -1 };
     /* HOW MUCH AIR A SEAT HAS TO KEEP FROM THE METAL (GitHub #88, CL#108): the
        air the mark already stands off it. datumClear() is that distance --
-       what is left of the owner's PLATE_TOP_CLEAR once the plate's own
-       half-height is paid for -- so there is one home for "how close this
+       what is left of the owner's PLATE_TOP_CLEAR once the mark's own outboard
+       reach is paid for -- so there is one home for "how close this
        mark comes to a tooth", whichever axis it is measured on. It answers in
        solve units because datumRuns() places lines in them; the seat is
        solved in rendered pixels, so it is multiplied straight back. */
@@ -9599,23 +9665,35 @@ class Component extends DCLogic {
     const runs = this.datumRuns(solved, this.state.ghosts, S);
     if (!runs.length) return null;
     /* Read off plateMetrics() rather than repeated here: fitEscapes needs the
-       same two numbers to know when a seat has gone stale, and one derivation
-       cannot be in two places. */
+       same numbers to know when a seat has gone stale, and one derivation cannot
+       be in two places. */
     const MARK = this.plateMetrics(S);
     const HAIR = MARK.hair;
     /* Two concrete colours, not the tokens: the mark is drawn inside the ghost
        layer's opacity now, and datumInk() is where the alpha it lost is paid
        back as ink (#81). */
     const INK = this.datumInk();
-    const MAJOR = MODULE * 1.2 * S, PAST = MODULE * 2 * S;
+    /* THE TICK LENGTH COMES OFF plateMetrics() NOW, NOT FROM A LITERAL HERE
+       (GitHub #141). datumClear() has to pay this exact length out of
+       PLATE_TOP_CLEAR -- it is the mark's outboard extreme -- and while it was
+       written here as `MODULE * 1.2 * S` that method had nothing to read and paid
+       the reserved box's half-height instead. PAST is deliberately NOT MARK.h even
+       though the two are the same number: it is how far the scribe runs out past
+       the end of what it references, which is a different fact that happens to
+       have the same value. */
+    const MAJOR = MARK.tick, PAST = MODULE * 2 * S;
     /* GROW REACHES BOTH DIMENSIONS OR NEITHER. It scales the type and the box the
        type is set inside by the same factor, so a grown mark is the same shape as
        an ungrown one rather than lettering crowding a fixed rectangle -- and it is
        1 in every treatment but 'etch-mark', which is what keeps the shipped chip
-       byte-identical while the lever exists. MARK.h stays UNSCALED and is what
-       fitEscapes and datumClear() go on reading: those two ask about the plate's
-       stroke overhang and about #76's bound, neither of which this lever is
-       entitled to answer for them. See the DECISIONS on datumClear(). */
+       byte-identical while the lever exists. MARK.h and MARK.reach stay UNSCALED
+       and are what fitEscapes and datumClear() go on reading: those two ask about
+       the plate's stroke overhang and about #76's bound, neither of which this
+       lever is entitled to answer for them. That is not an omission in the bound
+       (GitHub #141): growing this rectangle moves its OUTBOARD edge nearer the
+       line, not further, because 'etch-mark' is also the treatment that offsets
+       the rectangle inboard -- so the ticks stay the outboard extreme and the
+       grown box never becomes it. */
     const GROW = DATUM_LABEL === 'etch-mark' ? DATUM_MARK_GROW : 1;
     const PLATE_H = MARK.h * GROW, PLATE_F = MODULE * 1.3 * S * GROW;
     /* A WINDOWS FACE IN THE STACK. ui-monospace covers Apple, Menlo is the older
@@ -9786,13 +9864,31 @@ class Component extends DCLogic {
          clearance search and CL#160's far-end anchor go on solving the problem they
          already solved.
 
-         WHICH IS EXACTLY THE LIMIT WORTH KNOWING ABOUT 'etch-mark'. plateSeat()
-         cleared a box centred ON the line; `markT` then moves the drawn mark off
-         it. The search's answer is still true about the box it was asked about and
-         says nothing about the box that was drawn, so the clearance an offset mark
-         actually gets is MEASURED rather than solved. See the DECISIONS: on the
-         'out' side there is no metal to foul by construction, and on the 'in' side
-         there is, which is why the two are not interchangeable. */
+         WHICH IS EXACTLY THE LIMIT WORTH KNOWING ABOUT 'etch-mark', AND #141 CLOSED
+         ONE HALF OF IT. plateSeat() clears a box centred ON the line; `markT` then
+         moves the drawn mark off it, so the search's answer is true about the box it
+         was asked about and says nothing about the box that was drawn.
+
+         THE OUTBOARD HALF IS NOW SOLVED AND IT WAS NOT ABOUT THIS LABEL AT ALL: the
+         name is struck opposite the ticks (CL#166), so it reaches nothing outboard,
+         and what stands outboard is the ticks -- which datumClear() pays for by
+         name now (plateMetrics().reach) instead of paying the reserved box's
+         half-height. See PLATE_TOP_CLEAR.
+
+         THE INBOARD HALF IS STILL MEASURED RATHER THAN SOLVED, and this is where it
+         is recorded so the file does not imply otherwise. `markT` always points
+         INBOARD -- `markSign` resolves to `-out` on every chain, since the name goes
+         opposite the ticks and the ticks go outboard -- so the drawn rectangle
+         overhangs the searched one on the side that HAS metal, never on the empty
+         one. Measured at 1440x900: |markT| is 14.27px of
+         rectangle and about 9.0px of actual INK past the searched box's inboard
+         edge (ink reaching 26.0px off the line against the box's 17.03px). It is
+         not currently binding -- CL#166 measured 0.0% of the mark's pixels on metal
+         at every size it swept, because the rule is already stood off the chain by
+         PLATE_TOP_CLEAR and an inboard name lands in that existing gap -- so what
+         this costs is a guarantee, not a picture. Widening the searched rectangle
+         to cover it would need `markT`, which is per-chain and computed after the
+         seat, so it is a re-ordering of this method rather than a wider box. */
       els.push(h('g', { key: 'p' + ri,
         transform: 'translate(' + c.x.toFixed(2) + ',' + c.y.toFixed(2) + ') rotate(' + r.deg.toFixed(2) + ')' },
         this.datumStamp(label, font, track, pw, PLATE_H, PLATE_F, INK, HAIR)));

@@ -289,6 +289,59 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#176 — `datumClear()` was paying 20% short of what the datum actually puts
+  outboard, in every treatment the page has ever shipped.** (GitHub #141.)
+
+  **#141's own premise was obsolete when I filed it.** It assumed the label sat
+  outboard at 33.2/39.0px — CL#164-era geometry that **CL#166 had already reversed**.
+  `markSign` resolves to `-out` on every chain, so the label is always **inboard**;
+  measured, **0px of label ink outboard of the scribe**, both chains, both viewports.
+
+  **The thing that is outboard is the station ticks** — `MODULE * 1.2 * S`, declared
+  inline in `datumLayer` where `datumClear()` could not see them. So `datumClear()`
+  paid `plateMetrics().h / 2` = `MODULE * S`: **20% short, in every treatment
+  including the original chip.** Neither #139 nor #166 caused it; it is older than
+  both, and it is the fault #141 was reaching for from the wrong direction.
+
+  So option (2) — rename the constant to bound the scribe's standoff — would have
+  documented a mismatch CL#166 had removed while leaving a real one in place. Took
+  option (1): `PLATE_TOP_CLEAR` keeps meaning "clearance from the extreme border" and
+  `datumClear()` now pays the true reach.
+
+  **Derived, not a second constant.** `plateMetrics()` gains `tick` — the one home for
+  the tick length, now read by `MAJOR` in `datumLayer` where the literal used to be —
+  and `reach = max(tick, h/2, hair/2)`: a max over the three things the shape puts
+  outboard of its own line, so it stays true if any one is retuned rather than being
+  true because one happens to be biggest today.
+
+  Bound satisfaction at 1440x900: **21.40px → 20.00px** against a stated 20. The
+  crossover where the bound takes over from the module of air moves from
+  `20/(MODULE*2)` = 1.429 to `20/(MODULE*2.2)` ≈ **1.299**, so the change is confined
+  to `--gsfit` 1.299–1.461.
+
+  **Swept 10 seeds at desk and 5 on a phone**, two servers, harness LCG pinned. Every
+  scribe moved exactly **±1.41px toward its own chain**, uniform across deals as it
+  must be — the standoff is a property of the render scale, not the deal. Charles's
+  seat **unchanged to the last digit on all 10**; Harper's — the crowded chain — moved
+  **+0.32 to +0.63px**, second-order, because `datumClear()` also feeds `plateSeat`'s
+  metal-clearance air. **No seat lost a clean window.** The phone is **byte-identical**,
+  confirming it sits below the new crossover. Zero `plateSeat` warnings, zero overlap
+  warnings, zero console errors across ~30 seeded runs.
+
+  `pixel_regress` **11,636px at 1440x900 and 0px at 390x844** — and that split *is* the
+  accounting rather than a curiosity: the desk is inside the affected band and the
+  phone is not. `?who=charles` 0px both, since a solo page draws no datum at all.
+  `npm test` 120/0 with **both mutation-tested plate tests passing unchanged and
+  unedited**, plus the standoff test whose three assertions were checked against the
+  new air. `dom_invariants` and `verify_motion` PASS, 0 console errors.
+
+  **The inboard half of the same mismatch is still open and is filed as #162**:
+  `plateSeat()` searches a box centred on the line while `markT` moves the drawn box
+  ~14.27px inboard, onto the side that has the metal. It costs a guarantee rather than
+  a picture — CL#166 measured 0.0% of mark pixels on metal — and fixing it means
+  re-ordering `datumLayer` so the per-chain offset is known before the search, not
+  widening a box.
+
 - **CL#175 — the pop-out panel can be dismissed by tapping off it, and it stops
   overshooting its own cap.** (GitHub #154, #149 — both close.)
 
