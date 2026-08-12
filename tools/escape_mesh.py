@@ -57,6 +57,23 @@ the screen instead of the axis -- both of which only a measurement in screen
 space could see.
 
 Exit 0 if every run meshes, 1 if any ghost does not, 2 if it could not measure.
+
+THIS HARNESS DOES NOT PIN THE WEBFONT, AND THAT IS THE MEASURED ANSWER RATHER
+THAN AN OMISSION (GitHub #145). `tools/fontpin.py` exists because the page's
+drawing depends on WHEN Manrope arrives relative to its own first render (#98),
+and four gates import it. This one was held to the same test CL#168 applied to
+the others -- a full `--census` run with both font hosts blackholed at Chrome's
+resolver, against a normal run -- and the two outputs are IDENTICAL: 4 seeds x 2
+viewports, every run, every ghost, every residual to the last printed digit, the
+only differing line being the ephemeral port the server bound. Zero exposure, so
+pinning would add a mechanism and prove nothing.
+
+Two reasons it comes out that way, and both would have to change before this
+paragraph does. Every number here is a radius or a centre, taken off the anchor
+divs and the svg width attribute -- no text is measured, laid out, or even
+looked at. And the console errors it collects come from `Runtime` only; `Log` is
+never enabled, so the `ERR_CONNECTION_REFUSED` a blocked stylesheet produces is
+invisible here, where it is what made `verify_motion` go red for a font outage.
 """
 
 import argparse

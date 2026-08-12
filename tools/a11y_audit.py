@@ -3,11 +3,51 @@
 behavioural checks axe cannot make on a page that is entirely motion.
 
 Run against both themes, because contrast findings differ per theme.
+
+Usage: python3 tools/a11y_audit.py [url] [--fonts auto|pinned|blocked]
+
+THE WEBFONT IS PINNED, AND THE HONEST ANSWER IS THAT THE EXPOSURE MEASURED ZERO
+(GitHub #145). This was the harness to worry about, for a good reason: it asserts
+the WCAG 2.5.8 floor of 24x24 CSS px on every focusable, and a hit box derived
+from a label changes size when the face swaps -- which is `pill_clip`'s fault
+exactly, where the same page measured -0.58px of clip clearance with Manrope and
+-1.45px without, against a +0.05px tolerance.
+
+So it was measured rather than assumed, with both font hosts blackholed against a
+normal run, the deal held fixed so the font was the only variable:
+
+    every focusable's box, 30 of them   IDENTICAL to 0.01px in both regimes
+    smallest target, over 12 deals      IDENTICAL in both regimes, 39.44-44.00px
+    axe-core, both themes               no violations in either regime
+
+The one number that DOES move is the Table of Gears row: 268.63px wide with
+Manrope, 270.52px without -- 1.89px, and the row's HEIGHT, which is what the
+floor would bite on, does not move at all. Nothing here asserts a width, and the
+nearest thing to the floor is a checkbox at exactly 24.00x24.00 whose size is
+fixed in CSS. **So this is pinned as insurance, not as a fix** -- the same
+verdict CL#168 reached for `devices.py`, and worth saying plainly rather than
+dressing up. What it buys: the type-derived boxes stop moving between runs, so a
+human diffing two runs is not shown a number changing with nothing changed, and
+the day a control's box starts coming from its label the gate is already
+deterministic.
+
+**The three fixed sleeps are the part that was actually wrong.** A plain
+`asyncio.sleep` in a render path HOLDS the stylesheet for its duration and lets
+it land afterwards, which is the late-font regime itself (see tools/fontpin.py).
+They are replaced by conditions, and the `location.reload()` they were covering
+is gone with them -- the theme and speed are injected at document-start now, the
+way tools/dom_invariants.py does it, so there is no outgoing document to poll as
+ready.
 """
-import asyncio, json, subprocess, sys, time, urllib.request
+import argparse, asyncio, json, subprocess, sys, time, urllib.request
 import websockets
 
 import os as _os, shutil as _sh, sys as _sys, tempfile as _tf
+
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import fontpin  # noqa: E402
+
+
 def _sys_platform_is_darwin():
     return _sys.platform == "darwin"
 # CI runs on Linux, where Chrome is not in /Applications. Honour $CHROME,
@@ -31,7 +71,17 @@ AXE = (_os.environ.get("AXE_PATH")
 CI_FLAGS = ([] if _sys_platform_is_darwin() else
             ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"])
 _FAILURES = []
-URL = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8765/"
+# POSITIONAL and optional, because CI appends the served URL to this argv.
+_ap = argparse.ArgumentParser(description="accessibility audit: axe-core + the "
+                                          "checks axe cannot make")
+_ap.add_argument("url", nargs="?", default="http://127.0.0.1:8765/")
+_ap.add_argument("--fonts", default="auto", choices=["auto", "pinned", "blocked"],
+                 help="auto: serve the webfont from prefetched bytes, degrading "
+                      "loudly to blocked if it cannot be fetched. pinned: require "
+                      "it, exit 2 if unobtainable. blocked: never fetch it — the "
+                      "shipped typography is then NOT what gets measured.")
+_ARGS = _ap.parse_args()
+URL = _ARGS.url
 # THE PORT IS NOT FIXED (#42). Every harness here used a hardcoded DevTools
 # port, so two running at once fought over it and the loser reported a
 # ConnectionClosedError -- which reads as a page fault, not a harness fault, and
@@ -136,32 +186,84 @@ MANUAL = r"""
     return n;
   })();
 
-  /* Touch targets: 24x24 CSS px is the WCAG 2.2 minimum. */
-  out.smallTargets = foc.filter(e => {
+  /* Touch targets: 24x24 CSS px is the WCAG 2.2 minimum.
+
+     THE DIMENSIONS ARE REPORTED, NOT ONLY THE COUNT (GitHub #145). A bare
+     "0 targets under 24x24" cannot distinguish a page with room to spare from
+     one sitting a tenth of a pixel over the floor -- and some of these boxes
+     are derived from their own label, so they move when the face resolves
+     differently. Printing the tightest few is what makes that visible in a
+     diff of two runs instead of only in the run that finally goes red. */
+  const boxed = foc.map(e => {
     const b = e.getBoundingClientRect();
-    return b.width > 0 && (b.width < 24 || b.height < 24);
-  }).length;
+    return { name: accName(e) || '(unlabelled)', tag: e.tagName,
+             w: +b.width.toFixed(2), h: +b.height.toFixed(2),
+             min: +Math.min(b.width, b.height).toFixed(2) };
+  }).filter(t => t.w > 0);
+  boxed.sort((a, b) => a.min - b.min);
+  out.tightest = boxed.slice(0, 6);
+  out.smallTargets = boxed.filter(t => t.min < 24);
 
   return JSON.stringify(out);
 })()
 """
 
 
-async def main():
+# The panel's own state, as the page reports it, and the slider's box. Not a
+# duration: the pop-out is opened by a real click and the audit below is
+# meaningless until it is actually open -- axe cannot see a display:none control
+# and neither can the target-size check, so a click that silently misses would
+# quietly drop the slider out of the gate. #46's shape: the check that passes
+# loudest when the feature is broken.
+PANEL_JS = ("(()=>{const b=document.querySelector('[aria-expanded]');"
+            "if(!b)return 'no toggle';"
+            "if(b.getAttribute('aria-expanded')!=='true')return 'shut';"
+            "const r=[...document.querySelectorAll('input[type=range]')]"
+            ".filter(e=>e.getBoundingClientRect().width>0);"
+            "return r.length?'open':'no slider';})()")
+PANEL_TIMEOUT_S = 10.0
+# WHICH THEME IS ACTUALLY IN FORCE, and this is asserted rather than assumed for
+# the best possible reason (GitHub #145): it was NOT in force, for the whole life
+# of this file. The preferences were written by a JS snippet built from an
+# f-string concatenated with a plain string -- `f"...{{..."  "...}})()"` -- so the
+# `}}` in the second half never collapsed to one brace and every run threw
+# `SyntaxError: Unexpected token '}'` into a value nothing looked at. The theme
+# was never set, the speed was never set, and both passes audited the SAME
+# default theme at 1x. Every "a11y_audit PASS in both themes" in CHANGELOG.md is
+# one theme audited twice.
+#
+# A gate must therefore say what it measured. `data-theme` is the page's own
+# answer, and the speed is read back for the same reason -- CL#114 audits at 5x
+# so the corner departure indicator exists to be audited at all.
+INFORCE_JS = ("(()=>{const h=document.documentElement;return JSON.stringify({"
+              "theme:h.getAttribute('data-theme'),"
+              "speed:(()=>{try{return localStorage.getItem('wozi-speed')}"
+              "catch(e){return 'unreadable'}})(),"
+              "corner:document.querySelectorAll('[aria-expanded]').length});})()")
+
+
+async def main(pin):
     proc = subprocess.Popen(
         [CHROME, "--headless=new", "--window-position=-4000,-4000", f"--remote-debugging-port={PORT}",
          f"--user-data-dir={OUT}/cp-a11y", "--hide-scrollbars", "--no-first-run", *CI_FLAGS, "about:blank"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     ws = None
     for _ in range(60):
-        try:
-            ws = json.load(urllib.request.urlopen(f"http://127.0.0.1:{PORT}/json/new?{URL}", timeout=1))["webSocketDebuggerUrl"]; break
-        except Exception:
+        # about:blank, NOT the page under test. Asking /json/new for the URL makes
+        # the tab navigate before the font interception is armed, so that first
+        # navigation pulls the stylesheet off the network and warms the cache for
+        # every measured one after it -- a pin installed afterwards is decoration.
+        for method in (None, "PUT"):
             try:
-                rq = urllib.request.Request(f"http://127.0.0.1:{PORT}/json/new?{URL}", method="PUT")
-                ws = json.load(urllib.request.urlopen(rq, timeout=1))["webSocketDebuggerUrl"]; break
+                target = f"http://127.0.0.1:{PORT}/json/new?about:blank"
+                rq = urllib.request.Request(target, method=method) if method else target
+                ws = json.load(urllib.request.urlopen(rq, timeout=1))["webSocketDebuggerUrl"]
+                break
             except Exception:
-                time.sleep(0.2)
+                pass
+        if ws:
+            break
+        time.sleep(0.2)
     # FETCH AXE IF IT IS NOT THERE, rather than requiring a node_modules that
     # this repo deliberately does not have. The path used to point into one
     # session's scratchpad, which stops existing when that session ends -- so
@@ -183,47 +285,89 @@ async def main():
     else:
         _use = AXE
     axe_src = open(_use).read()
-    mid = 0
     async with websockets.connect(ws, max_size=8 * 10 ** 7) as c:
-        async def send(m, p=None):
-            nonlocal mid
-            mid += 1; my = mid
-            await c.send(json.dumps({"id": my, "method": m, "params": p or {}}))
-            while True:
-                msg = json.loads(await c.recv())
-                if msg.get("id") == my:
-                    return msg.get("result", {})
+        # send/pump/wait_until come from fontpin, and not for tidiness: a paused
+        # font request arrives UNSOLICITED and must be answered, and the
+        # loop-until-my-id send this file used to carry discarded exactly that
+        # message, so the page would hang on its own stylesheet forever.
+        send, pump, wait_until = fontpin.attach(c, pin)
+
         async def ev(expr, awaited=False):
             r = await send("Runtime.evaluate", {"expression": expr, "returnByValue": True,
                                                 "awaitPromise": awaited})
             return r.get("result", {}).get("value")
 
-        await send("Runtime.enable"); await send("Page.enable")
+        await send("Runtime.enable")
+        # Page.enable FIRST, or the injections below are accepted and silently
+        # never run -- which reads exactly like an injection that does not work.
+        await send("Page.enable")
+        await pin.install(send)
         await send("Emulation.setDeviceMetricsOverride", {"width": 1400, "height": 900, "deviceScaleFactor": 1, "mobile": False})
 
         for theme in ("dark", "light"):
-            await send("Page.navigate", {"url": URL}); await asyncio.sleep(2.0)
-            # speed pinned off 1x (GitHub #108, CL#114): the corner departure
-            # indicator is display:none at 1x, so auditing at the shipped
-            # default would never see it. 5x is a real, non-strobing stop.
-            await ev(f"(()=>{{localStorage.setItem('wozi-theme','{theme}');"
-                     "localStorage.setItem('wozi-speed','5');location.reload();}})()")
-            await asyncio.sleep(3.4)
-            # Open the pop-out menu so the slider is actually visible to axe
-            # and to the MANUAL checks below -- display:none is neither, and
-            # the slider is the ONLY route to the speed control off 1x now.
+            # THE PREFERENCES ARE INJECTED AT DOCUMENT-START, so one navigation
+            # does what a navigate-then-reload used to. The reload was the hazard,
+            # not the wait it needed: after `location.reload()` there are two
+            # documents in flight and a readiness poll can answer for the OUTGOING
+            # one, which is CL#168's bug in devices.py exactly. Nothing to poll
+            # wrongly if nothing reloads.
+            #
+            # Speed is pinned off 1x (GitHub #108, CL#114): the corner departure
+            # indicator is display:none at 1x, so auditing at the shipped default
+            # would never see it. 5x is a real, non-strobing stop.
+            prefs = await send("Page.addScriptToEvaluateOnNewDocument", {
+                "source": "try{localStorage.setItem('wozi-theme','%s');"
+                          "localStorage.setItem('wozi-speed','5')}catch(e){}" % theme})
+            await send("Page.navigate", {"url": URL})
+            # CONDITIONS, not the retired 2.0s + 3.4s. Those were tuned to a
+            # network the font is no longer on, and a sleep in the render path
+            # holds the stylesheet for its whole duration and lets it land
+            # afterwards -- the late-font regime itself.
+            await fontpin.wait_ready(send, pump, wait_until, what=f"{theme}: the page")
+            # Open the pop-out menu so the slider is actually visible to axe and
+            # to the MANUAL checks below -- display:none is neither, and the
+            # slider is the ONLY route to the speed control off 1x now.
             await ev("(()=>{const b=document.querySelector('[aria-expanded]'); "
                      "if (b) b.click();})()")
-            await asyncio.sleep(0.3)
-            await ev(axe_src)
-            res = await ev("axe.run(document,{resultTypes:['violations']}).then(r=>JSON.stringify("
-                           "r.violations.map(v=>({id:v.id,impact:v.impact,help:v.help,n:v.nodes.length}))))", True)
-            v = json.loads(res)
+            await wait_until(PANEL_JS, "open", PANEL_TIMEOUT_S,
+                             f"{theme}: the pop-out panel never opened")
+            # Each theme is a fresh document, so the injection must not stack:
+            # left in place, the light pass would still be told 'dark' by the
+            # script the dark pass added.
+            await send("Page.removeScriptToEvaluateOnNewDocument",
+                       {"identifier": prefs["identifier"]})
+            inforce = json.loads(await ev(INFORCE_JS))
             print(f"\n=== axe-core, {theme} theme ===")
+            print(f"   in force: data-theme={inforce['theme']!r}, "
+                  f"wozi-speed={inforce['speed']!r}, panel open")
+            if inforce["theme"] != theme:
+                _FAILURES.append(
+                    f"asked for the {theme} theme and the page reports "
+                    f"{inforce['theme']!r} — this pass audited the wrong theme, so "
+                    f"its findings are about the other one")
+            if inforce["speed"] != "5":
+                _FAILURES.append(
+                    f"asked for 5x and the page reports wozi-speed="
+                    f"{inforce['speed']!r} — the corner departure indicator is "
+                    f"display:none at 1x, so it was not audited (GitHub #108)")
+            await ev(axe_src)
+            # THE NODES COME BACK WITH THE COUNT. A finding stated as
+            # "color-contrast x3" is a fact nobody can act on: which three, and
+            # by how much? axe already knows -- it is the `any` check's own
+            # message, carrying the two colours and the ratio it wanted.
+            res = await ev("axe.run(document,{resultTypes:['violations']}).then(r=>JSON.stringify("
+                           "r.violations.map(v=>({id:v.id,impact:v.impact,help:v.help,"
+                           "n:v.nodes.length,nodes:v.nodes.slice(0,6).map(nd=>({"
+                           "t:(nd.target||[]).join(' '),"
+                           "why:((nd.any||[])[0]||{}).message||nd.failureSummary||''}))}))))", True)
+            v = json.loads(res)
             if not v:
                 print("   no violations")
             for x in sorted(v, key=lambda z: ["critical","serious","moderate","minor"].index(z["impact"] or "minor")):
                 print(f"   [{(x['impact'] or '?').upper():<8}] {x['id']:<28} x{x['n']}  {x['help']}")
+                for nd in x.get("nodes", []):
+                    print(f"       {nd['t']}")
+                    print(f"         {' '.join(nd['why'].split())[:150]}")
                 # WHAT ACTUALLY FAILS THIS GATE. Only critical and serious, so
                 # the check has teeth without turning red over a moderate hint
                 # nobody has agreed to act on -- a gate that fails on an open
@@ -244,7 +388,18 @@ async def main():
                 print(f"   SVG elements             : {m['svgTotal']}  (hidden from a11y tree: {m['svgHidden']})")
                 print(f"   SVG <text> nodes         : {m['svgTextNodes']}  (hidden: {m['svgTextHidden']})")
                 print(f"     sample announced       : {m['svgTextSample']}")
-                print(f"   targets under 24x24px    : {m['smallTargets']}")
+                print(f"   targets under 24x24px    : {len(m['smallTargets'])}")
+                # THE MARGIN, NOT ONLY THE VERDICT (GitHub #145). The floor is
+                # 24x24 and "0 under it" says nothing about whether the tightest
+                # target clears it by 20px or by 0.2 -- and these boxes are the
+                # ones that could in principle be set by their own label, which
+                # is what made this harness worth measuring for the font race.
+                for t in m.get("tightest", []):
+                    print(f"     {t['min']:>7.2f}px min  {t['w']}x{t['h']}  "
+                          f"{t['tag'].lower()}  {t['name'][:38]}")
+                for t in m["smallTargets"]:
+                    print(f"   UNDER THE FLOOR          : {t['w']}x{t['h']}px  "
+                          f"{t['tag'].lower()}  {t['name'][:38]}")
                 # THE BOX MEASURED IS NOT THE THUMB DRAWN (GitHub #108). A
                 # range input's own bounding box -- what the 24x24 check above
                 # actually measures -- is not the same rectangle as its
@@ -259,7 +414,11 @@ async def main():
                 # upper bound worth asserting on a hit target, so this one floor
                 # is the whole check.
                 if m["smallTargets"]:
-                    _FAILURES.append(f"{m['smallTargets']} interactive target(s) under 24x24px (WCAG 2.5.8)")
+                    _FAILURES.append(
+                        f"{len(m['smallTargets'])} interactive target(s) under "
+                        f"24x24px (WCAG 2.5.8): "
+                        + ", ".join(f"{t['name']} {t['w']}x{t['h']}"
+                                    for t in m["smallTargets"][:6]))
                 if not m["lang"]:
                     _FAILURES.append("no lang attribute on <html>")
                 if not m["main"]:
@@ -270,7 +429,15 @@ async def main():
                     _FAILURES.append(
                         f'{n} focusables share the accessible name "{name}" and do not '
                         f"share a destination (WCAG 2.4.4/4.1.2)")
+            # AFTER everything measured in this theme, never before: the probe
+            # appends and removes a span, and a state read before the page was
+            # measured says nothing about the render that was.
+            await pin.state(send, label=f"{theme} theme")
     proc.kill()
+    # The typography every render drew in, verified rather than assumed. A leak
+    # means nothing above is a statement about the page.
+    if not pin.report():
+        _FAILURES.append("the font pin leaked — see the MISMATCH line above")
     # AN EXIT CODE, so this is a gate rather than a printout (#47). It ended at
     # asyncio.run(main()) with main() returning None, so it exited 0 whatever it
     # found -- and every "axe clean, gate green" in the merge log was a report
@@ -278,7 +445,17 @@ async def main():
     return 1 if _FAILURES else 0
 
 if __name__ == "__main__":
-    _code = asyncio.run(main())
+    # THE FONT DECISION IS TAKEN BEFORE CHROME EXISTS, and that ordering is the
+    # whole mechanism -- a pin built after the first navigation is decoration. The
+    # stylesheet URL comes off the SERVED page rather than this repo's
+    # index.html, because this harness is pointed at a server somebody else
+    # started and it may be serving another worktree entirely.
+    _pin = fontpin.FontPin.decide(want=_ARGS.fonts, url=URL)
+    _fatal = _pin.announce()
+    if _fatal:
+        print(_fatal)
+        sys.exit(2)
+    _code = asyncio.run(main(_pin))
     if _FAILURES:
         print("\nRESULT: FAIL")
         for f in _FAILURES:

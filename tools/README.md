@@ -13,7 +13,11 @@ CDP; `pip` needs websockets, and Pillow/numpy for the image-analysis ones).
 - verify_motion.py <url>   THE gate: 18/18 transforms advance, badges centred,
                            no console errors. Counts only deg-suffixed
                            rotations (static rotate(120) planet seats are
-                           placement, not animation).
+                           placement, not animation). Pins the webfont, and
+                           NOT for a type measurement — "no console errors" is
+                           an assertion about the network while the font is on
+                           it, and an unreachable fonts.googleapis.com turned
+                           this gate red on an unchanged page (GitHub #145).
 - dom_invariants.py <url>  four structural assertions about the RENDERED DOM,
                            with no image at all: every wheel meshes with
                            something, every blank draws the tooth count its own
@@ -22,9 +26,10 @@ CDP; `pip` needs websockets, and Pillow/numpy for the image-analysis ones).
                            wheel's colour. Seeds the deal. Takes --query
                            '?who=charles' for the single-chain path; --census
                            prints every measurement rather than the verdict.
-- fontpin.py               NOT a harness — the shared mechanism the four gates
+- fontpin.py               NOT a harness — the shared mechanism the six gates
                            import (pixel_regress, pill_clip, devices,
-                           dom_invariants). Takes Manrope off the network:
+                           dom_invariants, verify_motion, a11y_audit). Takes
+                           Manrope off the network:
                            prefetches the CSS and every face into the process
                            BEFORE Chrome starts, fulfils every font-host request
                            from memory over CDP `Fetch`, and VERIFIES with a width
@@ -41,9 +46,21 @@ CDP; `pip` needs websockets, and Pillow/numpy for the image-analysis ones).
                            is what replaces `asyncio.sleep` so a wait answers
                            them instead of sleeping through them. GitHub #140;
                            the fault it removes cost a red deploy (CL#159).
+                           **escape_mesh.py is deliberately NOT on that list**:
+                           its exposure was measured at exactly zero (a full
+                           --census run byte-identical with both font hosts
+                           blackholed), so it is documented as immune rather
+                           than pinned for symmetry.
 - a11y_audit.py <url>      axe-core injected over CDP + the structural checks
                            axe cannot make (focus rules, reduced-motion, SVG
-                           exposure, target sizes).
+                           exposure, target sizes). Reports the tightest hit
+                           boxes, not only "0 under 24x24", and now states which
+                           theme and speed were actually IN FORCE per pass —
+                           they never were: a `}}` that never collapsed made
+                           every preference-setting snippet throw SyntaxError,
+                           so both passes audited the same default theme at 1x
+                           and every "PASS in both themes" in CHANGELOG.md is
+                           one theme audited twice (GitHub #145).
 - strip_comments.py        NOT a harness — the one thing in here that BUILDS
                            what ships. Cuts the commentary out of an HTML page
                            for delivery (603KB -> 189KB on index.html) and

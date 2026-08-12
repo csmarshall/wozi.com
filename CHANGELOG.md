@@ -289,6 +289,74 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#171 — `a11y_audit` had never audited the light theme, and fixing it turned up
+  five real contrast failures.** (GitHub #145, closes it.)
+
+  #145 asked whether `a11y_audit`, `verify_motion` and `escape_mesh` carried the
+  unpinned-webfont exposure CL#162/#168 fixed elsewhere. The answer per harness was
+  measured before anything changed, and the honest split is three different answers —
+  but the font question turned out to be the least of it.
+
+  **`a11y_audit.py` has never audited the light theme.** Its preference-injection
+  snippet was an f-string concatenated with a plain string, so the `}}` escape did
+  not apply in the non-f half, the injected JS carried a stray brace, and it threw
+  `SyntaxError` into a return value nothing inspected. Measured: the old flow reports
+  `data-theme='dark'` and `wozi-speed=null` in **both** passes. So **every
+  "a11y_audit PASS in both themes" in this changelog is one theme audited twice**,
+  and CL#114's stated reason for pinning speed off 1x — auditing the corner departure
+  indicator — never happened. The gate now asserts what it actually audited, per
+  pass, so it cannot recur silently.
+
+  **With that fixed it is RED, on five pre-existing `serious` contrast failures**,
+  light theme only, all in the pop-out control surface: both section headings and
+  both slider readouts at **4.28:1** on `--muted` `#6b7e7c`, and the selected row's
+  label at **4.42:1**, against a 4.5:1 threshold. Filed as **#151**.
+
+  **Two of those five are a regression from CL#169, one commit earlier**, and the
+  mechanism is worth recording because no colour changed: CL#169 dropped the Speed
+  and Wear readouts from `var(--icon)` 20px to `LIST_ROW_FONT_BOLD` 13px. At 20px
+  bold they were WCAG **large text** with a 3:1 threshold, which 4.28 cleared; at
+  13px bold they are normal text at 4.5:1, which it does not. The size change moved
+  the threshold, not the ink. CL#169's compaction was measured carefully for height
+  and for hit-box overlap and nobody thought to ask whether shrinking type crossed a
+  contrast boundary — and the gate that would have said so had never run in light.
+
+  **`verify_motion.py` was exposed, and it is the one assertion flip found
+  anywhere** — not through type (rotations 40/40, badge offsets 0.00-0.01px,
+  identical in both regimes) but through check 3, *"no console errors"*: unreachable
+  fonts produce three `ERR_CONNECTION_REFUSED` lines, so **a Google Fonts outage or
+  a runner without egress turned a gate CI runs on every push red for something that
+  is not the code**. Now demonstrated fixed: with both the prefetch and Chrome's
+  resolver blackholed it announces `fonts: BLOCKED`, tolerates exactly the font-host
+  lines, and passes — while in `pinned` mode those same lines still mean the pin
+  leaked.
+
+  **`a11y_audit`'s own font exposure is zero in its assertions**, measured across 12
+  deals: every hit box identical to 0.01px, the tightest box 24.00x24.00 in both
+  regimes. The one number that moves is a Table of Gears row's **width** (268.63 vs
+  270.52px) and nothing asserts a width — the row's *height*, which the 24x24 floor
+  would bite on, does not move. Pinned anyway as insurance, the `devices.py` verdict.
+
+  **`escape_mesh.py` is immune and was NOT changed except to say so.** A full
+  `--census` across 4 seeds x 2 viewports is byte-identical between regimes — 148
+  lines, every ghost and residual to the last digit — because it measures only radii
+  and centres and never enables the `Log` domain, so the stylesheet's failure is
+  invisible to it. Documented rather than pinned for symmetry.
+
+  Two further harness bugs, both of the CL#168 class: **both harnesses asked
+  `/json/new?<URL>`**, so the tab navigated *before* interception was armed and that
+  first fetch warmed the font cache for every measured render — they now open
+  `about:blank`; and `verify_motion` held an `asyncio.sleep` in the render path,
+  which holds the stylesheet for its duration and lets it land afterwards, i.e.
+  manufactures the regime it was hiding. Its 3.5s settle is now a condition at
+  ~0.10s.
+
+  `npm test` 120/0. `verify_motion` PASS x10 plus PASS under a simulated total font
+  outage (exit 1 before). `escape_mesh` PASS x3. `pill_clip`, `dom_invariants`,
+  `devices`, `pixel_regress` all verified undisturbed. `mutation_gate` 13/13 caught,
+  1/1 tolerated, 5/5 controls green. `a11y_audit` FAIL x4 **identically** — a side
+  benefit of the pin.
+
 - **CL#170 — `hexcore`'s cell-size search is memoised, and the estimate it was
   approved on was wrong.** (GitHub #135, plan B.)
 
