@@ -45,7 +45,29 @@ injection: without it the injection is accepted and silently never runs.
 Determinism lives in the harness and never in index.html -- the shipped page
 carries no test hooks.
 
-Exit 0 if every check passes, 1 if any fails, 2 if it could not measure at all.
+THE WEBFONT IS PINNED TOO, AND THIS HARNESS IS THE LEAST EXPOSED OF THE FOUR --
+WHICH IS WHY IT IS WORTH SAYING WHAT PINNING BUYS HERE (GitHub #140). The page's
+drawing depends on WHEN Manrope arrives relative to its own first render
+(index.html clears its textWidth memo on document.fonts.ready, #98), and that
+time comes off a third party's network. Measured on this machine, same seed, with
+the font reachable and then with both font hosts blackholed:
+
+    mesh residual        0.0008px of 0.35px  -- IDENTICAL
+    tooth census         exact to 0.0000     -- IDENTICAL
+    ink census           56 inks, same bounds -- IDENTICAL
+    shortest engraving   21.7px  ->  23.5px  -- MOVED, by 8%
+
+So none of the four ASSERTIONS is font-sensitive: check 3 asserts a computed text
+length greater than zero, and every face clears that. What moved is a REPORTED
+number, and that is still worth pinning rather than shrugging at -- a human
+diffing two runs of this tool on the same seed would see the engraving line
+change with nothing in the tree changed, and would have no way to tell that from
+a real regression. The state is asserted after the measurement (a width probe;
+document.fonts cannot answer it -- see tools/fontpin.py), so the number printed
+below is now a number about the page.
+
+Exit 0 if every check passes, 1 if any fails, 2 if it could not measure at all --
+including a run whose typography was not the one it chose.
 """
 
 import argparse
@@ -62,6 +84,9 @@ import time
 import urllib.request
 
 import websockets
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import fontpin
 
 # CI runs on Linux, where Chrome is not in /Applications. Honour $CHROME, then
 # fall back to whatever is on PATH, then to the macOS bundle.
@@ -431,8 +456,52 @@ def hue_gap(a, b):
     return min(d, 360 - d)
 
 
-async def sample(url, seed, viewport, theme):
-    """One navigation, one evaluate. Returns (payload, console errors)."""
+# The digest the settle below compares: how many wheels are on the stage, the fit
+# scale every measurement is divided by, and where each hub badge sits. Badge
+# centres are wheel centres, so they move when the solve moves and hold still
+# while the train turns -- which is exactly the difference this needs to see. Kept
+# to one string so the comparison is an equality and not a set of tolerances.
+GEOMETRY_JS = (
+    "(()=>{const n=document.querySelectorAll('svg').length;"
+    "const f=getComputedStyle(document.documentElement).getPropertyValue('--gsfit');"
+    "const b=[...document.querySelectorAll('a[href][aria-label]')].map(a=>{"
+    "const r=a.getBoundingClientRect();"
+    "return Math.round(r.left)+','+Math.round(r.top);}).join(' ');"
+    "return n+'|'+f.trim()+'|'+b;})()")
+# How long the stage may go on moving after the page reports itself loaded.
+# Reaching it is a hard failure and not a fallback: this file asserts exact tooth
+# counts and sub-pixel mesh residuals, and a half-solved stage fails them for a
+# reason that has nothing to do with the code.
+GEOMETRY_TIMEOUT_S = 15.0
+
+
+async def settle_geometry(send, pump, timeout=GEOMETRY_TIMEOUT_S):
+    """Wait until two consecutive reads of GEOMETRY_JS agree. Returns how long it
+    took, in seconds, so the caller can report a page that was slow rather than
+    only one that never arrived."""
+    t0 = time.monotonic()
+    prev = None
+    while time.monotonic() - t0 < timeout:
+        r = await send("Runtime.evaluate", {"expression": GEOMETRY_JS,
+                                           "returnByValue": True})
+        now = r.get("result", {}).get("value")
+        if now and now == prev:
+            return time.monotonic() - t0
+        prev = now
+        await pump(0.1)
+    raise SystemExit(
+        f"FATAL: the stage never stopped moving — two reads of its geometry still "
+        f"disagree after {timeout}s. Nothing has been measured, so nothing has "
+        f"been proved.")
+
+
+async def sample(url, seed, viewport, theme, pin):
+    """One navigation, one evaluate. Returns (payload, console errors).
+
+    `pin` is the font state chosen once, before this function is called and before
+    any browser exists -- see tools/fontpin.py. It is enforced on every request to
+    a font host and verified by a width probe once the page has been measured.
+    """
     port = int(os.environ.get("CDP_PORT") or 0) or free_port()
     profile = os.environ.get("CHROME_PROFILE") or tempfile.mkdtemp(prefix="wozi-dom-")
     proc = subprocess.Popen(
@@ -460,26 +529,30 @@ async def sample(url, seed, viewport, theme):
         return None, ["could not reach Chrome DevTools endpoint"]
 
     errors = []
-    mid = 0
     try:
         async with websockets.connect(ws_url, max_size=10 ** 8) as ws:
-            async def send(method, params=None):
-                nonlocal mid
-                mid += 1
-                my = mid
-                await ws.send(json.dumps({"id": my, "method": method, "params": params or {}}))
-                while True:
-                    msg = json.loads(await ws.recv())
-                    if msg.get("method") == "Runtime.exceptionThrown":
-                        det = msg["params"]["exceptionDetails"]
-                        errors.append("exception: " + str(det.get("text", ""))[:160])
-                    elif msg.get("method") == "Runtime.consoleAPICalled":
-                        if msg["params"]["type"] in ("error", "assert"):
-                            args = [str(a.get("value", a.get("description", "")))
-                                    for a in msg["params"]["args"]]
-                            errors.append("console.error: " + " ".join(args)[:160])
-                    if msg.get("id") == my:
-                        return msg.get("result", {})
+            def watch(msg):
+                """Console errors and exceptions, collected off every message
+                rather than only the ones that happen to arrive while a reply is
+                pending. This used to live inside `send`'s own recv loop; it is a
+                callback now because fontpin.attach owns the socket, and it has to
+                go on seeing everything -- the overlap and refused-bridge warnings
+                this file reports are console output and nothing else can see
+                them."""
+                if msg.get("method") == "Runtime.exceptionThrown":
+                    det = msg["params"]["exceptionDetails"]
+                    errors.append("exception: " + str(det.get("text", ""))[:160])
+                elif msg.get("method") == "Runtime.consoleAPICalled":
+                    if msg["params"]["type"] in ("error", "assert"):
+                        args = [str(a.get("value", a.get("description", "")))
+                                for a in msg["params"]["args"]]
+                        errors.append("console.error: " + " ".join(args)[:160])
+
+            # send/pump/wait_until come from fontpin: a paused font request arrives
+            # unsolicited and MUST be answered or the page hangs on its stylesheet,
+            # and `pump` is what makes a wait answer them instead of sleeping
+            # through them.
+            send, pump, wait_until = fontpin.attach(ws, pin, on_message=watch)
 
             # Page.enable FIRST. Without it the injection below is accepted and
             # silently never runs, which reads exactly like a seed that does not
@@ -489,15 +562,28 @@ async def sample(url, seed, viewport, theme):
             await send("Page.addScriptToEvaluateOnNewDocument", {"source": SEED_JS})
             await send("Page.addScriptToEvaluateOnNewDocument",
                        {"source": "try{localStorage.setItem('wozi-theme','%s')}catch(e){}" % theme})
+            await pin.install(send)
             await send("Emulation.setDeviceMetricsOverride",
                        {"width": viewport[0], "height": viewport[1],
                         "deviceScaleFactor": 1, "mobile": False})
             sep = "&" if "?" in url else "?"
             await send("Page.navigate", {"url": f"{url}{sep}seed={seed}"})
-            await asyncio.sleep(4.0)   # load, fonts, icon fetch, fit settle
+            # A CONDITION, NOT THE OLD FIXED 4.0s. That sleep was three things at
+            # once -- load, the font coming off the network, and the fit settling --
+            # and only one of them is still a duration at all now the font is
+            # served from memory. So: wait for load and fonts.ready, then wait for
+            # the geometry to stop moving, and measure only then. On a settled page
+            # this is far quicker than 4s; on a slow one it waits longer than 4s
+            # instead of measuring a half-solved stage and asserting exact tooth
+            # counts against it.
+            await fontpin.wait_ready(send, pump, wait_until, what="the page")
+            await settle_geometry(send, pump)
             res = await send("Runtime.evaluate",
                              {"expression": SAMPLE_JS, "returnByValue": True})
             raw = res.get("result", {}).get("value")
+            # AFTER the measurement, never before: the probe appends and removes a
+            # span, and a DOM this file has not yet read is not one to mutate.
+            await pin.state(send, label="the sample")
     finally:
         proc.kill()
         if not os.environ.get("CHROME_PROFILE"):
@@ -772,6 +858,11 @@ def main():
     ap.add_argument("--theme", default="dark", choices=["dark", "light"])
     ap.add_argument("--census", action="store_true",
                     help="print every measurement, not just the verdict")
+    ap.add_argument("--fonts", default="auto", choices=["auto", "pinned", "blocked"],
+                    help="auto: serve the webfont from prefetched bytes, degrading "
+                         "loudly to blocked if it cannot be fetched. pinned: require "
+                         "it, exit 2 if unobtainable. blocked: never fetch it — the "
+                         "engraving lengths reported are then fallback metrics.")
     a = ap.parse_args()
 
     # Appended to a bare directory URL, a query with no '?' becomes a PATH:
@@ -787,10 +878,26 @@ def main():
         print(f"FATAL: --viewport must be WxH (got {a.viewport!r})")
         return 2
 
+    # The font state is decided ONCE, here, before any browser exists -- a pin
+    # armed after the first navigation is decoration. The stylesheet URL is read
+    # off the SERVED page rather than this repo's index.html, because this harness
+    # is pointed at a server somebody else started and it may be serving a
+    # different worktree entirely.
+    pin = fontpin.FontPin.decide(want=a.fonts, url=a.url)
+    fatal = pin.announce()
+    if fatal:
+        print(fatal)
+        return 2
+
     t0 = time.time()
-    payload, errors = asyncio.run(sample(a.url + a.query, a.seed, (vw, vh), a.theme))
+    payload, errors = asyncio.run(sample(a.url + a.query, a.seed, (vw, vh), a.theme, pin))
     if payload is None:
         print("FATAL: " + "; ".join(errors))
+        return 2
+    # Verified, not assumed, and BEFORE any verdict is printed: a render that did
+    # not draw in the state this run chose means the pin leaked, and the numbers
+    # below are then about a typography nobody chose.
+    if not pin.report():
         return 2
 
     wheels, badges, S = payload["wheels"], payload["badges"], payload["S"]

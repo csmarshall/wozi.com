@@ -13,10 +13,26 @@ DevTools device toolbar does. It is NOT an iOS simulator, so it does not catch
 WebKit-specific behaviour. There are no iOS runtimes or Android SDK installed on
 this machine; if you want true Safari coverage that needs Xcode simulators.
 
-Usage: tools/devices.py [url]
-Exit 0 only if every device passes in both orientations.
+THE WEBFONT IS PINNED, AND THIS FILE HAS 28 CHANCES A RUN TO BE BITTEN BY IT
+(GitHub #140). The page's drawing depends on WHEN Manrope arrives relative to its
+own first render -- index.html clears its textWidth memo on document.fonts.ready
+(#98) -- and that arrival comes off a third party's network. 24 device profiles
+plus four safe-area profiles is 28 independent races per run, each with its own
+chance of landing on the wrong side of it, and what this file measures is
+ELEMENT BOXES: the fixed controls carry text, so their boxes move when the face
+does. There is a second reason particular to this harness, too, and it is worse:
+it OVERRIDES THE USER-AGENT per profile, and Google Fonts serves different CSS to
+different engines -- so an unpinned run could legitimately draw 24 profiles under
+more than one set of face metrics. Every request to a font host is now fulfilled
+from bytes prefetched into this process before Chrome starts, and the state is
+verified by a width probe after every profile. See tools/fontpin.py.
+
+Usage: tools/devices.py [url] [--fonts auto|pinned|blocked]
+Exit 0 only if every device passes in both orientations; 2 if the typography this
+run measured was not the one it chose.
 """
 
+import argparse
 import asyncio
 import json
 import re
@@ -40,7 +56,20 @@ CHROME = (_os.environ.get("CHROME")
 # without these. Only added off macOS, where they are unnecessary.
 CI_FLAGS = ([] if _sys_platform_is_darwin() else
             ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"])
-URL = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8765/"
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import fontpin
+
+_ap = argparse.ArgumentParser(description="does the train run along the long side")
+# POSITIONAL, because CI and tools/mutation_gate.py both append the served URL to
+# this argv and neither should have to learn a flag for it.
+_ap.add_argument("url", nargs="?", default="http://127.0.0.1:8765/")
+_ap.add_argument("--fonts", default="auto", choices=["auto", "pinned", "blocked"],
+                 help="auto: serve the webfont from prefetched bytes, degrading "
+                      "loudly to blocked if it cannot be fetched. pinned: require "
+                      "it, exit 2 if unobtainable. blocked: never fetch it — every "
+                      "text-sized box measured is then a fallback metric.")
+_ARGS = _ap.parse_args()
+URL = _ARGS.url
 # THE PORT IS NOT FIXED (#42). Every harness here used a hardcoded DevTools
 # port, so two running at once fought over it and the loser reported a
 # ConnectionClosedError -- which reads as a page fault, not a harness fault, and
@@ -286,6 +315,16 @@ MEASURE = r"""
 
 
 async def main():
+    # DECIDED ONCE, BEFORE CHROME EXISTS. 28 profiles under one font state, rather
+    # than 28 independent races. The stylesheet URL is read off the SERVED page,
+    # not this repo's index.html, because this harness is pointed at a server
+    # somebody else started and it may be serving another worktree.
+    pin = fontpin.FontPin.decide(want=_ARGS.fonts, url=URL)
+    fatal = pin.announce()
+    if fatal:
+        print(fatal)
+        return 2
+
     proc = subprocess.Popen(
         [CHROME, "--headless=new", "--window-position=-4000,-4000", f"--remote-debugging-port={PORT}",
          f"--user-data-dir={PROFILE}", "--no-first-run", *CI_FLAGS,
@@ -316,17 +355,14 @@ async def main():
           f"{'gear':>7}  verdict")
     bad = 0
     sbad = 0
-    mid = 0
     async with websockets.connect(ws_url, max_size=40 * 1024 * 1024) as ws:
-        async def send(method, params=None):
-            nonlocal mid
-            mid += 1
-            my = mid
-            await ws.send(json.dumps({"id": my, "method": method, "params": params or {}}))
-            while True:
-                msg = json.loads(await ws.recv())
-                if msg.get("id") == my:
-                    return msg.get("result", {})
+        # send/pump/wait_until come from fontpin, and `pump` is not a cosmetic
+        # replacement for asyncio.sleep: a paused font request arrives unsolicited,
+        # the loop-until-my-id send this file used to carry threw it away, and a
+        # stylesheet nobody answers hangs the profile. Worse than a hang, a plain
+        # sleep would hold the font for the whole sleep and let it land afterwards
+        # -- the late-font regime the pin exists to remove.
+        send, pump, wait_until = fontpin.attach(ws, pin)
 
         # SETTLE-POLL, NOT A FIXED SLEEP. Chasing #2, some FAILs at large widths
         # looked at first like an artifact of running ~30 navigations back to back
@@ -353,7 +389,7 @@ async def main():
                 if prev is not None and all(abs(m[k] - prev[k]) <= tol for k in keys):
                     return m
                 prev = m
-                await asyncio.sleep(poll)
+                await pump(poll)
                 waited += poll
             return last  # never settled inside the budget -- report the last read anyway
 
@@ -390,6 +426,7 @@ async def main():
             Math.random = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
           })();
         """})
+        await pin.install(send)
         seed = 20260804
         for label, pw, ph, dpr, ua, pchrome, lchrome in DEVICES:
             for orient in ("portrait", "landscape"):
@@ -405,8 +442,19 @@ async def main():
                 await send("Emulation.setTouchEmulationEnabled", {"enabled": True, "maxTouchPoints": 5})
                 await send("Page.navigate", {"url": URL + ("&" if "?" in URL else "?")
                                              + f"d={w}x{h}&seed={seed}"})
-                await asyncio.sleep(2.3)
+                # A CONDITION, then the geometry settle that was always here. The
+                # retired 2.3s was covering load, the font's trip across the
+                # network, and the fit -- and with the font served from memory only
+                # the last of those is still a duration at all. measure_settled
+                # below is the stronger half and is untouched; this replaces the
+                # guess in front of it.
+                await fontpin.wait_ready(send, pump, wait_until,
+                                         what=f"{label} {orient}")
                 m = await measure_settled(MEASURE)
+                # WHICH FACE THIS PROFILE ACTUALLY DREW IN, read after the geometry
+                # has settled and recorded per profile -- so a leak on one row of 28
+                # is named rather than averaged into a green verdict.
+                await pin.state(send, label=f"{label} {orient}")
                 if "error" in m:
                     print(f"{label:22} {orient:10} {w}x{h:<7} {m['error']}")
                     bad += 1
@@ -552,20 +600,34 @@ async def main():
                                       "angle": 0 if orient == "portrait" else 90}})
             await send("Emulation.setTouchEmulationEnabled", {"enabled": True, "maxTouchPoints": 5})
             await send("Page.navigate", {"url": URL + ("&" if "?" in URL else "?") + f"s={w}x{h}"})
-            await asyncio.sleep(2.3)
+            await fontpin.wait_ready(send, pump, wait_until,
+                                     what=f"{label} {orient} (safe area)")
             # PIN SPEED OFF 1x AND OPEN THE MENU (GitHub #108, CL#114) before
             # measuring. The corner departure indicator is display:none at 1x
             # -- the shipped default -- so measuring at that default would
             # never see it; and the slider is inside the pop-out panel, also
             # display:none until opened. Both are new fixed controls this
             # pass exists to check, so both have to actually be on screen.
+            # THE RELOAD IS ISSUED FROM INSIDE THE PAGE, so there is no navigation
+            # id to wait on and the load condition alone is not enough: the OLD
+            # document is also complete with fonts.ready settled, so a poll that
+            # lands before the reload commits reads 'ready' about the document
+            # being thrown away and measures a page still at 1x. A marker set on
+            # the doomed document is the discriminator -- the injected scripts run
+            # on the NEW one, which cannot carry it -- so this waits for the old
+            # document to be GONE and the new one to be ready, rather than for a
+            # guessed number of milliseconds.
+            await send("Runtime.evaluate", {"expression": "window.__preReload=1"})
             await send("Runtime.evaluate", {"expression":
                 "(()=>{try{localStorage.setItem('wozi-speed','5')}catch(e){}"
                 "location.reload();})()"})
-            await asyncio.sleep(2.3)
+            await wait_until("(()=>{if(window.__preReload)return 'reload pending';"
+                             f"return {fontpin.READY_JS};}})()",
+                             "ready", 25.0,
+                             f"{label} {orient} (safe area) never reloaded")
             await send("Runtime.evaluate", {"expression":
                 "(()=>{const b=document.querySelector('[aria-expanded]'); if(b) b.click();})()"})
-            await asyncio.sleep(0.3)
+            await pump(0.3)
             res = await send("Runtime.evaluate", {
                 "expression": SAFE_MEASURE % {"t": t, "r": r_, "b": b, "l": l},
                 "returnByValue": True})
@@ -597,6 +659,7 @@ async def main():
                 why.append("assembly no longer reaches the physical edges")
             if why:
                 sbad += 1
+            await pin.state(send, label=f"{label} {orient} (safe area)")
             print(f"{label:22} {orient:10} {f'{t}/{r_}/{b}/{l}':16} "
                   f"{worst:7.0f}px   {'ok' if not why else 'FAIL: ' + ', '.join(why)}")
 
@@ -605,6 +668,12 @@ async def main():
           " — assembly must reach BOTH edges of the long side, links centred.")
     print(f"{len(SAFE_DEVICES) - sbad}/{len(SAFE_DEVICES)} passed"
           " — fixed controls clear injected safe-area insets, gears ignore them.")
+    # VERIFIED, NOT ASSUMED, and it outranks the verdict: 28 profiles measured
+    # under a typography this run did not choose have not been measured at all,
+    # whatever they scored. Exit 2, not 1 -- that is "could not measure", not
+    # "measured and failed".
+    if not pin.report():
+        return 2
     return 0 if bad == 0 and sbad == 0 else 1
 
 

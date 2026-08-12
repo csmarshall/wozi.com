@@ -22,6 +22,25 @@ CDP; `pip` needs websockets, and Pillow/numpy for the image-analysis ones).
                            wheel's colour. Seeds the deal. Takes --query
                            '?who=charles' for the single-chain path; --census
                            prints every measurement rather than the verdict.
+- fontpin.py               NOT a harness — the shared mechanism the four gates
+                           import (pixel_regress, pill_clip, devices,
+                           dom_invariants). Takes Manrope off the network:
+                           prefetches the CSS and every face into the process
+                           BEFORE Chrome starts, fulfils every font-host request
+                           from memory over CDP `Fetch`, and VERIFIES with a width
+                           probe after each render that the face really painted --
+                           `document.fonts.status` and `.check()` both answer
+                           "yes" with the stylesheet blocked, so neither can be
+                           the detector. One state per run (`--fonts
+                           auto|pinned|blocked`), degrading loudly rather than
+                           failing on a Google Fonts outage; a page with no
+                           webfont at all, like /fidget/, is reported as such and
+                           not failed for it. Also carries the dispatching CDP
+                           session every caller now uses -- a paused font request
+                           arrives unsolicited and MUST be answered, and `pump()`
+                           is what replaces `asyncio.sleep` so a wait answers
+                           them instead of sleeping through them. GitHub #140;
+                           the fault it removes cost a red deploy (CL#159).
 - a11y_audit.py <url>      axe-core injected over CDP + the structural checks
                            axe cannot make (focus rules, reduced-motion, SVG
                            exposure, target sizes).

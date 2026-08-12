@@ -139,17 +139,18 @@ import asyncio
 import base64
 import json
 import os
-import random
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
-import urllib.parse
 import urllib.request
 
 import websockets
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import fontpin
 
 CHROME = (os.environ.get("CHROME")
           or shutil.which("google-chrome") or shutil.which("chromium-browser")
@@ -212,10 +213,14 @@ DETERMINISTIC_FLAGS = [] if os.environ.get("WOZI_PX_NO_DET_FLAGS") else [
 ]
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# The two hosts index.html reaches for Manrope. Named once; the interception
-# patterns, the prefetch scan and the operator-facing messages all read them
-# from here, so adding a third provider is one line and not four.
-FONT_HOSTS = ("fonts.googleapis.com", "fonts.gstatic.com")
+# THE FONT MECHANISM LIVES IN tools/fontpin.py NOW (GitHub #140), because three
+# other harnesses needed it and three copies of it would have been three chances
+# to fix two of them. What was here -- the host list, the Chrome-UA prefetch, the
+# Fetch interception, the width probe, the coin-flip delay knob -- is that module,
+# lifted unchanged in behaviour. What stays here is what is particular to a PIXEL
+# comparison: the settle in PNG bytes, the per-tree agreement control, and the
+# fact that both trees are held to one state decided before either is served.
+FONT_HOSTS = fontpin.FONT_HOSTS
 
 # THE SETTLE IS MEASURED IN PIXELS, WHICH IS THIS GATE'S OWN CURRENCY, and that
 # is not the obvious choice -- a MutationObserver watching for a quiet DOM was
@@ -242,21 +247,14 @@ READY_TIMEOUT_S = 25.0
 # abandoned. Three, so a lone odd pass is survivable and reported, and two odd
 # passes out of three is not quietly averaged into a verdict.
 STABLE_ATTEMPTS = 3
-# Chrome asks Google Fonts for woff2 and unicode-range subsets; urllib's own
-# User-Agent gets served legacy TTF with no subsetting, which is a different
-# face with different metrics. Prefetching under Chrome's UA is what makes the
-# bytes this harness serves the bytes the browser would have fetched itself.
-PREFETCH_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-               "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
-# The stress knob, and the only reason it exists: this file now CLAIMS that the
-# font cannot vary between the two trees, and a claim about a race is worth
-# nothing unless the race can be re-run on demand. Set
-# WOZI_PX_FONT_DELAY_S=2.5 and every intercepted font request is held for a
-# random interval up to that long, independently -- the exact asymmetry that
-# turned CI red. The gate must still report 0 px and the same font state on both
-# trees under it. It is off unless the variable is set, it is announced when it
-# is on, and no gate ever sets it.
-FONT_DELAY_S = float(os.environ.get("WOZI_PX_FONT_DELAY_S", "0") or 0)
+PREFETCH_UA = fontpin.PREFETCH_UA
+# The stress knob that makes this file's claim about the race testable: hold every
+# intercepted font request on a coin flip, and the gate must STILL report 0 px and
+# the same font state on both trees. It is read once, in fontpin, along with the
+# reasoning for why a coin flip and not a uniform delay -- WOZI_PX_FONT_DELAY_S is
+# still the name that turns it on, and WOZI_FONT_DELAY_S now works too, since the
+# other three harnesses share the mechanism and should share the knob.
+FONT_DELAY_S = fontpin.FONT_DELAY_S
 # The second stress knob, and the one that reproduces a CI runner rather than a
 # network. WOZI_PX_CPU_THROTTLE=6 slows every render 6x through
 # Emulation.setCPUThrottlingRate, which is what a shared 2-core runner does to a
@@ -294,152 +292,14 @@ def determinism_js(seed):
         "})()")
 
 
-# Installed alongside determinism_js. This hooks document.fonts.ready at
-# document-start, BEFORE the page's own #98 handler registers on the same promise
-# -- so `__fontsReady` going true means the font settled, and deliberately NOT
-# that the page has finished reacting to it. Callbacks on one promise run in
-# registration order, so ours is always first; what proves the page has finished
-# reacting is the pixel settle, not this flag.
-OBSERVE_JS = (
-    "(()=>{window.__fontsReady=false;window.__t0=Date.now();window.__tf=-1;"
-    "window.__fp=-1;"
-    "try{new PerformanceObserver((l)=>{for(const e of l.getEntries()){"
-    "if(window.__fp<0)window.__fp=Date.now()-window.__t0;}})"
-    ".observe({type:'paint',buffered:true})}catch(e){}"
-    "try{document.fonts.ready.then(()=>{window.__tf=Date.now()-window.__t0;"
-    "window.__fontsReady=true})}"
-    "catch(e){window.__fontsReady=true}})()")
-
-# Milliseconds from document-start to document.fonts.ready, and to first paint.
-# REPORTED, AND DELIBERATELY NOT GATED ON, because they were tried as the gate and
-# they do not discriminate. Measured, holding the font by hand:
-#
-#     font settled 310ms, first paint 53ms  -> the CORRECT picture
-#     font settled 131ms, first paint 202ms -> 999 px away from it
-#
-# Anti-correlated, so neither an absolute budget on the arrival nor the obvious
-# derived condition (arrived before first paint) separates the good regime from
-# the bad one. Whatever the page's memoised engraving metrics are really racing,
-# it is not an event either of these two names. So they stay in the output as
-# diagnostics -- worth seeing when something goes wrong -- and the thing actually
-# asserted is repeatability, in pixels, which needs no model of the page at all.
-ARRIVAL_JS = "window.__tf+'/'+window.__fp"
-
-# Returns 'ready', or a short string naming which term is still binding -- which
-# is what gets printed if READY_TIMEOUT_S is reached, so a hang says whether it
-# was the load event, the font promise or the picture.
-READY_JS = (
-    "(()=>{"
-    "if(document.readyState!=='complete')return 'load:'+document.readyState;"
-    "if(!window.__fontsReady)return 'fonts.ready pending';"
-    "if(!document.body)return 'no body';"
-    "return 'ready';})()")
-
-
-def applied_js(families):
-    """Is the webfont ACTUALLY PAINTING? Not 'has it loaded' -- see the module
-    docstring: document.fonts.status and document.fonts.check both answer 'yes'
-    with the stylesheet blocked, because a family nobody ever registered cannot
-    be reported missing. So measure instead. The same string is laid out twice,
-    once in "<family>,monospace" and once in "monospace" alone, and monospace is
-    chosen as the sentinel precisely because no proportional webfont can
-    accidentally match its metrics. Equal widths mean the family did not resolve.
-
-    Returns 'applied', 'fallback', or 'none' when the page declares no webfont at
-    all -- which /fidget/ does not, and that is not a fault to report.
-    """
-    if not families:
-        return "'none'"
-    probe = json.dumps("'%s',monospace" % sorted(families)[0].replace("'", ""))
-    return (
-        "(()=>{if(!document.body)return 'no body';"
-        "const mk=(f)=>{const s=document.createElement('span');"
-        "s.style.cssText='position:absolute;left:-9999px;top:0;white-space:pre;"
-        "font:600 40px '+f;"
-        "s.textContent='Handgloves 0123456789';document.body.appendChild(s);"
-        "const w=s.getBoundingClientRect().width;s.remove();return w;};"
-        f"const a=mk({probe});const b=mk('monospace');"
-        "return Math.abs(a-b)>0.5?'applied':'fallback';})()")
-
-
-def page_source(root, path):
-    """The HTML file a given --path actually serves, so the font scan reads the
-    page under test rather than assuming index.html. A directory means its
-    index.html, exactly as http.server resolves it."""
-    p = os.path.join(root, path) if path else root
-    if os.path.isdir(p):
-        p = os.path.join(p, "index.html")
-    return p if os.path.isfile(p) else None
-
-
-def scan_font_urls(html_path):
-    """Every stylesheet URL on a font host that the page links. Read off the
-    FILE and not over HTTP, because this has to happen before any browser
-    starts -- a URL discovered by watching the first navigation would mean the
-    first navigation was the one that paid for it, which is the race."""
-    if not html_path:
-        return []
-    src = open(html_path, encoding="utf-8", errors="replace").read()
-    hosts = "|".join(re.escape(h) for h in FONT_HOSTS)
-    return sorted(set(re.findall(r'https://(?:' + hosts + r')/[^"\'\s>)]+', src)))
-
-
-def families_from_urls(urls):
-    """The font-family names, read out of the stylesheet URL's own `family=`
-    parameter rather than out of the stylesheet.
-
-    It has to come from here and not from the CSS, because the probe is needed
-    most in exactly the case where the CSS was never fetched: with the font
-    blocked, a probe that does not know what family to look for returns 'no
-    webfont declared' and the run then cannot tell 'correctly absent' from 'never
-    asked'. That was a real hole -- --fonts blocked reported a font-state
-    mismatch on every render until the name came from the URL.
-
-    Google's form is `css2?family=Manrope:wght@400;500;600;800`, so the name ends
-    at the first colon and '+' is a space.
-    """
-    out = set()
-    for u in urls:
-        for m in re.findall(r"[?&]family=([^&]+)", u):
-            out.add(urllib.parse.unquote_plus(m.split(":")[0]).strip())
-    return {f for f in out if f}
-
-
-def prefetch_fonts(html_path):
-    """Pull the font CSS and every face it references into this process, BEFORE a
-    browser exists. Returns (cache, families, error).
-
-    `cache` maps absolute URL -> (content-type, bytes) and is served back to
-    Chrome by Fetch.fulfillRequest, so no measured navigation ever touches the
-    network. `families` is the font-family names the CSS declares, which is where
-    the applied-probe gets its name from rather than hardcoding 'Manrope' -- one
-    home for that fact, and it stays right if the page changes provider.
-
-    The CSS declares many @font-face blocks (latin, latin-ext, cyrillic, ...) and
-    Chrome fetches only the subsets it needs. All of them are cached anyway:
-    which subset a given render asks for is exactly the sort of thing that must
-    not vary between the two trees.
-    """
-    cache, families = {}, set()
-    for url in scan_font_urls(html_path):
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": PREFETCH_UA})
-            with urllib.request.urlopen(req, timeout=15) as r:
-                css = r.read()
-                cache[url] = (r.headers.get("Content-Type", "text/css"), css)
-        except Exception as e:
-            return {}, set(), f"{url}: {e}"
-        text = css.decode("utf-8", "replace")
-        families.update(m.strip().strip('"\'')
-                        for m in re.findall(r"font-family:\s*([^;]+);", text))
-        for face in sorted(set(re.findall(r"url\((https://[^)]+)\)", text))):
-            try:
-                req = urllib.request.Request(face, headers={"User-Agent": PREFETCH_UA})
-                with urllib.request.urlopen(req, timeout=15) as r:
-                    cache[face] = (r.headers.get("Content-Type", "font/woff2"), r.read())
-            except Exception as e:
-                return {}, set(), f"{face}: {e}"
-    return cache, families, None
+# The arrival observer, the load condition and the width probe all come from
+# fontpin, so the answer to "was the webfont really painting" is one answer for
+# every harness here rather than four that can drift apart.
+OBSERVE_JS = fontpin.OBSERVE_JS
+ARRIVAL_JS = fontpin.ARRIVAL_JS
+READY_JS = fontpin.READY_JS
+applied_js = fontpin.applied_js
+page_source = fontpin.page_source
 
 
 def serve(directory):
@@ -459,12 +319,14 @@ def serve(directory):
     raise SystemExit(f"FATAL: could not serve {directory}")
 
 
-async def shoot(url, viewports, seed, frames, theme, fonts, cache, families):
+async def shoot(url, viewports, seed, frames, theme, pin):
     """One browser, every viewport. Returns ({label: png}, {label: font state}).
 
-    `fonts` is 'pinned' or 'blocked' and is decided once by main() for the whole
-    run, so both trees are photographed under the same typography by
-    construction rather than by both happening to win the same race.
+    `pin` is the font state, decided once by main() before either tree is served,
+    so both trees are photographed under the same typography by construction
+    rather than by both happening to win the same race. It carries the
+    interception itself (tools/fontpin.py): every request to a font host is
+    answered from prefetched bytes or failed outright, identically on both sides.
     """
     port = free_port()
     profile = tempfile.mkdtemp(prefix="wozi-px-")
@@ -522,34 +384,12 @@ async def shoot(url, viewports, seed, frames, theme, fonts, cache, families):
                 await answer(msg["params"])
 
         async def answer(ev):
-            """One of two states, chosen for the whole run, applied identically to
-            every request on a font host. `blocked` fails it immediately, so
-            'no webfont' is true from the first byte with no timing in it at all;
-            `pinned` fulfils it from the prefetched bytes, which is a memory copy
-            and not a fetch. Anything not in the cache is a URL the prefetch scan
-            never saw, and it is refused rather than let through to the network --
-            a single un-pinned request is the whole race back again."""
-            rid = ev["requestId"]
-            # A COIN FLIP, not a uniform delay, because that is what the fault was.
-            # A uniform hold is the weaker model and it is misleading: every render
-            # in the run lands on the same side of the step, all three passes agree,
-            # and the gate reports a confident PASS on a picture 999 px from the
-            # right one. What turned CI red was some navigations paying a slow fetch
-            # and others not, so that is what this reproduces.
-            if FONT_DELAY_S and random.random() < 0.5:
-                await asyncio.sleep(FONT_DELAY_S)
-            hit = cache.get(ev["request"]["url"]) if fonts == "pinned" else None
-            if hit:
-                await raw("Fetch.fulfillRequest",
-                          {"requestId": rid, "responseCode": 200,
-                           "responseHeaders": [
-                               {"name": "content-type", "value": hit[0]},
-                               {"name": "access-control-allow-origin", "value": "*"},
-                               {"name": "cache-control", "value": "no-store"}],
-                           "body": base64.b64encode(hit[1]).decode()})
-            else:
-                await raw("Fetch.failRequest",
-                          {"requestId": rid, "errorReason": "BlockedByClient"})
+            """One of two states, chosen for the whole run and applied identically
+            to every request on a font host -- fulfilled from prefetched bytes or
+            failed outright, never let through to the network, because a single
+            un-pinned request is the whole race back again. The mechanism is
+            fontpin's; what stays here is the socket it is answered on."""
+            await pin.answer(ev, raw)
 
         async def send(m, p=None):
             nonlocal mid
@@ -583,8 +423,7 @@ async def shoot(url, viewports, seed, frames, theme, fonts, cache, families):
         await send("Runtime.enable")
         if CPU_THROTTLE:
             await send("Emulation.setCPUThrottlingRate", {"rate": CPU_THROTTLE})
-        await send("Fetch.enable",
-                   {"patterns": [{"urlPattern": f"https://{h}/*"} for h in FONT_HOSTS]})
+        await send("Fetch.enable", {"patterns": pin.patterns})
         await send("Page.addScriptToEvaluateOnNewDocument",
                    {"source": determinism_js(seed)})
         await send("Page.addScriptToEvaluateOnNewDocument", {"source": OBSERVE_JS})
@@ -617,7 +456,7 @@ async def shoot(url, viewports, seed, frames, theme, fonts, cache, families):
                 f"{STABLE_SAMPLE_MS}ms apart still differ after {timeout}s. Nothing "
                 f"has been photographed, so nothing has been proved.")
 
-        probe = applied_js(families)
+        probe = applied_js(pin.families)
         for w, hgt in viewports:
             label = f"{w}x{hgt}"
             await send("Emulation.setDeviceMetricsOverride",
@@ -730,40 +569,19 @@ def main():
         or [(1440, 900), (390, 844)]
 
     # ---- the font decision, taken once, before any browser exists -------------
-    # Both trees are the same page modulo comments, so the working tree's own copy
-    # is the right place to read the font URLs from; the ref worktree does not
-    # exist yet and must not be what decides how the FIRST tree is photographed.
+    # Read off the WORKING tree's own copy of the page: both trees are the same page
+    # modulo comments, and the ref worktree does not exist yet -- it must not be
+    # what decides how the FIRST tree is photographed. fontpin.decide() does the
+    # scan, the Chrome-UA prefetch and the degradation-to-blocked; `announce` prints
+    # the one line saying which state this run is in, and returns a fatal message
+    # only when --fonts pinned asked for a state it could not have.
     src = page_source(ROOT, a.path)
-    urls = scan_font_urls(src)
-    # The family name is derived from the URL, never from the prefetch, so the
-    # probe knows what to look for in every mode -- including the one where
-    # nothing was fetched. See families_from_urls().
-    families = families_from_urls(urls)
-    cache, err = {}, None
-    if urls and a.fonts != "blocked":
-        cache, _css_families, err = prefetch_fonts(src)
-    mode = "pinned" if cache else "blocked"
-    if not urls:
-        print(f"fonts: /{a.path or ''} links no webfont — nothing to pin, "
-              f"and nothing that can race")
-        expect = "none"
-    elif mode == "pinned":
-        print(f"fonts: PINNED — {len(cache)} object(s) prefetched, served from memory, "
-              f"family {sorted(families)[0] if families else '?'}")
-        expect = "applied"
-    else:
-        if a.fonts == "pinned":
-            print(f"FATAL: --fonts pinned could not prefetch the webfont ({err}). "
-                  f"Refusing to photograph: the alternative is a comparison whose "
-                  f"typography came off a third party's network. Re-run with "
-                  f"--fonts blocked to compare without it, knowing that real "
-                  f"typography is then not exercised.")
-            return 2
-        why = f"could not prefetch ({err})" if err else "requested"
-        print(f"fonts: BLOCKED — {why}. Both trees draw in the FALLBACK stack, so "
-              f"this run does not exercise real typography; it is still a valid "
-              f"comparison, because both sides are held to the same state.")
-        expect = "fallback"
+    pin = fontpin.FontPin.decide(want=a.fonts, html_path=src)
+    fatal = pin.announce()
+    if fatal:
+        print(fatal)
+        return 2
+    mode, expect = pin.mode, pin.expect
 
     def stable_render(directory, who):
         """Photograph one tree until it agrees with itself, and say so if it did not
@@ -789,7 +607,7 @@ def main():
             passes = []
             for _ in range(STABLE_ATTEMPTS):
                 passes.append(asyncio.run(shoot(base_ + a.path + a.query, vps, a.seed,
-                                                a.frames, a.theme, mode, cache, families)))
+                                                a.frames, a.theme, pin)))
                 if len(passes) < 2:
                     continue
                 # Compared as PNG bytes, per viewport: same encoder, same settings,
@@ -814,7 +632,7 @@ def main():
         srv, base = serve(ROOT)
         try:
             now, now_fonts, now_ms = asyncio.run(shoot(base + a.path + a.query, vps, a.seed,
-                                                       a.frames, a.theme, mode, cache, families))
+                                                       a.frames, a.theme, pin))
         finally:
             srv.kill()
         # Same diagnostics as the comparison path, because --shot is what a human
