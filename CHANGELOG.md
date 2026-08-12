@@ -289,6 +289,43 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#183 — `?hud` threw a `ReferenceError` on every solo page, twice a second.**
+  (GitHub #169.)
+
+  `hudSample()`'s `scope` row still read `WHO.slug`. `WHO` was split into `SPINE`
+  (which chain is the axis) and `SELECTED` (which person the page is about) precisely
+  because every reader had to know which of the two it meant — and this one reference
+  was not carried over. There is no live `WHO` declaration anywhere in the file.
+
+  **It survived because the combined stage short-circuits it.**
+  `STAGE.mode === 'all' ? 'all' : (WHO.slug || '?')` never evaluates the right-hand
+  side at `127.0.0.1` or `wozi.com`, which is exactly where anyone testing the HUD
+  would look. On a solo page — `?who=<slug>` or a personal subdomain — it threw, and
+  `hudSample()` runs on a 500ms `setInterval`, so it threw for as long as the page was
+  open.
+
+  **The instrument was broken in the one situation it exists for.** `?hud` is the only
+  test hook that ships, a deliberate exception to the rule that scaffolding lives in
+  the harness, and it earns that exception by being the only way to read tick rate,
+  dropped ticks and which of the four fit terms is binding on a device no harness can
+  drive. A phone bug report is usually a solo page.
+
+  **The verification is worth more than the fix, because the first attempt at it was
+  blind.** A bespoke CDP probe reported "no exceptions" on the fixed tree — and
+  reported the same on a worktree at HEAD that still contained the bug, because every
+  `Runtime.evaluate` in it was silently returning nothing. Only shooting the control
+  revealed that. `tools/verify_motion.py`, which already solves attachment and console
+  capture properly, gives the real answer: HEAD reports **3 console errors** naming
+  `ReferenceError: WHO is not defined` and `RESULT: CHECK ABOVE`; the fix reports **0**
+  and `RESULT: PASS`. Reuse the harness rather than writing a probe.
+
+  Also verified: `?hud` on the combined stage still clean and still reads `all`;
+  `?hudson=1` still draws no panel, so the `/[?&]hud(=|&|$)/` gate is intact; plain
+  `?who=charles` clean. `npm test` 120/0, and `pixel_regress` **0px** on both the stage
+  and `?who=charles` — which is the correct answer here, since absent `?hud` the page
+  must be byte-identical, and a non-zero result would have meant the change leaked into
+  the shipped render.
+
 - **CL#182 — `a11y_audit`'s green was green-on-average against a floating ruleset,
   and every run that measured nothing signed off as a pass.** (GitHub #165.)
 

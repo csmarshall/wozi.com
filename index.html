@@ -5398,7 +5398,16 @@ class Component extends DCLogic {
     const vv = window.visualViewport;
     put('view', Math.round((vv && vv.width) || window.innerWidth) + '×'
       + Math.round((vv && vv.height) || window.innerHeight));
-    put('scope', (STAGE.mode === 'all' ? 'all' : (WHO.slug || '?'))
+    /* THE SELECTION, NOT THE SPINE, and this row is the last thing that still said
+       WHO (GitHub #169). WHO was split into SPINE -- which chain is the axis -- and
+       SELECTED -- which person the page is about -- because every reader had to know
+       which of the two it meant; this reference was not carried over, so `?hud`
+       threw a ReferenceError every HUD_MS on any solo page. It survived because
+       STAGE.mode short-circuits the expression on the combined stage, which is
+       where anyone testing the HUD would look. The guard is kept even though that
+       branch cannot see a null SELECTED, for the same reason the `|| '?'` was
+       already there. */
+    put('scope', (STAGE.mode === 'all' ? 'all' : ((SELECTED && SELECTED.slug) || '?'))
       + ' · ' + (FORCE_KIND || 'mixed'));
 
     /* THE PANEL'S OWN COST, MEASURED BY THE PANEL. Everything above this line
