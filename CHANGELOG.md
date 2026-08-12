@@ -289,6 +289,66 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#188 — the datum seat searched a box the label no longer occupied, and
+  `GHOST_ALPHA_LAYER` was a second home for two numbers.** (GitHub #162, GitHub #163.)
+
+  **#162 — the seat now searches what it draws.** CL#166 reversed which side the label
+  sits on and CL#164 replaced the plate with an unbroken scribe plus relief lettering,
+  so the clearance search was reserving space around geometry that had moved. This is
+  the INBOARD half of #141, whose outboard half was `datumClear()` paying 20% short of
+  the tick length. `markOffset(side)` is derived **before** `plateSeat` and handed over
+  on the run; `plateSeat` builds a plate origin per candidate and `window_`,
+  `plateExcluded` and `plateAir` all read it. `edgeOf()` and the viewport clip still
+  read the *line*'s origin, because the scribe is still drawn on the line. One
+  derivation, not a searched copy and a drawn copy.
+
+  **It moves the drawing, which is the proof it was wrong before.** Across 5 seeds × 2
+  viewports on the combined stage: on the desk Harper's stamp slides a uniform
+  **−13.98px** along its run — the offset, finally paid — and Charles is unchanged on 4
+  of 5 seeds, sliding 119px on seed 17 to find a clean window. On the phone Harper's
+  mark **changes side**, onto the mirrored origin and down the run. In the before shot
+  the drawn label sits over a ghost wheel's teeth at the top of the frame; after, it
+  sits in clear air. That is the guarantee the search had been claiming.
+
+  **Zero `wozi:` warnings on either tree**, all 10 combinations — no "neither side", no
+  "no uncrowded seat", no overlap. So the stricter search still finds a clean seat
+  everywhere; the difference is that HEAD was clean about a box it was not drawing.
+
+  **#163 — the direction of the derivation was decided by the harness, not by taste.**
+  `tools/test.js` lifts `ghostOpacity(theme)` out of `index.html` as *text* and runs it
+  through `new Function` with nothing else in scope, at three sites — so a constant
+  referenced from that method body would throw a `ReferenceError` there. The method had
+  to stay self-contained, which meant the **constant** had to go, not the other way
+  round.
+
+  That forced the real structural fix. `GHOST_OFFSET_L` and `GHOST_LIGHT_PAINT` were
+  module-scope `const`s evaluated before the class exists, which is *why* the two
+  numbers were written twice in the first place — TDZ, not carelessness. They are one
+  memoised module function now, `ghostLightPaint(aDark, aLight)`, called from
+  `ghostSvg`'s `mirrored()` at the first moment in the page's life when the one home is
+  readable. Memo keyed on the alpha pair, so the 40-step bisection runs once per page
+  and **re-runs by itself if either alpha is ever retuned** — which is the property a
+  duplicated constant cannot have.
+
+  Isolated and proved pixel-neutral: `--theme light --query '?who=charles'` is the only
+  path that reads the mirror table, and a solo page draws no datum, so #162 cannot
+  contaminate it — **0px at both viewports, controls 0px.**
+
+  Also removed: `let markDir = null;` in `datumLayer` was **dead** — declared, never
+  assigned, never read, referenced only by its own comment claiming it was "filled in
+  from the spine on the first pass through the loop". No tool references it.
+
+  Verified: `npm test` **121/0**. `dom_invariants` exit 0 on stage, solo and light.
+  `escape_mesh` PASS. `a11y_audit` PASS both themes. `pixel_regress` **5,372px on the
+  combined stage** — the datum move, intended — and **0px on `?who=charles` in both
+  themes**, which is what confines the change to the datum and isolates #163.
+
+  Two findings filed rather than folded in: **#172**, the `DATUM_MARK_SIDE` note
+  describes a spine comparison no code performs — and #162's phone result makes that
+  prose wrong about its *outcome* too, not just its mechanism — and **#173**, the
+  station ticks stand `MODULE * 1.2 * S` outboard of the box `window_` guards and
+  nothing bounds them, landing at 376px of 390 on the phone.
+
 - **CL#187 — the stripper's self-check could not see a comment it had failed to find,
   and it silently deleted from inside a string literal.** (GitHub #161.)
 

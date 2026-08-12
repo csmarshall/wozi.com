@@ -1218,12 +1218,11 @@ const GHOST_COLORS = ['#9AA6AD', '#A9B4BA', '#8F9BA3', '#B3BCC2'];
    The mirror preserves the spread because it moves each grey by the same rule
    rather than collapsing them onto a point.
 
-   GHOST_OFFSET_L is DERIVED from the dark palette as it ships, so dark stays the
-   reference and light is its reflection. Nothing here is hand-picked, and a
+   The dark offsets are DERIVED from the dark palette as it ships, so dark stays
+   the reference and light is its reflection. Nothing here is hand-picked, and a
    change to GHOST_COLORS, to either ground, or to the dark tone factor
    re-derives instead of stranding a figure. */
 const GHOST_DIM_DARK = 0.78;
-const GHOST_ALPHA_LAYER = { dark: 0.17, light: 0.46 };
 function lstarOf(c) {
   const f = (u) => { u /= 255; return u <= 0.04045 ? u / 12.92 : Math.pow((u + 0.055) / 1.055, 2.4); };
   const Y = 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2]);
@@ -1241,38 +1240,69 @@ const GHOST_GROUNDS = (function () {
   return { light: read('--ref-bg', [225, 228, 221]), dark: read('--ref-bg-dark', [30, 34, 38]) };
 })();
 
-/* Per ghost colour, how far its DARK rendering sits above the dark page in L*.
-   Read off the shipped dark treatment rather than declared, so dark is the
-   single source of truth for the pair. */
-const GHOST_OFFSET_L = GHOST_COLORS.map((hex) => {
-  const n = parseInt(hex.slice(1), 16);
-  const g = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-  const D = GHOST_GROUNDS.dark, a = GHOST_ALPHA_LAYER.dark;
-  const painted = g.map(v => v * GHOST_DIM_DARK);
-  const composited = painted.map((v, i) => v * a + D[i] * (1 - a));
-  return lstarOf(composited) - lstarOf(D);
-});
+/* THE MIRROR, SOLVED ON FIRST USE RATHER THAN ON THE WAY PAST -- and the reason
+   is SCOPE, not cost (GitHub #163).
 
-/* The light paint that puts each ghost the SAME distance BELOW the pale page,
-   after the layer's own alpha has been charged. Scaling along the line from the
-   page to the grey keeps the hue the palette chose and leaves one unknown, and
-   composited L* is monotonic in it, so a short bisection is exact enough and
-   needs no seed. Falls back to the grey untouched if the solve cannot run. */
-const GHOST_LIGHT_PAINT = GHOST_COLORS.map((hex, i) => {
-  const n = parseInt(hex.slice(1), 16);
-  const g = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-  const L = GHOST_GROUNDS.light, a = GHOST_ALPHA_LAYER.light;
-  const target = lstarOf(L) - GHOST_OFFSET_L[i];
-  const compositedAt = (s) => {
-    const paint = g.map((v, k) => L[k] + s * (v - L[k]));
-    return lstarOf(paint.map((v, k) => v * a + L[k] * (1 - a)));
+   Both halves of this arithmetic composite against the ghost layer's own alpha,
+   and that alpha has exactly one home: ghostOpacity(), an instance method on a
+   class declared much further down this file. Module scope cannot see it -- the
+   class is in its own temporal dead zone while these lines run -- so as `const`s
+   evaluated here they had to be handed the two numbers a SECOND time, which is
+   what GHOST_ALPHA_LAYER was and what #163 was filed about. Two homes for one
+   fact, agreeing today and free to stop agreeing by eye: the layer's alpha is
+   exactly the kind of value that gets retuned once someone has seen it, and it
+   has been retuned once already.
+
+   Which direction the derivation runs was the whole decision, and the harness
+   settled it: tools/test.js lifts `ghostOpacity(theme)` out of this file as TEXT
+   and runs it with nothing else in scope, so it may reference no constant here.
+   The method is therefore the home, and this table asks it for both alphas at the
+   first moment anything can -- from inside a render, where `this` exists.
+
+   Memoised on the pair it was solved for, so the bisection runs once per page
+   rather than once per ghost wheel, and re-runs by itself if either alpha is ever
+   retuned. */
+const ghostLightPaint = (function () {
+  let key = null, memo = null;
+  return function (aDark, aLight) {
+    const k = aDark + ':' + aLight;
+    if (k === key) return memo;
+    /* Per ghost colour, how far its DARK rendering sits above the dark page in
+       L*. Read off the shipped dark treatment rather than declared, so dark is
+       the single source of truth for the pair. */
+    const offsetL = GHOST_COLORS.map((hex) => {
+      const n = parseInt(hex.slice(1), 16);
+      const g = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+      const D = GHOST_GROUNDS.dark;
+      const painted = g.map(v => v * GHOST_DIM_DARK);
+      const composited = painted.map((v, i) => v * aDark + D[i] * (1 - aDark));
+      return lstarOf(composited) - lstarOf(D);
+    });
+    /* The light paint that puts each ghost the SAME distance BELOW the pale page,
+       after the layer's own alpha has been charged. Scaling along the line from
+       the page to the grey keeps the hue the palette chose and leaves one
+       unknown, and composited L* is monotonic in it, so a short bisection is
+       exact enough and needs no seed. Falls back to the grey untouched if the
+       solve cannot run. */
+    memo = GHOST_COLORS.map((hex, i) => {
+      const n = parseInt(hex.slice(1), 16);
+      const g = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+      const L = GHOST_GROUNDS.light;
+      const target = lstarOf(L) - offsetL[i];
+      const compositedAt = (s) => {
+        const paint = g.map((v, k2) => L[k2] + s * (v - L[k2]));
+        return lstarOf(paint.map((v, k2) => v * aLight + L[k2] * (1 - aLight)));
+      };
+      if (!(target > 0)) return hex;
+      let lo = 0, hi = 4;
+      for (let k2 = 0; k2 < 40; k2++) { const mid = (lo + hi) / 2; if (compositedAt(mid) > target) lo = mid; else hi = mid; }
+      const paint = g.map((v, k2) => Math.max(0, Math.min(255, Math.round(L[k2] + hi * (v - L[k2])))));
+      return '#' + paint.map(v => v.toString(16).padStart(2, '0')).join('');
+    });
+    key = k;
+    return memo;
   };
-  if (!(target > 0)) return hex;
-  let lo = 0, hi = 4;
-  for (let k = 0; k < 40; k++) { const mid = (lo + hi) / 2; if (compositedAt(mid) > target) lo = mid; else hi = mid; }
-  const paint = g.map((v, k) => Math.max(0, Math.min(255, Math.round(L[k] + hi * (v - L[k])))));
-  return '#' + paint.map(v => v.toString(16).padStart(2, '0')).join('');
-});
+})();
 
 /* Perceptual lightness contrast (APCA Lc), polarity-aware, used only to match
    the ghost layer across the two themes -- see ghostOpacity(). Deliberately NOT
@@ -7331,7 +7361,16 @@ class Component extends DCLogic {
      their COLOUR (see dimK in ghostSvg) rather than by lowering this. Lowering
      it was tried for CL#140 and took the datum with it: at 0.188 the dark scribe
      solved to no harder than a ghost wheel, the weight the mock proves it
-     disappears at. Colour touches the wheels; alpha touches everything. */
+     disappears at. Colour touches the wheels; alpha touches everything.
+
+     THESE TWO NUMBERS LIVE HERE AND NOWHERE ELSE (GitHub #163). The ghost
+     mirror's L* solve composites against both of them and used to carry its own
+     copy in a GHOST_ALPHA_LAYER beside GHOST_COLORS, because module scope cannot
+     see a method on a class it precedes. It asks this instead, from inside a
+     render -- see ghostLightPaint(). This method is the home rather than the
+     other way round for a reason worth knowing before anyone reverses it: the
+     geometry suite lifts this function out of the file as TEXT and runs it with
+     nothing else in scope, so a constant named here would throw there. */
   ghostOpacity(theme) { return (theme || this.state.theme) === 'dark' ? 0.17 : 0.46; }
 
   /* HOW HEAVY ONE WHEEL IS DRAWN, in one place, because two layers have to agree
@@ -7544,8 +7583,14 @@ class Component extends DCLogic {
        shipped. Light no longer has a factor of its own at all: each grey is
        replaced by the paint that puts it the SAME L* distance BELOW the pale
        page as its dark rendering sits ABOVE the dark one -- see
-       GHOST_LIGHT_PAINT. The old 0.55 toward black put them 2.8x further out
+       ghostLightPaint(). The old 0.55 toward black put them 2.8x further out
        than that, which is what read as sticking out.
+
+       AND BOTH ALPHAS IT COMPOSITES AGAINST COME FROM ghostOpacity(), ASKED HERE
+       (GitHub #163). The solve is module-scope arithmetic and the alpha is an
+       instance method, so it used to be handed a second copy of the two numbers;
+       this is the first point in the page's life at which the one home can be
+       read, which is why the table is solved on demand rather than declared.
 
        WHY THE COLOUR AND NOT THE LAYER ALPHA, which was tried first. Lowering
        ghostOpacity() is identical arithmetic for a wheel and NOT identical for
@@ -7556,7 +7601,8 @@ class Component extends DCLogic {
     const isDark = this.state.theme === 'dark';
     const mirrored = (hex) => {
       const i2 = GHOST_COLORS.indexOf(hex);
-      return i2 < 0 ? hex : GHOST_LIGHT_PAINT[i2];
+      return i2 < 0 ? hex
+        : ghostLightPaint(this.ghostOpacity('dark'), this.ghostOpacity('light'))[i2];
     };
     const dim = (hex) => {
       if (!isDark) return mirrored(hex);
@@ -9660,6 +9706,43 @@ class Component extends DCLogic {
        solve units because datumRuns() places lines in them; the seat is
        solved in rendered pixels, so it is multiplied straight back. */
     const air = this.datumClear(S) * S;
+    /* WHERE THE RECTANGLE IS ACTUALLY DRAWN ACROSS THE RULE, WHICH IS NOT ALWAYS
+       ON IT (GitHub #162, the inboard half of #141). 'etch-mark' strikes the name
+       clear of the scribe, opposite the ticks, so the box this method reserves is
+       stamped a signed distance along the normal from the line it was measured
+       against -- measured at 1440x900, 14.27px of rectangle and about 9.0px of
+       INK past the searched box's inboard edge. Searching a box centred on the
+       line therefore answered truthfully about a box nobody draws, and it did so
+       in the one direction that HAS metal: the label stands on the chain's side.
+       That cost a guarantee rather than a picture -- the rule is already stood off
+       the chain by PLATE_TOP_CLEAR and the name landed in that existing gap -- but
+       a guarantee is what this search exists to give.
+
+       IT ARRIVES ON THE RUN AND IS A FUNCTION OF THE SIDE, for two reasons that
+       are both about ownership. The offset needs the label's MEASURED ink, which
+       only datumLayer has, and it needs to know which way round the mark was laid
+       -- which is what this method is being asked to decide. So the run carries
+       the derivation and this asks it per candidate origin, once for the natural
+       side and once for the mirrored one, before either is scored. One home: the
+       number that moves the drawn stamp is the same call that moved the searched
+       box.
+
+       ABSENT, IT IS ZERO, WHICH IS EXACTLY THE OLD BEHAVIOUR. A treatment that
+       centres its rectangle on the line supplies no offset and is searched as it
+       always was, and so is the geometry suite's own hand-built run -- the same
+       standing-in `_brandBox` does for a wordmark the harness never renders.
+
+       ONLY THE ACROSS AXIS MOVES. The offset is along the normal, so projecting
+       any wheel onto the run is unchanged by it and `plateExcluded`'s own D is the
+       same number either way; what changes is the distance measured across, and
+       the window that keeps the whole rectangle on the page. The SCRIBE is still
+       drawn on the line, so everything that asks where the MARK begins or leaves
+       the frame -- edgeOf(), and the viewport clip `want` is bounded by -- goes on
+       reading the line's own origin. */
+    const plateO = (O) => {
+      const t = typeof r.markOffset === 'function' ? r.markOffset(O.side || 1) : 0;
+      return { ox: O.ox + r.nx * t, oy: O.oy + r.ny * t };
+    };
     /* WHICH OF TWO SEATS IS THE BETTER ONE. A seat that clears the metal beats
        one that does not, whatever it costs in slide -- a plate with a
        background wheel drawn across it is not a placement, it is the mark
@@ -9679,7 +9762,11 @@ class Component extends DCLogic {
        unmirrored one -- and the seeded gate cannot see it, because the mirror
        only fires on the deals that seed does not produce. */
     [nat, alt].forEach(O => {
-      const iv = window_(O);
+      /* The rectangle's own origin, offset across the rule by however far this
+         side's label is struck off it. The window, the excluded bands and the
+         air are all properties of the DRAWN box, so all three read this. */
+      const P = plateO(O);
+      const iv = window_(P);
       if (!iv) return;
       /* THE ANCHOR END OF THE MARK, OR OF AS MUCH OF IT AS THE PAGE SHOWS.
          The more inboard of the two wins, and that is the whole of the rule: the
@@ -9716,11 +9803,11 @@ class Component extends DCLogic {
          is a preference for the mark's OWN position, not for wherever a
          search happens to land it. */
       const naiveAt = Math.max(iv[0], Math.min(iv[1], want));
-      const excluded = this.plateExcluded(O, r, pw, ph, metal, air);
+      const excluded = this.plateExcluded(P, r, pw, ph, metal, air);
       const cleanAt = this.plateNearestClean(want, iv[0], iv[1], excluded);
       const at = cleanAt === null ? naiveAt : cleanAt;
       const slide = Math.abs(at - want);
-      const gap = this.plateAir(O, at, r, pw, ph, metal);
+      const gap = this.plateAir(P, at, r, pw, ph, metal);
       const cand = { ox: O.ox, oy: O.oy, at: at, slide: slide, side: O.side || 1,
         air: gap, clean: gap >= air };
       if (!best || beats(cand, best)) best = cand;
@@ -9908,10 +9995,6 @@ class Component extends DCLogic {
        generic stays behind it. */
     const MONO = "ui-monospace, Menlo, Consolas, 'DejaVu Sans Mono', monospace";
     const els = [];
-    /* THE ONE SIDE EVERY CHAIN'S NAME IS STRUCK ON, filled in from the spine on the
-       first pass through the loop below and read by every chain after it. Outside the
-       loop because that is what makes it one decision rather than N. */
-    let markDir = null;
     let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
     const mk = (x, y) => {
       if (x < bx0) bx0 = x;
@@ -9935,6 +10018,89 @@ class Component extends DCLogic {
       const font = '600 ' + PLATE_F.toFixed(2) + 'px ' + MONO;
       const track = PLATE_F * 0.09;
       const pw = this.textWidth(label, font) + track * Math.max(0, label.length - 1) + PLATE_H * 0.8;
+      /* WHICH SIDE OF THE RULE AN 'etch-mark' NAME STANDS ON, AND HOW FAR OFF IT,
+         DERIVED BEFORE THE SEAT IS SEARCHED (GitHub #162). This used to be
+         computed after the seat, immediately above the stamp, and that ordering is
+         the whole of what #162 was: plateSeat() reserved a rectangle centred on
+         the line while the drawn one stood ~14.27px inboard of it, on the side
+         that has metal, so the search's answer was true about a box nobody drew.
+         It is a function of the candidate side rather than of the chosen one, so
+         the seat can ask it about BOTH origins before it scores either -- which is
+         what lets the search measure the box it is about to draw without knowing
+         in advance which way round the mark will be laid.
+
+         NOTHING ELSE MOVED. The offset the stamp is drawn at below is this same
+         call, resolved once the side is known, so there is one derivation and not
+         a searched copy and a drawn copy.
+
+         THE RULE IS "OPPOSITE THE TICKS", PER CHAIN, and what it is FOR is one side
+         for the whole stage at any chain count (GitHub #139). Charles: "one
+         consistent side is the way to go as remember we need to support N# of
+         chains." Worth stating exactly, because the two are not the same claim:
+         nothing here consults another chain, so the stage reads as one side for as
+         long as every chain's ticks point the same way -- which is what the seat
+         normally produces, and what a chain seated on the MIRRORED origin does not.
+         Nothing enforces it, and no gate photographs the disagreement.
+
+         WHY A CONSISTENT SIDE AT ALL. Outboard-of-its-own-chain was the obvious
+         reading and it does not scale: a chain's outboard direction mirrors with
+         its own origin, so with two chains it reads as an arbitrary mirror --
+         measured, one name left of its rule and the other right of its own, in
+         portrait -- and with N chains labels scatter over both sides with no rule a
+         reader can infer. CHAIN_ORDER already takes any number of chains, so the
+         rule has to hold for N.
+
+         THE SIDE IS COMPARED, NEVER WRITTEN DOWN. Both candidate sides are scored
+         against the direction the ticks were struck in and the one facing away
+         from them wins. Nothing here is a written sign: the ticks' own direction
+         comes from a seat that already compared both origins. That is
+         BRIDGE_BEARING's construction -- compare, never assert -- for the reason it
+         exists there: a hard-coded handedness is a legal mirror image of itself, so
+         it passes every measurement taken ALONG the mark and only a screenshot can
+         tell. This file has now had to learn that three times.
+
+         AND THE REFERENCE IS THE ASSEMBLY, NOT THE ORIGIN CORNER, WHICH WAS
+         MEASURED RATHER THAN ASSUMED. Away from the low-x low-y corner -- exactly
+         what BRIDGE_BEARING compares against -- is the same shape of rule and it
+         was tried first. On this composition the datum is scribed on the side of
+         its chain NEAREST that corner, so away-from-origin is systematically the
+         side facing the MACHINE: every chain lost its clearance rather than some
+         chains losing it, 17.4px on the spine at 1440x900, and the name sat over
+         metal where the chip had cleared. Away from the assembly is one side just
+         as strictly and keeps the standoff, so that is the reference.
+
+         `r.n` IS ALREADY IN SCREEN SPACE -- datumRuns() builds it through the
+         stage's own travel angle -- so nothing here needs a second opinion about
+         _axisRot, and turning the stage turns the answer with it.
+
+         WHAT THE CONSISTENCY COSTS is that the chosen side is no longer always the
+         TICKS' side, so the STANDOFF is derived per chain from what is actually
+         drawn there: past the tick tips where the two coincide, clear of the
+         scribe's own half-width where they do not. Plus `pad` either way --
+         plateMargin()'s figure, the plate's corner radius floored at half a
+         hairline -- and plus the ink the name puts on the side facing the rule,
+         because a centre is being placed and an edge has to clear. */
+      const ink = this.textInk(label, font, PLATE_F);
+      const rel = this.datumRelief(PLATE_F);
+      const markOffset = (side) => {
+        const tickDir = { x: side * r.nx, y: side * r.ny };
+        const away = (s) => -(r.nx * tickDir.x + r.ny * tickDir.y) * s;
+        const markSign = away(1) >= away(-1) ? 1 : -1;
+        /* The mark's reach toward the rule: the ink on the side that faces it,
+           plus the relief copy standing off that ink. */
+        const nearInk = (markSign > 0 ? ink.ascent : ink.descent) + rel.depth;
+        return DATUM_LABEL === 'etch-mark'
+          ? markSign * (HAIR / 2 + DATUM_MARK_AIR * this.plateMargin(S).pad + nearInk)
+            - rel.base
+          : 0;
+      };
+      /* HANDED TO THE SEAT ON THE RUN, and that is the shape rather than a
+         parameter for a reason worth stating: the geometry suite lifts plateSeat()
+         out of this file by its exact declaration and runs it against runs of its
+         own, so its argument list is part of the contract the suite reads. The run
+         descriptor is where every other per-chain fact the seat needs already
+         travels. */
+      r.markOffset = markOffset;
       /* THE RUN-OUT AND THE DRAWN AREA ARE HANDED OVER rather than re-derived on
          the other side, because the seat measures from where the LINE starts and
          the line starts a run-out beyond the clip below (#95). Two copies of
@@ -9998,66 +10164,10 @@ class Component extends DCLogic {
          guessed from a per-character average -- the same lesson the hover pill
          cost, where an estimate clipped the longest label on the first try.
          Measured above, with the rest of the placement it decides. */
-      /* WHICH SIDE OF THE RULE AN 'etch-mark' NAME STANDS ON: ONE SIDE FOR THE
-         WHOLE STAGE, at any chain count, decided once and compared against
-         thereafter (GitHub #139). Charles: "one consistent side is the way to go as
-         remember we need to support N# of chains."
-
-         WHY A CONSISTENT SIDE AT ALL. Outboard-of-its-own-chain was the obvious
-         reading and it does not scale: a chain's outboard direction mirrors with
-         its own origin, so with two chains it reads as an arbitrary mirror --
-         measured, one name left of its rule and the other right of its own, in
-         portrait -- and with N chains labels scatter over both sides with no rule a
-         reader can infer. CHAIN_ORDER already takes any number of chains, so the
-         rule has to hold for N.
-
-         THE DIRECTION IS TAKEN FROM THE SPINE AND THEN COMPARED AGAINST, WHICH IS
-         WHAT MAKES IT ONE SIDE RATHER THAN N AGREEING SIDES. `markDir` is the
-         spine's own outboard normal in screen space -- runs[0] is the spine, since
-         datumRuns() walks CHAIN_ORDER and CHAIN_ORDER[0] === SPINE by construction
-         -- and every chain then takes whichever of its two candidate sides points
-         along it. Nothing here is a written sign: the spine's own `out` comes from a
-         seat that already compared both origins, and each chain's side comes from
-         comparing both candidates against that. That is BRIDGE_BEARING's
-         construction -- compare, never assert -- for the reason it exists there: a
-         hard-coded handedness is a legal mirror image of itself, so it passes every
-         measurement taken ALONG the mark and only a screenshot can tell. This file
-         has now had to learn that three times.
-
-         AND THE REFERENCE IS THE ASSEMBLY, NOT THE ORIGIN CORNER, WHICH WAS
-         MEASURED RATHER THAN ASSUMED. `markDir = {x: 1, y: 1}` -- away from the
-         low-x low-y corner, exactly what BRIDGE_BEARING compares against -- is the
-         same shape of rule and it was tried first. On this composition the datum is
-         scribed on the side of its chain NEAREST that corner, so away-from-origin
-         is systematically the side facing the MACHINE: every chain lost its
-         clearance rather than some chains losing it, 17.4px on the spine at
-         1440x900, and the name sat over metal where the chip had cleared. Away from
-         the assembly is one side just as strictly and keeps the standoff, so that is
-         the reference. Swap this one line to compare the two again.
-
-         `r.n` IS ALREADY IN SCREEN SPACE -- datumRuns() builds it through the
-         stage's own travel angle -- so nothing here needs a second opinion about
-         _axisRot, and turning the stage turns the answer with it.
-
-         WHAT THE CONSISTENCY COSTS is that the chosen side is no longer always the
-         TICKS' side, so the STANDOFF is derived per chain from what is actually
-         drawn there: past the tick tips where the two coincide, clear of the
-         scribe's own half-width where they do not. Plus `pad` either way --
-         plateMargin()'s figure, the plate's corner radius floored at half a hairline
-         -- and plus half the mark's height, because a centre is being placed and an
-         edge has to clear. */
-      const tickDir = { x: out * r.nx, y: out * r.ny };
-      const away = (s) => -(r.nx * tickDir.x + r.ny * tickDir.y) * s;
-      const markSign = away(1) >= away(-1) ? 1 : -1;
-      const ink = this.textInk(label, font, PLATE_F);
-      const rel = this.datumRelief(PLATE_F);
-      /* The mark's reach toward the rule: the ink on the side that faces it, plus
-         the relief copy standing off that ink. */
-      const nearInk = (markSign > 0 ? ink.ascent : ink.descent) + rel.depth;
-      const markT = DATUM_LABEL === 'etch-mark'
-        ? markSign * (HAIR / 2 + DATUM_MARK_AIR * this.plateMargin(S).pad + nearInk)
-          - rel.base
-        : 0;
+      /* THE OFFSET THE STAMP IS DRAWN AT, resolved from the same derivation the
+         seat was searched with, now that the side is known. Above, not here, so
+         that the box that was measured is the box that is drawn (GitHub #162). */
+      const markT = markOffset(out);
       const c = at(seat.at, markT);
       [[-pw / 2, -PLATE_H / 2], [pw / 2, -PLATE_H / 2], [pw / 2, PLATE_H / 2], [-pw / 2, PLATE_H / 2]]
         .forEach(p => mk(c.x + r.ux * p[0] + r.nx * p[1], c.y + r.uy * p[0] + r.ny * p[1]));
@@ -10067,31 +10177,32 @@ class Component extends DCLogic {
          clearance search and CL#160's far-end anchor go on solving the problem they
          already solved.
 
-         WHICH IS EXACTLY THE LIMIT WORTH KNOWING ABOUT 'etch-mark', AND #141 CLOSED
-         ONE HALF OF IT. plateSeat() clears a box centred ON the line; `markT` then
-         moves the drawn mark off it, so the search's answer is true about the box it
-         was asked about and says nothing about the box that was drawn.
+         AND BOTH HALVES OF 'etch-mark''S OLD LIMIT ARE NOW CLOSED. The mark was
+         drawn a signed distance off the line while the seat cleared a box centred
+         ON it, so the search answered truthfully about a box nobody drew, in both
+         directions at once.
 
-         THE OUTBOARD HALF IS NOW SOLVED AND IT WAS NOT ABOUT THIS LABEL AT ALL: the
-         name is struck opposite the ticks (CL#166), so it reaches nothing outboard,
-         and what stands outboard is the ticks -- which datumClear() pays for by
-         name now (plateMetrics().reach) instead of paying the reserved box's
+         THE OUTBOARD HALF (GitHub #141) WAS NOT ABOUT THIS LABEL AT ALL: the name
+         is struck opposite the ticks (CL#166), so it reaches nothing outboard, and
+         what stands outboard is the ticks -- which datumClear() pays for by name
+         now (plateMetrics().reach) instead of paying the reserved box's
          half-height. See PLATE_TOP_CLEAR.
 
-         THE INBOARD HALF IS STILL MEASURED RATHER THAN SOLVED, and this is where it
-         is recorded so the file does not imply otherwise. `markT` always points
-         INBOARD -- `markSign` resolves to `-out` on every chain, since the name goes
-         opposite the ticks and the ticks go outboard -- so the drawn rectangle
-         overhangs the searched one on the side that HAS metal, never on the empty
-         one. Measured at 1440x900: |markT| is 14.27px of
-         rectangle and about 9.0px of actual INK past the searched box's inboard
-         edge (ink reaching 26.0px off the line against the box's 17.03px). It is
-         not currently binding -- CL#166 measured 0.0% of the mark's pixels on metal
-         at every size it swept, because the rule is already stood off the chain by
+         THE INBOARD HALF (GitHub #162) IS THE RE-ORDERING ABOVE. `markT` always
+         points INBOARD -- `markSign` resolves to `-out` on every chain, since the
+         name goes opposite the ticks and the ticks go outboard -- so the drawn
+         rectangle overhung the searched one on the side that HAS metal, never on
+         the empty one: measured at 1440x900, 14.27px of rectangle and about 9.0px
+         of actual INK past the searched box's inboard edge, the ink reaching
+         26.0px off the line against the box's 17.03px. `markOffset` is derived
+         BEFORE the seat now and the seat asks it per candidate side, so the box
+         that is searched is the box that is stamped. It was never binding on the
+         shipped deal -- CL#166 measured 0.0% of the mark's pixels on metal at every
+         size it swept, because the rule is already stood off the chain by
          PLATE_TOP_CLEAR and an inboard name lands in that existing gap -- so what
-         this costs is a guarantee, not a picture. Widening the searched rectangle
-         to cover it would need `markT`, which is per-chain and computed after the
-         seat, so it is a re-ordering of this method rather than a wider box. */
+         this bought back is the guarantee rather than a picture, and it is the
+         crowded deals #88/#109/#110 were about, and a grown DATUM_MARK_GROW, that
+         it holds for. */
       els.push(h('g', { key: 'p' + ri,
         transform: 'translate(' + c.x.toFixed(2) + ',' + c.y.toFixed(2) + ') rotate(' + r.deg.toFixed(2) + ')' },
         this.datumStamp(label, font, track, pw, PLATE_H, PLATE_F, INK, HAIR)));
