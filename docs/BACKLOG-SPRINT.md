@@ -44,7 +44,18 @@ a decision request — never a guessed implementation.
 Parallelism is bounded by *file contention*, not by ticket count. In this repo:
 
 - `index.html` is the bottleneck — roughly a dozen tickets touch it (that IS
-  GitHub #113's remaining cost). **At most one agent edits it at a time.**
+  GitHub #113's remaining cost). **`docs/INDEX-REGIONS.md` is the map**: it scores
+  46 regions for textual *and* semantic independence and gives a mechanical
+  dispatch rule. Its honest ceiling is **two implementation agents, sometimes
+  three** — the five exclusive scopes overlap, and they cover exactly the regions
+  real tickets are about. A brief should name the region and its anchor symbol,
+  never a line range, because the line numbers drift.
+- **Read-only work needs no lane at all, and this is the most under-used win.**
+  Measurement, audits, research, `docs/`, `?hud` readings — none of it takes the
+  lock or needs isolation, so it can *always* run alongside the implementation
+  lane. Since much of a backlog is *Evaluate* rather than *Ready*, dispatch those
+  freely and concurrently rather than queueing them behind a file they never
+  touch.
 - `fidget/index.html`, `tools/*`, `.github/workflows/*`, `config.js` and docs are
   independent of it and of each other, so those genuinely run concurrently.
 - Anything that mutates files in parallel gets `isolation: "worktree"`. Two
