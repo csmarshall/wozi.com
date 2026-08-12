@@ -1005,13 +1005,36 @@ const SHAFT_LABEL_GAP = 1.6;
    ring's own outer radius, so a tooth-count change re-spaces the page by itself. */
 const CENTRE = { x: 0, y: 0 };
 let GRAB_RADIUS = 0;
+
+/* THE ONLY THING BETWEEN THE GEAR AND THE WINDOW EDGE, as a fraction of the
+   ring's own outer radius. It is a JUDGED FIGURE and cannot be derived: what it
+   has to clear is one line of caption in the type size build() sets, and how
+   close the drawing may come to the caption and to the floating chrome strip
+   before the page looks cramped is a matter of taste, not of geometry.
+   Everything it decides IS derivable from it and is derived below.
+
+   The reason it is 0.42 is history, not measurement: it was inherited unchanged
+   from the two-set layout (CL#161 kept it deliberately rather than retune a
+   shipped value silently), where the same margin also had to hold the gap
+   between the two sets and the coupling note between them. With one set it only
+   holds the caption, so there is slack here that has never been reclaimed.
+
+   IT IS EASIER TO CHOOSE IN THE UNITS THE PAGE IS SEEN IN. The viewBox is
+   2*(R + margin) square and `meet` fits it to the SHORTER window edge, so the
+   gear fills 1 / (1 + this) of that edge -- 0.704 as it stands. Going the other
+   way, a wanted fill f is this = 1/f - 1: 0.78 -> 0.2821, 0.85 -> 0.1765,
+   0.92 -> 0.0870. Note the drawn ink runs about 11.6% past R (the outrigger
+   hairs outside the rim), so the ink meets the caption before this arithmetic
+   says the rim does. */
+const GEAR_MARGIN = 0.42;
+
 function layout() {
   const R = pitchR(MODE.stages[VIEW].spec.ring) + RING_RIM * MODULE;
   /* The margin holds one line of caption above the set. It used to also have to
      be reconciled with a gap holding the coupling note and the second set's
      caption; with one set there is nothing else in the frame, so the gap is gone
      and so is the portrait/landscape special case that came with it. */
-  const margin = R * 0.42;
+  const margin = R * GEAR_MARGIN;
   const half = R + margin;
   CENTRE.x = half; CENTRE.y = half;
   GRAB_RADIUS = R;
