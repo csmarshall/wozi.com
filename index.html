@@ -7940,108 +7940,189 @@ class Component extends DCLogic {
          -- "the clearance is a nicety; having ANY pattern is not" -- applied to
          the cell floor, and it is why this is a list rather than a constant. */
       const CELL_FLOORS = [CELL_MIN, px(3.9, 2.2, 6.0)];
-      let cellX = 0, bestWaste = Infinity, rOutX = rOutTry[0];
-      for (let fi = 0; fi < CELL_FLOORS.length && !cellX; fi++) {
-        const floorC = CELL_FLOORS[fi];
-        const ceilingF = Math.max(floorC, ceiling);
-        for (let attempt = 0; attempt < rOutTry.length && !cellX; attempt++) {
-          rOutX = rOutTry[attempt];
-          bestWaste = Infinity;
-          const seen = [];
-          /* THE GRID IS ANCHORED AT THE FLOOR, NOT THE CEILING. Written as
-             `for (c = ceilingF; c >= floorC; c -= 0.05)` the set of sizes
-             actually tested depends on where the sweep STARTS, so moving the
-             ceiling silently tests a different set -- and the floor itself is
-             sampled only when the span happens to be a whole number of steps.
-             That is how a 13-tooth wheel went blank at one viewport and not at
-             a neighbouring one with identical rIn/rOut: the only feasible size
-             sat just under the last grid point the ceiling happened to produce.
-             Counting down from the floor samples floorC exactly, every time,
-             and makes the tested set independent of the ceiling. Still walked
-             largest-first, so the "larger cells win ties" rule is unchanged. */
-          const nSteps = Math.max(0, Math.floor((ceilingF - floorC) / 0.05 + 1e-9));
-          for (let si = nSteps; si >= 0; si--) {
-            const c = floorC + si * 0.05;
-            /* PITCH ADDS THE WALL ACROSS THE FLATS, not across the radius
-               (#62). Two hexagons meet flat-to-flat, and a hexagon's inradius is
-               sqrt3/2 of its circumradius -- so adding WALLX/2 to the
-               circumradius opens a gap of only WALLX * sqrt3/2, 13.4% thinner
-               than asked for. Measured 0.736-1.039 against a nominal 0.85-1.20.
-               Dividing by sqrt3 makes the gap the wall. */
-            const step = c + WALLX / Math.sqrt(3), px = Math.sqrt(3) * step, ry2 = 1.5 * step;
-            const at = (q, r) => [px * (q + r / 2), ry2 * r];
-            const span = Math.ceil(rOutX / step) + 2;
-            let ink0 = Infinity, ink1 = 0, n = 0;
-            for (let k = 0; k <= span; k++) {
-              for (const [q, r] of ringOf(k)) {
-                const P = at(q, r);
-                let v0 = Infinity, v1 = 0, ok = true;
-                for (let v = 0; v < 6; v++) {
-                  const va = (90 + 60 * v) * Math.PI / 180;
-                  const d = Math.hypot(P[0] + c * Math.cos(va), P[1] + c * Math.sin(va));
-                  if (d > rOutX) { ok = false; break; }
-                  v0 = Math.min(v0, d); v1 = Math.max(v1, d);
+      /* THE SEARCH IS MEMOISED, AND THE KEY IS THE WHOLE RISK (GitHub #135).
+         Measured with tools/render_cost.py: forced to this family, gearSvg was
+         49.2ms of a 171.5ms first-render task at 6x CPU throttle against
+         sunburst's 2.1ms, and the reason is arithmetic rather than drawing --
+         the sweep below is CELL_FLOORS x rOutTry x ~n sizes at 0.05 steps, and
+         every candidate size enumerates the WHOLE lattice with six Math.hypot
+         per cell and then throws all but the winner away. The page renders its
+         composition five times per cold load, so each wheel paid for that five
+         times over.
+
+         MEMOISED, NOT BISECTED, and that is a correctness decision rather than
+         a preference. Feasibility is not monotonic in cell size: the rings are
+         anchored at the wheel centre, so ring radii land on fixed multiples of
+         the pitch and a ring is wholly in or wholly out -- the comment above
+         records a 13-tooth wheel whose only feasible size sat just under one
+         grid point. A bisection over a predicate that switches on and off along
+         the axis is entitled to land somewhere else entirely, which would move
+         the drawing; and CL#138's rule that the grid is anchored at the FLOOR
+         exists precisely so the tested SET is fixed. Memoising cannot change
+         which size wins, because it does not change the search at all.
+
+         WHAT THE KEY CARRIES, and why each part of it is there. Everything the
+         sweep and the keep read is one of these seven numbers -- checked line by
+         line, not inferred from a profile -- so two calls agreeing on all seven
+         cut an identical lattice. Drop one and the page draws a stale one:
+
+           rInX          the inner boundary. Carries hubR, and through it the
+                         wheel's radius, module and profile hub fraction.
+           rOutTry[0]    coreOut, the shell-clearing outer limit. Both entries
+           rOutTry[1]    are in the key because the fallback attempt reaches the
+                         second, so the pair IS an input, not just the winner.
+                         Carries wellR, and through it `marked` -- engravedRims
+                         and character both move it.
+           WALLX         LATTICE_WALL: the pitch's wall term. Viewport-dependent
+                         through px(), and tooth-count-dependent through
+                         1.2 * teeth / TEETH_MAX.
+           CELL_FLOORS[0] MIN_CUT / sqrt(3). MIN_CUT is stated in PIXELS and
+                         converted by px() (CL#137), so this is the component
+                         that makes the key SCALE-DEPENDENT: omit it and a phone
+                         is served the lattice solved for a desk.
+           CELL_FLOORS[1] hexcore's own legibility floor, also through px(), and
+                         load-bearing because the floor above is an AIM not a
+                         gate (CL#138) -- which of the two floors actually
+                         produced the answer is part of the answer.
+           ceiling       the sweep's top end, already clamped and already folded
+                         through g.cv.cellFrac / g.cv.cell, spanC and CELL_MAX.
+                         Keyed on the derived value rather than on its three
+                         inputs, so a future change to how the ceiling is
+                         computed cannot leave the key behind.
+
+         S itself is deliberately NOT in the key: it reaches the sweep only
+         through px(), so it is already carried by WALLX and both floors, and
+         adding it would only split entries that must agree. Same for g.teeth,
+         which reaches it only through WALLX and the radii. If anything new is
+         ever read in here, it belongs in this key -- and the seven above are
+         inputs, not a summary. Do not simplify one out.
+
+         The KEEP is inside the memo too, not only the sweep. It reads cellX,
+         WALLX, rOutX and rInX and nothing else, all of them already determined
+         by the key, so the cached value is the finished list of cut paths --
+         which also retires vertsX from the repeat renders (5.2ms at 6x). */
+      const hexMemo = this._hexMemo || (this._hexMemo = new Map());
+      const hexKey = rInX + ':' + rOutTry[0] + ':' + rOutTry[1] + ':' + WALLX
+                   + ':' + CELL_FLOORS[0] + ':' + CELL_FLOORS[1] + ':' + ceiling;
+      /* WHAT BOUNDS THE MAP. One entry per distinct wheel geometry per distinct
+         --gsfit, and --gsfit is quantised DOWN to 1% by fitStage() over a range
+         of about 0.28..5.12, so a visitor dragging a window edge walks a bounded
+         ladder of scales rather than a continuum -- but a long enough drag still
+         accumulates a lattice per wheel per rung. Cleared wholesale at the cap
+         instead of evicted one at a time: the cost of a miss is one sweep, the
+         cost of an LRU is a second structure to keep honest, and 48 is several
+         viewports' worth of a stage that only ever draws a couple of dozen
+         wheels. Sized in ENTRIES rather than bytes, and each entry holds the cut
+         paths for one wheel, which is the bulk of it. */
+      const HEX_MEMO_MAX = 48;
+      let hexCut = hexMemo.get(hexKey);
+      if (!hexCut) {
+        let cellX = 0, rOutX = rOutTry[0];
+        for (let fi = 0; fi < CELL_FLOORS.length && !cellX; fi++) {
+          const floorC = CELL_FLOORS[fi];
+          const ceilingF = Math.max(floorC, ceiling);
+          for (let attempt = 0; attempt < rOutTry.length && !cellX; attempt++) {
+            rOutX = rOutTry[attempt];
+            const seen = [];
+            /* THE GRID IS ANCHORED AT THE FLOOR, NOT THE CEILING. Written as
+               `for (c = ceilingF; c >= floorC; c -= 0.05)` the set of sizes
+               actually tested depends on where the sweep STARTS, so moving the
+               ceiling silently tests a different set -- and the floor itself is
+               sampled only when the span happens to be a whole number of steps.
+               That is how a 13-tooth wheel went blank at one viewport and not at
+               a neighbouring one with identical rIn/rOut: the only feasible size
+               sat just under the last grid point the ceiling happened to produce.
+               Counting down from the floor samples floorC exactly, every time,
+               and makes the tested set independent of the ceiling. Still walked
+               largest-first, so the "larger cells win ties" rule is unchanged. */
+            const nSteps = Math.max(0, Math.floor((ceilingF - floorC) / 0.05 + 1e-9));
+            for (let si = nSteps; si >= 0; si--) {
+              const c = floorC + si * 0.05;
+              /* PITCH ADDS THE WALL ACROSS THE FLATS, not across the radius
+                 (#62). Two hexagons meet flat-to-flat, and a hexagon's inradius is
+                 sqrt3/2 of its circumradius -- so adding WALLX/2 to the
+                 circumradius opens a gap of only WALLX * sqrt3/2, 13.4% thinner
+                 than asked for. Measured 0.736-1.039 against a nominal 0.85-1.20.
+                 Dividing by sqrt3 makes the gap the wall. */
+              const step = c + WALLX / Math.sqrt(3), px = Math.sqrt(3) * step, ry2 = 1.5 * step;
+              const at = (q, r) => [px * (q + r / 2), ry2 * r];
+              const span = Math.ceil(rOutX / step) + 2;
+              let ink0 = Infinity, ink1 = 0, n = 0;
+              for (let k = 0; k <= span; k++) {
+                for (const [q, r] of ringOf(k)) {
+                  const P = at(q, r);
+                  let v0 = Infinity, v1 = 0, ok = true;
+                  for (let v = 0; v < 6; v++) {
+                    const va = (90 + 60 * v) * Math.PI / 180;
+                    const d = Math.hypot(P[0] + c * Math.cos(va), P[1] + c * Math.sin(va));
+                    if (d > rOutX) { ok = false; break; }
+                    v0 = Math.min(v0, d); v1 = Math.max(v1, d);
+                  }
+                  if (!ok || v0 < rInX) continue;
+                  n++; ink0 = Math.min(ink0, v0); ink1 = Math.max(ink1, v1);
                 }
-                if (!ok || v0 < rInX) continue;
-                n++; ink0 = Math.min(ink0, v0); ink1 = Math.max(ink1, v1);
               }
+              if (!n) continue;
+              seen.push({ c: c, waste: (ink0 - rInX) + (rOutX - ink1) });
             }
-            if (!n) continue;
-            seen.push({ c: c, waste: (ink0 - rInX) + (rOutX - ink1) });
+            if (!seen.length) continue;
+            let best = Infinity;
+            seen.forEach(r => { if (r.waste < best) best = r.waste; });
+            /* among sizes that fit essentially as well, take the LARGEST cell */
+            seen.forEach(r => { if (r.waste <= best + 0.35 && r.c > cellX) cellX = r.c; });
           }
-          if (!seen.length) continue;
-          let best = Infinity;
-          seen.forEach(r => { if (r.waste < best) best = r.waste; });
-          /* among sizes that fit essentially as well, take the LARGEST cell */
-          seen.forEach(r => { if (r.waste <= best + 0.35 && r.c > cellX) { cellX = r.c; bestWaste = r.waste; } });
         }
-      }
-      if (cellX) {
-        /* THE SIZE is chosen by complete rings above, but the KEEP is exact.
-           Charles, looking at a GitHub wheel: "isn't there space for even a few
-           more hexagons on each side between the side of the shape and the
-           curve of the inner circle". Measured across all twelve wheel-and-
-           variant combinations, ten genuinely have no room -- the gap at the
-           flats is real but narrower than a whole cell. Two do: 15T coarse by
-           six cells, 19T fine by twelve.
+        hexCut = [];
+        if (cellX) {
+          /* THE SIZE is chosen by complete rings above, but the KEEP is exact.
+             Charles, looking at a GitHub wheel: "isn't there space for even a few
+             more hexagons on each side between the side of the shape and the
+             curve of the inner circle". Measured across all twelve wheel-and-
+             variant combinations, ten genuinely have no room -- the gap at the
+             flats is real but narrower than a whole cell. Two do: 15T coarse by
+             six cells, 19T fine by twelve.
 
-           Those were being rejected by a test that asks `distance + c > rOut`,
-           which treats every hexagon as a CIRCLE of radius c. A hexagon only
-           reaches c toward its six vertices; everywhere else it is shorter, by
-           up to 1 - cos(30). So cells that genuinely fit were being refused.
-           The keep below tests the six VERTICES instead, and takes every whole
-           cell that clears -- not only those in a complete ring.
+             Those were being rejected by a test that asks `distance + c > rOut`,
+             which treats every hexagon as a CIRCLE of radius c. A hexagon only
+             reaches c toward its six vertices; everywhere else it is shorter, by
+             up to 1 - cos(30). So cells that genuinely fit were being refused.
+             The keep below tests the six VERTICES instead, and takes every whole
+             cell that clears -- not only those in a complete ring.
 
-           This cannot cost symmetry, which is the property that matters here:
-           the lattice is six-fold symmetric about the centre and the test
-           depends only on distance from it, so the kept set is closed under a
-           60-degree rotation. A cell that fits guarantees its five partners
-           fit. The patch gains symmetric bumps at the flats rather than an
-           asymmetric edge -- and no cell is ever cut. */
-        const step = cellX + WALLX / Math.sqrt(3), px = Math.sqrt(3) * step, ry2 = 1.5 * step;  /* see #62 above */
-        const vertsX = (cx, cy) => {
-          const o = [];
-          for (let v = 0; v < 6; v++) {
-            const va = (90 + 60 * v) * Math.PI / 180;
-            o.push([cx + cellX * Math.cos(va), cy + cellX * Math.sin(va)]);
-          }
-          return o;
-        };
-        const span = Math.ceil(rOutX / step) + 2;
-        for (let k = 0; k <= span; k++) {
-          for (const [q, r] of ringOf(k)) {
-            const cx = px * (q + r / 2), cy = ry2 * r;
-            const V = vertsX(cx, cy);
-            if (!V.every(v2 => Math.hypot(v2[0], v2[1]) <= rOutX)) continue;
-            if (nearestEdge(V) < rInX) continue;   /* EDGE, not vertex (#45) */
-            let d2 = '';
+             This cannot cost symmetry, which is the property that matters here:
+             the lattice is six-fold symmetric about the centre and the test
+             depends only on distance from it, so the kept set is closed under a
+             60-degree rotation. A cell that fits guarantees its five partners
+             fit. The patch gains symmetric bumps at the flats rather than an
+             asymmetric edge -- and no cell is ever cut. */
+          const step = cellX + WALLX / Math.sqrt(3), px = Math.sqrt(3) * step, ry2 = 1.5 * step;  /* see #62 above */
+          const vertsX = (cx, cy) => {
+            const o = [];
             for (let v = 0; v < 6; v++) {
-              d2 += (v ? 'L' : 'M') + V[v][0].toFixed(2) + ',' + V[v][1].toFixed(2) + ' ';
+              const va = (90 + 60 * v) * Math.PI / 180;
+              o.push([cx + cellX * Math.cos(va), cy + cellX * Math.sin(va)]);
             }
-            holes.push(d2 + 'Z');
+            return o;
+          };
+          const span = Math.ceil(rOutX / step) + 2;
+          for (let k = 0; k <= span; k++) {
+            for (const [q, r] of ringOf(k)) {
+              const cx = px * (q + r / 2), cy = ry2 * r;
+              const V = vertsX(cx, cy);
+              if (!V.every(v2 => Math.hypot(v2[0], v2[1]) <= rOutX)) continue;
+              if (nearestEdge(V) < rInX) continue;   /* EDGE, not vertex (#45) */
+              let d2 = '';
+              for (let v = 0; v < 6; v++) {
+                d2 += (v ? 'L' : 'M') + V[v][0].toFixed(2) + ',' + V[v][1].toFixed(2) + ' ';
+              }
+              hexCut.push(d2 + 'Z');
+            }
           }
         }
+        if (hexMemo.size >= HEX_MEMO_MAX) hexMemo.clear();
+        hexMemo.set(hexKey, hexCut);
       }
+      for (let ci = 0; ci < hexCut.length; ci++) holes.push(hexCut[ci]);
       amShells(inner);
       inner.push(h('circle', { key: 'boss', r: hubR * BOSS_MUL, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2, strokeOpacity: 0.55 }));
     } else if (kind === 'isogrid') {

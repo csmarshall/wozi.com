@@ -289,6 +289,68 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#170 — `hexcore`'s cell-size search is memoised, and the estimate it was
+  approved on was wrong.** (GitHub #135, plan B.)
+
+  `hexcore` was **50.4ms of `gearSvg` at 6x against `sunburst`'s 2.1ms**, because its
+  cell-size search is a triple-nested sweep — `CELL_FLOORS` x `rOutTry` x ~n sizes at
+  0.05 steps — enumerating the whole lattice per candidate size and discarding all
+  but the winner, **recomputed on every one of the five renders per cold load**.
+
+  **Memoised, deliberately NOT bisected.** Feasibility is genuinely non-monotonic in
+  cell size: the rings are anchored at the wheel centre so a ring is wholly in or
+  wholly out, and CL#138's own comment records the case that proves it — a 13-tooth
+  wheel whose only feasible size sat just under one grid point. A bisection over a
+  predicate that switches on and off along the axis is entitled to land on a
+  different winner, which would move the drawing; the floor-anchored grid exists
+  precisely so the tested SET is fixed. Memoisation cannot change which size wins
+  because it does not change the search.
+
+  **The key is seven numbers and every one of them earns its place**, verified by
+  reading the sweep rather than trusting the profile: `rInX`; **both** entries of
+  `rOutTry`, because the fallback attempt reaches the second so the pair is an input
+  rather than just the winner; `WALLX`; **both** `CELL_FLOORS` entries, because the
+  shared floor is an aim rather than a gate (CL#138) so *which* floor produced the
+  answer is part of the answer; and `ceiling`. `CELL_FLOORS[0]` is what makes the key
+  scale-dependent — it carries `MIN_CUT`, which is stated in **pixels** and converted
+  by `px()` (CL#137), so omitting it would serve a phone the lattice solved for a
+  desk. `ceiling` is keyed on the **derived** value rather than its three inputs, so
+  a change to how it is computed cannot leave the key behind. `S` and `g.teeth` are
+  deliberately absent: they reach the sweep only through `px()` and the radii and are
+  already carried.
+
+  The keep is inside the memo too, so the cached value is the finished list of cut
+  paths, which also retires `vertsX` from repeat renders. `bestWaste` was written and
+  never read; it went with it.
+
+  **The ticket's ~50ms was not achievable, and that is worth recording rather than
+  quietly under-delivering.** Real saving on a hexcore-heavy deal is **≈12.6ms of
+  `gearSvg` and ≈19ms of the task at 6x** (183.3 → 164.5ms; 26.0 → 23.0ms at 1x).
+  Two structural reasons: the 50.4ms is spread across all five renders, and only
+  **three** can hit — render 1 draws at the boot `--gsfit` of 0.86 and renders 2+ at
+  the real ~1.4, so there are two distinct scales and therefore two unavoidable
+  misses per wheel. Call counts confirm it: `at` 46,006 → **20,496**, `vertsX`
+  9,587 → **2,440**, i.e. the sweep now runs about 2.2 renders' worth instead of 5.
+  **Plan A compounds with this** — killing the boot-scale render leaves one miss
+  instead of two.
+
+  The default deal barely moves (184.0 → 178.8ms combined at 6x, inside noise)
+  because it draws few or no `hexcore` wheels. That is the point: this removes the
+  **tail** the deal creates (#143), not the median.
+
+  **What bounds the map:** one entry per wheel geometry per `--gsfit`, and `fitStage`
+  quantises `--gsfit` down to 1% over ~0.28–5.12, so a resize drag walks a bounded
+  ladder rather than a continuum. `HEX_MEMO_MAX = 48`, cleared **wholesale** at the
+  cap rather than evicted one at a time — a miss costs one sweep, an LRU costs a
+  second structure to keep honest.
+
+  **`pixel_regress --query '?who=charles&kind=hexcore'` is 0px at both viewports
+  with controls 0px** — the mandatory check, since a mixed deal's 0px would be
+  agreeing about a picture it never took (CLAUDE.md). Byte-identical lattice means
+  the key is right. Combined stage and `?who=charles` also 0px. `npm test` 120/0,
+  `dom_invariants` PASS on both the combined stage and forced to hexcore,
+  `verify_motion` 40/40 with 0 console errors.
+
 - **CL#169 — Machine Settings gets toggle switches and a 16px thumb, and the rows
   tighten.** (GitHub #134, closes it.)
 
