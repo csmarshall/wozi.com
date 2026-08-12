@@ -182,7 +182,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,[tabindex]:focus-visibl
    strobe warning reaches the thumb: colouring the thing under the finger,
    never a mark on the track, because a redline tick at the boundary stop was
    tried first (GitHub #69's A/B sheets) and was invisible AT THAT STOP -- the
-   24px thumb sits centred on the exact index it would mark, visible five
+   thumb sits centred on the exact index it would mark, visible five
    stops either side and gone at the one that means something. The filled
    portion of the track is painted the same way, for the same reason: it is a
    background-image layer on the input itself, not a pseudo-element, because
@@ -191,12 +191,26 @@ a:focus-visible,button:focus-visible,input:focus-visible,[tabindex]:focus-visibl
    --trk and --thumb are declared here and read by both the CSS and the JS: the
    thumb's own margin is derived from them rather than measured, and the track
    fill's math in speedAt() reads --thumb too, so the visual thumb, the track
-   fill and the CSS centring cannot drift apart when either size changes. 24px
-   is the thumb because that is the WCAG 2.5.8 floor for a touch target and the
-   thumb is the thing being touched; the `<input>` itself is given an explicit
-   `height` of `--btn` (44px, the same touch target every corner button uses)
-   so the HIT AREA is larger than the VISIBLE thumb on purpose -- measure both
-   and say which one you measured, because they are not the same box.
+   fill and the CSS centring cannot drift apart when either size changes.
+
+   --thumb IS THE VISIBLE DISC AND IT IS NOT THE TOUCH TARGET (GitHub #134).
+   It was 24px, chosen because that is the WCAG 2.5.8 floor -- which was the
+   right floor for the wrong box. What a finger and a pointer actually acquire
+   is the `<input>` itself, given an explicit `height` of `--btn` (44px, the
+   same touch target every corner button uses) and a full-width track: the
+   whole 129x44 box is live, and a press anywhere in it jumps the thumb to
+   that stop. So the disc is free to be as small as it can be SEEN at, while
+   the target stays exactly where CL#155 put it -- the same hit-vs-visible
+   split the corner buttons make between a 44px box and a 20px glyph.
+
+   16px is Charles's call from a 24/20/16/12 sweep, at which the disc still
+   reads as a machined knob rather than a bead and still shows its own colour
+   change (the strobe warning below) at a glance. 12px was measured too and is
+   the point at which the state cue starts to be carried by the track alone.
+   MEASURE BOTH BOXES AND SAY WHICH ONE YOU MEASURED: a11y_audit.py reports
+   the input's box, not the disc's, and it is the input's that may never
+   shrink -- if a smaller disc ever makes that audit complain, the audit is
+   measuring the wrong thing and the disc is not the reason.
 
    THE BARE input[type="range"] SELECTOR IS SAFE WITH MORE THAN ONE CONTROL
    (GitHub #112 added Wear beside Speed), NOT BECAUSE THERE IS ONLY ONE, but
@@ -208,7 +222,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,[tabindex]:focus-visibl
    never a deliberate match; tools/test.js asserts every one on the page sets
    it. */
 input[type="range"]{
-  --trk:4px; --thumb:24px;
+  --trk:4px; --thumb:16px;
   -webkit-appearance:none; appearance:none;
   width:100%; height:var(--btn);
   background-color:transparent; border:0; margin:0; padding:0;
@@ -232,7 +246,7 @@ input[type="range"]::-moz-range-thumb{
   transition:background .18s ease;
 }
 /* The browser's own focus ring on the input box would draw a rectangle around
-   a control whose visible part is a 4px line and a 24px disc; :focus-visible
+   a control whose visible part is a 4px line and a 16px disc; :focus-visible
    above rings it instead, the same as every other interactive element here. */
 input[type="range"]:focus{outline:none;}
 /* ===========================================================================
@@ -623,6 +637,44 @@ const WEAR_SCUFF_RATIO = 0.5;
    different" type systems the way the row height and the list height once
    did. One string, two readers. */
 const LIST_ROW_FONT = "600 13px/1.3 'Manrope',system-ui,sans-serif";
+/* THE SPEED/WEAR READOUTS ARE THE SAME LINE AS THEIR LABEL, ONE WEIGHT UP
+   (GitHub #134). They were set at var(--icon) -- 20px -- which is why the two
+   slider rows were 20px of content line while every other row in the panel was
+   17px, and Charles asked for a shorter panel. Nothing about a readout in the
+   menu needs --icon: that token is a threshold for the CORNER departure
+   indicator, whose 20px buys bold text the 3:1 "large scale" contrast bar
+   instead of 4.5:1 (see the markup comment beside it). The menu readout sits
+   on --chip inside an open panel, next to a word that names it, so it is a
+   quieter thing answering a different question -- accepted knowingly.
+
+   DERIVED FROM LIST_ROW_FONT, never restated as a second 13px, so the label
+   and the readout cannot end up on two different lines. */
+const LIST_ROW_FONT_BOLD = LIST_ROW_FONT.replace('600', '700');
+/* The height of one line of LIST_ROW_FONT, which is what the Speed and Wear
+   rows' visible footprint is made of now that their readouts are set at it.
+   rowAntiOverlapGap in renderVals() MODELS this figure, so it has to come off
+   the same string the rows are actually drawn from -- a hand-written 17 here
+   is the coupling index.html's own comment warns about, and getting it wrong
+   silently overlaps two 44px hit boxes.
+
+   THE DIRECTION OF THE ROUNDING IS THE WHOLE OF IT. The two rows' centre
+   distance works out as var(--btn) + (real line - modelled line), so a model
+   LARGER than the real line box takes margin away rather than adding it:
+   rounding 13 x 1.3 up to 17 was MEASURED at 0.1px of hit-box overlap -- the
+   exact failure the margin exists to prevent, arrived at by being careful in
+   the wrong direction. So the model must never exceed the real line box, and
+   the way to guarantee that is to round the way the ENGINE rounds: Chrome
+   quantises a line box to 1/64px LayoutUnits, so flooring to that grid gives a
+   model equal to Chrome's own figure (16.890625) and a hair under Gecko's,
+   which uses 1/60px app units and lands on 16.9. Both directions safe, and the
+   two hit boxes meet at exactly zero, which is what CL#155 verified and what
+   this has to keep. A plain 16.9 measures -0.02px, which is harmless and is
+   still the wrong sign. */
+const LAYOUT_UNIT = 1 / 64;
+const LIST_ROW_LINE_PX = (() => {
+  const m = /(\d+(?:\.\d+)?)px\/(\d+(?:\.\d+)?)/.exec(LIST_ROW_FONT);
+  return Math.floor(parseFloat(m[1]) * parseFloat(m[2]) / LAYOUT_UNIT) * LAYOUT_UNIT;
+})();
 /* Depth of the engraving band, in modules — uniform on every wheel. Module-based
    rather than a fraction of the radius, which is what keeps the band exactly as
    wide on a 13-tooth blank as on a 19-tooth one.
@@ -9879,7 +9931,15 @@ class Component extends DCLogic {
        from the SAME figures the rows and the panel actually use, instead of
        restating them as a third copy that could drift out of step with
        either. */
-    const ROW_PAD_Y = 7;
+    /* 7 UNTIL GitHub #134, WHERE CHARLES TOOK IT TO 4 WITH THE CONSEQUENCE IN
+       FRONT OF HIM. It is one constant on purpose and stays one: the Table of
+       Gears entries share it, so this is not the two slider rows losing 6px
+       each, it is all fourteen rows in the panel losing 6px each, and that is
+       where most of the height Charles asked back actually comes from. Do NOT
+       give the slider rows a padding of their own to "scope" a future change --
+       two paddings is two vertical rhythms in one panel, which is the drift the
+       shared constant was introduced to end. */
+    const ROW_PAD_Y = 4;
     const PANEL_GAP = 2;
     /* Speed and Wear are the only two rows that both overflow a 44px hit box
        above and below a visually-shortened track (see speedTrackStyle's
@@ -9887,12 +9947,64 @@ class Component extends DCLogic {
        box larger than its own line. Two such rows stacked need their
        CENTRES at least var(--btn) apart to keep their hit boxes from
        overlapping, and shrinking the row to the label/readout line's height
-       trades away exactly that margin. max(0px, ...) is the floor: once
-       var(--icon) alone (plus this padding) already clears --btn, no extra
+       trades away exactly that margin. max(0px, ...) is the floor: once the
+       content line alone (plus this padding) already clears --btn, no extra
        gap is owed and this must not go negative and pull the rows together
-       instead. */
+       instead.
+
+       THE SUBTRACTED TERM IS THE ROW'S CONTENT LINE, AND IT USED TO BE WRITTEN
+       AS var(--icon) (GitHub #134). That was only ever true because the
+       readouts were SET at var(--icon) and were the tallest thing in the row.
+       They are LIST_ROW_FONT_BOLD now, so var(--icon) here would model a
+       20px line for a 17px row -- and the error lands as 3px of margin the
+       rows do not get, which is 3px of two 44px hit boxes overlapping and
+       nothing on the page saying so. The term is LIST_ROW_LINE_PX, off the
+       same string the labels and readouts are drawn from: change the row's
+       type and this follows, which is the whole reason it is not a number. */
     const rowAntiOverlapGap =
-      'max(0px, calc(var(--btn) - var(--icon) - ' + (2 * ROW_PAD_Y + PANEL_GAP) + 'px))';
+      'max(0px, calc(var(--btn) - ' + LIST_ROW_LINE_PX + 'px - '
+      + (2 * ROW_PAD_Y + PANEL_GAP) + 'px))';
+    /* THE THREE STYLE-LAYER CONTROLS ARE TOGGLE SWITCHES, AND THEIR STATE CUE
+       IS POSITIONAL (GitHub #134). This is the one thing about them that must
+       survive every future edit, so it is written down here rather than left
+       to be inferred from a border-radius.
+
+       The #134 sweep measured on/off contrast for every candidate treatment,
+       including the shipped native checkbox, and NONE of them reaches WCAG
+       1.4.11's 3:1 for on-versus-off in LIGHT mode: 1.86 for the lamp variants,
+       2.22 for this one, 2.33 for the milled plate, 2.85 for the browser's own
+       accent-tinted box. That is not a ranking anybody wins -- it is the
+       finding that a colour change alone cannot carry this state in light
+       theme at any of the palettes on offer. A switch does not need it to:
+       the KNOB MOVES, 16px from one end of the pill to the other, and a
+       position is legible at 1:1 contrast.
+
+       So DO NOT "improve" this into a colour-only cue -- dropping the knob,
+       or moving it to a fixed centre and tinting the pill, silently reverts
+       the one property the treatment was chosen for, and every automated
+       check on this page would keep passing. The knob's two positions are
+       derived from the pill's own box below, so they cannot fall out of step
+       with it either.
+
+       24 is the height because that is the WCAG 2.5.8 floor, unchanged from
+       the 24x24 checkbox this replaces -- the switch is WIDER than what it
+       replaces and never shorter. The travel is what the pill's extra width
+       buys, so the width is stated as height-plus-travel rather than as 40:
+       the knob's diameter, its two centres and the pill's width all fall out
+       of two figures, and changing either keeps the knob inside the pill. */
+    const SWITCH_H = 24;
+    const SWITCH_TRAVEL = 16;
+    const SWITCH_W = SWITCH_H + SWITCH_TRAVEL;
+    /* Clearance from the pill's inner edge to the knob, so the knob reads as a
+       part sitting IN a slot rather than as the slot's own end cap. */
+    const SWITCH_KNOB_GAP = 4;
+    const SWITCH_KNOB_R = SWITCH_H / 2 - SWITCH_KNOB_GAP;
+    /* One home for each end of the travel. The off centre is half a pill
+       height in from the left and the on centre is half a pill height in from
+       the right, so the distance between them IS SWITCH_TRAVEL by
+       construction -- there is no second place the throw is written down. */
+    const SWITCH_OFF_CX = SWITCH_H / 2;
+    const SWITCH_ON_CX = SWITCH_W - SWITCH_H / 2;
     /* Fraction of the TRACK, not of the multiplier: the thumb travels over
        stop INDICES (see the markup, and CL#96's invariant against a
        continuous control), so the fill is positioned by index too. One stop
@@ -10166,12 +10278,16 @@ class Component extends DCLogic {
          state, exactly like the corner control's did, and for the same
          reason. minWidth is pinned to the widest multiplier the ladder can
          produce, derived rather than guessed, so the slider does not shuffle
-         sideways as the thumb moves. */
+         sideways as the thumb moves.
+
+         LIST_ROW_FONT_BOLD, not var(--icon) (GitHub #134) -- see that
+         constant's comment for why the menu readout is deliberately quieter
+         than the corner departure indicator that still uses --icon. */
       speedReadStyle: {
         flex: '0 0 auto', textAlign: 'right',
         minWidth: (String(SPEED_STOPS[SPEED_STOPS.length - 1]).length + 1) + 'ch',
         color: speedStrobes ? 'var(--accent)' : 'var(--muted)',
-        font: "700 var(--icon)/1 'Manrope',system-ui,sans-serif",
+        font: LIST_ROW_FONT_BOLD,
         fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.02em'
       },
       /* THE TRACK IS PAINTED HERE, NOT IN THE STYLE BLOCK, because it depends
@@ -10232,7 +10348,8 @@ class Component extends DCLogic {
       wearReadStyle: {
         flex: '0 0 auto', textAlign: 'right', minWidth: '4ch',
         color: 'var(--muted)',
-        font: "700 var(--icon)/1 'Manrope',system-ui,sans-serif",
+        /* Same line as Speed's, same reason -- see LIST_ROW_FONT_BOLD. */
+        font: LIST_ROW_FONT_BOLD,
         fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.02em'
       },
       wearTrackStyle: (function () {
@@ -10258,29 +10375,92 @@ class Component extends DCLogic {
         { key: 'timing', label: 'Timing marks' },
         { key: 'lineWork', label: 'Line-drawn teeth' },
         { key: 'knurl', label: 'Knurled rim' }
-      ].map((t) => ({
+      ].map((t) => {
+        /* Read ONCE per row and used for both the input's own `checked` and the
+           switch's knob position, so the box can never draw a state the control
+           is not in. */
+        const on = this.layerOn(t.key);
+        return {
         label: t.label,
         ariaLabel: t.label,
-        checked: this.layerOn(t.key),
+        checked: on,
         onChange: (e) => {
           const next = e.target.checked;
           try { localStorage.setItem('wozi-' + t.key, String(next)); } catch (err) {}
           this.setState({ [t.key]: next });
         },
         /* PADDING TIGHTENED FROM 5px TO 2px (GitHub #125, caught by
-           devices.py): the 24px checkbox is a WCAG floor and cannot shrink,
+           devices.py): the 24px control is a WCAG floor and cannot shrink,
            so padding is the only slack this row has, and three of them
            stacked in the panel pushed the last past the safe-area rectangle
            by 12px on the shortest landscape phone profile (iPhone 13/14).
-           Confirmed by re-running devices.py after the change. */
+           Confirmed by re-running devices.py after the change. Still 2px:
+           #134's compaction is ROW_PAD_Y and the readout line, neither of
+           which this row has. */
         rowStyle: { display: 'flex', alignItems: 'center', gap: '8px', padding: '2px 12px',
-          font: "600 13px/1.3 'Manrope',system-ui,sans-serif", color: 'var(--ink)', cursor: 'pointer' },
-        /* 24px, the WCAG 2.5.8 floor every other control on this page holds
-           to (the same figure the range-input thumb's own comment cites) --
-           caught by a11y_audit.py reporting "3 interactive targets under
-           24x24px" against the 15px this shipped with first. */
-        boxStyle: { width: '24px', height: '24px', margin: 0, accentColor: 'var(--accent)', cursor: 'pointer' }
-      })),
+          font: LIST_ROW_FONT, color: 'var(--ink)', cursor: 'pointer' },
+        /* A TOGGLE SWITCH, NOT A CHECKBOX (GitHub #134, Charles's pick from the
+           six-treatment sweep). Still a real <input type="checkbox"> -- the
+           label still activates it, the space bar still flips it, and it still
+           announces as a checkbox -- with `appearance:none` so the box below is
+           what draws instead of the platform's own control. That also fixes
+           something the native box did wrong in passing: `accent-color` tints
+           the CHECKED state and leaves the unchecked box pure white in BOTH
+           themes, so the shipped control ignored dark mode entirely.
+
+           THE KNOB IS A radial-gradient, WHICH IS WHY THERE IS NO
+           PSEUDO-ELEMENT HERE. A ::before would need a CSS rule, and the only
+           pseudo-element rules in this file are the ones a range input leaves
+           no alternative to (see the <style> block) -- a switch does have an
+           alternative, so it uses it and the style stays inline where the rest
+           of this panel's styling lives. The gradient's centre is the state:
+           SWITCH_OFF_CX or SWITCH_ON_CX, one home each, SWITCH_TRAVEL apart by
+           construction. See the SWITCH_* block above for why that positional
+           cue is the requirement and not a decoration.
+
+           THE KNOB TAKES WHICHEVER TOKEN CONTRASTS WITH THE SLOT IT IS IN, and
+           that is not a flourish -- it is what makes the positional cue
+           legible at all. A knob painted --chip in both states was measured at
+           1.28:1 against the off slot in light and 1.20:1 in dark, which is
+           invisible: --chip is the PANEL's colour and --bg is the page's, and
+           those two are deliberate neighbours in both themes, so a --chip knob
+           in a --bg slot is a white disc on white. Off it is --muted, which is
+           3.26:1 in light and 6.14:1 in dark; on it is --chip against the
+           filled slot, 5.69:1 and 6.63:1 at the shipped steel accent.
+
+           THE ON FIGURE DEPENDS ON THE ACCENT AND ONE OF THE FIVE IS WEAK.
+           config.js's ACCENTS are per-person and syncVars writes the chosen one
+           onto the root, so this is not one number: white-on-amber (#F4B32B) is
+           1.86:1 in light, against 3.21-3.98:1 for red, blue, green and steel.
+           Left as it is on purpose -- the pill's own fill has changed colour by
+           then, the knob has MOVED, and the sweep's whole finding was that
+           on-versus-off cannot be carried by colour in light theme at any
+           palette on offer. If that ever needs to stop depending on the accent,
+           it needs a design decision (a contrasting ring, or a knob in --ink at
+           the cost of the lit reading), not a quiet token swap here. */
+        boxStyle: {
+          appearance: 'none', WebkitAppearance: 'none',
+          width: SWITCH_W + 'px', height: SWITCH_H + 'px',
+          margin: 0, flex: '0 0 auto', boxSizing: 'border-box',
+          cursor: 'pointer', borderRadius: (SWITCH_H / 2) + 'px',
+          border: '1px solid var(--hair)',
+          backgroundColor: on ? 'var(--accent)' : 'var(--bg)',
+          backgroundImage: 'radial-gradient(circle ' + SWITCH_KNOB_R + 'px at '
+            + (on ? SWITCH_ON_CX : SWITCH_OFF_CX) + 'px 50%,'
+            + (on ? 'var(--chip)' : 'var(--muted)') + ' 0 96%,rgba(0,0,0,0) 100%)',
+          /* The pill reads as a recess in both states; only the knob and the
+             fill move. Slightly softer when on so the accent fill is not also
+             carrying a shadow that says "still empty". */
+          boxShadow: on ? 'inset 0 1px 2px rgba(0,0,0,.16)'
+                        : 'inset 0 1px 3px rgba(0,0,0,.18)',
+          /* Colour only, the same 180ms every other control here uses. The
+             KNOB is deliberately not transitioned: a gradient's interpolation
+             is not something to rely on across engines, and a switch that
+             snaps is honest about a state that is binary. */
+          transition: 'background-color .18s ease'
+        }
+        };
+      }),
       toggleMotion: () => {
         const next = this.motionActive() ? 'rest' : 'run';
         try { localStorage.setItem('wozi-motion', next); } catch (e) {}

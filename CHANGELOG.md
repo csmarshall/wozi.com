@@ -289,6 +289,69 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Fixed
 
+- **CL#169 — Machine Settings gets toggle switches and a 16px thumb, and the rows
+  tighten.** (GitHub #134, closes it.)
+
+  Charles: *"Make machine settings checkboxes and sliders more compact and reflect
+  more machine-like vibe."* Then, from a six-candidate sweep, a combination that was
+  not one of the rows: *"toggle switches + compact circle slider (what we have now is
+  ok, but it's too big)."*
+
+  **The toggle won on a measurement, not a look.** The sweep found that **no**
+  candidate — the shipped one included — reaches WCAG 1.4.11's 3:1 for on-versus-off
+  in **light** mode (knurled-lamp 1.86, toggle 2.22, instrument-plate 2.33, shipped
+  2.85). The toggle is the only one whose state cue is **positional**: the knob
+  moves. That property is recorded in capitals at the site with the four figures, and
+  with an explicit instruction not to convert it back to a colour-only cue.
+
+  **It also had to be fixed to have that property at all.** The swept version drew
+  the knob `--chip` in both states — measured **1.28:1 light / 1.20:1 dark** against
+  the off pill, because `--chip` is the panel's own colour and they are deliberate
+  neighbours. The knob was invisible, defeating exactly the thing it was chosen for.
+  It now takes whichever token contrasts with its slot: 3.33:1 light / 6.21:1 dark
+  off, 5.69 / 6.63 on.
+
+  **And a caveat left standing rather than papered over:** the ON figure rides
+  `--accent`, which `syncVars` writes per person. Four of `config.js`'s five accents
+  give 3.21–5.69:1; **amber `#F4B32B` gives 1.86:1 in light**. Accepted because by
+  then the pill has changed colour and the knob has moved, and recorded as wanting a
+  design decision rather than a token swap.
+
+  **The thumb is 16px, and the WCAG floor is not what bounds it.** The slider's
+  target is the input's full 129x44 box — CL#155's hit-vs-visible split — so
+  `a11y_audit` passes at 24/20/16/12 alike and never becomes the disc's floor.
+  What bounds it is **readback**: the slider steps over `SPEED_STOPS` by index, so
+  someone wanting a particular stop reads position off the disc, and 12px stops
+  reading as a separate part. 16 is 4x the 4px track.
+
+  **The compaction is 650 → 569px, NOT the 542px Charles was shown** — that figure
+  was a candidate which also took checkbox padding to 0, tightened both headings and
+  halved the separator. He approved two levers, two shipped, and the remaining ~27px
+  is left on the table deliberately.
+
+  **`rowAntiOverlapGap` had a rounding trap that a model rounded the wrong way turns
+  into real overlap.** `centreDistance = --btn + (realLine - modelledLine)`, so
+  modelling the content line *up* steals margin: `Math.ceil(13 x 1.3) = 17` measured
+  **-0.1px of genuine hit-box overlap**. The model is now floored to Chrome's own
+  1/64px `LayoutUnit` grid, which is at or under both Chrome's and Gecko's line box.
+  Measured after: the two inputs' edges meet at **exactly 236.15px**, centres exactly
+  44.00px apart.
+
+  Readouts are `LIST_ROW_FONT_BOLD`, derived from `LIST_ROW_FONT` by one replace
+  rather than a second hand-written 13px.
+
+  `npm test` 120/0. `a11y_audit` PASS x2 with **0 targets under 24x24**, switch box
+  40x24, range box 129x44. `devices.py` 24/24 and 4/4 with the tightest profile's
+  clearance unchanged at 8px. Slider reachable at 844x273 on the combined stage and
+  on `?who=charles`. All eight stops step with the readout tracking and
+  `--thumb-color` flipping at index 4; all three switches flip, restore, and move the
+  knob; Wear 100% still touches exactly 2 of 40 tooth-path sets.
+
+  **`pixel_regress` 0px is NOT evidence about this change** — the panel is
+  `display:none` with no forcing parameter (**#144**), so the gate cannot photograph
+  a single control here. What the 0px does usefully prove is the negative: the
+  machine itself is byte-identical, so none of this leaked into the artwork.
+
 - **CL#167 — the plate's far-end anchor is now covered by the suite, and the mirror
   image is a registry mutant.** (GitHub #138, closes it.)
 
