@@ -7,6 +7,77 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Added
 
+- **CL#190 — every drive strand rode `_M[0]`, so the one-clock rule was broken for the
+  dormant chain code.** (GitHub #175.)
+
+  `applyRotation()` was already written for per-component clocks — it reads
+  `this._M[c.comp != null ? c.comp : 0]` — but `chainEl()`'s ref tracker pushed only
+  `{el, sign}`. So `c.comp` was always `undefined` and every strand fell back to
+  component 0. The consumer was taught about the split; the producer never was.
+
+  **And enabling strands is exactly what creates the extra components**, so the more of
+  the dormant capability was switched on, the more of it was driven by the wrong clock.
+
+  Measured, strands temporarily enabled, 18 tracked paths over 8 components:
+
+  | | before | after |
+  | --- | --- | --- |
+  | `comp` on the 18 strands | `undefined` on all 18 | `[0,1,2,3,4,5]` |
+  | advance `_M[5]` by 720°, strands changed | **0 of 18** | **3 of 18** |
+  | which components | — | **only 5**; 0–4 untouched |
+  | `_chainEls` after 2 renders | 36 entries, **18 null** | 18 entries, **0 null** |
+
+  Reversal is symmetric at **±21.99px per 360 master-degrees**, which is π × `MODULE` —
+  one circular pitch per tooth of travel, in whichever direction the drag runs. That is
+  the invariant's own stated consequence and it now holds.
+
+  **The 8-component seed is gone, and the projection about it was wrong in an
+  instructive way.** `for (let c = 0; c < 8; c++)` had zero margin: today's config with
+  every link stranded reaches exactly **8 of 8**. Pushed to 10 components it was
+  reproduced — but the symptom is **`rotate(0deg)`, not `rotate(NaN deg)`**, because
+  `NaN || 0` is falsy and `applyRotation()`'s own fallback writes zero. So the mesh
+  snaps to angle 0 and restarts from 0 next tick with its accumulated phase discarded.
+  **A NaN that drew would at least have been obvious.** The bound is derived from the
+  solve now; nothing knows the count except the solve.
+
+  **Why this rotted unnoticed, which is the general lesson:** dormant code is covered by
+  no gate. `verify_motion` cannot check a strand that does not exist and the pixel gate
+  photographs a page without one, so per-component `_M` (CL#142) moved an invariant out
+  from under code nothing exercises, with no signal at all.
+
+  **`verify_motion` is also insufficient here and would not have caught it**, which is
+  worth stating rather than assuming the harness has it covered: its
+  `dashoffset values: N sampled, N changed` is an **aggregate**, and every strand riding
+  `_M[0]` still moves — so it reports N of N while most strands are on the wrong clock. A
+  per-component variant would have to group sampled dashoffsets by the driver's
+  component; the awkward part is that it has no handle on the logic instance and reaching
+  it needed a React fiber walk, which wants a test-only accessor rather than fiber
+  archaeology.
+
+  Also corrected in `index.html`: two comments the #147 prototype disproved — the
+  "seven site wheels" count (`TRAIN` is generated from `CHAIN_ORDER`/`PEOPLE`, so a
+  `link` must be computed in the generator, and `tools/test.js` executes that builder in
+  Node with an injected declaration list) and the claim that re-enabling *"stays a
+  one-line TRAIN edit"*. The `link` also goes on the **receiving** wheel, which is now
+  said where somebody re-enabling it will read it.
+
+  Verified with strands **off**, which is the shipped state: `npm test` **121/0**;
+  `pixel_regress --ref HEAD` **0px** on the stage, `?who=charles` and `--theme light`,
+  controls 0px — that 0 is what proves the change is inert on the live page.
+  `dom_invariants` PASS dark and light, **2 components**. `verify_motion` PASS,
+  `strands: none (correct for the direct-mesh train)`.
+
+  **One mechanical problem deliberately left to #147**, because it is that ticket's
+  design question rather than this one's bug: `solve()` places a linked wheel at
+  `(prev.r + r) × spread`, and the union-find only unions pairs at `r1 + r2` — so a
+  strand's driver and driven sprocket land in **different components by construction**.
+  Recording the driver's component is correct and is what makes the test above pass, but
+  the consequence is that dragging the driver travels the strand while the driven
+  sprocket does not turn. A real roller chain cannot do that. Unioning the pair would
+  collapse the very multi-component condition this fix is verified against, so it is a
+  question about whether a strand makes two wheels one machine — and it decides what
+  `dom_invariants` check 1 should assert.
+
 - **CL#189 — a short scored index mark on every ghost wheel's raised face, on by
   default.** (GitHub #148.)
 

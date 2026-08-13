@@ -1446,10 +1446,17 @@ const CLEARANCE = 13;
    slug   — icon/link to seat on this gear's hub (omit for a plain idler)
    metal  — 'steel' | 'brass'
    Add or remove an entry and the whole train re-solves: spacing, direction, ratio. */
-/* Seven site wheels of near-equal size, each with its own web design.
-   `link: 'chain'` (or `'belt'`) drives the next wheel by strand instead of tooth mesh.
-   No entry sets one today, so no chain or belt is drawn — see CLAUDE.md,
-   "Dormant capability: chain and belt", before re-enabling either. */
+/* Site wheels of near-equal size, each with its own web design -- as many as
+   CHAIN_ORDER/PEOPLE yield, not the seven this comment used to name.
+   `link: 'chain'` (or `'belt'`) makes a wheel take its drive by strand instead of
+   tooth mesh, and it goes on the RECEIVING wheel: solve() tests `t.link` on the
+   wheel being placed. Nothing sets one today, so no strand is drawn.
+   IT IS NOT A ONE-LINE EDIT ANY MORE, whatever CLAUDE.md used to promise: TRAIN is
+   built by the IIFE below rather than written out, so a `link` has to be COMPUTED
+   in that generator -- and tools/test.js slices out and executes both the builder
+   and solve()'s body in Node with a named list of injected declarations, so a
+   helper left at module scope is invisible there (it failed 39 tests once).
+   See CLAUDE.md, "Dormant capability: chain and belt", before re-enabling either. */
 /* One directly-meshed train: every wheel drives its neighbour, so spacing is fixed by
    the pitch radii and only the bearing varies — a gentle serpentine, no slack to fold. */
 /* ---------------------------------------------------------------------------
@@ -4365,6 +4372,17 @@ class Component extends DCLogic {
        chain flung them all. Both are now scoped to the component the hit wheel
        belongs to, which solve() has already worked out. */
     this._dragComp = hit.comp || 0;
+    /* `_M` IS SEEDED HERE TOO, because a hand can be the first thing that ever
+       addresses this component (GitHub #175): `+= dM` on an undefined angle is
+       NaN. AND THE SYMPTOM IS NOT `rotate(NaN deg)`, which is what makes it worth
+       a line of its own -- measured, `NaN || 0` is FALSY, so applyRotation()'s
+       own fallback writes `rotate(0deg)` and the whole mesh snaps to angle zero,
+       then restarts from zero on the next tick with its accumulated phase gone.
+       A NaN that draws would at least be obvious; this reads as the component
+       jumping. The integrator now seeds a component on first sight, so this only
+       covers a grab that beats the first tick to it -- which is precisely the
+       failure a component bound written down in startPhysics used to leave open. */
+    if (this._M[this._dragComp] === undefined) this._M[this._dragComp] = 0;
     this._v[this._dragComp] = 0;
     stage.style.cursor = 'grabbing';
 
@@ -5286,9 +5304,19 @@ class Component extends DCLogic {
        that the value is now in state before any of this runs -- the seed cannot
        depend on where a restore was written any more. */
     const seed = (this.props.spinUp === false && startRunning) ? this.idleRate() : 0;
+    /* HOW MANY FLYWHEELS THERE ARE IS THE SOLVE'S ANSWER, NOT A NUMBER WRITTEN
+       HERE (GitHub #175). This seeded a fixed eight, which was exactly the count
+       a full chain drive reaches on today's config -- a constant sitting on its
+       own limit, so one more link or one more person put a component past the end
+       of the seed. The seed value is stored instead and applied to each component
+       the first time the integrator meets it, which is what finally makes the
+       claim above true: "a component that appears later simply starts from the
+       same place this would have put it" was written for the `|| 0` fallbacks,
+       and those start it from a STANDSTILL, not from the seed. Nothing here has
+       to know the count, so nothing here can be wrong about it. */
+    this._seedV = seed;
     this._v = [];
     this._M = [];
-    for (let c = 0; c < 8; c++) { this._v[c] = seed; this._M[c] = 0; }
     let last = performance.now();
     const step = (now) => {
       /* Cap the update rate — see tickRate(), which is also what the speed
@@ -5328,6 +5356,12 @@ class Component extends DCLogic {
            the entire integration, so a hand on ANY wheel froze the page. */
         const n = this.solve().comps || 1;
         for (let c = 0; c < n; c++) {
+          /* SEEDED ON FIRST SIGHT, so the count comes from the solve and never
+             from a bound written down anywhere (GitHub #175). A component the
+             solve produces after startPhysics ran -- an extra person, an extra
+             link, a strand splitting a mesh -- joins the integrator at the same
+             velocity the first ones did instead of at rest. */
+          if (this._v[c] === undefined) { this._v[c] = this._seedV || 0; this._M[c] = 0; }
           if (this._dragComp === c) continue;
           this._v[c] = approachSpeed(this._v[c] || 0, target, dt);
           this._M[c] = (this._M[c] || 0) + this._v[c] * dt;
@@ -5850,11 +5884,12 @@ class Component extends DCLogic {
        `linked` branch of solve() that no shipped TRAIN entry takes. Comparing
        it unconditionally meant a resize crossing any of its ~6 quantised
        thresholds threw the whole solve away and rebuilt it for a variable with
-       no effect on this train. Guarding it here rather than deleting it keeps
-       CLAUDE.md's promise that re-enabling `link: 'chain'`/`link: 'belt'`
-       stays a one-line TRAIN edit -- the moment a shipped entry IS linked,
-       this same line starts invalidating on it again, with nothing else to
-       remember. */
+       no effect on this train. Guarding it here rather than deleting it means the
+       moment a shipped wheel IS linked, this same line starts invalidating on it
+       again with nothing else to remember -- which is the property worth keeping.
+       (It used to claim this preserved "a one-line TRAIN edit". TRAIN is generated
+       now, so re-enabling is a change in the generator, not one line -- but the
+       invalidation still needs no second place to remember.) */
     if (rot === this._axisRot && (!TRAIN_HAS_LINKED || boost === this._spreadBoost)
       && tight === this._tight && idle === this._idlerN) return false;
     this._axisRot = rot;
@@ -9438,9 +9473,35 @@ class Component extends DCLogic {
       ' A' + r2 + ',' + r2 + ' 0 ' + (wrapB > Math.PI ? 1 : 0) + ' 0 ' + P(b, r2, th - al) +
       ' L' + P(a, r1, th - al) +
       ' A' + r1 + ',' + r1 + ' 0 ' + (wrapA > Math.PI ? 1 : 0) + ' 0 ' + P(a, r1, th + al) + ' Z';
-    /* The strand is driven from the same master angle as the wheels. */
+    /* ONE CLOCK, AND A STRAND IS BOUND BY IT (GitHub #175). Every wheel transform
+       AND every strand's `stroke-dashoffset` derives from the same master angle
+       for ITS OWN component each tick -- so reversing the drag reverses the strand
+       with it, which is the consequence that makes the rule checkable.
+
+       `sign` AND `comp` COME OFF THE SAME WHEEL, the driving sprocket, and they
+       are read here rather than in applyRotation() on purpose. `applyRotation()`
+       has been written for per-component clocks since CL#142 -- it indexes
+       `_M[c.comp]` -- but this tracker recorded only `sign`, so `c.comp` was
+       always `undefined`, every strand on the page fell through to `_M[0]`, and
+       advancing any other component's angle moved its wheels while its strands
+       stood still. The consumer was taught about per-component clocks; the
+       producer never was, and nothing noticed because no shipped TRAIN entry
+       carries a `link` (see CLAUDE.md, "Dormant capability: chain and belt").
+
+       IT IS RECORDED, NEVER INFERRED. solve() already derives which mesh each
+       wheel belongs to, by union-find, in the one place that decides it; asking
+       applyRotation() to work it out again from geometry would be a second
+       opinion about one fact, which is the class of fault #163 was.
+
+       GUARDED ON `el`, NOT JUST ON THE ARRAY -- the same #59 fault the ghost
+       collector already fixed and this one still carried. React calls a detached
+       ref with null, so each render pushed one `{el: null}` per strand on top of
+       the live ones: 18 live and 18 null after two renders, unbounded in
+       principle. applyRotation() skips them, so it grew rather than broke, which
+       is why the guard belongs here and not on the read. */
     const sign = a.dir > 0 ? -1 : 1;
-    const track = (el) => { if (this._chainEls) this._chainEls.push({ el: el, sign: sign }); };
+    const comp = a.comp != null ? a.comp : 0;
+    const track = (el) => { if (el && this._chainEls) this._chainEls.push({ el: el, sign: sign, comp: comp }); };
     const run = { willChange: 'stroke-dashoffset' };
     const pitchDash = (on) => on.toFixed(2) + ' ' + (PITCH - on).toFixed(2);
     if (b.belt === 'belt') {
