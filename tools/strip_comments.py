@@ -641,28 +641,60 @@ def strip(text: str, markers: bool = True) -> str:
     return apply_spans(text, comment_spans(text), markers)
 
 
-def _git(*args: str) -> Optional[str]:
-    """`git -C REPO_ROOT ...`, or None if git could not answer at all. Every
-    caller treats None as "say less in the banner", never as a value."""
+def _git(root: str, *args: str) -> Optional[str]:
+    """`git -C root ...`, or None if git could not answer at all. Every caller
+    treats None as "say less in the banner", never as a value."""
     try:
-        r = subprocess.run(["git", "-C", REPO_ROOT, *args],
+        r = subprocess.run(["git", "-C", root, *args],
                            capture_output=True, text=True, timeout=10)
     except (OSError, subprocess.SubprocessError):
         return None
     return r.stdout.strip() if r.returncode == 0 else None
 
 
-def _git_rc(*args: str) -> Optional[int]:
+def _git_rc(root: str, *args: str) -> Optional[int]:
     """The exit status of a git command, for the ones whose ANSWER is the status
     (`diff --quiet` is 0 for same, 1 for different, 128 for no repo at all)."""
     try:
-        return subprocess.run(["git", "-C", REPO_ROOT, *args],
+        return subprocess.run(["git", "-C", root, *args],
                               capture_output=True, text=True, timeout=10).returncode
     except (OSError, subprocess.SubprocessError):
         return None
 
 
-def commit_sha(explicit: Optional[str] = None) -> Optional[str]:
+def locate(path: str) -> Tuple[str, str]:
+    """The working tree that contains `path`, and `path` within it (GitHub #171).
+
+    EVERY git question this tool asks is about the FILE it was handed, not about
+    the copy of the tool that happens to be running -- and those are two different
+    trees whenever a linked worktree is involved. `REPO_ROOT` is derived from
+    `__file__`, so asking it about a worktree's `index.html` produced
+    `.claude/worktrees/<name>/index.html`: a path that exists in no commit, which
+    `git diff HEAD --` then reports as "differs" for free. The refusal was right
+    and the question was wrong.
+
+    `rev-parse --show-toplevel` is the one thing that answers this correctly for a
+    linked worktree, whose `.git` is a FILE holding a `gitdir:` pointer -- walking
+    up for a `.git` DIRECTORY finds the main checkout's, and `--git-common-dir`
+    names the main repo by design. Both land back on the bug.
+
+    Falls back to `REPO_ROOT` when git cannot answer at all (no git, no repo), so
+    a path outside any working tree still gets a printable name and
+    `matches_commit()` still says "not committed" -- which is what makes the guard
+    refuse rather than proceed.
+    """
+    real = os.path.realpath(path)
+    top = _git(os.path.dirname(real) or ".", "rev-parse", "--show-toplevel")
+    root = os.path.realpath(top) if top else REPO_ROOT
+    rel = os.path.relpath(real, root).replace(os.sep, "/")
+    # A file in no working tree at all has no repo-relative name, and a ladder of
+    # `../` is not one -- it is a path the refusal message then asks the reader to
+    # decode. Say where the file actually is; git will decline it either way, which
+    # is what keeps the guard refusing.
+    return (root, real) if rel.startswith("../") else (root, rel)
+
+
+def commit_sha(root: str, explicit: Optional[str] = None) -> Optional[str]:
     """The commit the backlinks will be pinned to.
 
     `--sha` (the deploy passes `github.sha`) wins, then `$GITHUB_SHA` so a CI run
@@ -670,27 +702,34 @@ def commit_sha(explicit: Optional[str] = None) -> Optional[str]:
     `matches_commit()` is asked separately whether the file being stripped is
     actually AT that commit -- the two questions are independent, and conflating
     them is how a stripped file ends up claiming a precision it has not got.
+
+    `root` is the file's own working tree, so a worktree's file is pinned to the
+    WORKTREE's HEAD -- which is the commit its lines are true of.
     """
-    return explicit or os.environ.get("GITHUB_SHA") or _git("rev-parse", "HEAD")
+    return explicit or os.environ.get("GITHUB_SHA") or _git(root, "rev-parse", "HEAD")
 
 
-def matches_commit(rel: str) -> Optional[bool]:
+def matches_commit(root: str, rel: str) -> Optional[bool]:
     """Is the working copy of `rel` identical to HEAD's? None when git cannot say.
+
+    `root`/`rel` come from `locate()` together and must not be mixed from two
+    sources: a path relative to one tree, asked of another, is the GitHub #171
+    fault exactly.
 
     Untracked is asked about separately, because `git diff` ignores a file it has
     never heard of and would report a brand-new file as unchanged.
     """
-    if _git_rc("ls-files", "--error-unmatch", "--", rel) != 0:
+    if _git_rc(root, "ls-files", "--error-unmatch", "--", rel) != 0:
         return False
-    rc = _git_rc("diff", "--quiet", "HEAD", "--", rel)
+    rc = _git_rc(root, "diff", "--quiet", "HEAD", "--", rel)
     return None if rc is None or rc > 1 else rc == 0
 
 
-def repo_url() -> Optional[str]:
+def repo_url(root: str) -> Optional[str]:
     """The origin remote, as an https URL. Never hardcoded -- see the docstring:
     the URL is the one fact in the banner that can go stale, and the remote is
     where it actually lives."""
-    raw_url = _git("remote", "get-url", "origin")
+    raw_url = _git(root, "remote", "get-url", "origin")
     if not raw_url:
         return None
     url = raw_url
@@ -1623,6 +1662,35 @@ def selftest() -> None:
     if "const a = 1;" not in truncated:
         fails.append("an unterminated block comment ate the code before it")
 
+    # GitHub #171: the git questions are about the FILE, not about the tool. A tree
+    # of its own, nowhere near `REPO_ROOT`, is the cheap stand-in for the linked
+    # worktree that produced the bug -- the fault is identical (`REPO_ROOT` is not
+    # the file's tree) and a `git init` costs milliseconds where a `worktree add`
+    # costs a checkout. `--show-toplevel` is what has to answer, so the assertion is
+    # that the root MOVED and the path within it is the bare filename.
+    with tempfile.TemporaryDirectory() as tmp:
+        elsewhere = os.path.realpath(tmp)
+        env_git = subprocess.run(["git", "-C", elsewhere, "init", "-q"],
+                                 capture_output=True, text=True)
+        if env_git.returncode == 0:
+            open(os.path.join(elsewhere, "index.html"), "w").write("<p>x</p>\n")
+            root, rel = locate(os.path.join(elsewhere, "index.html"))
+            if root != elsewhere:
+                fails.append(f"locate() resolved a file in its own tree to "
+                             f"{root!r}, not {elsewhere!r} -- GitHub #171 is back "
+                             f"and --in-place will refuse a clean file")
+            if rel != "index.html":
+                fails.append(f"locate() called that file {rel!r} rather than "
+                             f"'index.html', so HEAD is being asked about a path "
+                             f"no commit contains -- GitHub #171 is back")
+            # An untracked file must still be refused: the guard's whole job.
+            if matches_commit(root, rel) is not False:
+                fails.append("an uncommitted file read as safe to overwrite in "
+                             "place, which is the one unrecoverable mistake")
+        else:
+            fails.append("selftest could not `git init` a temporary tree, so the "
+                         "GitHub #171 path resolution was not tested at all")
+
     if fails:
         print("SELFTEST FAILED:\n  - " + "\n  - ".join(fails), file=sys.stderr)
         sys.exit(EXIT_SELFTEST)
@@ -1679,6 +1747,11 @@ def main(argv: List[str]) -> int:
     in_path = a.input
     out_path = a.out or (in_path if a.in_place else DEFAULT_OUT)
     same = (os.path.abspath(out_path) == os.path.abspath(in_path))
+    # ONE answer to "which tree, and what is it called in there", asked once and
+    # used by the guard, the banner and the anchor lookup alike. It was computed
+    # twice from `REPO_ROOT` with two different slash conventions, which is two
+    # chances to fix one of them (GitHub #171).
+    root, rel = locate(in_path)
 
     # THE ONE UNRECOVERABLE MISTAKE. Overwriting the source is fine when the source
     # is safely in a commit -- the deploy's checkout is -- and destroys work that
@@ -1688,12 +1761,11 @@ def main(argv: List[str]) -> int:
         print(f"refusing to overwrite {in_path} without --in-place", file=sys.stderr)
         return EXIT_USAGE
     if same:
-        rel_in = os.path.relpath(os.path.abspath(in_path), REPO_ROOT)
-        clean = matches_commit(rel_in)
+        clean = matches_commit(root, rel)
         if clean is not True and not a.force:
             why = ("git cannot say whether it is committed"
                    if clean is None else "it differs from HEAD")
-            print(f"refusing --in-place on {rel_in}: {why}, and the comments it "
+            print(f"refusing --in-place on {rel}: {why}, and the comments it "
                   f"carries exist nowhere else. Commit first, or pass --force.",
                   file=sys.stderr)
             return EXIT_USAGE
@@ -1704,10 +1776,9 @@ def main(argv: List[str]) -> int:
         print(f"cannot read {in_path}: {exc}", file=sys.stderr)
         return EXIT_USAGE
 
-    rel = os.path.relpath(os.path.abspath(in_path), REPO_ROOT).replace(os.sep, "/")
-    url = a.repo_url or repo_url()
-    sha = commit_sha(a.sha)
-    at_commit = matches_commit(rel)
+    url = a.repo_url or repo_url(root)
+    sha = commit_sha(root, a.sha)
+    at_commit = matches_commit(root, rel)
     stripped = inject_banner(strip(src, a.markers), url, rel=rel, sha=sha,
                              markers=a.markers, at_commit=at_commit)
     # The unmarked strip exists only to price the markers. It is the same cut, so

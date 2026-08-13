@@ -7,6 +7,99 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Added
 
+- **CL#191 — `--in-place` asked git about the wrong tree, and the accessibility
+  ruleset is vendored so no gate depends on anyone else's uptime.** (GitHub #171,
+  GitHub #168.)
+
+  **#171's root cause is not what the ticket guessed**, and the real one is more
+  general. I suspected `--git-common-dir` indirection or a `.git`-directory walk;
+  `REPO_ROOT` was already `dirname(dirname(__file__))`. The actual fault: **every git
+  question was asked of the tree the TOOL lives in, while the answer had to be about
+  the tree the FILE lives in.** `matches_commit()` ran
+  `git -C REPO_ROOT diff --quiet HEAD -- <path relative to REPO_ROOT>`, so the moment
+  those two trees differ the path handed to git exists in no commit and `git diff`
+  reports "differs" for free.
+
+  **The corollary is the useful part:** a worktree running its *own*
+  `tools/strip_comments.py` always worked, because `__file__` was then inside it. So
+  the trigger is **tool-tree ≠ file-tree**, and a linked worktree is merely the
+  common way to produce that — which is why the symptom looked like a worktree bug
+  and was not one.
+
+  `locate(path) -> (root, rel)` asks `git -C dirname(path) rev-parse --show-toplevel`,
+  with `realpath` on both sides so a symlink cannot skew the relative name, and the
+  root and rel now travel together rather than being mixed from two sources. It also
+  killed a duplicate: `rel` was computed twice from `REPO_ROOT` with two different
+  slash conventions.
+
+  **The guard it must not lose is proved intact**, which matters more than the fix —
+  overwriting a source carrying uncommitted prose is the one version of this mistake
+  nothing can undo. Verified with the main checkout's tool against a worktree: a
+  clean file now **succeeds** where it used to refuse; a dirty file **still refuses**,
+  and the message names the real path (`index.html`) instead of a
+  `../../../../../Users/…` ladder; `--force` still overrides. A file in no git tree
+  refuses with its absolute path.
+
+  **CI cannot regress**, and the reason is worth stating: for a relative path in a
+  clean checkout `--show-toplevel` returns exactly what `REPO_ROOT` returned, and if
+  git refuses to answer at all (a container's "dubious ownership") the fallback lands
+  on `REPO_ROOT` — today's behaviour precisely.
+
+  **The idiom is shared but the bug is not.** `ROOT = dirname(dirname(__file__))`
+  appears in six other tools; none computes a repo-relative path for a file handed in
+  from elsewhere, so all six use `ROOT` as the tree they operate *on*.
+  `strip_comments` was unique in taking an arbitrary file argument and then measuring
+  it against its own tree. One genuinely worktree-hostile thing was found and left
+  alone: `tools/palettes.py` hardcodes an absolute repo path plus a dead scratchpad
+  path, so it would silently render the *main* checkout from inside any worktree. It
+  gates nothing.
+
+  **#168 — `tools/vendor/axe-core-4.13.0.min.js`, 580,491 B, committed.** Pinning the
+  version (CL#182) fixed *what* was asserted; it did not stop an unpkg outage, a DNS
+  failure or a runner with no egress from reddening a run with nothing here having
+  changed — and this is the only automated check on contrast or target size anywhere
+  in the tree.
+
+  The blob is **byte-identical** to the temp-cached copy every green run so far was
+  measured under (sha256 `c24f097b…`), so vendoring changed the ruleset's *delivery*
+  and not the ruleset. Checked rather than assumed. **The filename is derived from
+  `AXE_VERSION`**, so bumping the pin points at a path that does not exist yet and the
+  run says so loudly — the cache-filename reasoning applied to a copy that cannot
+  expire. Resolution order is `AXE_PATH` → vendored → `node_modules` → temp cache →
+  network, with `node_modules` demoted below the vendored copy because its path
+  carries no version.
+
+  **One more exit-2 site**, the ninth of this family: an `AXE_PATH` that does not
+  exist used to fall through to a silent network fetch — auditing under a ruleset the
+  operator did not name while appearing to honour the one they did.
+
+  **Verified with a control, because "needs no network" is unfalsifiable without
+  one** — and my first attempt at that control was inconclusive, since removing the
+  vendored blob alone still let the temp cache satisfy the run:
+
+  | condition | result |
+  | --- | --- |
+  | normal | `RESULT: PASS`, exit 0, ruleset read off disk |
+  | unpkg blackholed, blob present | `RESULT: PASS`, exit 0 |
+  | blob **and** temp cache gone, blackholed | `RESULT: NOT AUDITED`, **exit 2** |
+  | blob restored, cache still gone, still blackholed | `RESULT: PASS`, exit 0 |
+  | `AXE_PATH` → a real 4.12.1 build | `NOT AUDITED`, exit 2, read-back refused it |
+  | `AXE_PATH` → nonexistent | `NOT AUDITED`, exit 2, no fetch attempted |
+
+  That fourth row is the decisive one: it audits with **no network and no cache**.
+
+  **The blob cannot reach the web, verified against the publish commands rather than
+  an exclude list.** Every publish in `deploy.yml` is an explicitly named file, plus
+  exactly one `aws s3 sync` rooted at `assets/`. `tools/` is named in no publish
+  command, and `git check-ignore` reports no rule matching `tools/vendor/`.
+
+  `mutation.yml` gets a **comment-only** change: reason 1 rewritten as *spent*, with
+  the measured evidence, and reason 2 left intact — **one pinned deal makes the
+  verdict reproducible, not complete.** Moving the audit onto the deploy path is a
+  separate decision and has deliberately not been taken.
+
+  `npm test` **121/0**. `strip_comments --selftest` green, 2.86s.
+
 - **CL#190 — every drive strand rode `_M[0]`, so the one-clock rule was broken for the
   dormant chain code.** (GitHub #175.)
 

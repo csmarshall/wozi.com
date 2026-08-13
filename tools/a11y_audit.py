@@ -18,6 +18,13 @@ another element.
 
 Usage: python3 tools/a11y_audit.py [url] [--fonts auto|pinned|blocked]
 
+THE RULESET IS VENDORED, so this needs no network of its own (GitHub #168).
+`tools/vendor/axe-core-4.13.0.min.js` is read off disk, the filename is derived
+from `AXE_VERSION`, and `axe.version` is still read back after injection -- the pin
+says what was asserted and the read-back proves it. `tools/` is not in the deploy's
+publish whitelist, so the blob cannot reach the web. Exit codes stay separated: no
+ruleset means `RESULT: NOT AUDITED` and exit 2, never a verdict on the page.
+
 THE WEBFONT IS PINNED, AND THE HONEST ANSWER IS THAT THE EXPOSURE MEASURED ZERO
 (GitHub #145). This was the harness to worry about, for a good reason: it asserts
 the WCAG 2.5.8 floor of 24x24 CSS px on every focusable, and a hit box derived
@@ -80,8 +87,6 @@ CHROME = (_os.environ.get("CHROME")
 _HERE = _os.path.dirname(_os.path.abspath(__file__))
 _REPO = _os.path.dirname(_HERE)
 OUT = _os.environ.get("WOZI_SCRATCH") or _tf.mkdtemp(prefix="wozi-a11y-")
-AXE = (_os.environ.get("AXE_PATH")
-       or _os.path.join(_REPO, "node_modules", "axe-core", "axe.min.js"))
 # THE RULESET IS PINNED TO AN EXACT VERSION (GitHub #165). This fetched
 # `axe-core@4` -- a major-version RANGE off somebody else's server -- so any 4.x
 # release that added or tightened a rule changed what this gate asserts with
@@ -102,6 +107,40 @@ AXE = (_os.environ.get("AXE_PATH")
 # read as changed while the gate went on asserting the previous ruleset.
 AXE_VERSION = "4.13.0"
 AXE_URL = f"https://unpkg.com/axe-core@{AXE_VERSION}/axe.min.js"
+# THE BYTES ARE IN THE REPO NOW (GitHub #168), so the only automated check on
+# contrast or target size anywhere in this tree no longer depends on anyone else's
+# uptime. Pinning the version fixed WHAT was asserted; it did not stop an unpkg
+# outage, a DNS failure or a runner with no egress from reddening a run with
+# nothing here having changed.
+#
+# THE VERSION IS IN THE FILENAME, and it is derived from `AXE_VERSION` rather
+# than written twice -- so bumping the pin points this at a path that does not
+# exist yet and the run says so loudly, where a name like `axe.min.js` would go on
+# serving the old ruleset under the new number. That is the same reasoning as the
+# temp cache's filename below, applied to a copy that cannot expire.
+#
+# `AXE_PATH` still wins, because pointing the audit at a different build is how
+# the version read-back is TESTED. `node_modules/` is still honoured after the
+# vendored copy for anyone who ran `npm install axe-core@4.13.0`, but it is no
+# longer preferred: its path carries no version, so it is the one route here whose
+# bytes cannot be identified before the read-back catches them.
+#
+# PROVENANCE OF THE 4.13.0 BLOB, recorded once and true only of that version --
+# not a checksum anything here verifies, because git already identifies the bytes
+# and a hash in a comment beside a version-derived filename is a constant waiting
+# to go stale. 580,491 B, sha256
+# c24f097bd2f451d4f933e8bc7d8d539f8672a2ebcb5cc9f9f3eec8ca9470a0c1, byte-identical
+# to the fetched copy every green run before this one was measured under -- so
+# vendoring changed the delivery of the ruleset and not the ruleset. A future bump
+# fetches from `AXE_URL` and writes its own file; this paragraph is history at that
+# point and should say so rather than being edited to look current.
+#
+# It lives under `tools/`, which the deploy's whitelist does not name, so it cannot
+# reach the web.
+AXE_VENDORED = _os.path.join(_HERE, "vendor", f"axe-core-{AXE_VERSION}.min.js")
+AXE = (_os.environ.get("AXE_PATH") or
+       (AXE_VENDORED if _os.path.exists(AXE_VENDORED)
+        else _os.path.join(_REPO, "node_modules", "axe-core", "axe.min.js")))
 # Containers have no sandbox and a tiny /dev/shm, so Chrome refuses to start
 # without these. Only added off macOS, where they are unnecessary.
 CI_FLAGS = ([] if _sys_platform_is_darwin() else
@@ -320,12 +359,28 @@ async def main(pin):
         if ws:
             break
         time.sleep(0.2)
-    # FETCH AXE IF IT IS NOT THERE, rather than requiring a node_modules that
-    # this repo deliberately does not have. The path used to point into one
-    # session's scratchpad, which stops existing when that session ends -- so
-    # this raised FileNotFoundError on every run afterwards, and nobody noticed
-    # because the tool also had no exit code (#47). Cached in a temp dir.
+    # THE FETCH IS THE LAST RESORT NOW, not the normal route (GitHub #168). The
+    # ruleset is vendored, so the expected path is a plain read off disk; this
+    # branch survives only for a tree whose vendored copy has been deleted or whose
+    # `AXE_VERSION` has been bumped ahead of the blob beside it. Before the
+    # vendoring the path pointed into one session's scratchpad, which stops
+    # existing when that session ends -- so this raised FileNotFoundError on every
+    # run afterwards, and nobody noticed because the tool also had no exit code
+    # (#47).
     if not _os.path.exists(AXE):
+        # AN EXPLICIT `AXE_PATH` THAT IS NOT THERE IS A TYPO, not an invitation to
+        # go to the network. Silently fetching instead would audit under a ruleset
+        # the operator did not name while appearing to honour the one they did --
+        # the same shape as a `--theme light` run that renders dark. Nothing was
+        # measured, so exit 2.
+        if _os.environ.get("AXE_PATH"):
+            print(f"FATAL: AXE_PATH={AXE} does not exist — nothing was audited")
+            proc.kill()
+            return 2
+        # A missing vendored copy is not a detail to discover later: it is the
+        # difference between a gate that needs no network and one that does.
+        print(f"   NOTE: no vendored axe-core at {AXE_VENDORED} — falling back "
+              f"to the network, which GitHub #168 removed the need for")
         # Version in the filename: see AXE_VERSION. A cache keyed on the name alone
         # would serve the previous ruleset forever after a bump.
         _cache = _os.path.join(_tf.gettempdir(), f"wozi-axe-{AXE_VERSION}.min.js")
@@ -336,12 +391,20 @@ async def main(pin):
                 _u.urlretrieve(AXE_URL, _cache)
             except Exception as _e:
                 print(f"FATAL: axe-core unavailable and could not be fetched: {_e}")
+                print(f"       expected a vendored copy at {AXE_VENDORED}")
                 print("       set AXE_PATH=/path/to/axe.min.js to use a local copy")
                 proc.kill()
                 return 2
         _use = _cache
     else:
         _use = AXE
+    # WHERE THE RULESET CAME FROM, and deliberately NOT "axe-core 4.13.0 from ..."
+    # -- the version is a claim this line is in no position to make. It is read back
+    # off `axe.version` after injection, several steps below; printing the pin here
+    # beside a file that turned out to be 4.12.1 would put the lie above its own
+    # correction.
+    print(f"   axe-core ruleset from {_use} (pin {AXE_VERSION}, "
+          f"verified after injection)")
     axe_src = open(_use).read()
     async with websockets.connect(ws, max_size=8 * 10 ** 7) as c:
         # send/pump/wait_until come from fontpin, and not for tidiness: a paused
