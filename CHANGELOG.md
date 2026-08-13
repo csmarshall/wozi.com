@@ -7,6 +7,73 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Added
 
+- **CL#189 — a short scored index mark on every ghost wheel's raised face, on by
+  default.** (GitHub #148.)
+
+  Charles: *"add default timing mark - but not full line - on ghost gears outer ring"*.
+  Three things in that sentence were load-bearing and all three are honoured: **ghost**
+  wheels (not the linked train), the **raised-face ring** (not the well), and **not a
+  full line** — a scored mark with a punch dot, `GHOST_TIMING_SPAN = 0.60` of the ring's
+  depth, chosen by Charles from a 12× seven-panel sweep against 0.50 (the dot alone),
+  0.70, 0.85, 1.00 and a line-only variant.
+
+  **The first of #125's three layers to ship ON**, via a new `ghostTiming` prop with
+  `default:true` read through `layerOn()`. The existing `timing` prop stays `false` —
+  flipping *that* would have marked every linked wheel too, which is not what was asked
+  for.
+
+  **No fourth checkbox**, deliberately: CL#154's third row left only 2px of safe-area
+  clearance on the shortest landscape phone, so a fourth would very likely re-fail
+  `devices.py`. Charles asked for a default, not a control, so `ghostTiming` follows
+  `character`'s half of the pattern — schema default, no `storedFlag`, no row.
+
+  **`timingMark()` had to move before it could be shared.** It was a local `const`
+  inside `gearSvg`, so the shape itself was unreachable from the ghost renderer; it is
+  at module scope now with its proportions named (`TIMING_STROKE_MUL`,
+  `TIMING_DOT_MUL`, `TIMING_ALPHA`). It reads no `this`, so it stayed a free function —
+  which keeps all three existing call sites unchanged, including one inside a plain
+  `function(){}` IIFE where `this` is not the page. The three inline `Math.max` radius
+  literals in `ghostSvg` are named too (`gFaceR`/`gWellR`/`gBossR`).
+
+  **Both ghost classes get the mark, with no `role` test.** Bridge and origin idlers
+  versus escape-run outriggers are opposites in the **solve** — one may move a chain,
+  the other may not move anything — and `CLAUDE.md` is emphatic that they must never be
+  merged there. But in the **paint** they are already one renderer, one palette, one
+  dimming, and a mark is a property of a drawn wheel. Nothing here moves a wheel.
+
+  **A bug in the tuning itself, found by the sweep and worth recording**: the constant
+  was first defined as the *line's* length, and at 0.62 the resulting shape covered
+  **94%** of the ring — the dot adds its own diameter past the line's end and the round
+  cap adds half a stroke past the other, so the number in the file and the number on the
+  page were different quantities. Redefined as the **whole mark's extent, dot
+  included**; a per-ghost probe confirms **60% of the ring on all 19 ghosts at both
+  viewports**, +3.36 units of inner clearance, contained. Usable range is 0.47 (the dot
+  alone) to 1.00.
+
+  Drawn **inside** the alpha'd group — outside it would paint at full strength over a
+  bridge idler's opaque backing plate — and in `ft.line`, an ink already censused.
+  **`dom_invariants` reports 56 inks dark / 64 light / 42 solo, all unchanged**, which
+  is the check that would have caught a new literal colour.
+
+  Verified: `npm test` **121/0**. `dom_invariants` PASS ×3. `escape_mesh` PASS, worst
+  residual 0.0162px of 0.35. `a11y_audit` PASS both themes. `verify_motion` PASS, 0
+  console errors, strands correctly absent. `pill_clip` PASS, worst overrun −0.58px.
+  `pixel_regress` **674px stage / 142px solo / 697px light**, controls **0px** on every
+  run — non-zero forever after by design, since a default-on layer is now part of the
+  picture. The solo figure is smaller *for a reason worth stating*: that page has **0
+  structural idlers**, so only escape-run outriggers are marked there, against the
+  stage's 2 idlers plus 17 outriggers.
+
+  **Frame budget, which the ticket asked about:** `?hud` with the layer on versus off
+  gives tick ms **33.4 p50 / 49.9 p95** against **33.3 / 50.0**, 7 drops both. Under
+  `render_cost --throttle 6` `ghostSvg` is 1.5ms of a 139ms task, and tree-vs-HEAD
+  totals sit **inside** a 21% run-to-run variance measured on identical code — so the
+  honest verdict is **"not resolvable above noise"**, not "free".
+
+  The mark is ~3× stronger in light than dark (max channel delta 36 vs 12), straight off
+  `ghostOpacity`'s 0.46 against 0.17 — a consequence of the existing ghost paint, not a
+  new decision.
+
 - **CL#164 — the datum label is etched clear of an unbroken rule, on one side for
   every chain.** (GitHub #139.)
 
