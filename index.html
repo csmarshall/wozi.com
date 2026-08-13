@@ -428,7 +428,28 @@ input[type="range"]:focus{outline:none;}
        class or a stylesheet is forbidden here (styling is inline by design),
        and hoisting it into a render value would move the buttons' appearance
        out of the markup and into the logic, which is worse than the
-       repetition it removes. Only the `right` term differs between them. -->
+       repetition it removes. Only the `right` term differs between them.
+
+       AND THE ROW'S TWO ENDS CARRY REFS, BECAUSE THE DATUM PLATE MAY NOT BE
+       SEATED UNDER IT (GitHub #183). The seat search was bounded by the
+       viewport and by nothing else, so a mark could be stamped beneath these
+       buttons — measured on the shipped page at four of six portrait deals,
+       up to 346 square pixels of overlap. fitEscapes() publishes the row's
+       measured box the same way it publishes the wordmark's, and plateSeat()
+       carves it out of the window; see _ctlBox there.
+
+       THE ENDS BOUND THE ROW, so only they are measured. Each control's
+       `right` is its index in one row of whole button pitches, all at the same
+       `top` and the same size, so the union of the outermost slot in use and
+       the frame-most one contains every control between them. The theme
+       button holds the frame-most end always; the other end is the menu
+       toggle, or the departure indicator when it is showing. A control that
+       ever stands outside this row would need its own ref — which is a reason
+       to keep the row a row. -->
+  <!-- THE DEPARTURE INDICATOR'S REF IS THE ROW'S OUTER END WHEN IT IS SHOWING,
+       and nothing when it is not: display:none measures as a zero-sized rect,
+       which fitEscapes() drops, so the row's box shrinks back to the menu
+       toggle at exactly 1x without anything having to test the speed. -->
   <!-- THE DEPARTURE INDICATOR. Not a chooser -- all actual choosing happens on
        the slider in the menu below. Its whole job is to say the machine is not
        running at its normal pace and to give a one-tap way back: "this page is
@@ -461,7 +482,7 @@ input[type="range"]:focus{outline:none;}
        and the accessibility tree exactly like togPanelStyle does for the
        menu, so a screen reader at 1x hears nothing extra here and loses no
        focus stop. -->
-  <button onClick="{{ resetSpeed }}" title="{{ speedLabel }}" aria-label="{{ speedLabel }}" style="{{ speedStyle }}" style-hover="color:var(--ink);">
+  <button ref="{{ spdRef }}" onClick="{{ resetSpeed }}" title="{{ speedLabel }}" aria-label="{{ speedLabel }}" style="{{ speedStyle }}" style-hover="color:var(--ink);">
     {{ speedMark }}
   </button>
   <!-- THE REF IS HERE SO ESCAPE HAS SOMEWHERE TO PUT THE FOCUS BACK (GitHub
@@ -476,7 +497,7 @@ input[type="range"]:focus{outline:none;}
   <button onClick="{{ toggleMotion }}" title="{{ motionLabel }}" aria-label="{{ motionLabel }}" aria-pressed="{{ motionPressed }}" style="position:fixed;top:var(--offtop);right:calc(var(--offright) + var(--btn) + var(--btngap));z-index:20;display:flex;align-items:center;justify-content:center;width:var(--btn);height:var(--btn);padding:0;border:0;border-radius:999px;background:transparent;color:var(--muted);cursor:pointer;transition:color .18s ease;" style-hover="color:var(--ink);">
     {{ motionIcon }}
   </button>
-  <button onClick="{{ toggleTheme }}" title="{{ themeLabel }}" aria-label="{{ themeLabel }}" style="position:fixed;top:var(--offtop);right:var(--offright);z-index:20;display:flex;align-items:center;justify-content:center;width:var(--btn);height:var(--btn);padding:0;border:0;border-radius:999px;background:transparent;color:var(--muted);cursor:pointer;transition:color .18s ease;" style-hover="color:var(--ink);">
+  <button ref="{{ thmRef }}" onClick="{{ toggleTheme }}" title="{{ themeLabel }}" aria-label="{{ themeLabel }}" style="position:fixed;top:var(--offtop);right:var(--offright);z-index:20;display:flex;align-items:center;justify-content:center;width:var(--btn);height:var(--btn);padding:0;border:0;border-radius:999px;background:transparent;color:var(--muted);cursor:pointer;transition:color .18s ease;" style-hover="color:var(--ink);">
     {{ themeIcon }}
   </button>
 
@@ -1834,20 +1855,33 @@ const DATUM_PLATE = {};
    at the shipped size and air: 0px of label ink outboard of the scribe, both
    chains, both viewports.
 
-   AND #172 HAS PUT IT BACK, ON THE CHAINS THAT ARE NOT THE SPINE. The name's side
-   is the stage's now, taken from the spine, so a chain whose own ticks point the
-   other way carries its name OUTBOARD again -- and this figure does not bound it,
-   because plateMetrics().reach still reports the ticks alone. Measured over six
-   deals on the shipped two-chain stage, on the chain where it happens: 30.0-34.5
-   rendered px of name off the line at 1440x900 against 11.7-12.3 of tick, and
-   20.3-21.4 against 7.1-7.2 on the phone -- so the outermost ink stands about
-   twice this figure off the teeth there. KNOWN AND DELIBERATE, not an oversight:
-   it is CL#164's condition restored along with CL#164's rule, it is a statement
-   about how detached the mark READS rather than a collision (plateSeat() measures
-   the drawn box against every wheel wherever it lands, and the census finds no
-   crowded seat), and closing it means this figure paying for the NAME as well as
-   the ticks -- which needs an ink measurement datumRuns() has not got when it
-   scribes the line. See datumLayer(). */
+   AND #172 PUT IT BACK, ON THE CHAINS THAT ARE NOT THE SPINE, SO THE REACH NOW
+   PAYS FOR THE NAME TOO (GitHub #183). The name's side is the stage's, taken from
+   the spine, so a chain whose own ticks point the other way carries its name
+   OUTBOARD -- and this figure did not bound it, because plateMetrics().reach
+   reported the ticks alone. Measured over six deals on the shipped two-chain
+   stage, on the chain where it happens: 30.0-34.5 rendered px of name off the line
+   at 1440x900 against 11.7-12.3 of tick, and 17.9-21.4 against 6.9-7.2 on the
+   phone -- so the figure was bounding a box a third the size of the drawn one, and
+   the outermost ink stood about twice this figure off the teeth.
+
+   `reach` IS A MAX OVER THE TICKS AND THE NAME NOW, and the measurement it needs
+   is published before the first line is scribed rather than discovered after the
+   seat -- see markStand() and datumLayer(). WHAT IT COST, measured: the air the
+   line stands in falls from 8.32 rendered px to 0 at 1440x900 and from 5.88 to
+   1.99 on a 390x844 phone, so the scribe now grazes the deepest tooth tip on a
+   desk. THAT IS THIS FIGURE BEING HONOURED RATHER THAN A REGRESSION -- the
+   outermost ink comes in from 38.5 to 30.2 on the desk and from 26.1 to 20.3 on
+   the phone, which is inside the stated twenty.
+
+   AND ON A DESK IT STILL CANNOT BE MET, which is arithmetic and worth stating
+   plainly: the name's ink ALONE reaches 29.6px at 1440x900 -- the type is set at
+   DATUM_MARK_GROW x 1.3 modules and stood off the rule by CL#166's air -- so no
+   amount of air satisfies twenty while the name is outboard. The floor at zero is
+   what happens then, exactly as it already did above a render scale of 2.38 (see
+   datumClear), and the honest reading is that TWENTY IS UNSATISFIABLE FOR AN
+   OUTBOARD NAME AT THIS SIZE. Two levers exist and both are Charles's: this
+   figure, and DATUM_MARK_GROW. Neither was moved to make a measurement agree. */
 const PLATE_TOP_CLEAR = 20;
 
 /* HOW FAR ALONG THE LINE THE PLATE SITS FROM THE END OF THE MARK IT IS STAMPED
@@ -4384,6 +4418,10 @@ class Component extends DCLogic {
   _colRef = React.createRef();
   _stageRef = React.createRef();
   _togRef = React.createRef();
+  /* The corner row's two ends, measured by fitEscapes() so plateSeat() can keep
+     the datum plate out from under them (GitHub #183). See the markup. */
+  _thmRef = React.createRef();
+  _spdRef = React.createRef();
 
   /* ONE HOME FOR CLOSING THE POP-OUT (GitHub #154). Three things now dismiss it
      -- the scrim, Escape, and the toggle button's own second press -- and
@@ -4968,6 +5006,49 @@ class Component extends DCLogic {
       this._brandBox = { x0: cb.left - rect.left, y0: cb.top - rect.top,
         x1: cb.right - rect.left, y1: cb.bottom - rect.top };
     }
+    /* AND WHERE THE FIXED CORNER CONTROLS ARE (GitHub #183), in that same space
+       and for the same reason: the plate is seated against the frame, and the
+       frame is not the only thing in front of the stage. The seat was bounded by
+       the viewport and by nothing else, so a mark could be stamped under the
+       theme, motion and menu buttons -- 4 of 6 portrait deals on the shipped
+       page, up to 346 square pixels of overlap, landscape clean. plateSeat()
+       carves this out of its window.
+
+       THE ROW'S ENDS ARE MEASURED, NOT THE CORNER THEY ARE PINNED TO, and not
+       every button in it. Same reasoning as the wordmark above -- each control's
+       offsets are a token plus that edge's safe-area inset, known to CSS and to
+       nothing else -- plus one this box adds: the controls sit in ONE row, at
+       one `top`, at one size, spaced by whole button pitches, so the union of
+       the outermost slot in use and the frame-most one contains the rest by
+       construction. The theme button is always the frame-most; the other end is
+       the departure indicator when the page is away from 1x and the menu toggle
+       when it is not, and display:none measures as a zero-sized rect, so which
+       of them bounds the row needs no test of the speed.
+
+       LEFT NULL UNTIL THE REFS ARE ATTACHED, and plateSeat() then searches the
+       whole window exactly as it always did -- the same standing-in the natural
+       side does for an unmeasured viewport, and what the geometry suite gets for
+       ever, since it renders no corner row to measure.
+
+       THE REFS THEMSELVES ARE READ DEFENSIVELY, WHICH IS A CONTRACT AND NOT
+       TIMIDITY. The suite lifts this method out of the file and calls it on a
+       context carrying the refs it knew about when it was written -- and a lifted
+       function reaching for one it was never given throws, which is the same
+       extraction trap CL#188 hit from the other end. An unattached ref and a
+       context that has never heard of it are the same state to this loop, and
+       both mean "nothing measured, so nothing barred". */
+    let ctl = null;
+    [this._spdRef, this._togRef, this._thmRef].forEach(ref => {
+      const el = ref && ref.current;
+      if (!el) return;
+      const b = el.getBoundingClientRect();
+      if (!b.width || !b.height) return;
+      const box = { x0: b.left - rect.left, y0: b.top - rect.top,
+        x1: b.right - rect.left, y1: b.bottom - rect.top };
+      ctl = ctl ? { x0: Math.min(ctl.x0, box.x0), y0: Math.min(ctl.y0, box.y0),
+        x1: Math.max(ctl.x1, box.x1), y1: Math.max(ctl.y1, box.y1) } : box;
+    });
+    this._ctlBox = ctl;
     /* AND A SEAT THAT HAS GONE STALE IS RE-SEATED. Publishing the box is not
        enough on its own: the datum plate is placed during render, and a render
        only happens when something QUANTISED moves -- the 1% render scale, the
@@ -9711,7 +9792,8 @@ class Component extends DCLogic {
      clearance -- see plateMargin(). The margin absorbs the stroke; the re-seat
      absorbs the movement. */
   /* THE SIZES OF THE MARK THAT ANYTHING OUTSIDE datumLayer NEEDS, at a given
-     render scale. All of them are module multiples like everything else here. They
+     render scale. All of them but the last are module multiples like everything
+     else here -- `name` is measured ink and is handed in, see below. They
      are named here rather than left inline because fitEscapes has to know how far
      the stage may move before a seat it published stops being true, and a second
      copy of any of these derivations is the drift this repo has already paid for
@@ -9725,12 +9807,13 @@ class Component extends DCLogic {
 
      `reach` IS HOW FAR OUTBOARD OF THE SCRIBE THE MARK ACTUALLY DRAWS, which is
      what #76's figure bounds and what datumClear() pays out of it. It is a MAX
-     over the three things this shape puts on the outboard side of its own line,
+     over the four things this shape puts on the outboard side of its own line,
      so it stays true if any one of them is retuned rather than being true because
      one of them happens to be biggest today:
 
        tick     the station ticks, struck along `out * MAJOR`. The winner at every
-                render scale the fit can produce, and the term that was missing.
+                render scale the fit can produce until a struck name joined the
+                max below, and the term that was missing when #141 was filed.
        h / 2    the reserved rectangle's own outboard edge, for the treatments
                 that centre that rectangle ON the line ('chip', 'etch',
                 'etch-strike', 'etch-pocket', 'drop'). UNGROWN deliberately --
@@ -9741,17 +9824,39 @@ class Component extends DCLogic {
                 only term left, since the other two vanish with the scale and this
                 one is floored at one rendered pixel (#61).
 
-     WHAT IS NOT IN IT is anything per-chain -- the offset an 'etch-mark' label is
-     drawn at depends on that chain's own ink, and datumRuns() asks for this once
-     for the whole stage because the standoff is a property of the render scale.
-     The label is struck OPPOSITE the ticks (CL#166), so it stands inboard of the
-     rule and reaches nothing outboard for this to bound; what clears it against
-     the metal on that side is plateSeat()'s own search, not this figure. */
+       name     the struck 'etch-mark' name's own ink, where there is one. It
+                stands on whichever side the STAGE's direction points (CL#196),
+                so on any chain whose own ticks point the other way it is the
+                outboard extreme -- and it is much the largest term when it is:
+                29.6 rendered px against the ticks' 11.7 at 1440x900.
+
+     THE NAME TERM IS MEASURED INK, SO IT CANNOT BE DERIVED HERE (GitHub #183).
+     Every other term is a module multiple this method can compute from `s`
+     alone; a name's reach is its glyphs' own height at the size it is set, which
+     takes a canvas. So it arrives on the component from datumLayer(), which is
+     the one place that has measured it, and this reads it back -- the same shape
+     as `markOffset` travelling to plateSeat() on the run (CL#188) and of the
+     spine's direction travelling through `markRef` (CL#196). Passing it in
+     rather than measuring here is what keeps this method a pure function of the
+     scale for every caller that has no ink to hand.
+
+     ABSENT, IT IS ZERO, WHICH IS EXACTLY WHAT THIS RETURNED BEFORE. A page whose
+     datum has not been laid out yet, a treatment that centres its rectangle on
+     the line, and the geometry suite -- which lifts this method out of the file
+     and runs it with no component at all -- all get the tick-and-box answer they
+     have always got. What the suite therefore cannot see is the name term; it
+     has no canvas, so #76's bound is checked there against the ticks alone.
+
+     IT IS ONE FIGURE FOR THE STAGE, not one per chain, because `clear` is: every
+     mark stands the same distance off the machine it references (see
+     datumRuns()), so the reduction is a MAX over the names the stage can draw
+     and the tallest of them is what the figure has to hold for. */
   plateMetrics(s) {
     const h = MODULE * 2 * s, hair = Math.max(1, MODULE * 0.13 * s);
     const tick = MODULE * 1.2 * s;
-    return { h: h, hair: hair, tick: tick,
-      reach: Math.max(tick, h / 2, hair / 2) };
+    const name = this._nameReach || 0;
+    return { h: h, hair: hair, tick: tick, name: name,
+      reach: Math.max(tick, h / 2, hair / 2, name) };
   }
 
   /* THE MARGIN THE PLATE IS SEATED WITH, and how much of it is real clearance.
@@ -9783,14 +9888,21 @@ class Component extends DCLogic {
      measured 11.67px against the 9.73px paid at 1440x900 -- and they were declared
      inline in datumLayer where nothing here could see them. So the bound was
      honoured against a box while ink stood 20% further out than the box did, in
-     every label treatment this page has ever shipped, chip included. #139's
-     'etch-mark' did not cause that and does not change it: the name is struck
-     OPPOSITE the ticks (CL#166), so it stands inboard of the rule and puts no ink
-     on this side at all. The 33-39px outer edge #141 was filed about was CL#164's
-     one-consistent-side geometry, which CL#166 replaced.
+     every label treatment this page has ever shipped, chip included.
+
+     AND THE TICKS ARE NO LONGER THE WHOLE OF IT EITHER (GitHub #183). CL#166
+     struck the name OPPOSITE the ticks, so it stood inboard of the rule and put no
+     ink on this side -- which is what let this bound be about the ticks alone, and
+     is exactly what CL#196 undid: the side is the STAGE's now, so a chain whose
+     ticks point the other way carries its name outboard, 30.0-34.5px of it against
+     11.7-12.3 of tick. `reach` is a max over the ticks and the NAME now, so this
+     pays for whichever of them actually reaches further, and on every deal
+     measured that is the name. The 33-39px outer edge #141 was filed about was
+     CL#164's one-consistent-side geometry; CL#166 removed the case and CL#196
+     restored it, so this is the same condition paid for rather than avoided.
 
      ONE HOME, NOT A SECOND FIGURE. `reach` is derived in plateMetrics() from the
-     shape's own three outboard terms and is read by the drawing as well as by this
+     shape's own four outboard terms and is read by the drawing as well as by this
      bound, so datumLayer's `MAJOR` and this payment cannot come to disagree. A
      constant here would have been a number chosen to match the ticks and nothing
      in the file would have said so.
@@ -9829,7 +9941,27 @@ class Component extends DCLogic {
      teeth, from a module of air to 8.32px of it. Above 2.38 nothing moves either,
      because the air was already floored at zero. The change is confined to the
      band between those two crossovers, which is where a desk sits and a phone does
-     not. */
+     not.
+
+     AND THE NAME TERM MOVES EVERY SCALE, WHICH THE TICKS NEVER DID (GitHub #183).
+     A struck name reaches about 1.9 modules off its rule -- 29.6px at 1440x900
+     against the ticks' 11.7 -- so once `reach` accounts for it the figure is spent
+     at a render scale of roughly 20 / (MODULE * 4.3), about 0.67, which is below
+     anything the fit deals. MEASURED: the air falls 8.32 -> 0.00 rendered px at
+     1440x900 and 5.88 -> 1.99 at 390x844, so the desk now sits on the floor the
+     paragraph above describes for an ultrawide and the phone is nearly there. The
+     phone still varies with the deal, because the term is the tallest NAME's ink
+     and the descender is what decides it.
+
+     THE FLOOR NOW BEING THE ORDINARY CASE HAS A SECOND CONSEQUENCE, said here
+     because nothing else says it: plateSeat() takes this same figure as the air a
+     seat must keep from the metal, so a floored air asks a plate only not to
+     OVERLAP a wheel where it used to ask for a module of daylight. That is the
+     figure being honest rather than a threshold being relaxed -- the plate may
+     come as close to a tooth as the rule it rides does, which is the same
+     sentence in both places -- but a crowded seat is likelier than it was, and the
+     console is where it will say so. Measured over 5 seeds x 2 viewports x 2
+     themes: no crowded seat and no warning. */
   datumClear(S) {
     const air = Math.min(MODULE * S, PLATE_TOP_CLEAR - this.plateMetrics(S).reach);
     return Math.max(0, air) / S;
@@ -10020,15 +10152,52 @@ class Component extends DCLogic {
        run plus half its height across it, resolved onto each screen axis. Both
        half-extents carry the margin, so it applies on every edge. */
     const pad = this.plateMargin(S).pad;
-    const hx = Math.abs(r.ux) * pw / 2 + Math.abs(r.nx) * ph / 2 + pad;
-    const hy = Math.abs(r.uy) * pw / 2 + Math.abs(r.ny) * ph / 2 + pad;
-    /* The stations at which the WHOLE plate is on the page, by the same slab
+    const MARK = this.plateMetrics(S);
+    /* THE BAND THE MARK ACTUALLY DRAWS ACROSS ITS RULE, so the window below
+       bounds the DRAWING and not merely the placard (GitHub #173). The station
+       ticks are struck `MARK.tick` outboard of the line -- a fifth further out
+       than the plate's own half-height -- and nothing bounded them: measured on
+       a phone, the outermost tick landed at 376px of 390, on the page with 14px
+       to spare, so a slightly different deal or a real safe-area inset put it
+       over. The window guaranteed the box was on the page while the mark drew
+       past it, which is #162's fault stated on the other axis: clean about a box
+       smaller than what it draws.
+
+       THREE TERMS, EACH READ OFF SOMETHING ALREADY DRAWN and none of them
+       written down here: the plate's rectangle at the offset it is stamped at,
+       the scribe's own stroke overhang either side of the line, and the tick
+       tips. `MARK.tick` is the one home for the tick length -- the same figure
+       datumLayer strikes them with and datumClear() pays for -- so a longer tick
+       tightens this bound by itself. THE SIGN MATTERS: the ticks go out along
+       `side`, so the mirrored origin's band is the mirror image and the two
+       candidates are bounded differently, which is the point -- one side may
+       have room for the ticks where the other does not.
+
+       ONLY THE ACROSS AXIS IS WIDENED. A tick's position ALONG the run is a
+       station, fixed by the wheel it indexes, so no seat can move it and
+       bounding it here would bound the wrong thing -- the mark deliberately runs
+       off the page along its own axis, which is most of what makes it read as a
+       datum. What the seat chooses is where the plate sits along the run, and
+       that is what `pw` still bounds. */
+    const band = (O) => {
+      const t = typeof r.markOffset === 'function' ? r.markOffset(O.side || 1) : 0;
+      const tip = (O.side || 1) * MARK.tick;
+      const lo = Math.min(t - ph / 2, -MARK.hair / 2, tip);
+      const hi = Math.max(t + ph / 2, MARK.hair / 2, tip);
+      return { mid: (lo + hi) / 2, half: (hi - lo) / 2 };
+    };
+    /* The stations at which the WHOLE mark is on the page, by the same slab
        clip the line itself uses: an axis the run is parallel to does not bound
        it, and taking that axis' crossing anyway is what made a datum a fraction
        of a degree off horizontal thirty-six thousand pixels long. Here the
        parallel axis instead decides the interval outright -- either the run
-       already sits inside that slab, or no station on it ever will. */
-    const window_ = (O) => {
+       already sits inside that slab, or no station on it ever will.
+
+       THE HALF-EXTENTS ARE THE CANDIDATE'S OWN and arrive as arguments, because
+       the band above is not the same on both sides. They were computed once
+       outside this, which was true only while the searched box was symmetric
+       about the line. */
+    const window_ = (O, hx, hy) => {
       let lo = -Infinity, hi = Infinity;
       [[O.ox, r.ux, vp.x0 + hx, vp.x1 - hx], [O.oy, r.uy, vp.y0 + hy, vp.y1 - hy]]
         .forEach(s => {
@@ -10050,7 +10219,17 @@ class Component extends DCLogic {
        reach is paid for -- so there is one home for "how close this
        mark comes to a tooth", whichever axis it is measured on. It answers in
        solve units because datumRuns() places lines in them; the seat is
-       solved in rendered pixels, so it is multiplied straight back. */
+       solved in rendered pixels, so it is multiplied straight back.
+
+       IT IS ORDINARILY ZERO NOW, AND THAT IS THE ONE HOME BEING HONEST RATHER
+       THAN A REQUIREMENT BEING DROPPED (GitHub #183). Once #76's figure pays for
+       the struck name as well as the ticks there is nothing left of it at a
+       desk's render scale, so this asks a plate not to OVERLAP a wheel where it
+       used to ask for daylight. Sharpening it back up would mean writing a second
+       figure here that disagrees with where the rule is scribed -- and the whole
+       point of reading datumClear() is that a plate may come as close to a tooth
+       as its own rule does, no closer and no further. See PLATE_TOP_CLEAR for the
+       measurement and for which lever moves it. */
     const air = this.datumClear(S) * S;
     /* WHERE THE RECTANGLE IS ACTUALLY DRAWN ACROSS THE RULE, WHICH IS NOT ALWAYS
        ON IT (GitHub #162, the inboard half of #141). 'etch-mark' strikes the name
@@ -10098,6 +10277,60 @@ class Component extends DCLogic {
       const t = typeof r.markOffset === 'function' ? r.markOffset(O.side || 1) : 0;
       return { ox: O.ox + r.nx * t, oy: O.oy + r.ny * t };
     };
+    /* THE STATIONS THE FIXED CORNER CONTROLS TAKE (GitHub #183). The seat was
+       bounded by the viewport and by NOTHING ELSE, so a plate could be stamped
+       under the theme, motion and menu buttons: measured 4 of 6 portrait deals on
+       the shipped page, up to 346 square pixels of overlap, landscape clean at
+       every deal. The frame is not the only thing in front of the stage, and the
+       row is measured in the same space `_vpBox` is published in (see
+       fitEscapes), so it carves the window exactly as the frame bounds it.
+
+       WHY IT IS A BAR AND NOT A CLIP, which is why slabClip() cannot serve here.
+       That function treats an axis the run is parallel to as UNBOUNDING, which is
+       right for asking where a line leaves a box and wrong for asking where it
+       crosses one: a vertical run far to the left of the corner would be barred
+       along its whole length by the y crossing alone. So the parallel axis
+       decides the question outright, exactly as it does in window_ above and with
+       the same sense reversed -- either the line passes through the row's band on
+       that axis or no station on it ever clashes.
+
+       THE BAR CARRIES THE CANDIDATE'S OWN HALF-EXTENTS, so what is kept clear is
+       the drawn band and not a centre: the same `hx`/`hy` the window is bounded
+       with, margin included, which is the one place those are derived.
+
+       ABSENT, IT IS NO BAR AT ALL. Before the first fit there is no measured row,
+       and the geometry suite renders none for ever -- the same standing-in the
+       natural side does for an unmeasured viewport. */
+    const barred = (O, hx, hy) => {
+      const c = this._ctlBox;
+      if (!c) return null;
+      let lo = -Infinity, hi = Infinity;
+      [[O.ox, r.ux, c.x0 - hx, c.x1 + hx], [O.oy, r.uy, c.y0 - hy, c.y1 + hy]]
+        .forEach(s => {
+          if (Math.abs(s[1]) < 1e-6) {
+            if (s[0] < s[2] || s[0] > s[3]) { lo = Infinity; hi = -Infinity; }
+            return;
+          }
+          const a = (s[2] - s[0]) / s[1], b = (s[3] - s[0]) / s[1];
+          lo = Math.max(lo, Math.min(a, b));
+          hi = Math.min(hi, Math.max(a, b));
+        });
+      return lo < hi ? [lo, hi] : null;
+    };
+    /* WHAT A BAR LEAVES OF A WINDOW: the one or two spans either side of it.
+       NOTHING IS MERGED AND NOTHING IS ARBITRATED HERE -- each span is scored as
+       its own candidate by the loop below, so the corner row costs the search a
+       second station to try rather than a rule to weigh against the others. A bar
+       that covers a window whole leaves no span, and that side is then simply not
+       a candidate, which lands on the existing "neither side has room" sentence
+       instead of inventing a second one. */
+    const spans = (iv, bar) => {
+      if (!bar) return [iv];
+      const out = [];
+      if (bar[0] > iv[0]) out.push([iv[0], Math.min(iv[1], bar[0])]);
+      if (bar[1] < iv[1]) out.push([Math.max(iv[0], bar[1]), iv[1]]);
+      return out.filter(w => w[1] > w[0]);
+    };
     /* WHICH OF TWO SEATS IS THE BETTER ONE. A seat that clears the metal beats
        one that does not, whatever it costs in slide -- a plate with a
        background wheel drawn across it is not a placement, it is the mark
@@ -10121,7 +10354,18 @@ class Component extends DCLogic {
          side's label is struck off it. The window, the excluded bands and the
          air are all properties of the DRAWN box, so all three read this. */
       const P = plateO(O);
-      const iv = window_(P);
+      /* AND THE BOX THE FRAME AND THE CORNER ROW ARE ARGUED AGAINST IS THE WHOLE
+         MARK'S (GitHub #173): the band this side draws across its rule, centred
+         where that band's own middle falls rather than on the placard, with the
+         half-extents that band resolves onto each screen axis. The plate origin
+         above is still what the METAL is measured against, because the ticks and
+         the scribe are what a wheel is allowed to be drawn over -- the layer is
+         painted beneath every wheel -- and the placard is what it is not. */
+      const B = band(O);
+      const C = { ox: O.ox + r.nx * B.mid, oy: O.oy + r.ny * B.mid };
+      const hx = Math.abs(r.ux) * pw / 2 + Math.abs(r.nx) * B.half + pad;
+      const hy = Math.abs(r.uy) * pw / 2 + Math.abs(r.ny) * B.half + pad;
+      const iv = window_(C, hx, hy);
       if (!iv) return;
       /* THE ANCHOR END OF THE MARK, OR OF AS MUCH OF IT AS THE PAGE SHOWS.
          The more inboard of the two wins, and that is the whole of the rule: the
@@ -10157,15 +10401,21 @@ class Component extends DCLogic {
          `slide` is measured against either way -- the figure this file states
          is a preference for the mark's OWN position, not for wherever a
          search happens to land it. */
-      const naiveAt = Math.max(iv[0], Math.min(iv[1], want));
       const excluded = this.plateExcluded(P, r, pw, ph, metal, air);
-      const cleanAt = this.plateNearestClean(want, iv[0], iv[1], excluded);
-      const at = cleanAt === null ? naiveAt : cleanAt;
-      const slide = Math.abs(at - want);
-      const gap = this.plateAir(P, at, r, pw, ph, metal);
-      const cand = { ox: O.ox, oy: O.oy, at: at, slide: slide, side: O.side || 1,
-        air: gap, clean: gap >= air };
-      if (!best || beats(cand, best)) best = cand;
+      /* ONE CANDIDATE PER SPAN THE CORNER ROW LEAVES (GitHub #183), and `slide`
+         is still measured from the mark's own preferred station, so a span
+         further from it loses to a nearer one by the rule that was already here
+         rather than by a new one. */
+      spans(iv, barred(C, hx, hy)).forEach(win => {
+        const naiveAt = Math.max(win[0], Math.min(win[1], want));
+        const cleanAt = this.plateNearestClean(want, win[0], win[1], excluded);
+        const at = cleanAt === null ? naiveAt : cleanAt;
+        const slide = Math.abs(at - want);
+        const gap = this.plateAir(P, at, r, pw, ph, metal);
+        const cand = { ox: O.ox, oy: O.oy, at: at, slide: slide, side: O.side || 1,
+          air: gap, clean: gap >= air };
+        if (!best || beats(cand, best)) best = cand;
+      });
     });
     if (!best) {
       if (!this._plateWarned) this._plateWarned = {};
@@ -10259,6 +10509,42 @@ class Component extends DCLogic {
     return { base: fs * 0.35, depth: Math.max(1, fs * DATUM_ETCH_DEPTH) };
   }
 
+  /* WHERE A STRUCK NAME SITS ACROSS ITS RULE, AND HOW FAR IT THEN REACHES OFF
+     IT -- one home for both, because they are two readings of one placement and
+     they were never both derived (GitHub #183). The offset was derived in
+     datumLayer and the reach was not derived at all: plateMetrics().reach
+     reported the ticks alone, so #76's bound was paid against 11.7 rendered px
+     while the name drew 30.0 to 34.5 of ink on the chains that carry it
+     outboard. Deriving the second from the first is what makes them agree.
+
+     `centre` IS THE SIGNED STEP FROM THE RULE TO THE STAMP'S CENTRE, for a name
+     struck in direction `s` -- the air, the ink that faces the rule, and the
+     relief copy standing off that ink, less the baseline the stamp sets its type
+     on. Which way `s` points is not this method's question; datumLayer compares
+     it against the stage's own direction (CL#196).
+
+     `reach` IS THE SAME PLACEMENT READ FROM THE OTHER END: the far edge of the
+     drawn glyphs, measured from the rule. IT IS THE SAME ON EITHER SIDE, and
+     that is a consequence rather than a coincidence -- the centre is stepped by
+     exactly the NEAR side's own ink, so the near edge lands at `air` whichever
+     way the name is struck and the far edge at the mark's full drawn height past
+     it. One figure therefore bounds a name on either side, and nothing that
+     needs the bound has to know which side a chain will be seated on. It is why
+     datumRuns() can scribe the line before any seat has been searched.
+
+     THE AIR IS CL#166'S FIGURE UNCHANGED: the scribe's own stroke overhang plus
+     DATUM_MARK_AIR of the plate's padding. What the eye measures is the gap
+     between the rule and the nearest drawn pixel, so that is what is stated. */
+  markStand(label, font, fs, hair, pad) {
+    const ink = this.textInk(label, font, fs);
+    const rel = this.datumRelief(fs);
+    const air = hair / 2 + DATUM_MARK_AIR * pad;
+    return {
+      centre: (s) => s * (air + (s > 0 ? ink.ascent : ink.descent) + rel.depth) - rel.base,
+      reach: air + ink.ascent + ink.descent + 2 * rel.depth
+    };
+  }
+
   datumStamp(label, font, track, pw, ph, fs, INK, HAIR) {
     const h = React.createElement;
     const depth = this.datumRelief(fs).depth;
@@ -10307,40 +10593,25 @@ class Component extends DCLogic {
 
   datumLayer(solved, S, box, metal) {
     const h = React.createElement;
-    const runs = this.datumRuns(solved, this.state.ghosts, S);
-    if (!runs.length) return null;
-    /* Read off plateMetrics() rather than repeated here: fitEscapes needs the
-       same numbers to know when a seat has gone stale, and one derivation cannot
-       be in two places. */
-    const MARK = this.plateMetrics(S);
-    const HAIR = MARK.hair;
-    /* Two concrete colours, not the tokens: the mark is drawn inside the ghost
-       layer's opacity now, and datumInk() is where the alpha it lost is paid
-       back as ink (#81). */
-    const INK = this.datumInk();
-    /* THE TICK LENGTH COMES OFF plateMetrics() NOW, NOT FROM A LITERAL HERE
-       (GitHub #141). datumClear() has to pay this exact length out of
-       PLATE_TOP_CLEAR -- it is the mark's outboard extreme -- and while it was
-       written here as `MODULE * 1.2 * S` that method had nothing to read and paid
-       the reserved box's half-height instead. PAST is deliberately NOT MARK.h even
-       though the two are the same number: it is how far the scribe runs out past
-       the end of what it references, which is a different fact that happens to
-       have the same value. */
-    const MAJOR = MARK.tick, PAST = MODULE * 2 * S;
     /* GROW REACHES BOTH DIMENSIONS OR NEITHER. It scales the type and the box the
        type is set inside by the same factor, so a grown mark is the same shape as
        an ungrown one rather than lettering crowding a fixed rectangle -- and it is
        1 in every treatment but 'etch-mark', which is what keeps the shipped chip
-       byte-identical while the lever exists. MARK.h and MARK.reach stay UNSCALED
-       and are what fitEscapes and datumClear() go on reading: those two ask about
-       the plate's stroke overhang and about #76's bound, neither of which this
-       lever is entitled to answer for them. That is not an omission in the bound
-       (GitHub #141): growing this rectangle moves its OUTBOARD edge nearer the
-       line, not further, because 'etch-mark' is also the treatment that offsets
-       the rectangle inboard -- so the ticks stay the outboard extreme and the
-       grown box never becomes it. */
-    const GROW = DATUM_LABEL === 'etch-mark' ? DATUM_MARK_GROW : 1;
-    const PLATE_H = MARK.h * GROW, PLATE_F = MODULE * 1.3 * S * GROW;
+       byte-identical while the lever exists. MARK.h stays UNSCALED and is what
+       fitEscapes goes on reading, since it asks about the plate's stroke
+       overhang, which this lever is not entitled to answer for it.
+
+       MARK.reach IS NO LONGER INNOCENT OF IT, THOUGH (GitHub #183). Growing this
+       rectangle moves its own outboard edge nearer the line -- 'etch-mark' is
+       also the treatment that offsets the rectangle clear of the line -- so the
+       BOX never becomes the outboard extreme. The INK does, on any chain whose
+       ticks point away from the stage's own label direction, and the ink is set
+       at PLATE_F, which this lever scales. So the figure it feeds is scaled by
+       it too, through the measurement below rather than through a factor written
+       anywhere. */
+    const STRUCK = DATUM_LABEL === 'etch-mark';
+    const GROW = STRUCK ? DATUM_MARK_GROW : 1;
+    const PLATE_F = MODULE * 1.3 * S * GROW;
     /* A WINDOWS FACE IN THE STACK. ui-monospace covers Apple, Menlo is the older
        macOS name and DejaVu Sans Mono is what Linux ships -- and nothing here
        named anything a Windows machine has, so the generic `monospace` resolved
@@ -10349,6 +10620,61 @@ class Component extends DCLogic {
        page. Consolas has shipped with Windows since Vista and Office 2007; the
        generic stays behind it. */
     const MONO = "ui-monospace, Menlo, Consolas, 'DejaVu Sans Mono', monospace";
+    /* ONE FONT STRING FOR EVERY NAME ON THE STAGE. The size is the render
+       scale's, not the chain's, so a per-run copy of this was a per-run chance
+       for the measurement below and the drawing to be set differently. */
+    const FONT = '600 ' + PLATE_F.toFixed(2) + 'px ' + MONO;
+    const PAD = this.plateMargin(S).pad;
+    /* HOW FAR A STRUCK NAME REACHES OFF ITS RULE AT THIS SCALE, PUBLISHED BEFORE
+       THE FIRST LINE IS SCRIBED (GitHub #183). plateMetrics().reach folds this
+       into #76's bound, and datumRuns() -- called on the next line -- pays that
+       bound to decide where every rule on the stage is laid. So the measurement
+       has to happen first, and it can: a name's reach depends on the size it is
+       set at and on its own glyphs, and neither of those needs a seat, a side or
+       a solve. That is what makes this a published figure rather than the second
+       pass the ticket expected.
+
+       THE MAX OVER EVERY NAME THE TABLE HOLDS, not over this stage's chains, and
+       the difference is deliberate. The figure is one for the whole stage (see
+       datumRuns()), so it has to hold for the tallest name that can be drawn;
+       and a stage that draws a datum at all is a shared one, which carries every
+       person in the table. A person with no wheels is paid for and not drawn,
+       which over-pays by whatever their descender is deeper than the rest.
+
+       ZERO IN EVERY OTHER TREATMENT, exactly as `markOffset` is: a rectangle
+       centred on the line puts no ink outboard that MARK.h does not already
+       account for. */
+    const NAMES = Object.keys(DATUM_PLATE).map(k => DATUM_PLATE[k]);
+    this._nameReach = STRUCK
+      ? NAMES.reduce((m, n) => Math.max(m,
+        this.markStand(n, FONT, PLATE_F, this.plateMetrics(S).hair, PAD).reach), 0)
+      : 0;
+    /* AND ONLY NOW ARE THE MARK'S OWN SIZES TAKEN, which is the whole reason the
+       measurement above comes first. plateMetrics() reads the figure just
+       published, so a copy of it taken any earlier is the old tick-only answer --
+       and a stale `reach` in the one method that draws the thing it bounds is
+       precisely the drift #183 was filed about. Read off plateMetrics() rather
+       than repeated here for the reason it always was: fitEscapes needs the same
+       numbers to know when a seat has gone stale, and one derivation cannot live
+       in two places.
+
+       THE TICK LENGTH COMES OFF IT TOO, NOT FROM A LITERAL HERE (GitHub #141).
+       datumClear() has to pay this exact length out of PLATE_TOP_CLEAR, and while
+       it was written here as `MODULE * 1.2 * S` that method had nothing to read
+       and paid the reserved box's half-height instead. PAST is deliberately NOT
+       MARK.h even though the two are the same number: it is how far the scribe
+       runs out past the end of what it references, which is a different fact that
+       happens to have the same value. */
+    const MARK = this.plateMetrics(S);
+    const HAIR = MARK.hair;
+    const MAJOR = MARK.tick, PAST = MODULE * 2 * S;
+    const PLATE_H = MARK.h * GROW;
+    const runs = this.datumRuns(solved, this.state.ghosts, S);
+    if (!runs.length) return null;
+    /* Two concrete colours, not the tokens: the mark is drawn inside the ghost
+       layer's opacity now, and datumInk() is where the alpha it lost is paid
+       back as ink (#81). */
+    const INK = this.datumInk();
     const els = [];
     let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
     const mk = (x, y) => {
@@ -10389,7 +10715,7 @@ class Component extends DCLogic {
          engravings, but nothing about where the line goes can be settled until
          the thing it has to carry has been measured. */
       const label = r.plate;
-      const font = '600 ' + PLATE_F.toFixed(2) + 'px ' + MONO;
+      const font = FONT;
       const track = PLATE_F * 0.09;
       const pw = this.textWidth(label, font) + track * Math.max(0, label.length - 1) + PLATE_H * 0.8;
       /* WHICH SIDE OF THE RULE AN 'etch-mark' NAME STANDS ON, AND HOW FAR OFF IT,
@@ -10464,8 +10790,12 @@ class Component extends DCLogic {
          plateMargin()'s figure, the plate's corner radius floored at half a
          hairline -- and plus the ink the name puts on the side facing the rule,
          because a centre is being placed and an edge has to clear. */
-      const ink = this.textInk(label, font, PLATE_F);
-      const rel = this.datumRelief(PLATE_F);
+      /* AND HOW FAR OFF IT COMES OFF markStand(), WHICH IS ALSO WHAT #76'S BOUND
+         PAYS FOR (GitHub #183). The offset used to be derived here and the reach
+         nowhere, so the drawing knew a distance the bound did not; one method now
+         answers both, and `_nameReach` above is the same call reduced over every
+         name the stage can draw. */
+      const stand = this.markStand(label, font, PLATE_F, HAIR, PAD);
       /* WHICH WAY ALONG THE NORMAL THIS CHAIN'S NAME IS STRUCK, as a signed step
          over `r.n`. Both candidates are built and scored; neither is assumed.
 
@@ -10491,16 +10821,7 @@ class Component extends DCLogic {
         const agree = (s) => s * (r.nx * ref.x + r.ny * ref.y);
         return agree(1) >= agree(-1) ? 1 : -1;
       };
-      const markOffset = (side) => {
-        const markSign = markDir(side);
-        /* The mark's reach toward the rule: the ink on the side that faces it,
-           plus the relief copy standing off that ink. */
-        const nearInk = (markSign > 0 ? ink.ascent : ink.descent) + rel.depth;
-        return DATUM_LABEL === 'etch-mark'
-          ? markSign * (HAIR / 2 + DATUM_MARK_AIR * this.plateMargin(S).pad + nearInk)
-            - rel.base
-          : 0;
-      };
+      const markOffset = (side) => STRUCK ? stand.centre(markDir(side)) : 0;
       /* HANDED TO THE SEAT ON THE RUN, and that is the shape rather than a
          parameter for a reason worth stating: the geometry suite lifts plateSeat()
          out of this file by its exact declaration and runs it against runs of its
@@ -10612,38 +10933,39 @@ class Component extends DCLogic {
          clearance search and CL#160's far-end anchor go on solving the problem they
          already solved.
 
-         AND 'etch-mark''S OLD LIMIT HAD TWO HALVES, of which the INBOARD one is
-         closed and the OUTBOARD one is open again on purpose (GitHub #172, below).
-         The mark was drawn a signed distance off the line while the seat cleared a
-         box centred ON it, so the search answered truthfully about a box nobody
-         drew, in both directions at once.
+         AND 'etch-mark''S OLD LIMIT HAD TWO HALVES, BOTH NOW CLOSED -- the INBOARD
+         one by the re-ordering below (GitHub #162) and the OUTBOARD one by the
+         reach paying for this name (GitHub #183). The mark was drawn a signed
+         distance off the line while the seat cleared a box centred ON it, so the
+         search answered truthfully about a box nobody drew, in both directions at
+         once.
 
-         THE OUTBOARD HALF (GitHub #141) WAS NOT ABOUT THIS LABEL AT ALL: what
-         stands outboard is the ticks, which datumClear() pays for by name
+         THE OUTBOARD HALF (GitHub #141) WAS NOT ORIGINALLY ABOUT THIS LABEL: what
+         stood outboard was the ticks, which datumClear() pays for by name
          (plateMetrics().reach) instead of paying the reserved box's half-height.
-         See PLATE_TOP_CLEAR. AND #172 HAS PUT THE NAME BACK OUTBOARD ON SOME
-         CHAINS, WHICH RE-OPENS THAT FIGURE RATHER THAN CLEARING IT -- said here
-         plainly because the temptation is to assume the #141 fix covers it.
+         Then #172 put the name back outboard on some chains, which re-opened that
+         figure rather than clearing it -- said here plainly because the temptation
+         is to assume the #141 fix covers it, and for a while it did not.
 
-         The name's side is the STAGE's now, so a chain whose own ticks point the
-         other way carries its name on the SAME side as them: outboard. Measured on
-         the shipped two-chain stage over six deals, on the chain where that
-         happens: the name's box edge stands 30.0-34.5 rendered px off the line at
-         1440x900 and 20.3-21.4 at 390x844, against a tick reach of 11.7-12.3 and
-         7.1-7.2. The ticks are what plateMetrics().reach reports and what
-         datumClear() pays for, so on that chain the mark's outermost ink is about
-         twice PLATE_TOP_CLEAR's 20px from the teeth rather than inside it.
+         The name's side is the STAGE's, so a chain whose own ticks point the other
+         way carries its name on the SAME side as them: outboard. Measured on the
+         shipped two-chain stage over six deals, on the chain where that happens:
+         the name's ink stands 30.0-34.5 rendered px off the line at 1440x900 and
+         17.9-21.4 at 390x844, against a tick reach of 11.7-12.3 and 6.9-7.2. So
+         the figure was bounding a box about a third of what was drawn.
 
-         THIS IS EXACTLY THE CONDITION #141 WAS FILED AGAINST -- CL#164's own
+         THIS WAS EXACTLY THE CONDITION #141 WAS FILED AGAINST -- CL#164's own
          consistent side reached 33-39px outboard, and CL#166 closed it by removing
-         the outboard case rather than by paying for it. Restoring the consistent
-         side restores it. It is a bound on how detached the mark reads from its
-         chain, not a collision: plateSeat() measures the DRAWN box against every
-         wheel on the stage on whichever side it lands, and the seeded census finds
-         no crowded seat. Paying for it properly means plateMetrics().reach taking
-         the max of the ticks and the NAME -- which needs the label's measured ink,
-         which datumRuns() does not have when it places the line. That is a real
-         change to where every line is scribed and it is not this ticket's.
+         the outboard case rather than by paying for it; restoring the consistent
+         side restored it. It was never a collision: plateSeat() measures the DRAWN
+         box against every wheel on the stage on whichever side it lands, and the
+         census found no crowded seat. It was a bound on how detached the mark
+         reads from its chain, and it is paid now -- markStand() derives the reach
+         from the same placement it derives the offset from, and datumLayer
+         publishes the max of them over the stage's names BEFORE datumRuns() places
+         a line, which is what the label's measured ink was supposed to make
+         impossible. WHAT IT COST is in PLATE_TOP_CLEAR: every rule on the stage
+         moved toward its own chain, 8.32px of air to 0 on a desk.
 
          THE INBOARD HALF (GitHub #162) IS THE RE-ORDERING ABOVE, and it is the
          half that is a guarantee rather than a margin. `markT` used to point
@@ -11345,6 +11667,10 @@ class Component extends DCLogic {
          the tab order and the accessibility tree. */
       toggleTog: () => this.setState({ tog: !this.state.tog }),
       togRef: this._togRef,
+      /* The corner row's two ends, for the datum's sake and for nothing else
+         (GitHub #183) -- see the markup and fitEscapes(). */
+      thmRef: this._thmRef,
+      spdRef: this._spdRef,
       /* The scrim's only job. `preventDefault` is not what consumes the tap --
          the scrim being the topmost element under the pointer is (see the
          markup) -- it is here so a press-and-drag on the page behind the panel

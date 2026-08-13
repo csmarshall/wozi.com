@@ -7,6 +7,64 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Added
 
+- **CL#201 — the datum seat windows what it draws: ticks, name and the corner row.**
+  (GitHub #173, GitHub #183.)
+
+  Three faces of one fault — *the seat was bounded by the viewport and by nothing else* —
+  solved together because each moves every scribed line, so separately they would be
+  three sweeps of the same geometry.
+
+  **1. `plateSeat` windows the whole drawn mark.** A per-candidate `band(O)` resolves the
+  across-rule extent — plate box at its stamped offset, scribe overhang, tick tips at
+  `side * MARK.tick` — and hands that to `window_`. Only the **across** axis widens: a
+  tick's position *along* the run is a station and the seat cannot move it. The tick
+  length keeps its one home in `plateMetrics().tick`.
+
+  **2. `reach` takes the max of the ticks and the NAME.** `markStand()` is the single home
+  for where a struck name sits across its rule *and* how far its ink reaches — and the
+  reach falls out **side-independently**, because the centre is stepped by exactly the
+  near-side ink. `datumLayer` publishes the stage-wide max as `_nameReach` **before**
+  `datumRuns()` scribes, so **no second pass was needed** — the expensive part #183
+  predicted did not materialise. Absent ⇒ 0 ⇒ old behaviour.
+
+  **3. The corner row bars stations.** `fitEscapes` publishes `_ctlBox` and `plateSeat`
+  carves it out, scoring each remaining span as its own candidate — so the row costs a
+  station to try rather than a rule to arbitrate.
+
+  | bound | before | after |
+  | --- | --- | --- |
+  | tick tip → frame edge (worst of 24) | **19.69px** phone / 70.08 desk, by luck | **24.15 / 78.39px**, by construction |
+  | `reach` vs what is drawn | ticks only, 11.7–12.3 / 6.9–7.2 while the name drew **30.0–34.5 / 17.7–21.4** | **max(tick, name)** = 29.61 desk / 18.01 phone |
+  | corner-control clashes | **8 of 24** | **0** |
+
+  **The cost, stated rather than buried: line-to-teeth air goes 8.32 → 0.00px on the desk**
+  and 5.88 → 1.99px on the phone. Every rule moved toward its own chain, and the desk now
+  sits on a floor previously reached only on an ultrawide.
+
+  **And the honest finding underneath it: #76's 20px is arithmetically unsatisfiable for
+  an outboard name at `DATUM_MARK_GROW = 1.75`** — the ink alone reaches 29.6px. Zero air
+  is the closest the geometry can get. **No constant was moved to make anything agree**,
+  which is the whole point; the alternative was to quietly relax 20px and report success.
+
+  Baselines held: **0 `wozi:` warnings** over 24 combinations, and **0 of 12 mixed-side** —
+  CL#196's guarantee survives, re-measured as a sign in screen x/y. `npm test` 127/0;
+  `mutation_gate --only plate-anchor-by-orientation` **CAUGHT**, all four `plate*` anchors
+  intact. `pixel_regress`: `?who=charles` **0px dark and light**, `/fidget/` 0px, combined
+  stage 23,562 dark / 23,690 light / 19,143 `--panel`. `dom_invariants` PASS on stage, solo
+  and light; `escape_mesh` PASS.
+
+  **Three corrections to my own tickets**, each measured over more combinations than the
+  figure it replaces: #183's phone name box is **18.79–22.12px**, not 20.3–21.4, and its
+  desk "30.0–34.5" was the **ink**, not the box (box 31.29–35.59 — they differ by ~1.2px).
+  #183's clash census is **4 of 6** portrait seeds today, not 3 — its "2 of 6" row predates
+  CL#196 landing. And #173's "376 of 390, 14px to spare" is 19.69px worst over 24 combos:
+  same order, different deal.
+
+  **A coverage gap this creates, filed rather than left silent (#185):** `tools/test.js`
+  lifts `datumClear`/`plateMetrics` with no canvas, so the suite's #76 assertions now
+  measure the **tick-only** reach and cannot see the name term at all. The gate narrowed
+  without saying so, which is the exact failure CL#199 had just been fixed for.
+
 - **CL#200 — the webfont is vendored and Wear's contract is asserted; and both tickets'
   premises were wrong in ways that changed what got built.** (GitHub #178, GitHub #177.)
 
