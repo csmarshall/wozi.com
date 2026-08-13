@@ -40,7 +40,27 @@ CDP; `pip` needs websockets, and Pillow/numpy for the image-analysis ones).
                            auto|pinned|blocked`), degrading loudly rather than
                            failing on a Google Fonts outage; a page with no
                            webfont at all, like /fidget/, is reported as such and
-                           not failed for it. Also carries the dispatching CDP
+                           not failed for it.
+                           **THE BYTES ARE VENDORED, so the prefetch reads disk
+                           and the network is the fallback** (GitHub #178).
+                           `vendor/fonts/` holds the stylesheet, its six subset
+                           faces and the SIL OFL; every filename is derived from
+                           its URL, so an upstream rotation points at a path that
+                           does not exist and the run says so instead of serving
+                           the wrong build. That degrade-loudly path had turned
+                           out to be one line in an otherwise green run: a 404 on
+                           a content-hashed woff2 put every render in the
+                           FALLBACK stack, which moves `pill_clip`'s worst
+                           overrun from -0.58px to -1.45px while all six gates
+                           went on passing. `python3 tools/fontpin.py --vendor`
+                           refreshes the set and `--check` says whether what the
+                           page links today is what is on disk (0 vendored,
+                           1 stale, 2 nothing read). No gate may run either: a
+                           harness that re-vendored while measuring would be back
+                           to depending on Google at run time. `tools/` is in no
+                           publish command — `test.js` asserts that against the
+                           publish steps — and the shipped page still loads
+                           Manrope from Google for real visitors. Also carries the dispatching CDP
                            session every caller now uses -- a paused font request
                            arrives unsolicited and MUST be answered, and `pump()`
                            is what replaces `asyncio.sleep` so a wait answers

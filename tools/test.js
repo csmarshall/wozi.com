@@ -329,7 +329,18 @@ const ENGRAVE_SIZES = (function () {
 })();
 
 const page = (function build() {
-  const consts = ['MODULE', 'TOOTH_ADD', 'TOOTH_DED', 'TOOTH_ROOT_MIN', 'BAND_RISE',
+  const consts = ['MODULE', 'TOOTH_ADD', 'TOOTH_DED', 'TOOTH_ROOT_MIN',
+    /* The rest of the tooth's own shape (GitHub #177). teethPath() closes over
+       all three, so the fracture tests below cannot execute the page's own
+       function without them -- and reading them here rather than beside that
+       test keeps every page constant arriving by one route. */
+    'TOOTH_PA', 'TOOTH_THICK', 'TOOTH_FILLET',
+    /* How much shallower the second wear mark is than the first (GitHub #112).
+       Read from the page for the same reason RING_STUB is: a copy here would let
+       index.html move the two marks apart while the suite went on asserting the
+       old ratio. */
+    'WEAR_SCUFF_RATIO',
+    'BAND_RISE',
     'BAND_DEPTH', 'RIM_UNDER_BAND', 'BASELINE_MID', 'ROOT_MARGIN', 'MIN_MODULE',
     'TEETH_MIN', 'TEETH_MAX', 'TEETH_SLACK', 'TEETH_HOST',
     'ANG_MIN', 'ANG_MAX',
@@ -758,6 +769,27 @@ test('the deploy publishes nothing it is documented never to publish', () => {
   ok(bad.length === 0,
     'a publish step would copy an archived or repo-only document to the live '
     + 'bucket: ' + bad.join(', '));
+});
+
+test('nothing under tools/ is published — the harness fixtures cannot reach the web', () => {
+  /* TWO VENDORED THIRD-PARTY BLOBS NOW LIVE UNDER tools/ AND NEITHER MAY BE
+     SERVED (GitHub #168, #178): `vendor/axe-core-<version>.min.js` and
+     `vendor/fonts/` -- the Manrope stylesheet, its faces and the SIL OFL. Both
+     were vendored so that no gate depends on somebody else's uptime at run time,
+     and both arguments came with the same constraint attached: the copy is a
+     harness fixture, the shipped page still asks Google for the font, and putting
+     either on the bucket would publish a dependency the site does not have.
+
+     ASSERTED AGAINST THE PUBLISH COMMANDS, not against an exclude list -- there
+     is no exclude list, which is the point of a whitelist. This is the same read
+     as the test above, from the other end: `tools/` is not named by any `aws s3
+     cp`, and the one `aws s3 sync` is rooted at `assets/`. A grep for `tools/`
+     over deploy.yml would pass on prose; a step that copied
+     `tools/vendor/fonts/` would not be caught by anything else in this suite. */
+  const bad = [...PUBLISH.files, ...PUBLISH.dirs].filter(p => /(^|\/)tools\//.test(p));
+  ok(bad.length === 0,
+    'a publish step would put a harness fixture on the live bucket: ' + bad.join(', ')
+    + ' — vendored third-party bytes are for the gates, not for visitors');
 });
 
 /* The real SITES builder, sliced out of index.html and run against whatever
@@ -5645,6 +5677,332 @@ test('no dealable set trips teethPath\'s root-circle floor', () => {
     m.two.forEach(v => check('(' + v.pg2.join(',') + ')', [v.pg2[0], v.pg2[1], v.pg2[2]], v.pg2[3], teeth));
   }
   ok(bad.length === 0, bad.length + ' members would be floored into stubs:\n      ' + bad.join('\n      '));
+});
+
+/* ---- 6b. the Wear control's fracture (GitHub #112, #5, #177) -------------- */
+
+/* NOTHING AUTOMATIC HAS EVER DRAWN A WHEEL AT WEAR != 0 (GitHub #177). The
+   slider persists `wozi-wear` in localStorage, and no file in `.github/` or
+   `tools/` mentions that key -- so `wearWheels()`, `WEAR_SCUFF_RATIO` and every
+   value of `chipSev` were shipped code with no gate over them at all, and the
+   two claims CLAUDE.md makes about them ("Wear at 0 changes nothing", "character
+   still wins if both are on") were prose with nothing behind it.
+
+   THIS ASSERTS THE CONTRACT AND NOT THE PICTURE, deliberately. A pixel count
+   over a chipped wheel is invalidated by the next appearance change; that the
+   fracture is one shape scaled by severity, that severity 0 is never asked for,
+   and that the debug flag outranks the slider are true of any appearance the
+   crack ever has. It also needs no browser: teethPath() is pure arithmetic over
+   its arguments, so it runs here in Node against the page's own source.
+
+   WHERE THE "WEAR 0 IS A NO-OP" GUARANTEE ACTUALLY LIVES is the part worth
+   knowing before editing either side. It is NOT in teethPath: hand that function
+   a real `chipIdx` with `chipSev` 0 and it returns a tooth with its tip land
+   replaced by a zero-height notch, which is a different path from an unchipped
+   one. index.html says as much ("gated to never actually render at the call
+   site"). The guarantee is the CALL SITE's `if (wear > 0)`, which leaves
+   `wearChip` at -1 so the chip branch is never entered -- so that is what is
+   asserted, on the wheels the wear pair chose as well as on the ones it did
+   not. */
+
+/* teethPath(), lifted out of the renderer and given the module-scope names it
+   closes over, exactly as the solver and TRAIN builder are lifted elsewhere in
+   this file. `mod` is passed as undefined because that is what gearSvg passes:
+   the module comes from MODULE, and a suite that handed one in would be
+   measuring a wheel the page cannot draw. */
+const teethPathOf = (function () {
+  const src = grabDecl('const polarR =') + '\n'
+    + 'const R = { ' + grabBlock('teethPath(n, r, chipIdx, mod, chipSev, chipOut) {', '{', '}') + ' };\n'
+    + 'return (n, r, chipIdx, chipSev, chipOut) => '
+    + 'R.teethPath(n, r, chipIdx, undefined, chipSev, chipOut);';
+  return new Function('MODULE', 'TOOTH_ADD', 'TOOTH_DED', 'TOOTH_ROOT_MIN',
+    'TOOTH_PA', 'TOOTH_THICK', 'TOOTH_FILLET', src)(
+      page.MODULE, page.TOOTH_ADD, page.TOOTH_DED, page.TOOTH_ROOT_MIN,
+      page.TOOTH_PA, page.TOOTH_THICK, page.TOOTH_FILLET);
+})();
+
+/* The addendum span the fracture's authored fractions are measured in: `rStart`
+   is where the flank leaves the fillet and `ro` is the tip. Taken as the page's
+   OWN three declarations, executed here, rather than retyped -- a copy of that
+   arithmetic beside a test about it is exactly the drift this file exists to
+   catch, and it is the only way `0.44 of the addendum` can be checked against a
+   rendered path instead of against itself. */
+const teethFrame = (function () {
+  const body = grabDecl('const ro = r + m * TOOTH_ADD') + '\n'
+    + grabDecl('const phi = TOOTH_PA * Math.PI / 180') + '\n'
+    + grabDecl('const rStart = Math.max(rb, rr + 0.01);') + '\n'
+    + 'return { ro: ro, rStart: rStart };';
+  const fn = new Function('n', 'r', 'm', 'TOOTH_ADD', 'TOOTH_DED', 'TOOTH_ROOT_MIN',
+    'TOOTH_PA', body);
+  return (n, r) => fn(n, r, page.MODULE, page.TOOTH_ADD, page.TOOTH_DED,
+    page.TOOTH_ROOT_MIN, page.TOOTH_PA);
+})();
+
+/* The two fractions the crack is authored between, read off the page's own line
+   rather than retyped as two literals -- the same treatment ENGRAVE_SIZES gets,
+   and for the same reason: these tests are about whether the rendered path
+   REACHES them, which says nothing if the numbers came from the test. */
+const CHIP_SPAN = (function () {
+  const m = STRIPPED_SRC.match(
+    /const fTop = ([0-9.]+), fBot = fTop - sev \* \(fTop - ([0-9.]+)\);/);
+  if (!m) throw new Error('teethPath no longer declares the fracture span as '
+    + '`const fTop = <top>, fBot = fTop - sev * (fTop - <bottom>);` -- if the '
+    + 'shape has been rewritten, this extractor and the tests below need to '
+    + 'follow it rather than being deleted');
+  /* The two interior jags, from the same line that places them. Read as well as
+     the span because the span alone cannot tell a scaling from a reshaping: a
+     silhouette distorted IDENTICALLY at every severity keeps every
+     severity-to-severity comparison true, and only the authored fractions say
+     where those two points are supposed to be. */
+  const j = STRIPPED_SRC.match(
+    /const breakAt = relIn\([0-9.]+\), j1 = relIn\(([0-9.]+)\), j2 = relIn\(([0-9.]+)\), j3 = fBot;/);
+  if (!j) throw new Error('teethPath no longer places the two interior jag points as '
+    + '`j1 = relIn(<f>), j2 = relIn(<f>)` -- see the comment on CHIP_SPAN');
+  return {
+    top: parseFloat(m[1]), bottom: parseFloat(m[2]),
+    jags: [parseFloat(j[1]), parseFloat(j[2])]
+  };
+})();
+
+/* Every point in a path, as a radius from the wheel centre. polarR() writes
+   `x,y` pairs and nothing else in the string carries a comma, so this reads the
+   geometry rather than the command letters. */
+function radiiOf(d) {
+  return (d.match(/-?[0-9]+(?:\.[0-9]+)?,-?[0-9]+(?:\.[0-9]+)?/g) || [])
+    .map(p => { const [x, y] = p.split(',').map(Number); return Math.hypot(x, y); });
+}
+
+/* The four jag points of one fracture, as fractions of the addendum span. The
+   inked face is `flank .. jag[4] .. flank`, so the crack itself is the middle
+   four -- taken from `chipOut.face`, which teethPath fills from the same strings
+   it builds `d` out of, so this measures the shape the page draws and not a
+   second opinion about it. */
+function fractureAt(teeth, sev) {
+  const r = page.MODULE * teeth / 2;
+  const out = {};
+  teethPathOf(teeth, r, 3, sev, out);
+  if (!out.face) throw new Error('teethPath recorded no fracture face at severity ' + sev);
+  const f = teethFrame(teeth, r);
+  const span = f.ro - f.rStart;
+  const all = radiiOf(out.face).map(rad => (rad - f.rStart) / span);
+  return all.slice(1, 5);
+}
+
+/* gearSvg's wear block, executed: from the slider's own value down to the
+   teethPath() call whose arguments it exists to decide. Sliced between two
+   anchors rather than brace-matched, because it is a run of statements in the
+   middle of a much larger method -- the first anchor is unique on its own, and
+   the `const path = this.teethPath(` that ends it is NOT (ghostSvg has one too),
+   so it is searched for FROM the first anchor rather than from the top of the
+   file.
+
+   teethPath itself is replaced with a spy: what this measures is which arguments
+   the call site chooses, including whether it asks for the ink out-parameter at
+   all, which is the difference between a fracture that is absent and one that is
+   merely faint. */
+function wearCallSite(o) {
+  const i = locateAnchor(SRC, 'index.html', 'declaration',
+    'const wear = this.state.wear || 0;');
+  const masked = maskedOf(SRC);
+  const at = masked.indexOf('const path = this.teethPath(', i);
+  if (at < 0) throw new Error('gearSvg no longer calls teethPath after its wear block');
+  const j = masked.indexOf(';', at);
+  const body = noteAnchor('index.html', 'gearSvg wear block', SRC.slice(i, j + 1));
+  const asked = [];
+  const self = {
+    state: { wear: o.wear },
+    props: { character: !!o.character },
+    wearWheels: () => o.wheels,
+    teethPath: function () { asked.push([].slice.call(arguments)); return 'PATH'; }
+  };
+  const fn = new Function('g', 'r', 'WEAR_SCUFF_RATIO',
+    body + '\nreturn { chip: chip, chipSev: chipSev, path: path };');
+  const got = fn.call(self, o.g, o.r, page.WEAR_SCUFF_RATIO);
+  got.args = asked[0];
+  return got;
+}
+
+/* wearWheels(), executed against a stage of our choosing. `solve()` is a spy so
+   the memoisation can be checked as well as the choice: "never re-chosen by the
+   slider" is a claim about how often this runs, not only about what it returns. */
+function wearWheelsOn(gears) {
+  const src = grabBlock('wearWheels() {', '{', '}');
+  const fn = new Function('SPINE_SLUG', 'const R = { ' + src + ' }; return R.wearWheels;')('spine');
+  let solves = 0;
+  const self = { _wearWheels: null, solve: () => { solves++; return { gears: gears }; } };
+  const first = fn.call(self);
+  const again = fn.call(self);
+  return { picked: first, same: first === again, solves: solves };
+}
+
+test('Wear at 0 asks for no fracture on any wheel, marked or not (GitHub #112)', () => {
+  /* THE SHIPPED DEFAULT. `character:false` has kept every fracture invisible
+     since CL#16 and the slider's zero must not change that -- not "faintly", but
+     absent: no chip index, no severity that could be drawn, and no ink
+     out-parameter, so nothing is recorded and nothing is drawn. */
+  const wheels = { maxI: 2, minI: 5 };
+  const bad = [];
+  for (let i = 0; i < 8; i++) {
+    const got = wearCallSite({ wear: 0, g: { i: i, teeth: 23 }, r: page.MODULE * 23 / 2, wheels: wheels });
+    if (got.chip !== -1) bad.push('wheel ' + i + ' was given chip index ' + got.chip);
+    if (got.args[5] !== undefined) bad.push('wheel ' + i + ' asked teethPath to record a fracture face');
+  }
+  ok(bad.length === 0, 'Wear 0 is not the untouched render any more:\n      ' + bad.join('\n      '));
+
+  /* AND THE PATH IT PRODUCES IS THE UNCHIPPED ONE, byte for byte -- run through
+     the arguments the call site actually chose rather than through arguments
+     this test picked, which is the only version of the check that can fail if
+     the guard moves. Note WHY it holds: `chipIdx` is -1, so teethPath's chip
+     branch is unreachable whatever severity travels beside it. Severity 0 with a
+     REAL chip index is a different path (index.html: "gated to never actually
+     render at the call site"), which is exactly why the guard is the thing under
+     test here. */
+  const teeth = 23, r = page.MODULE * teeth / 2;
+  const args = wearCallSite({ wear: 0, g: { i: 2, teeth: teeth }, r: r, wheels: wheels }).args;
+  eq(teethPathOf(args[0], args[1], args[2], args[4], undefined),
+    teethPathOf(teeth, r, -1, undefined, undefined),
+    'the wheel drawn at Wear 0 is not the wheel drawn with no chip at all');
+});
+
+test('the second wear mark is WEAR_SCUFF_RATIO of the first, in depth as well as in name', () => {
+  /* Two claims, and the second is the one that could rot quietly. The call site
+     must scale the smaller wheel's severity by WEAR_SCUFF_RATIO at every slider
+     position -- and severity must scale the fracture's DEPTH by the same factor,
+     which is a fact about teethPath's arithmetic and not about the call site at
+     all. Halving a severity that reached the tooth non-linearly would keep the
+     first assertion true and make the two marks the wrong distance apart. */
+  const wheels = { maxI: 2, minI: 5 };
+  const bad = [];
+  [0.2, 0.5, 0.75, 1].forEach(w => {
+    const big = wearCallSite({ wear: w, g: { i: 2, teeth: 23 }, r: 40, wheels: wheels }).chipSev;
+    const small = wearCallSite({ wear: w, g: { i: 5, teeth: 23 }, r: 40, wheels: wheels }).chipSev;
+    if (Math.abs(small - big * page.WEAR_SCUFF_RATIO) > 1e-12) {
+      bad.push('at slider ' + w + ' the marks are ' + big + ' and ' + small
+        + ', a ratio of ' + (small / big).toFixed(4) + ' rather than ' + page.WEAR_SCUFF_RATIO);
+    }
+  });
+  [13, 23, 40].forEach(teeth => {
+    const deep = fractureAt(teeth, 1), light = fractureAt(teeth, page.WEAR_SCUFF_RATIO);
+    const dDeep = deep[0] - deep[3], dLight = light[0] - light[3];
+    if (Math.abs(dLight / dDeep - page.WEAR_SCUFF_RATIO) > 0.01) {
+      bad.push(teeth + ' teeth: a severity of ' + page.WEAR_SCUFF_RATIO + ' cuts '
+        + (dLight / dDeep).toFixed(4) + ' of the full depth, not ' + page.WEAR_SCUFF_RATIO
+        + ' -- severity no longer scales the fracture linearly');
+    }
+  });
+  ok(bad.length === 0, bad.join('\n      '));
+});
+
+test('a severity of 1 reaches the authored span, and a lighter one is the same shape shallower', () => {
+  /* ONE SHAPE SCALED BY SEVERITY, NOT TWO SHAPES (CLAUDE.md). Full severity must
+     reach exactly the fractions the page authors -- top at the tip, bottom deep
+     in the flank -- and a lighter mark must keep the top where it is, lift the
+     bottom in proportion, and carry the two interior jag points at the SAME
+     relative position within the crack. That last one is what "a light scuff is a
+     shallow version of the same crack" means, and it is the assertion a rewrite
+     that distorted the silhouette would trip.
+
+     0.01 of the span is the tolerance because polarR() rounds every coordinate to
+     two decimals, which is about 0.002 of the addendum at these sizes. */
+  const bad = [];
+  [13, 23, 40].forEach(teeth => {
+    const full = fractureAt(teeth, 1);
+    if (Math.abs(full[0] - CHIP_SPAN.top) > 0.01) {
+      bad.push(teeth + ' teeth: full severity tops out at ' + full[0].toFixed(4)
+        + ' of the addendum, not the authored ' + CHIP_SPAN.top);
+    }
+    if (Math.abs(full[3] - CHIP_SPAN.bottom) > 0.01) {
+      bad.push(teeth + ' teeth: full severity reaches down to ' + full[3].toFixed(4)
+        + ' of the addendum, not the authored ' + CHIP_SPAN.bottom);
+    }
+    /* At full severity `relIn` is the identity -- fBot IS the authored bottom --
+       so the two interior jags must land on their own authored fractions. This is
+       the absolute reading of the silhouette; the relative one below cannot see a
+       reshaping that is uniform across severities. */
+    CHIP_SPAN.jags.forEach((want, k) => {
+      if (Math.abs(full[k + 1] - want) > 0.01) {
+        bad.push(teeth + ' teeth: at full severity jag point ' + (k + 1) + ' sits at '
+          + full[k + 1].toFixed(4) + ' of the addendum, not the authored ' + want
+          + ' -- the authored silhouette has been reshaped, not scaled');
+      }
+    });
+    [0.25, 0.5, 0.75].forEach(sev => {
+      const part = fractureAt(teeth, sev);
+      if (Math.abs(part[0] - CHIP_SPAN.top) > 0.01) {
+        bad.push(teeth + ' teeth at severity ' + sev + ': the crack no longer starts at '
+          + 'the tip (' + part[0].toFixed(4) + ' vs ' + CHIP_SPAN.top + ') -- even a faint '
+          + 'mark nicks the very top first');
+      }
+      const want = CHIP_SPAN.top - sev * (CHIP_SPAN.top - CHIP_SPAN.bottom);
+      if (Math.abs(part[3] - want) > 0.01) {
+        bad.push(teeth + ' teeth at severity ' + sev + ': reaches ' + part[3].toFixed(4)
+          + ' of the addendum, not ' + want.toFixed(4) + ' -- severity is not scaling '
+          + 'the reach');
+      }
+      /* Shape, not size: where each interior jag sits inside the crack. */
+      [1, 2].forEach(k => {
+        const relFull = (full[k] - full[3]) / (full[0] - full[3]);
+        const relPart = (part[k] - part[3]) / (part[0] - part[3]);
+        if (Math.abs(relFull - relPart) > 0.02) {
+          bad.push(teeth + ' teeth at severity ' + sev + ': jag point ' + k + ' sits at '
+            + relPart.toFixed(3) + ' of the crack against ' + relFull.toFixed(3)
+            + ' at full severity -- the silhouette is distorting as it grows, not scaling');
+        }
+      });
+    });
+  });
+  ok(bad.length === 0, bad.join('\n      '));
+});
+
+test('character still outranks the Wear slider when both are on (GitHub #112)', () => {
+  /* Two independent selections over the same primitive, and the debug flag wins.
+     It chips EVERY wheel, at full severity, whatever the slider says -- including
+     wheels the wear pair did not choose and including a slider sitting at 0. A
+     regression here reads as "the debug flag stopped working", which nobody
+     photographs. */
+  const wheels = { maxI: 2, minI: 5 };
+  const bad = [];
+  [0, 0.3, 1].forEach(w => {
+    [1, 2, 5, 7].forEach(i => {
+      const got = wearCallSite({
+        wear: w, character: true, g: { i: i, teeth: 23 }, r: 40, wheels: wheels
+      });
+      if (got.chip < 0) bad.push('character on, slider ' + w + ', wheel ' + i + ': no chip at all');
+      if (got.chipSev !== 1) {
+        bad.push('character on, slider ' + w + ', wheel ' + i + ': severity ' + got.chipSev
+          + ' -- the slider is overriding the debug flag');
+      }
+      if (got.args[5] === undefined) {
+        bad.push('character on, slider ' + w + ', wheel ' + i + ': the fracture is cut but '
+          + 'never inked');
+      }
+    });
+  });
+  ok(bad.length === 0, bad.join('\n      '));
+});
+
+test('the wear pair is the spine\'s own extremes, chosen once per solve', () => {
+  /* A wheel does not change which extreme it is because a slider moved, so this
+     is memoised alongside `_solved` -- and a spine of one wheel marks that wheel
+     once, at the deeper severity, because there is no sensible way to paint two
+     depths of fracture onto one blank. Idlers, ghosts and other chains are not
+     content and take no mark. */
+  const many = wearWheelsOn([
+    { i: 0, teeth: 19, role: 'link', person: 'spine' },
+    { i: 1, teeth: 31, role: 'link', person: 'spine' },
+    { i: 2, teeth: 11, role: 'link', person: 'spine' },
+    { i: 3, teeth: 47, role: 'idler', person: 'spine' },
+    { i: 4, teeth: 51, role: 'link', person: 'other' }
+  ]);
+  eq(many.picked.maxI, 1, 'the deeper mark is not on the spine\'s largest linked wheel');
+  eq(many.picked.minI, 2, 'the lighter mark is not on the spine\'s smallest linked wheel');
+  ok(many.same && many.solves === 1,
+    'wearWheels() re-solved instead of answering from its memo -- which wheel is '
+    + 'marked could then change mid-drag');
+
+  const one = wearWheelsOn([{ i: 6, teeth: 23, role: 'link', person: 'spine' }]);
+  eq(one.picked.maxI, 6, 'a spine of one wheel does not carry the mark');
+  eq(one.picked.minI, null, 'a spine of one wheel was given two marks on the same blank');
 });
 
 /* ---- 7. the solver's own constraints hold -------------------------------- */

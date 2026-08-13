@@ -1,0 +1,39 @@
+# Manrope, vendored for the harnesses only (GitHub #178).
+# Written by `python3 tools/fontpin.py --vendor`; every filename is
+# DERIVED from the URL above it, so an upstream rotation points at a
+# path that does not exist rather than serving these bytes under a new
+# stylesheet. Provenance, not a checksum anything verifies.
+#
+# Prefetched under Chrome's User-Agent (PREFETCH_UA): Google Fonts
+# serves urllib legacy unsubsetted TTF, which is a different face with
+# different metrics.
+#
+# LICENCE: SIL Open Font License 1.1 — see OFL.txt beside this file,
+# taken from https://raw.githubusercontent.com/google/fonts/main/ofl/
+# manrope/OFL.txt. The OFL permits redistribution of the Font Software
+# bundled with other software provided the copyright notice and licence
+# travel with it, which is what OFL.txt is here for. These bytes are a
+# harness fixture: `tools/` is in no publish command, and the shipped
+# page still loads Manrope from Google for real visitors.
+
+css2-eefb80db7cef9244.css
+    https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;800&display=swap
+    8716 B  sha256 ed72ae9df62152c7fe86a228b2d9a941b2edbddda23079dfa191685eb8f8a26a
+manrope-v20-xn7gYHE41ni1AdIRggOxSvfedN62Zw.woff2
+    https://fonts.gstatic.com/s/manrope/v20/xn7gYHE41ni1AdIRggOxSvfedN62Zw.woff2
+    14544 B  sha256 95a493061fe0a8d0d027c2892747134ba747141112d3be4d5022e70ab7d3a1a6
+manrope-v20-xn7gYHE41ni1AdIRggSxSvfedN62Zw.woff2
+    https://fonts.gstatic.com/s/manrope/v20/xn7gYHE41ni1AdIRggSxSvfedN62Zw.woff2
+    9360 B  sha256 40af11327fe5308166c6cb5787808b042db6da889abf602f0a4876c49675d87e
+manrope-v20-xn7gYHE41ni1AdIRggexSvfedN4.woff2
+    https://fonts.gstatic.com/s/manrope/v20/xn7gYHE41ni1AdIRggexSvfedN4.woff2
+    24576 B  sha256 e310b55a7fd9677f5e3555e6c6c4d064fa1f1d24393f0ddbe217cea12a8c432f
+manrope-v20-xn7gYHE41ni1AdIRggixSvfedN62Zw.woff2
+    https://fonts.gstatic.com/s/manrope/v20/xn7gYHE41ni1AdIRggixSvfedN62Zw.woff2
+    8492 B  sha256 bab757f8a0a1bc04055ee98cb5777f3254aab11f6d222366e1f40a36f390506a
+manrope-v20-xn7gYHE41ni1AdIRggmxSvfedN62Zw.woff2
+    https://fonts.gstatic.com/s/manrope/v20/xn7gYHE41ni1AdIRggmxSvfedN62Zw.woff2
+    15240 B  sha256 ce093b341d9c10658ee1eaa85c5f8042ff3307bc6ccfc5f405616eb437f0009e
+manrope-v20-xn7gYHE41ni1AdIRggqxSvfedN62Zw.woff2
+    https://fonts.gstatic.com/s/manrope/v20/xn7gYHE41ni1AdIRggqxSvfedN62Zw.woff2
+    2592 B  sha256 e8c0b39992f06b3dc9a9834494088014859f363bf6ca8792b6bb07e17c7965f3

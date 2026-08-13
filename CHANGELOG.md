@@ -7,6 +7,75 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Added
 
+- **CL#200 — the webfont is vendored and Wear's contract is asserted; and both tickets'
+  premises were wrong in ways that changed what got built.** (GitHub #178, GitHub #177.)
+
+  **#178 — vendoring one face was never going to be enough, and the stylesheet matters
+  more than the faces.** The set is **7 objects**: 1 stylesheet plus **6** subset woff2
+  faces (latin, latin-ext, cyrillic, cyrillic-ext, greek, vietnamese) — 83.5 KB, 108 KB
+  with the OFL. All seven are on disk in `tools/vendor/fonts/`.
+
+  **The CSS is what names the faces**, which is why vendoring it removes the whole class
+  of variation rather than one instance. And the ticket's own evidence proves the point:
+  the 404'd filename (`xn7KYHE41ni1…woff2`) is **not even the shape of name our
+  stylesheet declares** — ours are `xn7gYHE41ni1…`. Google served a *different face set*
+  at that moment. With the CSS on disk the vendored stylesheet names the vendored faces
+  and the harness cannot half-migrate to a build nobody captured.
+
+  **Verified with the control that makes it falsifiable**, since "needs no network" is
+  worthless unasserted:
+
+  | | fonts line | worst overrun |
+  | --- | --- | --- |
+  | vendored, network up | `PINNED — 7 (7 vendored, 0 fetched)` | **−0.58px** |
+  | vendored, **Google blackholed** | `PINNED — 7 (7 vendored, 0 fetched)` | **−0.58px** |
+  | **vendor dir moved aside**, blackholed | `BLOCKED — could not prefetch` | **−1.45px**, still `PASS` |
+
+  The middle row is the fix; the third is the proof that the **disk copy** is what makes
+  it Manrope and nothing else. That third row still saying `PASS` is #178 in one line —
+  the gate degrades to system-ui and reports green — now with the cure printed under it.
+  Every other pinning gate passes under the blackhole too, `devices.py` with **28 renders
+  verified `applied`**.
+
+  **The blob cannot reach the web, and that is now MECHANICAL rather than my grep.** A new
+  test — *"nothing under tools/ is published"* — reads the parsed publish commands and
+  covers the vendored axe blob as well. **Proved able to fail** by transiently adding an
+  `aws s3 cp tools/vendor/fonts/MANIFEST` line: 126/1, exit 1. Confirmed live: that path
+  returns **403**.
+
+  Filenames are derived from the URL, so a Google rotation points at a path that does not
+  exist and the run says so, naming the URL and `--vendor`. **No gate re-vendors** — a
+  harness that re-fetched while measuring would be back to depending on Google, with the
+  added ability to rewrite the repo mid-measurement. `--check` exits **2** on
+  `fidget/index.html`, deliberately: from a CLI that measures nothing, "this page has no
+  webfont" and "the scan can no longer see the one it has" are the same silence. OFL 1.1
+  travels with the bytes and `--check` refuses if it goes missing.
+
+  **#177 — and the ticket's premise was false in a way worth keeping.** *"Severity 0
+  returns a path identical to no chip at all"* is **not true of `teethPath`**: hand it a
+  real `chipIdx` with `chipSev` 0 and you get a tooth whose tip land is replaced by a
+  zero-height notch — measured, first divergence at char 1201. **The guarantee lives
+  entirely in the call site's `if (wear > 0)`**, which leaves `wearChip` at −1 so the chip
+  branch is unreachable, and `index.html` already said so. Pinning "sev 0 is a no-op"
+  *inside* `teethPath` would have asserted something untrue — so the test asserts the
+  **guard**, on the marked wheels as well as the unmarked, plus that the ink
+  out-parameter is not even requested.
+
+  **Eight mutations, eight caught**, tree restored each time — the guard, the
+  `WEAR_SCUFF_RATIO` half-depth, the severity mapping, the authored 0.44→0.93 span,
+  `character` outranking the slider, and `wearWheels`' spine-extremes selection twice.
+
+  **One mutation was invisible on the first pass and that is the useful part:** squaring
+  `relIn` cancels when a silhouette check compares severity against severity, because the
+  distortion is uniform at every severity. Fixed by reading the two interior jag fractions
+  out of the page's own line and asserting the rendered jags land on them at severity 1,
+  where `relIn` is the identity. That assertion is what "prove it can fail" actually
+  bought — the first version of the test would have passed a real distortion.
+
+  Suite **121 → 127**. `pixel_regress --ref HEAD` 0px with controls 0px on the stage,
+  `?who=charles`, `--path fidget/` and `--theme light`. `index.html` byte-identical to
+  HEAD — the interception is CDP-only, so real visitors still fetch Manrope from Google.
+
 - **CL#199 — `tools/test.js` read only the first job's steps, so CL#198's split made it
   blind to every publish command.** (GitHub #184.)
 

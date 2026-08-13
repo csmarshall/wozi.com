@@ -17,13 +17,32 @@ step function. `tools/pixel_regress.py` solved it; this module is that mechanism
 lifted out of it verbatim in behaviour, so the other harnesses get the same fix
 once rather than three subtly different ones.
 
+THE BYTES ARE VENDORED, so the prefetch is a read off disk and the network is
+the fallback rather than the primary (GitHub #178). Pinning fixed WHEN the font
+arrives; it did not stop Google's own file rotation from making the prefetch
+404, and when that happens this module degrades to `blocked` -- every render in
+the fallback stack, announced in one line a green run's reader has no reason to
+read. Measured, that is not cosmetic: `pill_clip`'s worst overrun moves from
+-0.58px with Manrope to -1.45px without it, so seven gates go on reporting green
+while none of them is measuring the shipped typography any more. Same argument
+as CL#168's axe-core vendoring, and worse in one respect -- axe's failure is
+loud (exit 2, `RESULT: NOT AUDITED`) and this one continues.
+
+`tools/vendor/fonts/` holds the stylesheet and every face it references, keyed by
+URL, with the SIL OFL beside them (see that directory's MANIFEST). `python3
+tools/fontpin.py --vendor` refreshes it and `--check` says whether what the page
+links today is what is on disk. `tools/` is in no publish command, so the copy
+cannot reach the web, and NOTHING here touches the shipped page: real visitors
+still fetch Manrope from Google exactly as before.
+
 THE MECHANISM, and the four traps inside it:
 
   1. PREFETCH BEFORE ANY BROWSER EXISTS. The stylesheet URL is read out of the
      HTML FILE (or, for a harness pointed at a server that is already up, over
      one plain HTTP GET of the page) and every face it references is pulled into
-     this process. A URL discovered by watching the first navigation would mean
-     the first navigation was the one that paid for it -- which is the race.
+     this process -- from the vendored copy where there is one. A URL discovered
+     by watching the first navigation would mean the first navigation was the one
+     that paid for it -- which is the race.
 
   2. A CHROME USER-AGENT ON THE PREFETCH. urllib's own UA gets served legacy TTF
      with no unicode-range subsetting: a different face with different metrics.
@@ -82,6 +101,8 @@ slow to reach there, it is UNREACHABLE.
 
 import asyncio
 import base64
+import collections
+import hashlib
 import json
 import os
 import random
@@ -301,13 +322,95 @@ def families_from_urls(urls):
     return {f for f in out if f}
 
 
+# WHERE THE VENDORED BYTES LIVE (GitHub #178). One directory, keyed by URL
+# through vendor_name() below, with the SIL OFL and a generated MANIFEST beside
+# them. It sits under `tools/`, which no publish command in
+# `.github/workflows/deploy.yml` names -- every one of those either names an
+# explicit file or is the single `aws s3 sync assets/ --exclude "*" --include
+# "*.svg"` -- so these bytes cannot reach the web. `tools/test.js` asserts that
+# mechanically rather than leaving it to this comment.
+FONT_VENDOR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "vendor", "fonts")
+
+# The font hosts serve exactly two kinds of object and the harness has to hand a
+# content-type back to Chrome for each. DERIVED FROM THE NAME, not read out of
+# the MANIFEST: a captured header stored beside the bytes would be a second home
+# for a fact the extension already carries, and the MANIFEST would then be
+# load-bearing instead of being provenance.
+FONT_TYPES = {".css": "text/css; charset=utf-8",
+              ".woff2": "font/woff2",
+              ".woff": "font/woff",
+              ".ttf": "font/ttf"}
+
+
+def vendor_name(url):
+    """The local filename for one font-host URL, DERIVED from the URL.
+
+    That derivation is the whole safety property, and it is CL#191's lesson about
+    `axe-core-4.13.0.min.js` applied to a dependency with no version number of
+    its own: when Google publishes a new Manrope build the URL changes, so the
+    name this returns changes, so the path does not exist and the run SAYS the
+    copy is stale -- where a fixed name like `manrope-latin.woff2` would go on
+    serving last year's outlines under this year's stylesheet, silently.
+
+    A face keeps its own identity: `/s/manrope/v20/xn7g....woff2` becomes
+    `manrope-v20-xn7g....woff2`, so the family and the upstream version are
+    legible on disk and the basename is Google's own content hash. A stylesheet
+    URL is a query (`css2?family=Manrope:wght@400;500;600;800&display=swap`),
+    which is not a filename, so it is named for a digest of the whole URL --
+    change a weight and it points somewhere new, which is the same property by a
+    different route.
+    """
+    parts = urllib.parse.urlsplit(url)
+    base = os.path.basename(parts.path)
+    ext = os.path.splitext(base)[1].lower()
+    if ext in FONT_TYPES and ext != ".css":
+        segs = [s for s in parts.path.split("/") if s and s != "s"]
+        return "-".join(segs)
+    digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
+    return f"{base or 'stylesheet'}-{digest}.css"
+
+
+def vendor_type(name):
+    """The content-type for a vendored file, from its extension. Unknown
+    extensions get the woff2 type rather than a guess with a question mark in it:
+    every non-CSS object either host serves is a font face."""
+    return FONT_TYPES.get(os.path.splitext(name)[1].lower(), FONT_TYPES[".woff2"])
+
+
+def vendored_path(url):
+    """The vendored file for `url`, or None when there is not one. Absence is the
+    signal -- see vendor_name()."""
+    p = os.path.join(FONT_VENDOR, vendor_name(url))
+    return p if os.path.isfile(p) else None
+
+
+# WHAT ONE PREFETCH PRODUCED, including where each object came from (GitHub
+# #178). `cache`, `families` and `err` are what this returned before; `vendored`
+# and `fetched` are counts and `stale` names the URLs that had to come off the
+# network, which is the only thing an operator can act on -- a stale vendoring is
+# fixed by one command and an unvendored one is a red deploy waiting for somebody
+# else's version bump.
+Prefetched = collections.namedtuple(
+    "Prefetched", "cache families err vendored fetched stale")
+
+
 def prefetch(urls):
     """Pull each font stylesheet and every face it references into this process,
-    BEFORE a browser exists. Returns (cache, css_families, error).
+    BEFORE a browser exists. Returns a Prefetched.
 
     `cache` maps absolute URL -> (content-type, bytes) and is served back to
     Chrome by Fetch.fulfillRequest, so no measured navigation ever touches the
     network.
+
+    EVERY OBJECT IS TAKEN OFF DISK IF IT IS VENDORED, and only fetched when it is
+    not (GitHub #178). So the normal run needs no network at all, and a Google
+    Fonts rotation, a DNS failure or a runner with no egress cannot quietly move
+    this run into the fallback stack. Note what that means for a stylesheet whose
+    faces have rotated upstream: the vendored CSS names the vendored faces, so
+    the run stays entirely on the vendored set rather than half-migrating to a
+    build nobody captured. That is the point, and `--check` is how the drift is
+    noticed deliberately instead of at 3am.
 
     The CSS declares many @font-face blocks (latin, latin-ext, cyrillic, ...) and
     Chrome fetches only the subsets it needs. All of them are cached anyway:
@@ -317,26 +420,41 @@ def prefetch(urls):
     Google serves different subsets to different engines. Serving one prefetched
     stylesheet to every profile makes that one fact instead of 24.
     """
-    cache, families = {}, set()
+    cache, families, stale = {}, set(), []
+    counts = {"disk": 0, "net": 0}
+
+    def get(url):
+        """One object, disk first. Raises whatever urllib raises."""
+        p = vendored_path(url)
+        if p:
+            counts["disk"] += 1
+            with open(p, "rb") as f:
+                return vendor_type(p), f.read()
+        stale.append(url)
+        req = urllib.request.Request(url, headers={"User-Agent": PREFETCH_UA})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            counts["net"] += 1
+            return (r.headers.get("Content-Type") or vendor_type(url), r.read())
+
+    def failed(what, e):
+        return Prefetched({}, set(), f"{what}: {e}", counts["disk"], counts["net"],
+                          stale)
+
     for url in urls:
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": PREFETCH_UA})
-            with urllib.request.urlopen(req, timeout=15) as r:
-                css = r.read()
-                cache[url] = (r.headers.get("Content-Type", "text/css"), css)
+            ctype, css = get(url)
         except Exception as e:
-            return {}, set(), f"{url}: {e}"
+            return failed(url, e)
+        cache[url] = (ctype, css)
         text = css.decode("utf-8", "replace")
         families.update(m.strip().strip('"\'')
                         for m in re.findall(r"font-family:\s*([^;]+);", text))
         for face in sorted(set(re.findall(r"url\((https://[^)]+)\)", text))):
             try:
-                req = urllib.request.Request(face, headers={"User-Agent": PREFETCH_UA})
-                with urllib.request.urlopen(req, timeout=15) as r:
-                    cache[face] = (r.headers.get("Content-Type", "font/woff2"), r.read())
+                cache[face] = get(face)
             except Exception as e:
-                return {}, set(), f"{face}: {e}"
-    return cache, families, None
+                return failed(face, e)
+    return Prefetched(cache, families, None, counts["disk"], counts["net"], stale)
 
 
 def urls_from_url(url, timeout=5):
@@ -367,12 +485,18 @@ class FontPin:
     the whole point, and a pin built after the first navigation is decoration.
     """
 
-    def __init__(self, urls, families, cache, want, err):
+    def __init__(self, urls, families, cache, want, err, got=None):
         self.urls = urls
         self.families = families
         self.cache = cache
         self.err = err
         self.want = want
+        # The Prefetched that produced `cache`, or None when nothing was
+        # prefetched at all (`--fonts blocked`, or a page linking no webfont).
+        # Kept so announce() can say how much of this run came off disk: "PINNED"
+        # was true both before and after GitHub #178 and only this distinguishes
+        # a pin that needs no network from one that got lucky.
+        self.got = got
         self.mode = "pinned" if cache else "blocked"
         # What every render must report. Kept separate from `mode` because
         # 'none' is not a mode -- it is a page that declares no webfont, and
@@ -399,10 +523,11 @@ class FontPin:
         if not urls and url:
             urls = urls_from_url(url)
         families = families_from_urls(urls)
-        cache, err = {}, None
+        cache, err, got = {}, None, None
         if urls and want != "blocked":
-            cache, _css_families, err = prefetch(urls)
-        return cls(urls, families, cache, want, err)
+            got = prefetch(urls)
+            cache, err = got.cache, got.err
+        return cls(urls, families, cache, want, err, got)
 
     def announce(self):
         """The one line that says which state this run is in. Returns None, or a
@@ -414,11 +539,14 @@ class FontPin:
                   "that can race")
             return None
         if self.mode == "pinned":
-            print(f"fonts: PINNED — {len(self.cache)} object(s) prefetched, served "
-                  f"from memory, family "
+            print(f"fonts: PINNED — {len(self.cache)} object(s) prefetched"
+                  + (f" ({self.got.vendored} vendored, {self.got.fetched} fetched)"
+                     if self.got else "")
+                  + f", served from memory, family "
                   f"{sorted(self.families)[0] if self.families else '?'}"
                   + (f"   [FONT_DELAY_S={FONT_DELAY_S} — requests held on a coin "
                      f"flip, on purpose]" if FONT_DELAY_S else ""))
+            self.say_stale()
             return None
         if self.want == "pinned":
             return (f"FATAL: --fonts pinned could not prefetch the webfont "
@@ -430,7 +558,34 @@ class FontPin:
         print(f"fonts: BLOCKED — {why}. Every render draws in the FALLBACK stack, "
               f"so this run does not exercise the shipped typography; it is still "
               f"a valid run, because every render is held to the same state.")
+        # A DEGRADED RUN NAMES ITS OWN CURE (GitHub #178). This is the line the
+        # ticket was filed about: it was one sentence about a third party's 404 in
+        # the middle of an otherwise green run, with nothing to do about it. There
+        # is something to do about it now, so say so here rather than leaving the
+        # reader to know that vendoring exists.
+        if self.err:
+            self.say_stale()
         return None
+
+    def say_stale(self):
+        """Name every object this run had to fetch, because a run that reached the
+        network is a run that COULD have degraded, whether or not it did.
+
+        Deliberately a NOTE and not a failure: the vendored set going stale is
+        Google publishing a build, which is not a fault in this repo and must not
+        redden a deploy -- the whole argument of GitHub #178 is that an upstream
+        change should not do that. What it must not be is silent, which is the
+        state it was in before."""
+        stale = list(self.got.stale) if self.got else []
+        if not stale:
+            return
+        print(f"   NOTE: {len(stale)} object(s) were NOT vendored and came off the "
+              f"network, so this run depended on Google Fonts being up:")
+        for u in stale[:4]:
+            print(f"      {u}\n         -> expected {os.path.join(FONT_VENDOR, vendor_name(u))}")
+        if len(stale) > 4:
+            print(f"      ... and {len(stale) - 4} more")
+        print("   Re-vendor with: python3 tools/fontpin.py --vendor")
 
     # ---- enforcement -------------------------------------------------------
 
@@ -664,3 +819,156 @@ async def wait_ready(send, pump, wait_until, timeout=25.0, what="the page"):
     This is the floor they sit on.
     """
     return await wait_until(READY_JS, "ready", timeout, f"{what} never finished loading")
+
+
+# ---- the vendored set: refreshing it, and checking it ----------------------
+#
+# THIS IS A LIBRARY WITH A COMMAND LINE, and the command line does exactly two
+# things, neither of which any gate runs (GitHub #178). `--vendor` is the only
+# thing here that writes to the repo, and `--check` is the read that says whether
+# the copy on disk is still what the page links. A gate must never invoke either:
+# a harness that re-vendored on the fly would be back to depending on Google at
+# run time, with the added ability to change the repo while measuring it.
+
+def _page_urls(html_path):
+    """The font URLs to work on: the given page, or this repo's index.html."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    path = html_path or os.path.join(os.path.dirname(here), "index.html")
+    return path, scan_font_urls(path)
+
+
+def write_vendor(urls):
+    """Fetch every object those stylesheets need and write it into FONT_VENDOR,
+    with a MANIFEST recording where each came from.
+
+    THE MANIFEST IS PROVENANCE, NOT A CHECKSUM ANYTHING VERIFIES, and that is
+    CL#191's reasoning about the axe-core blob repeated: git already identifies
+    these bytes, so a hash checked at run time would only be able to disagree with
+    the file git handed us, and a hash written beside a URL-derived filename is a
+    constant waiting to go stale. It is here so a human can answer "which Manrope
+    is this" without a browser.
+
+    Returns (written, error). Fetches from the network deliberately -- this is the
+    one place that is supposed to.
+    """
+    written, lines = [], []
+    if not os.path.isdir(FONT_VENDOR):
+        os.makedirs(FONT_VENDOR)
+    todo = list(urls)
+    seen = set()
+    while todo:
+        url = todo.pop(0)
+        if url in seen:
+            continue
+        seen.add(url)
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": PREFETCH_UA})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                body = r.read()
+        except Exception as e:
+            return written, f"{url}: {e}"
+        name = vendor_name(url)
+        with open(os.path.join(FONT_VENDOR, name), "wb") as f:
+            f.write(body)
+        written.append(name)
+        lines.append(f"{name}\n    {url}\n    {len(body)} B  sha256 "
+                     f"{hashlib.sha256(body).hexdigest()}")
+        if name.endswith(".css"):
+            text = body.decode("utf-8", "replace")
+            todo.extend(sorted(set(re.findall(r"url\((https://[^)]+)\)", text))))
+    with open(os.path.join(FONT_VENDOR, "MANIFEST"), "w", encoding="utf-8") as f:
+        f.write("# Manrope, vendored for the harnesses only (GitHub #178).\n"
+                "# Written by `python3 tools/fontpin.py --vendor`; every filename is\n"
+                "# DERIVED from the URL above it, so an upstream rotation points at a\n"
+                "# path that does not exist rather than serving these bytes under a new\n"
+                "# stylesheet. Provenance, not a checksum anything verifies.\n"
+                "#\n"
+                "# Prefetched under Chrome's User-Agent (PREFETCH_UA): Google Fonts\n"
+                "# serves urllib legacy unsubsetted TTF, which is a different face with\n"
+                "# different metrics.\n"
+                "#\n"
+                "# LICENCE: SIL Open Font License 1.1 — see OFL.txt beside this file,\n"
+                "# taken from https://raw.githubusercontent.com/google/fonts/main/ofl/\n"
+                "# manrope/OFL.txt. The OFL permits redistribution of the Font Software\n"
+                "# bundled with other software provided the copyright notice and licence\n"
+                "# travel with it, which is what OFL.txt is here for. These bytes are a\n"
+                "# harness fixture: `tools/` is in no publish command, and the shipped\n"
+                "# page still loads Manrope from Google for real visitors.\n\n"
+                + "\n".join(lines) + "\n")
+    return written, None
+
+
+def main(argv):
+    """`--check` (default) or `--vendor`. Exit 0 pass, 1 stale, 2 nothing read."""
+    args = list(argv)
+    mode = "check"
+    html = None
+    while args:
+        a = args.pop(0)
+        if a in ("--vendor", "--check"):
+            mode = a[2:]
+        elif a == "--html" and args:
+            html = args.pop(0)
+        elif a in ("-h", "--help"):
+            print("usage: python3 tools/fontpin.py [--check|--vendor] [--html PATH]")
+            return 0
+        else:
+            print(f"FATAL: unknown argument {a!r} — nothing was read")
+            return 2
+    path, urls = _page_urls(html)
+    if not urls:
+        # NOT A PASS, DELIBERATELY, even though `/fidget/index.html` legitimately
+        # links no webfont: from here "this page has none" and "the scan can no
+        # longer see the one it has" are the same silence, and a check that
+        # reported green on the second would be the #178 fault with a new coat on.
+        # decide() is allowed to trust the scan because a render then proves it by
+        # measuring; nothing here measures anything, so it refuses instead.
+        print(f"FATAL: {path} links no font stylesheet on {' or '.join(FONT_HOSTS)} "
+              f"— either the page has none to vendor (true of fidget/index.html, "
+              f"and there is nothing here to check for it) or the scan has stopped "
+              f"seeing the one it has. Nothing was checked either way.")
+        return 2
+    print(f"page:   {path}")
+    for u in urls:
+        print(f"links:  {u}")
+    if mode == "vendor":
+        written, err = write_vendor(urls)
+        if err:
+            print(f"FATAL: could not fetch {err} — the vendored set is INCOMPLETE "
+                  f"and nothing should be trusted until this is re-run")
+            return 2
+        print(f"wrote {len(written)} object(s) into {FONT_VENDOR}:")
+        for n in written:
+            print(f"   {n}")
+        print("   MANIFEST")
+        print("Reminder: OFL.txt must stay beside them — see the MANIFEST header.")
+        return 0
+    # --check reads the same way a gate does, so it answers the question a gate
+    # would ask: is every object this page needs on disk?
+    got = prefetch(urls)
+    if got.err:
+        print(f"FATAL: could not assemble the font set at all ({got.err}) — the "
+              f"vendored copy is incomplete AND the network did not answer, so "
+              f"nothing was checked")
+        return 2
+    print(f"{len(got.cache)} object(s): {got.vendored} vendored, {got.fetched} fetched")
+    ofl = os.path.join(FONT_VENDOR, "OFL.txt")
+    if not os.path.isfile(ofl):
+        print(f"RESULT: STALE — the licence is missing ({ofl}). The OFL requires it "
+              f"to travel with the bytes.")
+        return 1
+    if got.stale:
+        for u in got.stale:
+            print(f"   not vendored: {u}\n      -> expected "
+                  f"{os.path.join(FONT_VENDOR, vendor_name(u))}")
+        print("RESULT: STALE — run `python3 tools/fontpin.py --vendor`. Every gate "
+              "that pins the font is depending on Google Fonts being up until then.")
+        return 1
+    print("RESULT: VENDORED — every object the page links is on disk, so no gate "
+          "here needs the network to measure the shipped typography.")
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+    raise SystemExit(main(sys.argv[1:]))
