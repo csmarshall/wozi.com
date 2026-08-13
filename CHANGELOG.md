@@ -7,6 +7,87 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Added
 
+- **CL#192 — `/fidget/`'s grip spring diverged at 30fps, which is Low Power Mode; and
+  the page now hears a collapsing URL bar.** (GitHub #164, GitHub #170.)
+
+  **#164 — the grip was integrated explicitly, so `ζ = 0.28` was a claim about the
+  continuous model and not about the page.** `ω_n·dt` is 1.0 at 60fps and 2.0 at 30fps,
+  and forward Euler on a spring is unstable once the step is that large relative to the
+  period. Measured on the real page at 30fps, a 60° twist then held still: the old code
+  peaked at **4.98×** the finger's angle and **settled there** — 300° away from a finger
+  holding perfectly still. At the 0.05s `dt` clamp it reached **7.45×**. Simulating the
+  spring alone, with the page's other bounding terms removed, it diverges **without
+  bound** (5.5×10¹⁹⁹ at 30fps, NaN at 20fps) — so 4.98× was not the fault's size, it was
+  what the rest of the machine happened to contain.
+
+  **Fixed in closed form** — the exact solution of the linear damped oscillator over
+  `dt`, which is available because the finger's target is constant between pointer
+  events. Two alternatives were considered and rejected with reasons:
+
+  - **Clamping `dt`** runs the machine *slow* on the slow device, which is a different
+    bug wearing this one's clothes.
+  - **Semi-implicit Euler** was checked rather than assumed: its bound is
+    `ω_n·dt < 2.64` at ζ = 0.28, which **still fails** at the 0.05s clamp (3.0). Closed
+    form is unconditionally stable *and* `dt`-independent, so there is no threshold to
+    sit near and no sub-step count to jitter between frames.
+
+  | | 60fps | 30fps (Low Power Mode) | 20fps (the clamp) |
+  | --- | --- | --- | --- |
+  | before, peak | 1.90× | **4.98×, settling there** | **7.45×** |
+  | after, peak | 1.38× | 1.31× | 1.38× |
+  | after, settles | 1.000× | 1.000× | 1.000× |
+
+  **`ζ` measured at 60fps is now 0.280 — exactly `HAND_DAMPING` — and `ω_n` 59.31
+  against a model 60.** Those were assertions in the file; they are measurements now.
+  Every quantity is flat across 60/30/20fps: **30fps behaves like 60fps.**
+
+  `ω_n` and `ζ` are **derived, not restated** — `MODE.stiffness / p.inertia` and
+  `MODE.damper(p) / p.inertia / 2`, read off the same two quantities the old torque
+  expression used, so nothing new is written down and `HAND_FREQ / gear` is not
+  re-asserted. All three damping regimes are handled including the **ζ = 1 limit**,
+  where `sin(ω_d·dt)/ω_d → dt` and neither branch computes it — getting that wrong is a
+  NaN into `S.angle`, and `HAND_DAMPING` is a constant a future hand may move.
+
+  **The no-grip branch is arithmetically untouched**, so flick and coast are
+  bit-identical: a 0.75× `REF_SPEED` flick coasts to rest after **8.400s** with total
+  angle **113.199758027 rad** on both sides. `ringCheck`/`sunCheck` still pass, including
+  on the sun-grounded path, where the same gesture gives 1.31× against HEAD's 4.98×.
+
+  **#170 — one feature-guarded line**, beside the existing `resize` handler, using the
+  landing page's solved pattern. `visualViewport` references in the file go 0 → 2.
+  **Honest about what is and is not established:** the *asymmetry* is measured
+  (`index.html` 6 references, this file 0), and the fix moves **0px**, which is the
+  specific failure mode to watch for — a listener that fires on load rather than only on
+  change. The *symptom* is unverified and cannot be verified here: headless Chrome has no
+  browser chrome, so there is no toolbar to collapse. It is in because the cost is
+  asymmetric, not because anyone reproduced it. `docs/MANUAL-CHECKS.md` check 12 remains
+  the only thing that can close it, and it still needs a phone.
+
+  `layout()` deliberately still measures `svg.clientWidth/clientHeight` rather than
+  `visualViewport.width/height` — copying that half would risk integer-versus-fractional
+  differences and a non-zero pixel gate for no verified gain.
+
+  **`pixel_regress --path fidget/` is 0px at 90, 900 and 3000 frames, and that is the
+  structural expectation rather than a miss.** The resting pose has no finger down, so
+  `gripAdvance` is never reached and the free branch is the identical expression with
+  `S.rate = 0`. Worth contrasting with the landing page's flywheel, where `_M`
+  accumulates phase from a *drawn* integrator so a change can never be 0px: here the
+  changed branch is not on the resting page at all. The two probes are the actual gate,
+  and they agree digit-for-digit by two independent routes — the page's own `step()`
+  executed in Node, and the real page in real Chrome with real pointer events on a
+  virtual clock.
+
+  `npm test` 121/0. `verify_motion` 0 console errors. `strip_comments --check` passes on
+  this file, which is one of the two built artifacts. All four before/after screenshots
+  are byte-identical.
+
+  **`fidget/README.md` records several numbers this invalidates and was deliberately not
+  edited** — the whole "one thing the fix does not reach" paragraph now documents a
+  hazard that is gone, the carrier step-response row shifts about 2%, and the port-ratio
+  row's 14.2× becomes **15.6×**, which is *closer* to `RATIO` = 15.17× than the old
+  figure. `docs/MANUAL-CHECKS.md` checks 11 and 12 both need rewriting; check 12's claim
+  that there is no `visualViewport` listener is now false.
+
 - **CL#191 — `--in-place` asked git about the wrong tree, and the accessibility
   ruleset is vendored so no gate depends on anyone else's uptime.** (GitHub #171,
   GitHub #168.)

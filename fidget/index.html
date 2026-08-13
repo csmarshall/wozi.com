@@ -558,7 +558,17 @@ const retard = (w) => COULOMB + VISCOUS * w + WINDAGE * w * w;
    deliver them -- it did not until #158, when the spring term was divided by the
    gear ratio twice and the output port came out overdamped at 1.09. They hold now
    at both ports and in both groundings: wn = HAND_FREQ / gear and zeta =
-   HAND_DAMPING exactly, neither written down. */
+   HAND_DAMPING exactly, neither written down.
+
+   AND THEY HOLD AT ANY FRAME RATE, which is a second thing and was not true until
+   #164. The grip used to be STEPPED, so `wn * dt` decided the shape -- 1.0 at
+   60fps at this HAND_FREQ, where the measured first overshoot was 90% against
+   this zeta's 40%, and divergent by 30fps, which is what Low Power Mode runs at.
+   gripAdvance() integrates the same equation in closed form instead, so these two
+   numbers are now the whole of what a finger feels and the tick is not a third
+   parameter. Change HAND_FREQ and nothing has to be re-checked against a frame
+   rate; that is the point of the change, and it is why HAND_FREQ is still free to
+   be a feel figure rather than a stability budget. */
 const HAND_FREQ = 60;                          /* rad/s at the input port */
 const HAND_DAMPING = 0.28;                     /* damping ratio, at either port */
 
@@ -1234,14 +1244,17 @@ function step(now) {
      own angle is the coordinate's divided by the same -- which is where the
      SQUARE comes from, without it ever being written as a square.
 
-     THE SQUARE IS THE PRODUCT OF THOSE TWO DIVISIONS, SO EACH LINE BELOW CARRIES
-     EXACTLY ONE OF THEM (GitHub #158). `portAngle` and `portRate` are the second
-     division, already done, on the line above. What remains for the spring and
-     the damper alike is the FIRST one -- mapping the torque back onto the
-     coordinate -- and it is `/ p.gear`, once, for both. Writing the spring as
-     `/ (p.gear * p.gear)` reads like the square the comment describes and is the
-     square applied TWICE: it shipped, and it cost the heavy port everything the
-     page is for. The output port came out at HAND_FREQ / RATIO^1.5 rather than
+     THE SQUARE IS THE PRODUCT OF THOSE TWO DIVISIONS, AND gripAdvance() BELOW
+     CARRIES EXACTLY ONE OF THEM ON EACH SIDE (GitHub #158). Dividing the state by
+     the gear on the way in is the second; multiplying the answer by it on the way
+     out is the first, mapping the result back onto the coordinate -- once, for the
+     spring and the damper alike, because both live in the same port-referred
+     equation. This was `/ p.gear` on each of two torque terms before #164 moved
+     the arithmetic into closed form, and the failure it is worth remembering is
+     the same either way: writing the spring's map as `/ (p.gear * p.gear)` reads
+     like the square this comment describes and IS the square applied TWICE. It
+     shipped, and it cost the heavy port everything the page is for. The output
+     port came out at HAND_FREQ / RATIO^1.5 rather than
      HAND_FREQ / RATIO, its damping ratio at 0.28 * sqrt(RATIO) = 1.09 instead of
      the 0.28 the README claims "at either port" -- so it did not oscillate at
      all, took 6.3 s to reach 90% of a step against 0.47 s, and stalled ~6% short
@@ -1253,32 +1266,93 @@ function step(now) {
      2 * zeta * sqrt(stiffness * port.inertia), which is critical damping in the
      PORT's own coordinate, and it only yields zeta at the port if the spring is
      mapped by one gear too. The two terms have to divide by the same thing. */
-  let accel = 0;
+  let v = S.rate;
+  let advance = 0;              /* radians the SPRING carries this tick, exactly */
   if (S.grip) {
-    const p = S.grip.port;
-    const portAngle = S.angle / p.gear;
-    const portRate = S.rate / p.gear;
-    const torque = MODE.stiffness * (S.grip.target - portAngle) / p.gear
-                 - MODE.damper(p) * portRate / p.gear;
-    accel = torque / MODE.jEff;
+    const g = gripAdvance(S.grip.port, S.grip.target, dt);
+    v = g.rate;
+    advance = g.advance;
   }
-
-  let v = S.rate + accel * dt;
 
   /* Losses always act, held or free -- a real grip does not switch the bearings
      off. The clamp is what makes a stop ARRIVE: below one tick's worth of
      retardation there is nothing left to shed, so it is zero rather than an
      ever-smaller residue. */
+  const driven = v;
   const drop = retard(Math.abs(v)) * dt;
   v = Math.abs(v) <= drop ? 0 : v - Math.sign(v) * drop;
   if (Math.abs(v) > MAX_SPEED) v = Math.sign(v) * MAX_SPEED;
 
-  S.angle += (S.rate + v) / 2 * dt;             /* trapezoid: the angle is the
-                                                   integral of the rate, and a
-                                                   rectangle rule visibly lags
-                                                   at these decelerations */
+  /* THE ANGLE, AND THE ONE PLACE THE TWO TERMS MEET. Free of a finger this is the
+     trapezoid it has always been: the angle is the integral of the rate, and a
+     rectangle rule visibly lags at these decelerations. Under a grip the spring's
+     own share of the angle is already exact -- gripAdvance() integrated it in
+     closed form rather than stepping it -- so what is left to add is the LOSS's
+     share, which is the trapezoid of the change the loss just made to the rate.
+     Written this way the free branch is arithmetically the expression it always
+     was, so a flick and a coast are untouched by any of this: the closed form is
+     reached only while a finger is down, which is the only place the instability
+     it fixes could ever appear. */
+  S.angle += S.grip ? advance + (v - driven) / 2 * dt
+                    : (S.rate + v) / 2 * dt;
   S.rate = v;
   applyTransforms();
+}
+
+/* ONE TICK OF THE GRIP, INTEGRATED IN CLOSED FORM RATHER THAN STEPPED (GitHub
+   #164). Between two frames the grip is a LINEAR damped oscillator with a
+   constant target -- the finger's angle does not move until the next pointer
+   event -- so its exact solution over dt is available, and using it is cheaper
+   than defending an approximation of it.
+   The reason it must be exact rather than merely stable: the spring was stepped
+   forward-Euler, which is conditionally stable in `wn * dt`, and at the shipped
+   HAND_FREQ that product is 1.0 at 60fps and 2.0 at 30fps. So the TICK, not the
+   model, was setting the shape a finger feels -- measured first overshoot 90% at
+   60fps against the continuous zeta=0.28's 40% -- and past about 1.3 it diverged
+   into a limit cycle bounded only by MAX_SPEED and the losses: at the 0.05s dt
+   clamp a 60-degree twist excursioned to 7.5x the finger's angle while the finger
+   held still. Low Power Mode throttles rAF to 30fps, which is inside that. A
+   clamp on dt was the one fix deliberately not taken -- it buys stability by
+   quietly running the machine slow on the device that is already slow.
+   THE TWO CONSTANTS ARE READ OFF THE SAME TWO QUANTITIES THE TORQUE WAS, not
+   restated from HAND_FREQ and HAND_DAMPING: the port-referred equation is
+   `port.inertia * a = stiffness * (target - angle) - damper * rate`, so
+   `wn^2 = stiffness / port.inertia` and `2*zeta*wn = damper / port.inertia`
+   directly. Nothing here knows the ratio, the grounding or which member is being
+   turned, exactly as the explicit version did not.
+   All three damping regimes are covered because HAND_DAMPING is a constant a
+   future hand may move: under 1 the response is a decaying cosine, over 1 a pair
+   of real exponentials (cosh/sinh), and at exactly 1 the sin/wd factor has the
+   finite limit dt, which is the one value neither branch can compute. Getting
+   that wrong is a NaN into S.angle and a page that never draws again. */
+function gripAdvance(p, target, dt) {
+  const freqSq = MODE.stiffness / p.inertia;              /* wn^2               */
+  const decayRate = MODE.damper(p) / p.inertia / 2;       /* zeta * wn          */
+  const gap = decayRate * decayRate - freqSq;             /* wn^2 (zeta^2 - 1)  */
+  let cosine, sineOver;                    /* cos(wd*dt) and sin(wd*dt)/wd      */
+  if (gap < 0) {
+    const wd = Math.sqrt(-gap);
+    cosine = Math.cos(wd * dt); sineOver = Math.sin(wd * dt) / wd;
+  } else if (gap > 0) {
+    const wh = Math.sqrt(gap);
+    cosine = Math.cosh(wh * dt); sineOver = Math.sinh(wh * dt) / wh;
+  } else {
+    cosine = 1; sineOver = dt;
+  }
+  const decay = Math.exp(-decayRate * dt);
+  /* In the PORT's coordinate, measured from the finger: `gapAngle` is how far
+     behind the finger the port is and `portRate` how fast it is closing. Both are
+     the generalised coordinate divided by the gear, which is the same second
+     division the explicit form did on its own first line. */
+  const gapAngle = S.angle / p.gear - target;
+  const portRate = S.rate / p.gear;
+  const gapNext = decay * (gapAngle * cosine + (portRate + decayRate * gapAngle) * sineOver);
+  const rateNext = decay * (portRate * cosine - (freqSq * gapAngle + decayRate * portRate) * sineOver);
+  /* Back onto the generalised coordinate by multiplying by the gear -- the
+     inverse of the division above, so a port with gear 1 is untouched by the
+     round trip. The angle is returned as a DELTA and not as a value, because the
+     loss term still has its own share to add to the same tick. */
+  return { advance: (gapNext - gapAngle) * p.gear, rate: rateNext * p.gear };
 }
 
 /* ================================================================== POINTER
@@ -1518,6 +1592,27 @@ function useGrounding(name) {
 
 useGrounding(GROUNDED);
 window.addEventListener('resize', layout);
+/* AND THE VISUAL VIEWPORT, WHICH IS A SEPARATE EVENT AND THE ONLY ONE A
+   COLLAPSING TOOLBAR IS KNOWN TO FIRE (GitHub #170). iOS Safari moves the visual
+   viewport when its toolbar collapses under a scroll, or when a keyboard comes
+   up, WITHOUT necessarily resizing the layout viewport -- which is the entire
+   reason the API exists as a second thing to listen to, and index.html has
+   listened to it for exactly this for a while. This page had only the `resize`
+   line above, so if iOS does not also fire that one, layout() never ran and the
+   gear stayed sized and centred for a viewport the visitor could no longer see.
+   BE HONEST ABOUT WHICH HALF OF THAT IS MEASURED. The asymmetry between the two
+   files is: index.html six references, this file none. The SYMPTOM is projected
+   and has never been reproduced, and it cannot be from here -- everything in
+   tools/ is headless Chrome plus one windowless WKWebView, so there is no browser
+   chrome and no toolbar to collapse. docs/MANUAL-CHECKS.md check 12 is this exact
+   question and a phone is the only thing that can answer it. This is here because
+   the cost is asymmetric -- one redundant handler against a page laid out to the
+   wrong height on the device class it is most used on -- not because anyone has
+   seen it fail.
+   It is the SAME function and not a variant of it: layout() reads the box it is
+   given and is idempotent, so a doubled event costs one extra pass of attribute
+   writes and cannot compute a second opinion about where the gear is. */
+if (window.visualViewport) window.visualViewport.addEventListener('resize', layout);
 /* AND ONCE MORE AFTER THE FIRST FULL LAYOUT, because two of the things layout()
    measures are not true yet when this script runs. The chrome strip is a wrapping
    flex row over a safe-area inset, and it is 95px tall as one row and 155px as two
