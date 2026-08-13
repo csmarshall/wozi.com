@@ -68,9 +68,16 @@ space could see.
 Exit 0 if every run meshes, 1 if any ghost does not, 2 if it could not measure.
 
 THIS HARNESS DOES NOT PIN THE WEBFONT, AND THAT IS THE MEASURED ANSWER RATHER
-THAN AN OMISSION (GitHub #145). `tools/fontpin.py` exists because the page's
-drawing depends on WHEN Manrope arrives relative to its own first render (#98),
-and four gates import it. This one was held to the same test CL#168 applied to
+THAN AN OMISSION (GitHub #145). It does IMPORT `fontpin`, which is a different
+claim and worth separating: what it takes is `attach()`, the CDP session helper
+with a deadline on every round trip (#179), and it passes `pin=None` -- the
+`Fetch` domain is never enabled here, so nothing is intercepted and the font
+arrives from the network exactly as it always has. Reading the import as a pin
+would be reading it backwards.
+
+`tools/fontpin.py` exists because the page's drawing depends on WHEN Manrope
+arrives relative to its own first render (#98), and most gates import it for
+that. This one was held to the same test CL#168 applied to
 the others -- a full `--census` run with both font hosts blackholed at Chrome's
 resolver, against a normal run -- and the two outputs are IDENTICAL: 4 seeds x 2
 viewports, every run, every ghost, every residual to the last printed digit, the
@@ -112,6 +119,17 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # the correct outcome -- a harness that cannot find the padding cannot measure a
 # radius.
 import dom_invariants as dom  # noqa: E402
+
+# THE SESSION HELPER, NOT THE PIN -- see the docstring above for why this harness
+# still measures with the font on the network, which is unchanged (GitHub #179).
+# `attach(ws, pin=None, ...)` is a CDP session with a DEADLINE on every round trip
+# and the dead-socket case caught, and it treats `pin is None` as "nothing to
+# intercept": the `Fetch` domain is never enabled here, so no request is ever
+# paused and there is nothing for a pin to answer. What this buys is that the
+# ceiling exists in ONE place -- `pixel_regress` keeping its own copy is why CL#193
+# had to fix the same missing deadline twice, and a third copy here would have been
+# a third chance to miss it.
+import fontpin  # noqa: E402
 
 CHROME, CI_FLAGS, ROOT = dom.CHROME, dom.CI_FLAGS, dom.ROOT
 PAD_LINKED, PAD_GHOST, TOL_MESH_PX = dom.PAD_LINKED, dom.PAD_GHOST, dom.TOL_MESH_PX
@@ -307,27 +325,32 @@ async def sample(url, seed, viewport, theme):
         return None, ["could not reach Chrome DevTools endpoint"]
 
     errors = []
-    mid = 0
     raw = None
     try:
         async with websockets.connect(ws_url, max_size=10 ** 8) as ws:
-            async def send(method, params=None):
-                nonlocal mid
-                mid += 1
-                my = mid
-                await ws.send(json.dumps({"id": my, "method": method, "params": params or {}}))
-                while True:
-                    msg = json.loads(await ws.recv())
-                    if msg.get("method") == "Runtime.exceptionThrown":
-                        det = msg["params"]["exceptionDetails"]
-                        errors.append("exception: " + str(det.get("text", ""))[:160])
-                    elif msg.get("method") == "Runtime.consoleAPICalled":
-                        if msg["params"]["type"] in ("error", "assert"):
-                            args = [str(a.get("value", a.get("description", "")))
-                                    for a in msg["params"]["args"]]
-                            errors.append("console.error: " + " ".join(args)[:160])
-                    if msg.get("id") == my:
-                        return msg.get("result", {})
+            def watch(msg):
+                """Console errors and exceptions, collected off the message stream
+                rather than out of `send`'s own loop. The events arrive
+                UNSOLICITED, so a helper that only looked at messages while a
+                round trip was outstanding saw whichever ones happened to land in
+                that window; `attach` dispatches every message and hands each to
+                this, which is the same route dom_invariants takes."""
+                if msg.get("method") == "Runtime.exceptionThrown":
+                    det = msg["params"]["exceptionDetails"]
+                    errors.append("exception: " + str(det.get("text", ""))[:160])
+                elif msg.get("method") == "Runtime.consoleAPICalled":
+                    if msg["params"]["type"] in ("error", "assert"):
+                        args = [str(a.get("value", a.get("description", "")))
+                                for a in msg["params"]["args"]]
+                        errors.append("console.error: " + " ".join(args)[:160])
+
+            # No pin: this harness deliberately does not intercept the font hosts
+            # (see the module docstring), and `attach` takes `pin=None` for exactly
+            # that case. What it is here for is the CEILING on a round trip and the
+            # dead-socket catch -- both of which end a stuck run at exit 2 naming
+            # the CDP method, instead of leaving the deploy's step bound to say only
+            # that something took twenty minutes (GitHub #179, #180).
+            send, pump, _wait_until = fontpin.attach(ws, None, on_message=watch)
 
             await send("Page.enable")
             await send("Runtime.enable")
@@ -342,8 +365,12 @@ async def sample(url, seed, viewport, theme):
             # own DEAL_SEED, which runs later and wins.
             await send("Page.navigate", {"url": url})
             # fitEscapes runs out of the fit pass, which settles a beat after the
-            # first paint -- the runs do not exist at load.
-            await asyncio.sleep(4.0)
+            # first paint -- the runs do not exist at load. `pump` rather than
+            # `asyncio.sleep`: same 4 seconds of wall clock, but the socket is read
+            # throughout, so a console error raised during the settle is collected
+            # when it happens instead of sitting in a buffer until the next round
+            # trip drains it.
+            await pump(4.0)
             res = await send("Runtime.evaluate",
                              {"expression": SAMPLE_JS, "returnByValue": True})
             raw = res.get("result", {}).get("value")
@@ -555,4 +582,25 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # EXIT 2 GETS A `RESULT:` LINE TOO, BECAUSE THAT IS THE ONLY CHANNEL ANYBODY
+    # READS (GitHub #181). Every path above that cannot measure -- an unservable
+    # tree, no DevTools endpoint, a CDP method that never answered, a socket that
+    # died -- prints its own FATAL sentence and exits 2, and printed no verdict
+    # line at all. A sweep that filters `grep -E "^RESULT"` therefore saw NOTHING
+    # from those runs: not a failure, not a pass, no line. That is how #181's own
+    # investigation lost its diagnostic, one rung further down than the FAIL it was
+    # chasing, and it is the same lesson as a11y_audit's `RESULT: NOT AUDITED` --
+    # the exit code and the verdict line are two channels and only one of them
+    # gets read.
+    #
+    # The FATAL sentence stays exactly where it was and says what happened; this
+    # only guarantees the run is VISIBLE to whatever is reading verdicts. Note the
+    # asymmetry deliberately: `NOT MEASURED` is not a failure of the page, and
+    # anything counting FAILs must not count it as one.
+    try:
+        sys.exit(main())
+    except SystemExit as e:
+        if e.code == 2:
+            print("\nRESULT: NOT MEASURED   (see the FATAL line above; this is a "
+                  "harness fault, not a verdict on the page)")
+        raise

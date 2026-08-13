@@ -7,6 +7,76 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Added
 
+- **CL#195 — the last unbounded CDP wait, the dead-socket exit code, and an
+  unmeasured run that no verdict-only filter could see.** (GitHub #179, #180, #181.)
+
+  **#179** — `escape_mesh.py`'s hand-rolled `send` was a bare
+  `while True: await ws.recv()` with no deadline at all, on the deploy path. It is
+  **deleted** rather than given a third copy of CL#193's ceiling: the file now takes
+  `fontpin.attach()`, so the deadline lives in **one** place. `pixel_regress` keeping
+  its own copy is exactly why CL#193 had to fix the same missing deadline twice.
+
+  Two consequences of routing through `attach()`, both improvements: console-error
+  collection moves to `on_message`, so it sees every message rather than only those
+  arriving while a round trip is outstanding; and the `fitEscapes` settle becomes
+  `pump(4.0)` instead of `asyncio.sleep(4.0)` — same wall clock, socket read
+  throughout.
+
+  **A premise correction worth keeping:** `escape_mesh` did **not** already import
+  `fontpin` — it imports `dom_invariants`, which does. So this adds a direct import to
+  a file whose docstring says at length that it deliberately **does not pin the
+  webfont**, and that remains true (`pin=None`, `Fetch` never enabled, font still on
+  the network). **The session helper and the pin are two things**, and the docstring
+  now separates those claims explicitly because the import makes them easier to
+  conflate, not harder. `CLAUDE.md` had already made that mistake — it listed
+  `escape_mesh` as pinned because a census counted `grep -c fontpin` per file rather
+  than reading the match, and this file's single mention was the sentence saying it
+  does not. **A match count is not a reading.** Corrected.
+
+  **#180** — `ConnectionClosedError` was unhandled everywhere, so a dead socket exited
+  **1**: *"it measured and the artifact is wrong"* for a run that measured nothing.
+  A guarded import and one `socket_died()` helper in `fontpin`, with `pixel_regress`
+  reusing `fontpin.WS_CLOSED` rather than importing `websockets.exceptions` again — one
+  home for what a closed socket is.
+
+  **The two faults are kept apart in what they print**, because they are different
+  signatures: the deadline says *"wedged rather than gone"*, this says *"GONE rather
+  than wedged (a wedged one is caught by `CDP_TIMEOUT_S` instead)"*. Proved by
+  `SIGSTOP` past keepalive: `escape_mesh` **47s**, `pixel_regress` **50s**, both exit 2
+  with no traceback, both naming the method and `keepalive ping timeout`. **The 47–50s
+  is keepalive's own detection interval and this change does not try to shorten it** —
+  the defect was the exit code and the traceback, never the wait, so nobody should
+  later read a 50s pause here as a hang.
+
+  Covers the **8** harnesses whose sockets go through `attach()` or `pixel_regress`'s
+  copy; the **13** diagnostic tools with bare `recv()` are named and deliberately left,
+  since none gates a deploy.
+
+  **#181's fixable half, and it is narrower than the ticket hoped.** Judged mostly a
+  discipline rather than a code change, and said so in `tools/README.md` instead of
+  building a runner. One code change earned its place: **every exit-2 path printed a
+  FATAL and no `RESULT:` line at all**, so a run that measured nothing was invisible to
+  a verdict-only filter — not a pass, not a failure, no line. `escape_mesh` now prints
+  `RESULT: NOT MEASURED` and `pixel_regress` `RESULT: COULD NOT COMPARE`, which is
+  `a11y_audit`'s `NOT AUDITED` lesson one rung down.
+
+  **Stated plainly rather than overclaimed:** this makes the *fact* of an unmeasured run
+  survive a verdict-only filter. It does **not** make the diagnostic survive, and it
+  does not explain #181's instance 1 — that run printed a genuine `RESULT: FAIL`, so it
+  was a real verdict whose per-seed detail was lost to filtering. `devices.py` has no
+  `RESULT:` line at all, so its instance could not have been greppable by any filter.
+
+  **`TOL_MESH_PX` untouched, and routing through `attach()` changed no residual at
+  all** — two full `--census` runs byte-identical in every figure: 0.0113–0.0214px
+  against the 0.35px bound over 8 seed×viewport combinations, 37.1–37.3s. `npm test`
+  121/0. `pixel_regress --ref HEAD` 0px with controls 0px. All six `attach` consumers
+  healthy.
+
+  **Reported, not investigated:** the Manrope prefetch is intermittently 404ing —
+  three gates ran `fonts: BLOCKED` while three others ran `PINNED` minutes apart. Each
+  run is internally consistent so no verdict is wrong, but a gate whose font state
+  flips between runs is a candidate mechanism for #181 and is #178's subject.
+
 - **CL#194 — Wear's fracture gets its own drawn contour, because a silhouette was all it
   ever had.** (GitHub #146.)
 

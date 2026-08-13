@@ -142,6 +142,54 @@ FONT_DELAY_S = float(os.environ.get("WOZI_FONT_DELAY_S")
 # what a wedged browser means (GitHub #156).
 CDP_TIMEOUT_S = float(os.environ.get("WOZI_CDP_TIMEOUT_S", "90") or 90)
 
+# THE OTHER FAULT, AND IT IS NOT THE ONE ABOVE (GitHub #180). Two failures look
+# alike from an operator's chair and are opposites on the wire, so they are kept
+# apart deliberately and named separately in what they print:
+#
+#   * CDP_TIMEOUT_S is a Chrome that IS THERE and will not answer — it replies to
+#     keepalive pings and never to the method. Nothing raises, so only a deadline
+#     ends it.
+#   * this is a socket that DIED. `websockets` (15.0.1) keepalive notices a dead
+#     peer on its own and raises `ConnectionClosedError` — measured at 48-50s by
+#     SIGSTOPping a headless Chrome, which is keepalive's own detection interval
+#     and NOT something this catch tries to shorten. There is nothing to speed up
+#     here: the fault is the exit code, not the duration.
+#
+# Because nothing caught it, that exception reached the top as a traceback and the
+# process exited **1** — which across these harnesses means "it measured, and the
+# artifact is wrong". A socket that died measured nothing, so 1 is a page verdict
+# delivered by a run that never saw the page: the #156 confusion arriving by a
+# route that sweep did not cover. CLAUDE.md records that CDP harnesses flake this
+# way occasionally, so the normal intermittent infrastructure fault was reporting
+# itself as a regression and sending the operator to look for a change that is not
+# there.
+#
+# THE IMPORT IS GUARDED because this is a library and its callers should not be
+# made to carry a dependency to be told about one. `except ()` is legal and never
+# matches, so a `websockets` without the module simply keeps HEAD's behaviour
+# rather than failing at import time.
+try:
+    from websockets.exceptions import ConnectionClosed as WS_CLOSED
+except Exception:  # pragma: no cover - depends on the installed websockets
+    WS_CLOSED = ()
+
+
+def socket_died(what, err):
+    """The socket closed mid-round-trip: exit 2, and say whose fault it is not.
+
+    A library, so this code is what a11y_audit, devices, dom_invariants,
+    escape_mesh, pill_clip and verify_motion return — `print(...)` then
+    `raise SystemExit(2)`, never `SystemExit("string")`, which prints and exits 1
+    (GitHub #156).
+    """
+    print(f"FATAL: the CDP socket closed during {what} — "
+          f"{type(err).__name__}: {err}. The browser is GONE rather than wedged "
+          f"(a wedged one is caught by CDP_TIMEOUT_S instead), so this is a "
+          f"harness fault and not a verdict: nothing has been measured and "
+          f"nothing about the page has been shown.")
+    raise SystemExit(2)
+
+
 # Installed at document-start, BEFORE the page's own #98 handler registers on the
 # same promise -- callbacks on one promise run in registration order, so ours is
 # always first. `__fontsReady` therefore means the font SETTLED and deliberately
@@ -508,10 +556,19 @@ def attach(ws, pin, on_message=None):
     mid = 0
     waiting = {}
 
+    async def wire(payload, what):
+        """One outbound frame. See socket_died: a closed socket must not leave as
+        a traceback, because a traceback is exit 1 (GitHub #180)."""
+        try:
+            await ws.send(payload)
+        except WS_CLOSED as e:
+            socket_died(what, e)
+
     async def raw(method, params=None):
         nonlocal mid
         mid += 1
-        await ws.send(json.dumps({"id": mid, "method": method, "params": params or {}}))
+        await wire(json.dumps({"id": mid, "method": method, "params": params or {}}),
+                   f"{method} (unsolicited)")
 
     async def dispatch(msg):
         if on_message:
@@ -521,11 +578,13 @@ def attach(ws, pin, on_message=None):
         elif msg.get("method") == "Fetch.requestPaused" and pin is not None:
             await pin.answer(msg["params"], raw)
 
-    async def pump_once(timeout):
+    async def pump_once(timeout, what="a background message"):
         try:
             msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=timeout))
         except asyncio.TimeoutError:
             return
+        except WS_CLOSED as e:
+            socket_died(what, e)
         await dispatch(msg)
 
     async def send(method, params=None):
@@ -534,13 +593,17 @@ def attach(ws, pin, on_message=None):
         The id is captured into a local because `pump_once` answers paused font
         requests through `raw`, which increments `mid` as well, so the reply this
         call is waiting for cannot be identified by re-reading it.
+
+        A socket that dies under this call is the OTHER fault and exits 2 by a
+        different sentence — see socket_died (GitHub #180).
         """
         nonlocal mid
         mid += 1
         my = mid
         fut = asyncio.get_event_loop().create_future()
         waiting[my] = fut
-        await ws.send(json.dumps({"id": my, "method": method, "params": params or {}}))
+        await wire(json.dumps({"id": my, "method": method, "params": params or {}}),
+                   method)
         end = time.monotonic() + CDP_TIMEOUT_S
         while not fut.done():
             left = end - time.monotonic()
@@ -552,7 +615,7 @@ def attach(ws, pin, on_message=None):
                       f"closed socket raises instead), so nothing has been "
                       f"measured and nothing has been proved.")
                 raise SystemExit(2)
-            await pump_once(min(1.0, left))
+            await pump_once(min(1.0, left), method)
         return fut.result()
 
     async def pump(seconds):

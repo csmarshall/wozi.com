@@ -436,6 +436,12 @@ READY_JS = fontpin.READY_JS
 applied_js = fontpin.applied_js
 page_source = fontpin.page_source
 
+# The dead-socket exception, taken from fontpin rather than imported again here
+# (GitHub #180). It is guarded there — `websockets` without that module leaves an
+# empty tuple, which `except` accepts and never matches — and one home for it means
+# this file and `attach()` cannot come to disagree about what a closed socket is.
+WS_CLOSED = fontpin.WS_CLOSED
+
 
 def fatal(msg):
     """Stop with the exit code the docstring promises for a run that could not
@@ -452,8 +458,19 @@ def fatal(msg):
     down, in the codes rather than in the prose, and it survived because every
     one of these paths prints a sentence that makes it obvious to a human
     reading the log and invisible to anything reading the exit status.
+
+    AND IT PRINTS A `RESULT:` LINE, because that is the channel anybody actually
+    reads (GitHub #181). main() already ends every exit-2 it reaches itself with
+    `RESULT: COULD NOT COMPARE`; these paths ended with a FATAL and no verdict line
+    at all, so a sweep filtering `grep -E "^RESULT"` saw NOTHING from them -- not a
+    pass, not a failure, no line. That is precisely how #181's own investigation
+    threw away the diagnostic it needed, and it is a11y_audit's `RESULT: NOT
+    AUDITED` lesson one rung down: the exit code and the verdict line are two
+    channels, and only one of them gets read.
     """
     print(msg)
+    print("\nRESULT: COULD NOT COMPARE — nothing was photographed, so this is a "
+          "harness fault and not a pixel verdict (see the FATAL line above)")
     raise SystemExit(2)
 
 
@@ -530,16 +547,37 @@ async def shoot(url, viewports, seed, frames, theme, pin, panel=False,
         # else needed a response and is a deadlock now.
         waiting, paused = {}, []
 
+        async def wire(payload, what):
+            """One outbound frame, with the DEAD-SOCKET case named (GitHub #180).
+
+            Distinct from the deadline below and deliberately so: that one is a
+            Chrome which answers keepalive and never the method, this one is a
+            Chrome that is gone. `websockets` raises here on its own after 48-50s
+            of keepalive — a duration this does not try to shorten, since the
+            defect was never the wait but the traceback at the end of it, which
+            exits 1 and means "the artifact moved" on a run that photographed
+            nothing.
+            """
+            try:
+                await c.send(payload)
+            except WS_CLOSED as e:
+                proc.kill()
+                fontpin.socket_died(f"{what} (no picture was taken)", e)
+
         async def raw(m, p=None):
             nonlocal mid
             mid += 1
-            await c.send(json.dumps({"id": mid, "method": m, "params": p or {}}))
+            await wire(json.dumps({"id": mid, "method": m, "params": p or {}}),
+                       f"{m} (unsolicited)")
 
-        async def pump_once(timeout):
+        async def pump_once(timeout, what="a background message"):
             try:
                 msg = json.loads(await asyncio.wait_for(c.recv(), timeout=timeout))
             except asyncio.TimeoutError:
                 return
+            except WS_CLOSED as e:
+                proc.kill()
+                fontpin.socket_died(f"{what} (no picture was taken)", e)
             if msg.get("id") in waiting:
                 waiting.pop(msg["id"]).set_result(msg.get("result", {}))
             elif msg.get("method") == "Fetch.requestPaused":
@@ -573,7 +611,7 @@ async def shoot(url, viewports, seed, frames, theme, pin, panel=False,
             my = mid
             fut = asyncio.get_event_loop().create_future()
             waiting[my] = fut
-            await c.send(json.dumps({"id": my, "method": m, "params": p or {}}))
+            await wire(json.dumps({"id": my, "method": m, "params": p or {}}), m)
             end = time.monotonic() + CDP_TIMEOUT_S
             while not fut.done():
                 left = end - time.monotonic()
@@ -585,7 +623,7 @@ async def shoot(url, viewports, seed, frames, theme, pin, panel=False,
                           f"outstanding. The browser is wedged rather than gone (a "
                           f"closed socket raises instead), so nothing has been "
                           f"photographed and nothing has been proved.")
-                await pump_once(min(1.0, left))
+                await pump_once(min(1.0, left), m)
             return fut.result()
 
         async def wait_until(expr, want, timeout, what):

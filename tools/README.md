@@ -50,7 +50,21 @@ CDP; `pip` needs websockets, and Pillow/numpy for the image-analysis ones).
                            its exposure was measured at exactly zero (a full
                            --census run byte-identical with both font hosts
                            blackholed), so it is documented as immune rather
-                           than pinned for symmetry.
+                           than pinned for symmetry. It DOES import this module
+                           now, for `attach()` alone, and passes `pin=None`
+                           (GitHub #179) — the session helper and the pin are two
+                           separate things this file happens to hold, and reading
+                           the import as a pin gets it backwards.
+                           `attach()` also owns the two ways a CDP round trip
+                           ends without an answer, kept apart on purpose because
+                           they mean opposite things: `CDP_TIMEOUT_S` (90s,
+                           `WOZI_CDP_TIMEOUT_S`) for a Chrome that answers
+                           keepalive and never the method, and `socket_died()` for
+                           one that is gone, which `websockets` raises on its own
+                           after 48-50s of keepalive. Both exit **2**. The second
+                           used to leave as an unhandled traceback at exit 1 —
+                           "the artifact moved", from a run that measured nothing
+                           (GitHub #180).
 - a11y_audit.py <url>      axe-core injected over CDP + the structural checks
                            axe cannot make (focus rules, reduced-motion, SVG
                            exposure, target sizes). Reports the tightest hit
@@ -96,6 +110,22 @@ worktree already on 8765, `python3 -m http.server 8765` fails with EADDRINUSE an
 every gate then passes against somebody else's `index.html` without a word. Serve
 on a port of your own, and confirm the body is the tree you meant before believing
 a PASS. `pixel_regress.py` picks a free port for this reason (#42).
+
+**Never run one of these through a filter that keeps only the verdict.** This is a
+discipline for whoever writes the sweep, not something a harness can enforce, and
+it has now cost two investigations (GitHub #181). A pre-push sweep piped through
+`grep -E "^RESULT"` caught an `escape_mesh` FAIL and threw away the per-seed rows
+that would have named the failing ghost, its residual and its host; a `devices.py`
+exit 1 in 10.3s of a 158s run was suppressed the same way. Both are unexplained
+*only* because of the filter — each tool had already printed why. Run them
+`2>&1 | tee <tool>_$(date +"%F-%H%M.%S").log` and grep the LOG, or capture and
+print the whole output on non-zero. Two things about these tools make it worse
+than it sounds: the interesting detail is in the rows above the verdict (`--census`
+adds more), and an exit-2 path prints a FATAL sentence which is the only statement
+of what went wrong. Every exit-2 path in `escape_mesh.py` and `pixel_regress.py`
+now also prints a `RESULT:` line, so at least the fact of a run that measured
+nothing survives a verdict-only filter — but the diagnostic itself does not, and
+nothing here can make it.
 
 Testing lesson recorded in git history worth repeating here: synthesized CDP
 pointer events never trigger native link drag-and-drop, so a harness can pass

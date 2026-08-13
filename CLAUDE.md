@@ -872,9 +872,18 @@ what makes the gate trustworthy.
 verified appearance-neutral. **No tolerance was added to either the diff or the
 control**, deliberately: a threshold chosen to turn a red run green measures
 nothing. A residual now prints a greppable `NOTE:` instead of failing.
-**Every GATE pins the webfont through `fontpin` now** — `pixel_regress`,
-`dom_invariants`, `devices`, `pill_clip`, `verify_motion`, `escape_mesh` and
-`a11y_audit`, the last of them since CL#168. This paragraph named three files as
+**Every gate that MEASURES TYPE pins the webfont through `fontpin`** —
+`pixel_regress`, `dom_invariants`, `devices`, `pill_clip`, `verify_motion` and
+`a11y_audit`, the last of them since CL#168. **`escape_mesh` deliberately does
+not**, and that exemption is argued at length in its own docstring and in
+`tools/README.md` (#145): it measures centre distances between ghosts, which no
+face can move. This paragraph listed it as pinned for a few hours because the
+census behind it counted `grep -c fontpin` per file rather than reading the
+match — and `escape_mesh`'s single mention was the sentence saying it does not.
+**A match count is not a reading.** It is now easier to get wrong, not harder,
+because CL#195 gave `escape_mesh` a real `fontpin` import — for the session
+helper, with `pin=None` and `Fetch` never enabled. The helper and the pin are two
+things. This paragraph named three files as
 "still carrying the unpinned exposure" for a while after they had all stopped, and
 then named `pill_clip` alone for a few hours after that — a stale exemption list is
 worse than none, because it sends someone to fix what is already fixed. What is
