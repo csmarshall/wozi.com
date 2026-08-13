@@ -1384,10 +1384,23 @@ function portAt(p) {
   return Math.hypot(dx, dy) <= GRAB_RADIUS ? portOf(VIEW) : null;
 }
 
-/* Screen y grows downward, so a CCW-positive angle needs y negated. Without
-   that the page turns the opposite way to the finger, which is a bug you can
-   only see and never reason your way to. */
-const angleAt = (p, c) => Math.atan2(-(p.y - c.y), p.x - c.x);
+/* THE FINGER'S ANGLE IS MEASURED IN THE SAME HANDEDNESS THE DRAWING USES, which
+   is clockwise-positive AS SEEN (GitHub #182). Screen y grows downward, so every
+   angle in this file already means that and nothing here is free to choose: a
+   planet is placed at (cos a, sin a) and its orbit group carries rotate(a), and
+   those two only describe the same planet because rotate(+a) turns clockwise on
+   screen exactly as +a moves a point downward. applyTransforms writes S.angle
+   through that same rotate(), so a finger angle measured counter-clockwise-
+   positive -- `atan2(-(p.y - c.y), ...)`, which is what shipped from #123 --
+   makes the train mirror the hand: measured with a synthetic pointer, a 60
+   degree sweep one way turned the input port exactly 60.00 degrees the other.
+   Do not "fix" that by negating applyTransforms' angle instead; the drawing's
+   own placement arithmetic is the convention, and the pointer is the one thing
+   that was outside it. Note what could not catch this: the spring settles on the
+   finger either way, so every magnitude the page reports is correct and only the
+   handedness is wrong -- the mirror-image class of fault CLAUDE.md's bridge
+   bearing paid for twice. */
+const angleAt = (p, c) => Math.atan2(p.y - c.y, p.x - c.x);
 
 let prevPointerAngle = 0, grabbedCentre = null;
 

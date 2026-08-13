@@ -7,6 +7,72 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Added
 
+- **CL#197 — `/fidget/`'s train turned backwards under the finger, and had since its
+  first commit.** (GitHub #182.)
+
+  Charles: *"fidget swiping on ios seems to go backward"*. **It is not iOS-specific, not
+  the swipe, and not CL#192's integrator — it reproduces with a mouse on a desk.**
+
+  ```js
+  const angleAt = (p, c) => Math.atan2(-(p.y - c.y), p.x - c.x);   // before
+  ```
+
+  **One expression, out of step with the page's own convention.** Everything `/fidget/`
+  draws is **clockwise-positive as seen**: a planet is placed at
+  `cx: orbitR * cos(a), cy: orbitR * sin(a)` in SVG's **y-down** space and its orbit
+  group carries `rotate(a)`, and those two describe the same planet only because
+  `rotate(+a)` turns clockwise. `applyTransforms` writes `S.angle` through that same
+  `rotate()`. The pointer was the **only** thing outside the convention — the negated
+  `y` made the finger counter-clockwise-positive.
+
+  **The comment above it claimed the negation prevented exactly the fault it caused**
+  ("the page turns the opposite way to the finger"), which is why it survived: it read
+  as the fix for the bug it was.
+
+  Measured with a CDP synthetic pointer sweeping 60° around the centre, reading each
+  turning node's `rotate()` **and** the screen travel of a point fixed to it — so
+  direction-as-seen assumes no sign convention:
+
+  | finger, 60° | before | after |
+  | --- | --- | --- |
+  | counter-clockwise | input port **60.00° CW** — `RESULT: OPPOSES` | 60.00° CCW — `RESULT: FOLLOWS` |
+  | clockwise | input port **60.00° CCW** | 60.00° CW |
+
+  An **exact mirror with the magnitude right**, which is precisely why nothing here
+  could ever have caught it: the spring settles on the finger either way, so every
+  number a gate measures is correct. After the fix the sun and carrier follow the hand
+  while the planets counter-rotate — the physically correct split, and 6 nodes with the
+  finger against 2 opposed where before it was 0 with and 7 against.
+
+  `git log -L` puts the line in `4f8165d`, **`/fidget/`'s first commit** (#123), so it
+  predates CL#161 and CL#192 both.
+
+  **The two other candidates were ruled out rather than left open.** The swipe origin is
+  captured correctly (`pointerdown` reads its own event and `pointermove` checks
+  `pointerId`). The swipe *sign* matches its stated intent and — as its own comment
+  admits — is **unobservable with two groundings**, since up and down are then the same
+  toggle; untouched deliberately.
+
+  **Confirmed separately: a swipe starting on the bottom chrome row never reaches the
+  `<svg>`** — it lands on a `<b>` inside `#chrome`, whose rows carry
+  `pointer-events: auto`. That is a **missed** swap, not a backward one, and the
+  `ground` button and `g` / Shift+Up/Down keep the feature reachable.
+
+  **On timing, since the ticket asked:** the last *successful* deploy before the report
+  was CL#188 at 22:33Z the previous day; the run that carried CL#192 to the bucket
+  finished at **19:51Z, 28 minutes after #182 was filed**. So the diverging 30fps grip
+  was also live when he swiped and cannot be excluded as a second contributor — but it
+  is not needed to explain "backward", and it is already gone from the live page.
+
+  `pixel_regress --ref HEAD --path fidget/` **0px at 90 / 900 / 3000 frames**, both
+  viewports, controls 0px — structurally expected, since the resting page has no finger
+  down. `npm test` 121/0. `strip_comments --check` passes. `ringCheck`/`sunCheck` pass
+  by evidence: the probe built **both** groundings at runtime, and either check throwing
+  would have stopped `build()` before `#shaft` existed.
+
+  The comment now states the convention and warns against "fixing" it at
+  `applyTransforms` instead — which would invert the drawing to match a wrong pointer.
+
 - **CL#196 — the datum's side is now derived from the spine, so one consistent side
   holds for any number of chains.** (GitHub #172.)
 
