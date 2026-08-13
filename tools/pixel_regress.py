@@ -285,6 +285,48 @@ READY_TIMEOUT_S = 25.0
 # passes out of three is not quietly averaged into a verdict.
 STABLE_ATTEMPTS = 3
 
+# EVERY OTHER CEILING IN THIS FILE IS ENFORCED BY A LOOP THAT CALLS `send`, AND
+# `send` ITSELF HAD NO CEILING AT ALL (GitHub #174). That is not a theoretical
+# hole: run 31639824875 sat in_progress for 93 MINUTES on this gate and never
+# advanced, and `concurrency: cancel-in-progress: false` — which is correct and
+# must stay — queued every later deploy behind it, so the site silently stayed on
+# an older commit for the whole of it.
+#
+# The shape of the fault is worth stating, because a reader looking at
+# READY_TIMEOUT_S, PANEL_TIMEOUT_S and STABLE_ATTEMPTS would reasonably conclude
+# this file cannot hang. Each of those is `while time.monotonic() < end: await
+# send(...)`, so the deadline is only ever CHECKED BETWEEN round trips. A single
+# round trip that never comes back never returns to the loop that would notice,
+# and `send` waited on `pump_once(30.0)` in a `while not fut.done()` — a 30s read
+# timeout retried forever, which is an infinite wait wearing a timeout's clothes.
+#
+# A DEAD SOCKET IS NOT THE CASE TO WORRY ABOUT, and that is measured rather than
+# assumed: SIGSTOP the harness's own headless Chrome and `websockets` (15.0.1)
+# keepalive ends the read in 48-50s with ConnectionClosedError. Which also settles
+# what the 93-minute hang was NOT — a dropped connection would have died in a
+# minute. So the case that has no exception to catch is a Chrome that is ALIVE and
+# wedged: answering keepalive pings, never answering `Page.captureScreenshot` or
+# `Runtime.evaluate`. Only a deadline ends that one, and the same SIGSTOP
+# experiment against this version stops in CDP_TIMEOUT_S naming the method.
+#
+# Worth knowing and NOT fixed here: that ConnectionClosedError is unhandled, so it
+# leaves as a traceback and exits 1 — this tool's word for THE ARTIFACT MOVED, on a
+# run that photographed nothing. Measured, exit=1. It is the #156 confusion by a
+# different route and wants its own ticket rather than being folded in here.
+#
+# 90s is a per-CALL ceiling, not a budget for the run, and the margin is measured
+# rather than guessed: a full healthy `--ref HEAD` passes with the deadline
+# squeezed to WOZI_CDP_TIMEOUT_S=2, and passes at 2 again under
+# WOZI_PX_CPU_THROTTLE=6, which is the knob that reproduces a shared CI runner. So
+# no legitimate round trip here — navigation or screenshot included — takes two
+# seconds even throttled, and 90 is 45x the worst observed. It is deliberately far
+# above the honest worst case because deploy.yml's step and job bounds are the
+# backstop and this is the thing that should fire FIRST, naming the CDP method
+# that stopped answering. Overridable so the deadline itself stays testable —
+# WOZI_CDP_TIMEOUT_S=0.001 is how it was demonstrated to fire, and to fire as
+# exit 2 rather than as a pixel verdict.
+CDP_TIMEOUT_S = float(os.environ.get("WOZI_CDP_TIMEOUT_S", "90") or 90)
+
 # ---- opening the pop-out, for --panel (GitHub #144) -------------------------
 # THE TARGET IS THE PAGE'S OWN DISCLOSURE MARKER, NOT A COORDINATE. Every corner
 # button is a fixed-position circle whose `right` is its index in the row times a
@@ -513,13 +555,37 @@ async def shoot(url, viewports, seed, frames, theme, pin, panel=False,
             await pin.answer(ev, raw)
 
         async def send(m, p=None):
+            """One CDP round trip, with a DEADLINE (GitHub #174).
+
+            The id is captured into a local: `pump_once` answers paused font
+            requests through `raw`, which increments `mid` too, so the reply this
+            call is waiting for cannot be identified by re-reading `mid`.
+
+            Reaching the deadline is exit 2 and nothing else. A call that never
+            came back means no picture was taken, and the whole of CL#159's
+            argument is that "I could not look" must never read the same as
+            "nothing moved" — least of all by way of hanging until a CI job's
+            360-minute default kills the runner with no sentence in the log at
+            all.
+            """
             nonlocal mid
             mid += 1
+            my = mid
             fut = asyncio.get_event_loop().create_future()
-            waiting[mid] = fut
-            await c.send(json.dumps({"id": mid, "method": m, "params": p or {}}))
+            waiting[my] = fut
+            await c.send(json.dumps({"id": my, "method": m, "params": p or {}}))
+            end = time.monotonic() + CDP_TIMEOUT_S
             while not fut.done():
-                await pump_once(30.0)
+                left = end - time.monotonic()
+                if left <= 0:
+                    waiting.pop(my, None)
+                    proc.kill()
+                    fatal(f"FATAL: Chrome never answered {m} — no reply in "
+                          f"{CDP_TIMEOUT_S:g}s, with {len(waiting)} other call(s) "
+                          f"outstanding. The browser is wedged rather than gone (a "
+                          f"closed socket raises instead), so nothing has been "
+                          f"photographed and nothing has been proved.")
+                await pump_once(min(1.0, left))
             return fut.result()
 
         async def wait_until(expr, want, timeout, what):

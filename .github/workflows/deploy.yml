@@ -55,6 +55,19 @@ on:
   workflow_dispatch:
 
 # Never let two deploys race each other onto the same bucket.
+#
+# cancel-in-progress: false IS DELIBERATE AND MUST STAY FALSE (GitHub #174). A
+# deploy half-way through publishing objects must not be killed by the next push,
+# or the bucket ends up carrying a mix of two commits — and this workflow does not
+# pass --delete, so there is no one atomic step that would put that right again.
+#
+# The cost of that choice is that a run which never ENDS blocks every run behind
+# it: one hung gate held this group for 93 minutes, two later pushes sat
+# `pending`, and the live site silently stayed on an older commit while the repo
+# looked deployed. FLIPPING THIS TO TRUE IS NOT THE FIX and would trade a stale
+# bucket for a mixed one. The fix is that a hang must END — the timeout-minutes
+# below, and the per-CDP-call deadline in tools/fontpin.py and
+# tools/pixel_regress.py that is what actually stopped that run being possible.
 concurrency:
   group: deploy-wozi-com
   cancel-in-progress: false
@@ -70,8 +83,35 @@ env:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    # THE BACKSTOP, AND ONLY THE BACKSTOP (GitHub #174). Until this existed there
+    # was no timeout-minutes anywhere in this file, so GitHub's 360-MINUTE DEFAULT
+    # applied: a gate that stopped answering held the runner for six hours and, via
+    # the concurrency group above, held every deploy behind it.
+    #
+    # 45, and the margin is deliberately generous because A TIMEOUT THAT TRIPS ON A
+    # SLOW-BUT-HEALTHY RUN IS WORSE THAN NONE — it goes red for a reason that has
+    # nothing to do with the page, which is the red that trains everyone to ignore a
+    # workflow. Measured on a laptop, serially, one gate at a time: node
+    # tools/test.js 7.6s; the browser-gate step 3m43 (devices 2m40, verify_motion
+    # 4.8s, pill_clip 18.8s, dom_invariants 1.3 + 1.3 + 1.3s, escape_mesh 37.0s);
+    # the five-run pixel battery 1m03 (14.6 / 14.1 / 8.6 / 14.8 / 11.0s). Call the
+    # gate half five minutes locally and note the one figure with a CI number beside
+    # it — devices.py is 3m38 there against 2m40 here, so this runner is about 1.4x
+    # a laptop rather than the order of magnitude it is tempting to assume. On top of
+    # the gates, the publish half carries a CloudFront invalidation whose own waiter
+    # runs to 10 minutes, which is why 45 rather than the 30 GitHub #174 suggested:
+    # ~15 minutes healthy, and a 3x margin on the slowest part being somebody else's
+    # infrastructure.
+    #
+    # THE PER-STEP BOUNDS BELOW ARE THE PART THAT EARNS ITS KEEP, not this one. A
+    # job-level timeout says "the job timed out" and cancels the remaining steps,
+    # including the `if: always()` summary; a step-level timeout NAMES THE GATE that
+    # hung, which is the whole diagnostic value — the hang that motivated this was
+    # on one specific step and the log said nothing at all about which.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        timeout-minutes: 5
 
       # The geometry suite runs BEFORE any credential is assumed, so a broken
       # gear set cannot reach the bucket. It reads its constants straight out of
@@ -79,6 +119,9 @@ jobs:
       # this page can be honest: change BAND_DEPTH or a tooth floor and gear sets
       # nothing has measured become reachable, and this is what catches that.
       - name: Verify the geometry before anything else
+        # 7.6s on a laptop and no browser in it, so anything past a minute is a
+        # wedged Node rather than a slow suite.
+        timeout-minutes: 5
         run: node tools/test.js
 
       # BUILD WHAT SHIPS, AND DO IT HERE — before Chrome, before the credential,
@@ -99,6 +142,10 @@ jobs:
       #
       # keybase.html is absent from this loop on purpose: see the header.
       - name: Build what actually ships
+        # A pip install off PyPI plus two passes of a text transform. The install is
+        # the only part that can hang, and it is non-fatal by design (see below), so
+        # a stalled index must not become a six-hour runner.
+        timeout-minutes: 10
         run: |
           set -euo pipefail
           unset TMOUT
@@ -121,6 +168,7 @@ jobs:
       # Cheap enough (no browser) that running it twice costs nothing worth
       # saving, and the two runs answer different questions.
       - name: Verify the geometry against what ships
+        timeout-minutes: 5
         run: node tools/test.js
 
       # The train being wonky breaks the whole illusion of the page, so the
@@ -132,6 +180,9 @@ jobs:
       # layout that was visibly broken on Charles's iPhone.
       - uses: browser-actions/setup-chrome@v1
         id: chrome
+        # A download off somebody else's CDN, which is exactly the class of step
+        # that stalls without failing.
+        timeout-minutes: 10
         with:
           chrome-version: stable
 
@@ -154,6 +205,20 @@ jobs:
       # and pass that URL instead — and check the body you get back is the tree you
       # meant, which after the build step above means checking for the banner.
       - name: Verify the layout on real device profiles
+        # SEVEN BROWSER GATES IN ONE STEP, so the bound has to cover the slowest of
+        # them plus six others. devices.py is the long pole: 3m38 in CI against 2m40
+        # measured here over three consecutive runs (158.0 / 158.2 / 161.8s). The
+        # rest, locally: verify_motion 4.8s, pill_clip 18.8s, dom_invariants 1.3 +
+        # 1.3 + 1.3s, escape_mesh 37.0s — 3m43 for the whole step. Apply devices.py's
+        # own 1.4x CI factor to all seven and it is a little over five minutes, so 20
+        # is roughly a 4x margin.
+        #
+        # Every one of these attaches through tools/fontpin.py, so each now carries
+        # a 90s per-CDP-call deadline of its own (GitHub #174) and should report
+        # exit 2 long before this fires. This is here for the failure that is not a
+        # CDP call at all — a python3 -m http.server that never binds, a Chrome
+        # that never starts.
+        timeout-minutes: 20
         env:
           CHROME: ${{ steps.chrome.outputs.chrome-path }}
         run: |
@@ -238,6 +303,22 @@ jobs:
       # not running — which is why it now exits 2 instead, and why they are
       # installed rather than hoped for.
       - name: The artifact must draw the same page as the source
+        # THIS IS THE STEP THAT HUNG (GitHub #174). Run 31639824875 sat here for 93
+        # minutes and the log said nothing, because there was no bound at any level
+        # and nothing in the harness had a deadline either: pixel_regress's `send`
+        # waited on a 30s socket read inside `while not fut.done()`, which retries
+        # forever. That is fixed in the tool — CDP_TIMEOUT_S, 90s per call, exit 2 —
+        # and this is the bound that catches whatever the next version of that
+        # mistake turns out to be.
+        #
+        # 25 against 1m03 measured locally for all five runs (14.6s stage, 14.1s
+        # solo, 8.6s fidget, 14.8s panel, 11.0s light) — and each of those is five
+        # browser launches deep already, because every tree is photographed until it
+        # agrees with itself. That is a wide margin on purpose: this is the step that
+        # actually hung, the harness deadline below it should always fire first with
+        # a sentence, and the cost of over-provisioning a bound whose healthy case is
+        # a minute is nothing at all.
+        timeout-minutes: 25
         env:
           CHROME: ${{ steps.chrome.outputs.chrome-path }}
         run: |
@@ -280,6 +361,8 @@ jobs:
 
       - name: Assume the deploy role via OIDC
         if: github.event_name != 'pull_request'
+        # One STS call. If it has not answered in five minutes it is not going to.
+        timeout-minutes: 5
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::464480389332:role/wozi-com-deploy
@@ -294,6 +377,9 @@ jobs:
 
       - name: Publish HTML
         if: github.event_name != 'pull_request'
+        # Three aws s3 cp calls. The AWS CLI has its own retries, so the
+        # failure this bounds is a transfer that stalls rather than errors.
+        timeout-minutes: 10
         run: |
           # Two of these three are the STRIPPED artifacts by now and the third is
           # the repo file untouched — see the header. The loop does not know the
@@ -310,6 +396,7 @@ jobs:
 
       - name: Publish the runtime
         if: github.event_name != 'pull_request'
+        timeout-minutes: 10
         run: |
           # config.js carries the link table, the people and the palette, and
           # index.html reads it at load. If it is missing the page still renders
@@ -326,6 +413,7 @@ jobs:
 
       - name: Publish hub icons
         if: github.event_name != 'pull_request'
+        timeout-minutes: 10
         run: |
           aws s3 sync assets/ "$BUCKET/assets/" \
             --content-type "image/svg+xml" \
@@ -336,6 +424,7 @@ jobs:
 
       - name: Publish the SSH public key
         if: github.event_name != 'pull_request'
+        timeout-minutes: 5
         run: |
           # No extension, so without an explicit type browsers download it
           # instead of showing it.
@@ -346,6 +435,7 @@ jobs:
 
       - name: Publish the favicon
         if: github.event_name != 'pull_request'
+        timeout-minutes: 5
         run: |
           # Every browser requests this unconditionally before ever honouring
           # a <link rel="icon"> (GitHub #119) -- it 403'd for the whole life
@@ -357,6 +447,7 @@ jobs:
 
       - name: Publish the crawl policy
         if: github.event_name != 'pull_request'
+        timeout-minutes: 5
         run: |
           # Before this existed, https://wozi.com/robots.txt returned the raw S3
           # AccessDenied XML at 403 (#74) -- and a 403 is not a policy. Most
@@ -381,6 +472,10 @@ jobs:
 
       - name: Invalidate CloudFront
         if: github.event_name != 'pull_request'
+        # `aws cloudfront wait invalidation-completed` polls on its own waiter (20s x
+        # 30 attempts = 10 minutes) and an invalidation genuinely can take several,
+        # so this is the one publish step whose HEALTHY case is minutes long.
+        timeout-minutes: 20
         id: invalidate
         run: |
           # Mandatory, not optional. The distribution's default TTL is 86400,
@@ -396,6 +491,13 @@ jobs:
 
       - name: Verify the deploy is actually live
         if: github.event_name != 'pull_request'
+        # EVERY assertion in here retries 6 times with a 10s backoff and a 20s curl
+        # cap, and there are about twenty of them — so a wholly broken deploy could
+        # sit in this loop for the better part of an hour before printing its verdict.
+        # A healthy run is seconds. 15 minutes is well above the second and well
+        # below the first, and the retries are what make the failing case slow rather
+        # than anything about the site.
+        timeout-minutes: 15
         run: |
           set -o pipefail
           fail=0

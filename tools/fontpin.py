@@ -115,6 +115,33 @@ PREFETCH_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.
 FONT_DELAY_S = float(os.environ.get("WOZI_FONT_DELAY_S")
                      or os.environ.get("WOZI_PX_FONT_DELAY_S") or 0)
 
+# THE CEILING ON ONE CDP ROUND TRIP, shared by every harness that attaches through
+# this module (GitHub #174). `attach`'s `send` waited on a 30s socket read inside
+# `while not fut.done()`, which retries forever: a timeout that cannot expire. It
+# is the same code `tools/pixel_regress.py` carries its own copy of, and that copy
+# is what held a deploy runner for 93 minutes with no line in the log.
+#
+# What it does NOT cover is a socket that dies: `websockets` (15.0.1) keepalive
+# turns that into ConnectionClosedError in 48-50s, measured by SIGSTOPping a
+# headless Chrome. It terminates on its own — though as an unhandled traceback,
+# which exits 1 rather than 2, and that is a separate defect of the same #156
+# family. This deadline is for the case with nothing to catch: a Chrome that
+# answers keepalive pings and never answers the method.
+#
+# It is deliberately far above any honest round trip, because `wait_until` above it
+# owns the question "did the page get there in time" and this owns only "is the
+# browser still talking at all". A deadline tight enough to argue with the first one
+# would turn a slow-but-healthy run red, which is worse than no deadline. Measured:
+# a healthy pixel_regress run passes with this squeezed to 2s, and passes at 2s
+# again under a 6x CPU throttle, so 90 is 45x the worst round trip observed.
+#
+# THE EXIT CODE IS PART OF THE FIX. This is a library, so what it raises is what
+# a11y_audit, dom_invariants, devices, escape_mesh, pill_clip and verify_motion
+# return: `print(...)` then `raise SystemExit(2)`, never `SystemExit("string")`,
+# which prints and exits 1 — "it measured and the answer is bad", the opposite of
+# what a wedged browser means (GitHub #156).
+CDP_TIMEOUT_S = float(os.environ.get("WOZI_CDP_TIMEOUT_S", "90") or 90)
+
 # Installed at document-start, BEFORE the page's own #98 handler registers on the
 # same promise -- callbacks on one promise run in registration order, so ours is
 # always first. `__fontsReady` therefore means the font SETTLED and deliberately
@@ -502,13 +529,30 @@ def attach(ws, pin, on_message=None):
         await dispatch(msg)
 
     async def send(method, params=None):
+        """One CDP round trip, with a DEADLINE — see CDP_TIMEOUT_S (GitHub #174).
+
+        The id is captured into a local because `pump_once` answers paused font
+        requests through `raw`, which increments `mid` as well, so the reply this
+        call is waiting for cannot be identified by re-reading it.
+        """
         nonlocal mid
         mid += 1
+        my = mid
         fut = asyncio.get_event_loop().create_future()
-        waiting[mid] = fut
-        await ws.send(json.dumps({"id": mid, "method": method, "params": params or {}}))
+        waiting[my] = fut
+        await ws.send(json.dumps({"id": my, "method": method, "params": params or {}}))
+        end = time.monotonic() + CDP_TIMEOUT_S
         while not fut.done():
-            await pump_once(30.0)
+            left = end - time.monotonic()
+            if left <= 0:
+                waiting.pop(my, None)
+                print(f"FATAL: Chrome never answered {method} — no reply in "
+                      f"{CDP_TIMEOUT_S:g}s, with {len(waiting)} other call(s) "
+                      f"outstanding. The browser is wedged rather than gone (a "
+                      f"closed socket raises instead), so nothing has been "
+                      f"measured and nothing has been proved.")
+                raise SystemExit(2)
+            await pump_once(min(1.0, left))
         return fut.result()
 
     async def pump(seconds):

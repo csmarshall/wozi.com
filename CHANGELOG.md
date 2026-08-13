@@ -7,6 +7,74 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Added
 
+- **CL#193 — the 93-minute deploy hang had a proven cause: a CDP round trip with no
+  ceiling. And it was not the dropped socket I guessed.** (GitHub #174.)
+
+  Both CDP session helpers — `pixel_regress.py`'s own copy and `fontpin.py`'s
+  `attach()`, shared by six harnesses — were:
+
+  ```python
+  while not fut.done():
+      await pump_once(30.0)      # 30s read timeout, retried forever
+  ```
+
+  **A timeout that cannot expire.** `READY_TIMEOUT_S`, `PANEL_TIMEOUT_S` and `settle()`
+  all check their deadlines *between* round trips, so a single call that never returns
+  never reaches the loop that would notice it. Both now carry `CDP_TIMEOUT_S` (90s,
+  `WOZI_CDP_TIMEOUT_S` overridable), kill the browser, and exit **2** naming the CDP
+  method.
+
+  **My hypothesis in the ticket was wrong, and it was ruled out by measurement rather
+  than argued down.** I guessed a socket that dropped without closing. `websockets`
+  15.0.1 keepalive turns that into `ConnectionClosedError` in **48–50s**, measured by
+  `SIGSTOP`ping a headless Chrome against HEAD's code. So a dead socket terminates on
+  its own and cannot explain 93 minutes. What can is a Chrome that **answers keepalive
+  pings and never answers the method** — wedged but alive. The new FATAL message says
+  exactly that, so the next operator does not repeat my guess: *"The browser is wedged
+  rather than gone (a closed socket raises instead)."*
+
+  Proved, not reasoned: the deadline fires and names the method at exit **2** in both
+  copies (`Page.enable`, verified independently in `pixel_regress` and via `fontpin`
+  from `dom_invariants`); against a **real wedge** — `SIGSTOP` on the harness's own
+  Chrome — `pixel_regress` exits 2 in 10s naming `Runtime.evaluate`; and HEAD's code in
+  the same experiment ran 48–50s and died with an unhandled traceback at exit **1**,
+  which is this tool's word for "the artifact moved".
+
+  **The 90s margin is measured, not chosen:** a full healthy run still passes with the
+  deadline squeezed to **2s**, and passes at 2s again under 6× CPU throttling. So 90 is
+  45× the worst observed round trip.
+
+  **Timing the gate sequence, serially**, which is what makes the workflow bounds
+  measured rather than guessed: `node tools/test.js` 7.6s, `devices.py` 158–162s,
+  `verify_motion` 4.8s, `pill_clip` 18.8s, three `dom_invariants` 1.3s each,
+  `escape_mesh` 37.0s → **3m43 for the browser-gate step**; the five-run pixel battery
+  14.6/14.1/8.6/14.8/11.0 → **1m03**. Worth recording: **the CI factor is ~1.4×, not an
+  order of magnitude** — `devices.py` is 3m38 in CI against 2m40 here.
+
+  Bounds added everywhere they were absent. `deploy.yml`: job **45**, with per-step
+  bounds including **20** on the browser-gate step and **25** on the pixel battery — the
+  per-step ones are what actually catch a hang *and name it*, so the job bound only
+  needs to be safely clear of healthy. 45 rather than the ticket's suggested 30 because
+  the measured healthy total is ~15 min in CI **of which the CloudFront invalidation
+  waiter alone can be 10** — a path whose slowest part is somebody else's
+  infrastructure. `mutation.yml`: `registry` **10** (it had none, so the 360-minute
+  default applied), and the sweep gets a **step** bound of 40 *under* its job's 45 so
+  the `if: always()` Summary still runs.
+
+  `cancel-in-progress: false` is unchanged, with a comment saying why flipping it trades
+  a stale bucket for a **mixed** one.
+
+  Verified: `npm test` 121/0; `pixel_regress --ref HEAD` 0px, controls 0px;
+  `mutation_gate --blind` 17/17 mutations still apply; both workflows parse and all **19**
+  `run:` blocks pass `bash -n`.
+
+  **Projected, not proved, and worth keeping separate:** workflow-level behaviour — that
+  a step timeout cancels the job and names the step, and that a job timeout skips
+  `if: always()` steps — is from GitHub's documentation, since an agent cannot push and
+  so cannot trigger CI. And that run `31639824875` sat in *this specific* unbounded loop
+  is inference: the loop is proved unbounded, the dead-socket alternative is ruled out by
+  the keepalive measurement, and the step before it passed.
+
 - **CL#192 — `/fidget/`'s grip spring diverged at 30fps, which is Low Power Mode; and
   the page now hears a collapsing URL bar.** (GitHub #164, GitHub #170.)
 
