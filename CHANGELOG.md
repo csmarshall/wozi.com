@@ -7,6 +7,78 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Added
 
+- **CL#202 — `SPEED_CEIL` was two facts, so the 500× and 1000× stops arrive with the
+  flywheel's feel untouched.** (GitHub #150.)
+
+  Charles: *"Add 500x and 1000x sliders if supported"*. It **is** supported and it **is**
+  one schema value — but that value was also scaling the coast, and `SPINDOWN_*`'s
+  coefficients are *solved* so a full-ladder coast takes `SPINDOWN_RANGE_MS`. Stretching
+  the ladder 5× therefore made the wheel much draggier at any given actual speed, undoing
+  CL#141, which Charles tuned by hand against a **200×** ladder for *"a gratifying spin
+  that ended up slowly and naturally returning back to the same speed"*.
+
+  Two facts, now two names: `SPEED_CEIL` is **the fastest the train can be asked to run**;
+  `SPINDOWN_TUNED_CEIL` is **the reference excess the drag curve was fitted at**. Same
+  shape as #152.
+
+  | throw | today (ceiling 200) | naive raise to 1000 | **after the split** |
+  | --- | --- | --- | --- |
+  | 2× | 910 ms | 200 ms | **910 ms** |
+  | 20× | 6,918 ms | 2,685 ms | **6,918 ms** |
+  | 200× | 14,999 ms | 9,368 ms | **14,999 ms** |
+  | 500× | — | 12,588 ms | 17,963 ms |
+  | 1000× | — | 14,999 ms | 19,866 ms |
+
+  **Stronger than the table: `SPINDOWN_SPAN` and `SPINDOWN_K` are numerically identical to
+  HEAD** — 68.228571 and 2.8886669850e-4, to the last digit. CL#141's feel is not
+  approximately preserved, it is untouched.
+
+  **`driveCap()` belongs to the ladder, and the alternative is broken rather than merely
+  worse.** It must clear `idleRate()` at every declared stop or it stops being a ceiling
+  and becomes a **brake** — the exact failure `max(8, …)` existed to prevent. Pinned to
+  the tuned span it would be **68.57 while the 1000× stop idles at 342.86**, so merely
+  *touching* the wheel at either new stop would clamp `_v` down 5× on release.
+
+  **So CL#136's identity is narrowed rather than lost, and it was never really "cap ==
+  range".** It was "the cap and the drag curve are pinned to the *same* span" — true for
+  free while one number was both. A throw from `SPINDOWN_TUNED_CEIL` still takes
+  `SPINDOWN_RANGE_MS` exactly, asserted as an identity; a throw past it takes **19,866
+  ms** — sublinear, 5× the speed for 1.32× the time, because viscous and windage drag both
+  rise with the excess. A consequence of the model rather than a chosen number, so it is
+  documented and not asserted to a value.
+
+  **The new constant cannot be derived, and that is argued rather than assumed.** It is
+  not `BASE_MS`, not the schema (that is the other fact), not `strobeSpeed()` (15.75×, two
+  decades below). It is the one figure in the model that comes from a person spinning
+  wheels.
+
+  **`tools/test.js` had to change, because two tests asserted the alias** — exactly what
+  #152/CL#185 warned. The CL#136 identity test failed honestly and is re-pinned to
+  `SPINDOWN_TUNED_CEIL`, with a new assertion that `driveCap()` stays `rateAt(SPEED_CEIL)`.
+  And one test *required* `/SPEED_CEIL/` in the coast chunk — it **required the aliasing**.
+  Worse, it sliced `SRC` rather than `STRIPPED_SRC`, so after the split **it would have
+  gone on passing on a comment** while the live code no longer matched: the #101 trap,
+  found by accident. Inverted per CL#185, read off the stripped source, and both new
+  guards confirmed to fire.
+
+  Verified: `npm test` **127/0**. `pixel_regress --ref HEAD` **0px at 90 / 900 / 3000
+  frames** — and 0px is *correct* here rather than "not tested", because `CLAUDE.md`'s
+  "cannot be 0px" rule covers a changed spin-up **curve** and the coefficients are provably
+  identical; the real question is 1000×, which those shots never reach, so it was driven
+  directly. **`?hud` at 1000×**: `tick/s 30.0 of 30`, `drop 0`, `33.3 p50 / 34.1 p95` —
+  indistinguishable from 1×, so per-tick work does not scale with speed, measured rather
+  than claimed. **`_M` precision**: a per-tick step of 11,429° against a float64 ulp of
+  3.7e-9° is 3e9 ulps of headroom; the 2^53 limit is ~833 years of continuous 1000×.
+
+  **Strobe treatment verified rather than inferred**: `aria-valuetext` reads *"1000×,
+  strobing — benchmark only"* and `--thumb-color` resolves to `--accent` against `--muted`
+  at the 10× control. The corner departure indicator needs nothing.
+
+  **One real visual change, and it is a derived value doing its job**: the panel widens
+  **8.75px — exactly 1ch at 13px** — because the readout's `minWidth` is
+  `String(SPEED_STOPS[last]).length + 1` in `ch`, and `"200"` → `"1000"` takes it 4ch → 5ch.
+  `--panel` reports 15,201px across both viewports, controls 0px; nothing else moved.
+
 - **CL#201 — the datum seat windows what it draws: ticks, name and the corner row.**
   (GitHub #173, GitHub #183.)
 

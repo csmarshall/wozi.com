@@ -1975,7 +1975,7 @@ function loadDriveCap() {
   return (factor) => host(baseMs, ceil, floor, factor);
 }
 
-test('how long a throw can coast is the ladder\'s own crossing time (GitHub #121, CL#136)', () => {
+test('a throw from the TUNED span\'s top coasts for exactly its crossing time (GitHub #121, CL#136; split #150)', () => {
   /* THE REGRESSION, stated as the arithmetic that caused it. Once CL#127 made
      the flywheel decelerate at a CONSTANT rate, the time a thrown wheel coasts
      stopped being a property of the easing and became purely
@@ -1984,24 +1984,40 @@ test('how long a throw can coast is the ladder\'s own crossing time (GitHub #121
      deceleration is 269ms. No throw, however hard, could outlast a quarter
      second, which is #121: the train read as refusing to coast.
 
-     Deriving the cap from the ladder's top instead makes this exact rather than
-     merely bigger: a saturating throw sheds idleRate(ceil) - idleRate(floor) at
-     a rate defined as that same span over SPINDOWN_RANGE_MS, so it takes
-     SPINDOWN_RANGE_MS precisely. Asserted as an identity, not a threshold,
-     because a threshold would need a number nobody derived -- and the identity
-     is what makes the hardest possible throw and the full slider sweep the same
-     journey, one by hand and one by control. */
+     CL#136 fixed that by deriving the cap from the ladder's top, and stated the
+     fix as an identity: a saturating throw sheds exactly the span the drag
+     curve is solved over, so it takes SPINDOWN_RANGE_MS precisely.
+
+     #150 SPLIT THE SPAN OFF THE LADDER, AND THIS TEST HAD ASSERTED THE ALIAS.
+     The identity was only ever "the cap and the drag curve are pinned to the
+     SAME span" -- true for free while SPEED_CEIL was both. It is not the
+     ladder's top that owns it: raising `speed.max` to 1000 for #150's two new
+     stops moved every ordinary throw (a 2x throw fell 910ms -> 199ms), because
+     the drag terms are all stated relative to their reference span. So the
+     identity is re-pinned to SPINDOWN_TUNED_CEIL, which is what the drag curve
+     is actually referred to, and it is exact there. Inverted rather than
+     deleted (the CL#185 pattern): the guarantee that survives is asserted, and
+     re-aliasing it to SPEED_CEIL is what now fails, below.
+
+     A hand may throw PAST that span -- driveCap() is the ladder's top and must
+     be, or it would clamp the train down at the stops above (see the ceiling
+     check below). Such a throw takes LONGER than SPINDOWN_RANGE_MS, and
+     sublinearly so, because viscous and windage drag both rise with the excess:
+     measured 19866ms from 1000x against 14999ms from 200x. That duration is a
+     consequence of the model, not a figure anyone chose, so it is not asserted
+     to a number here. */
   const approachSpeed = loadApproachSpeed();
   const capFor = loadDriveCap();
   const { floor, ceil } = speedSchema();
   const rangeMs = grabNumber('SPINDOWN_RANGE_MS');
+  const tuned = grabNumber('SPINDOWN_TUNED_CEIL');
   const at1x = capFor(floor);
 
   /* A tick fine enough that quantisation is a rounding error rather than the
      measurement -- the identity is about the continuous rate, and step()'s real
      dt is not this suite's to choose. */
   const dt = 0.5;
-  const ticks = ticksToSettle(approachSpeed, at1x.driveCap(), at1x.idleRate(), dt);
+  const ticks = ticksToSettle(approachSpeed, at1x.rateAt(tuned), at1x.idleRate(), dt);
   const coastMs = ticks * dt;
   /* Tolerance scales with the quantity being measured. `dt * 2` is 1ms, which is
      0.04% of a 2400ms coast and a reasonable bound there, but the same absolute
@@ -2009,22 +2025,31 @@ test('how long a throw can coast is the ladder\'s own crossing time (GitHub #121
      0.007% -- tighter than the integration itself, and it failed by 1.5ms on a
      model that had not changed. 0.1% or two ticks, whichever is larger. */
   ok(Math.abs(coastMs - rangeMs) <= Math.max(dt * 2, rangeMs * 0.001),
-    `a saturating throw at ${floor}x coasts ${coastMs.toFixed(1)}ms, but the ladder's own `
-    + `crossing time is ${rangeMs}ms — driveCap() and SPINDOWN_DECEL are no longer `
-    + 'derived from the same span, so the hardest throw and a full slider sweep have '
-    + 'drifted apart');
+    `a throw from ${tuned}x — the span the drag curve is referred to — coasts `
+    + `${coastMs.toFixed(1)}ms, but SPINDOWN_RANGE_MS says ${rangeMs}ms. `
+    + 'SPINDOWN_SPAN and SPINDOWN_TUNED_CEIL have drifted apart, so the coast no '
+    + 'longer lasts the time the one feel figure names');
 
-  /* And it must still be a CEILING at every stop, which is what `max(8, ...)`
-     was protecting when the cap was a fixed number: a cap below the idle rate
-     would clamp the train DOWN and act as a brake (the failure the old comment
-     called out at 200x). Being the largest idleRate() the schema permits, it
-     clears every stop by construction -- this checks the construction. */
+  /* And driveCap() must still be a CEILING at every stop, which is what
+     `max(8, ...)` was protecting when the cap was a fixed number: a cap below
+     the idle rate would clamp the train DOWN and act as a brake.
+
+     THIS IS ALSO WHAT DECIDES WHICH OF #150'S TWO FACTS THE CAP BELONGS TO, and
+     it is not a preference. Pinning driveCap() to SPINDOWN_TUNED_CEIL instead
+     would keep the identity above exact at the cost of failing right here at
+     500x and 1000x: releasing the wheel at those stops would clamp `_v` from
+     342.86 down to 68.57 and the train would be braked by being touched. A hand
+     must be able to reach any speed the control can ask for, so the cap follows
+     the LADDER and the drag curve follows the TUNED span. */
   SPEED_STOPS_FOR_TEST().forEach(stop => {
     const o = capFor(stop);
     ok(o.driveCap() >= o.idleRate() - 1e-9,
       `at ${stop}x the drive cap (${o.driveCap()}) is below the idle rate `
       + `(${o.idleRate()}) — the cap has become a brake, not a ceiling`);
   });
+  eq(at1x.driveCap(), at1x.rateAt(ceil),
+    'driveCap() is no longer the ladder\'s own top — it must stay pinned to '
+    + 'SPEED_CEIL (#150 fact 1), never to the coast\'s tuned span');
 
   /* The historic 8 is gone from live code. Quoted in the comment that explains
      why, so STRIPPED_SRC and not SRC -- the #101 trap. */
@@ -2064,18 +2089,44 @@ test('spin-up and spin-down share the same approach — GitHub #106 asks explici
     + 'branching on direction somewhere, which #106 says it should not');
 });
 
-test('the settle-rate constant is DERIVED from the speed ladder and BASE_MS, not a bare deg/ms² literal', () => {
+test('the settle-rate constant is DERIVED from the TUNED span and BASE_MS, and never re-aliased to the ladder (#150)', () => {
   /* CLAUDE.md: no drifting constants. The one tunable figure this candidate
      exposes is a wall-clock DURATION (named and commented in index.html as a
      placeholder for Charles's call); the actual master-degrees-per-ms-squared
-     rate has to come from that duration divided by the ladder's own span, or a
-     ladder change (moving the top stop off 200x) would silently desync the feel
-     from the number that is supposed to define it. */
-  const chunk = SRC.slice(SRC.indexOf('const SPINDOWN_RANGE_MS'),
-    SRC.indexOf('function approachSpeed('));
-  ok(/SPEED_CEIL/.test(chunk) && /SPEED_FLOOR/.test(chunk) && /BASE_MS/.test(chunk),
-    'the settle-rate constant does not reference SPEED_CEIL, SPEED_FLOOR and '
-    + 'BASE_MS — it may have been hand-tuned as a bare number instead of derived');
+     rate has to come from that duration divided by a span, or it would be a
+     bare hand-tuned number with nothing reporting when it went stale.
+
+     WHICH span is the whole of #150, and this test used to assert the wrong one
+     -- it required SPEED_CEIL, i.e. it required exactly the aliasing that made
+     raising `speed.max` a silent retune of the coast. Inverted, per CL#185:
+     SPINDOWN_TUNED_CEIL is now required and SPEED_CEIL is now REFUSED.
+
+     READ OFF STRIPPED_SRC, WHICH THE OLD VERSION DID NOT (the #101 trap). It
+     sliced SRC, so the prose above these constants satisfied it on its own --
+     and after the split that prose still names SPEED_CEIL at length, so the old
+     assertion would have gone on passing on a comment while the live code no
+     longer did what it claimed. A match in a comment is not a reading. */
+  const chunk = STRIPPED_SRC.slice(STRIPPED_SRC.indexOf('const SPINDOWN_RANGE_MS'),
+    STRIPPED_SRC.indexOf('function approachSpeed('));
+  ok(/SPINDOWN_TUNED_CEIL/.test(chunk) && /SPEED_FLOOR/.test(chunk) && /BASE_MS/.test(chunk),
+    'the settle-rate constant does not reference SPINDOWN_TUNED_CEIL, SPEED_FLOOR '
+    + 'and BASE_MS as live code — it may have been hand-tuned as a bare number '
+    + 'instead of derived');
+  ok(!/SPEED_CEIL/.test(chunk),
+    'the coast model reads SPEED_CEIL again — #150 split those two facts apart '
+    + 'deliberately. The ladder\'s top is what the control OFFERS; the coast is '
+    + 'shaped against the span it was TUNED at. Re-aliasing them means the next '
+    + 'change to speed.max silently retunes a feel Charles set by hand');
+
+  /* And the tuned span must be somewhere the machine can actually be asked to
+     go. Above the ladder's top it would name a reference speed no slider can
+     reach and no hand can be capped at, and SPINDOWN_RANGE_MS would then be a
+     duration nothing on the page can produce. */
+  const tuned = grabNumber('SPINDOWN_TUNED_CEIL');
+  const { floor, ceil } = speedSchema();
+  ok(tuned > floor && tuned <= ceil,
+    `SPINDOWN_TUNED_CEIL is ${tuned}x, outside the ladder's own ${floor}x..${ceil}x — `
+    + 'the coast is referred to a speed the machine cannot be asked to run');
 });
 
 /* ---- the real solver, executed against a stage of our choosing ------------ */

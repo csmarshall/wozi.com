@@ -642,11 +642,17 @@ input[type="range"]:focus{outline:none;}
                           only ever resets it to 1x). `min` and `max` are the
                           two ends of the stop ladder and the only levers here
                           (#96): 1x because the control never slows the
-                          machine down -- pause is its own button -- and 200x
+                          machine down -- pause is its own button -- and 1000x
                           because Charles asked for a ceiling absurd enough to
-                          benchmark against. SPEED_STOPS lays a 1-2-5 ladder
+                          benchmark against (#150 raised it from 200x, and that
+                          one value is the whole of the two new stops).
+                          SPEED_STOPS lays a 1-2-5 ladder
                           between them, so this is where to widen or narrow it
-                          and there is no stop list written anywhere. The
+                          and there is no stop list written anywhere. WIDENING
+                          IT NO LONGER RESHAPES THE COAST -- SPINDOWN_TUNED_CEIL
+                          is the span the drag curve is referred to, and it is
+                          a separate constant precisely so this lever stays
+                          cheap (#150). The
                           STROBE limit is not here and must not be: 15.75x at
                           30fps is a property of BASE_MS and the frame rate,
                           derived by strobeSpeed(), and stops at or above it
@@ -663,7 +669,7 @@ input[type="range"]:focus{outline:none;}
      is a historical record of that one session, not a running description of
      HEAD, and was never updated (nor should it be) as later real commits moved
      these values on. Read this comment block, not that file, for what is live. -->
-<script type="text/x-dc" data-dc-script data-props="{&quot;domain&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Wordmark&quot;},&quot;frameRate&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[60,30,24,20],&quot;default&quot;:30,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;spinUp&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;engravedRims&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;parallax&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;character&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;timing&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;lineWork&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;knurl&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;ghostTiming&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;hoverDrag&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;speed&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;min&quot;:1,&quot;max&quot;:200,&quot;step&quot;:1,&quot;default&quot;:1,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;gearScale&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;min&quot;:0.5,&quot;max&quot;:1.3,&quot;step&quot;:0.05,&quot;default&quot;:1,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;options&quot;:[&quot;#5F686E&quot;,&quot;#E8483A&quot;,&quot;#3B7DE8&quot;,&quot;#F4B32B&quot;,&quot;#1FA463&quot;],&quot;default&quot;:&quot;#5F686E&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;shuffle&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Gears&quot;}}">
+<script type="text/x-dc" data-dc-script data-props="{&quot;domain&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Wordmark&quot;},&quot;frameRate&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[60,30,24,20],&quot;default&quot;:30,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;spinUp&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;engravedRims&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;parallax&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;character&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;timing&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;lineWork&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;knurl&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;ghostTiming&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;hoverDrag&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Layers&quot;},&quot;speed&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;min&quot;:1,&quot;max&quot;:1000,&quot;step&quot;:1,&quot;default&quot;:1,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;gearScale&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;min&quot;:0.5,&quot;max&quot;:1.3,&quot;step&quot;:0.05,&quot;default&quot;:1,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;options&quot;:[&quot;#5F686E&quot;,&quot;#E8483A&quot;,&quot;#3B7DE8&quot;,&quot;#F4B32B&quot;,&quot;#1FA463&quot;],&quot;default&quot;:&quot;#5F686E&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Gears&quot;},&quot;shuffle&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Gears&quot;}}">
 /* ?seed=8231 — DRAW THE SAME MACHINE TWICE.
 
    Every wheel on this page is dealt. Twelve bare `Math.random()` calls below
@@ -1086,13 +1092,18 @@ const BASE_MS = 21000;
    increments, because the effect is perceptually multiplicative — 1x to 2x and
    50x to 100x are the same size of change to look at — and 1-2-5 is the standard
    logarithmic ladder for exactly that (oscilloscope timebases, chart axes,
-   preferred component values). From 1 to 200 that is eight positions:
+   preferred component values). From 1 to 1000 that is ten positions:
 
-     1  2  5  10  20  50  100  200
+     1  2  5  10  20  50  100  200  500  1000
               |
-              +-- 15.75x strobe limit falls here: 1..10 are clean, 20..200 strobe
+              +-- 15.75x strobe limit falls here: 1..10 are clean, 20..1000 strobe
 
-   200 is a rung of that ladder exactly, so the ceiling is Charles's number
+   500 AND 1000 ARE #150, AND THEY COST ONE VALUE — `speed.max`, which is what
+   this whole ladder is generated up to. Never hand-write a stop list. What
+   raising it must NOT do is change how the wheel coasts, and it used to: see
+   SPINDOWN_TUNED_CEIL below, which is the second fact this ceiling was carrying.
+
+   1000 is a rung of that ladder exactly, so the ceiling is Charles's number
    landing on the ladder rather than the ladder being bent to reach it. The
    floor is 1x — the control only ever speeds the machine UP; slowing it down was
    not wanted and stopping it is already the pause button's job (#69).
@@ -1155,15 +1166,30 @@ const SPEED_STOPS = (() => {
    SPINDOWN_DECEL is that rate, in master-degrees per ms per ms -- and it is
    DERIVED, not tuned directly. SPINDOWN_RANGE_MS names the one feel figure
    this candidate actually exposes: how long the flywheel takes to cross the
-   WHOLE ladder at that constant rate, from idleRate() at SPEED_CEIL down to
-   idleRate() at SPEED_FLOOR. SPINDOWN_DECEL is just that range divided by that
-   time, so there is one number to retune by eye and nothing here can drift out
-   of step with SPEED_CEIL/SPEED_FLOOR the way a hand-picked deg/ms^2 would.
-   `Math.max(SPEED_CEIL - SPEED_FLOOR, SPEED_FLOOR)` guards the degenerate case
-   where the prop schema failed to parse and both collapsed to the same
-   value (PROP_SCHEMA above) -- without it SPINDOWN_DECEL would be exactly 0
-   and the flywheel would never move at all, which is a worse failure than a
-   schema that only has one speed.
+   TUNED SPAN at that constant rate, from idleRate() at SPINDOWN_TUNED_CEIL
+   down to idleRate() at SPEED_FLOOR. SPINDOWN_DECEL is just that range divided
+   by that time, so there is one number to retune by eye and nothing here can
+   drift the way a hand-picked deg/ms^2 would.
+
+   IT USED TO SAY "THE WHOLE LADDER", AND #150 IS WHY IT NO LONGER CAN. The
+   span was `SPEED_CEIL - SPEED_FLOOR`, so the ladder's top was doing two jobs
+   at once and widening it retuned the coast for free -- see
+   SPINDOWN_TUNED_CEIL below for the split and for the measurements. The
+   consequence to hold on to: SPINDOWN_RANGE_MS is how long a coast from
+   SPINDOWN_TUNED_CEIL takes, exactly, and a throw HARDER than that (the ladder
+   now runs to 1000x and driveCap() follows it) takes longer -- 19866ms from
+   the very top against 14999ms from 200x, sublinear because viscous and
+   windage drag both rise with the excess.
+
+   `Math.max(SPINDOWN_TUNED_CEIL - SPEED_FLOOR, SPEED_FLOOR)` guards the
+   degenerate case where the two collapse to the same value -- without it
+   SPINDOWN_DECEL would be exactly 0 and the flywheel would never move at all,
+   which is a worse failure than a schema that only has one speed. Note the
+   guard is weaker than it was, and deliberately: SPINDOWN_TUNED_CEIL is a
+   literal, so it can no longer be dragged onto SPEED_FLOOR by a prop schema
+   that failed to parse. That failure mode is now impossible rather than
+   guarded, and the guard is kept for the case of somebody editing the two into
+   agreement by hand.
 
    2400ms IS A PLACEHOLDER FOR CHARLES'S CALL. It is the candidate that shipped
    out of three built and captured against the real page (`_v` has no outside
@@ -1210,18 +1236,20 @@ const SPINDOWN_RANGE_MS = 15000;
 
    ONE FEEL FIGURE IS ADDED AND THE OTHER IS UNCHANGED. `SPINDOWN_TAU_MS` is the
    time constant of the viscous part -- the character of the coast. Nothing else
-   is chosen: SPINDOWN_COULOMB is SOLVED so that a full-ladder transition still
-   takes exactly SPINDOWN_RANGE_MS, which is the number CL#127 already exposed
-   and which CL#136 gave a second job (it is also how long the hardest possible
-   throw runs, since a saturating throw IS the ladder travelled by hand). So the
-   two numbers keep their existing meanings and the new one only shapes what
-   happens between the ends.
+   is chosen: SPINDOWN_COULOMB is SOLVED so that a transition across the TUNED
+   SPAN still takes exactly SPINDOWN_RANGE_MS, which is the number CL#127
+   already exposed and which CL#136 gave a second job. That second job is the
+   one #150 had to narrow: CL#136 could say "it is also how long the hardest
+   possible throw runs, since a saturating throw IS the ladder travelled by
+   hand" only while the ladder and the tuned span were the same number. They are
+   not any more, so the exact statement is now "how long a throw from
+   SPINDOWN_TUNED_CEIL runs"; the hardest throw the ladder permits runs longer.
 
    Integrating de/dt = -(a + b*e) from e0 to 0 gives t = (1/b) * ln(1 + b*e0/a),
-   so pinning t to SPINDOWN_RANGE_MS at e0 = the ladder span inverts to the `a`
+   so pinning t to SPINDOWN_RANGE_MS at e0 = the tuned span inverts to the `a`
    below. At the shipped figures the rate starts 3.2x the old flat one and ends
    5x slower than it, which is the whole of what "coasts" means here. */
-/* HOW HARD IT BRAKES AT THE TOP OF THE LADDER AGAINST AT REST. This is the one
+/* HOW HARD IT BRAKES AT THE TOP OF THE TUNED SPAN AGAINST AT REST. This is the one
    number that decides the CHARACTER, and both failures this has had sit at its
    ends. At 1 the three terms collapse to a constant and it is the brake CL#127
    shipped. Very large, the Coulomb residue vanishes, and it becomes the pure
@@ -1236,7 +1264,12 @@ const SPINDOWN_RANGE_MS = 15000;
    asked for is the opposite -- "if you walked up to the gears on the table with
    a clutch so you could spin them freely ... a gratifying spin that ended up
    slowly and naturally returning back to the same speed". That is low drag that
-   FALLS steeply as the wheel slows, which is a wide range and little windage. */
+   FALLS steeply as the wheel slows, which is a wide range and little windage.
+
+   "THE TOP" HERE MEANS SPINDOWN_TUNED_CEIL, NOT SPEED_CEIL (#150). Those four
+   candidates were spun against a 200x ladder, so 60 is a ratio measured at
+   200x; reading it against a 1000x ladder would be reading a hand-set number
+   off a different instrument. */
 const SPINDOWN_DRAG_RANGE = 60;
 /* Of the SPEED-DEPENDENT drag, the share that is windage (proportional to the
    square of the excess) rather than bearing drag (proportional to it).
@@ -1247,15 +1280,53 @@ const SPINDOWN_DRAG_RANGE = 60;
    term bites hardest exactly where a thrown wheel is fastest -- it takes the
    gratifying part of the spin away first. */
 const SPINDOWN_WINDAGE = 0.10;
-const SPINDOWN_SPAN = (7200 / BASE_MS) * Math.max(SPEED_CEIL - SPEED_FLOOR, SPEED_FLOOR);
+
+/* THE LADDER TOP THE COAST WAS SHAPED AGAINST — and it is NOT the ladder top
+   the control offers any more (GitHub #150).
+
+   SPEED_CEIL used to be both, and the two facts only looked like one while the
+   ladder never moved. They are:
+
+     1. THE FASTEST THE TRAIN CAN BE ASKED TO RUN. What SPEED_STOPS lays a
+        1-2-5 ladder up to, and what driveCap() bounds a hand to. That is
+        SPEED_CEIL, it is the schema's own `speed.max`, and #150 raised it to
+        1000 to get the 500x and 1000x stops Charles asked for.
+     2. THE EXCESS SPEED THE THREE DRAG TERMS ARE REFERRED TO. Every one of the
+        figures above is stated RELATIVE to this: SPINDOWN_DRAG_RANGE is how
+        much harder the wheel brakes HERE than at rest, SPINDOWN_WINDAGE is the
+        share of the drag AT THIS SPEED that is windage, and SPINDOWN_RANGE_MS
+        is how long a coast FROM HERE takes. Move it and all three change
+        meaning at once.
+
+   Fact 2 is a record of a tuning session, so raising fact 1 through it was a
+   silent retune of a feel Charles set by hand. Measured, coast to rest, before
+   any of this was split: a 2x throw fell 910ms -> 199ms and a 20x throw
+   6918ms -> 2684ms, simply because the ladder got longer. CL#141's four
+   candidates were spun on the real page against a 200x ladder and C was
+   chosen; that is the number here, and this is the whole of what it means.
+
+   IT CANNOT BE DERIVED, AND THAT IS ARGUED RATHER THAN ASSUMED. CLAUDE.md's
+   rule is to derive anything the code already knows, and nothing here knows
+   this: it is not BASE_MS (a period), not the schema (that is fact 1), and not
+   strobeSpeed() (15.75x, a sampling limit two decades below it). It is the
+   reference excess the drag curve was fitted at — the one figure in the model
+   that comes from a person spinning wheels rather than from the machine. A
+   constant that cannot be derived must say so, and this is why.
+
+   IT IS NOT A CEILING ON ANYTHING and must never be used as one. The ladder may
+   run far above it; a hand may throw far past it. It says only where the drag
+   curve was pinned. */
+const SPINDOWN_TUNED_CEIL = 200;
+const SPINDOWN_SPAN = (7200 / BASE_MS) * Math.max(SPINDOWN_TUNED_CEIL - SPEED_FLOOR, SPEED_FLOOR);
 
 /* The three coast-down coefficients, SOLVED rather than chosen, so the two
    figures above set only the shape and `SPINDOWN_RANGE_MS` still sets the
-   duration exactly -- which is what keeps CL#136's identity true: a saturating
-   throw is the ladder travelled by hand, so it must take the ladder's own time.
+   duration exactly -- which is what keeps CL#136's identity true in the form
+   #150 left it: a throw from SPINDOWN_TUNED_CEIL is that span travelled by
+   hand, so it must take that span's own time.
 
    Only the overall scale is solved. Its split is fixed by the two constants
-   above, and the time to fall from the ladder's top to rest is the integral of
+   above, and the time to fall from the tuned span's top to rest is the integral of
    1/decel over the gap, which has no robust closed form across the whole range
    of shapes (the arctan/log form loses precision as the windage share goes to
    zero, and threw a domain error when it was tried). Simpson plus bisection is
@@ -4548,17 +4619,39 @@ class Component extends DCLogic {
 
      The ladder top is the ceiling, and it is not a new number — a hand may wind
      the train up to the fastest the machine can be ASKED to run, and no
-     further. Two things fall out that the historic 8 could not express. A
-     saturating throw now takes SPINDOWN_RANGE_MS to come back, because it IS
-     the ladder, travelled by hand instead of by the slider. And the coast
-     becomes proportional to effort — a gentle throw still dies in ~150ms, a
-     hard one runs for seconds — which is what constant deceleration MEANS and
-     what the old fixed-tau lag could not do at any cap, since its settling time
-     ignored the size of the drop.
+     further. The coast becomes proportional to effort — a gentle throw still
+     dies in ~150ms, a hard one runs for seconds — which is what constant
+     deceleration MEANS and what the old fixed-tau lag could not do at any cap,
+     since its settling time ignored the size of the drop.
 
      Not `max(...)` with anything: this is already the largest idleRate() the
      schema permits, so it is a ceiling at every stop by construction, and
-     identical to the old behaviour at the top stop where the two agreed. */
+     identical to the old behaviour at the top stop where the two agreed.
+
+     WHICH OF #150'S TWO FACTS THIS IS, AND WHY IT IS NOT A JUDGEMENT CALL.
+     SPEED_CEIL used to mean both "the fastest the train can be asked to run"
+     and "the span the coast was tuned against"; #150 split them, and this cap
+     had to go to one of them. It goes to the LADDER, and the sentence above is
+     the reason stated as a requirement: the cap must clear idleRate() at every
+     declared stop or it stops being a ceiling and becomes a BRAKE — exactly
+     what `max(8, ...)` was there to prevent. Pinned to SPINDOWN_TUNED_CEIL it
+     would be 68.57 while the 1000x stop idles at 342.86, so merely TOUCHING the
+     wheel at either new stop would clamp `_v` down by a factor of five on
+     release. A hand must be able to reach any speed the control can ask for.
+     tools/test.js asserts both halves: the cap equals rateAt(SPEED_CEIL), and
+     it clears the idle rate at every stop the ladder offers.
+
+     THE COST, STATED RATHER THAN HIDDEN. CL#136's identity — "a saturating
+     throw takes SPINDOWN_RANGE_MS, because it IS the ladder travelled by hand"
+     — was only ever true because ONE number was both ends of it. It cannot
+     survive the split, and it was not lost so much as narrowed: a throw from
+     SPINDOWN_TUNED_CEIL still takes SPINDOWN_RANGE_MS exactly (14999ms,
+     asserted), and a throw past it takes longer. Measured, coast to 1x, at the
+     shipped figures: 200x 14999ms, 500x 17963ms, 1000x 19866ms. Sublinear —
+     five times the speed for 1.32x the time — because viscous and windage drag
+     both rise with the excess, so a harder throw genuinely does shed faster.
+     Every ordinary throw is untouched: 2x is 910ms and 20x is 6918ms, the same
+     figures to the millisecond as before #150. */
   driveCap() { return Math.abs(this.rateAt(SPEED_CEIL)); }
 
   /* Does a stop sample the teeth below Nyquist? The ladder is allowed to run
