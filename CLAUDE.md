@@ -79,15 +79,30 @@ in the banner rather than implying a precision it has not got. The repo is publi
 so that link resolves for the reader it is aimed at.
 
 **The transform is gated by making the artifact the thing under test, not by
-adding a second set of checks.** The strip runs over the deploy's own checkout
-(`--in-place`), before Chrome and before any credential, so `npm test`, the
-device sweep, the motion, DOM, pill and escape-mesh gates all measure the
-delivered file without knowing anything was stripped. `tools/pixel_regress.py
---ref HEAD` is then the bridge: working tree is the artifact, HEAD is the source,
-and the transform may change every byte so long as it changes **no pixel** — run
-on the combined stage, on `?who=charles`, and on `/fidget/` via `--path`, because
-those are three different code paths and the first agrees with a fault in the
-other two. `npm test` runs **twice**, once against the source and once against
+adding a second set of checks.** The strip runs **once**, in the `build` job, which
+uploads the two stripped pages as an artifact that every gate job and `publish`
+downloads — so `npm test`, the device sweep, the motion, DOM, pill and escape-mesh
+gates all measure the delivered file without knowing anything was stripped.
+
+**One strip, not five** (CL#198). With the gates parallelised, re-running the
+transform where each job needed it would have put it on five machines and left
+"what was gated is what ships" resting on byte-identical output across all of
+them — true, and a claim nothing in the workflow could check. One upload makes that
+identity **structural rather than argued**. Two things follow for free: the artifact
+holds *only* `index.html`, `fidget/index.html` and a `sha256sum` manifest, so a
+downloading job **cannot** touch `keybase.html` or `robots.txt` — not merely does
+not — and `publish` re-checks that manifest against digests passed as job outputs,
+so the log names the bytes that reached the bucket.
+
+**And "before any credential" is now structural too**, where it used to be merely
+sequential: `id-token: write` lives **only** on `publish`, so no gate job can
+request an OIDC token at all.
+
+`tools/pixel_regress.py --ref HEAD` is then the bridge: working tree is the
+artifact, HEAD is the source, and the transform may change every byte so long as it
+changes **no pixel** — run **five** ways, on the combined stage, on `?who=charles`,
+on `/fidget/` via `--path`, with `--panel`, and in `--theme light`, because those are
+five different code paths and the first agrees with a fault in the other four. `npm test` runs **twice**, once against the source and once against
 the artifact: it reads its constants and the two-row menu out of `index.html` as
 text, so it is the only gate that can notice a strip that left the page drawing
 correctly while making it unparseable to the tools that read it.
