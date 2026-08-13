@@ -409,12 +409,54 @@ SAMPLE_JS = r"""
                target: !!(id && svg.querySelector('[id="' + id + '"]')) };
     });
 
+    /* The same wheel in SCREEN space, for the strand attribution in check 1 --
+       taken off the ANCHOR, never off the svg. The anchor is zero-size and does
+       not rotate, so its rect IS the wheel centre with every ancestor transform
+       already applied; the svg inside it is the rotating element, and its rect is
+       the box of a spinning square. That is the trap this file's own header warns
+       about, and using the svg here made every wrap undetectable while leaving
+       incidental crossings visible -- a plausible-looking wrong answer. */
+    const ab = anchor.getBoundingClientRect();
     wheels.push({
+      sx: ab.left, sy: ab.top,
       cx: parseFloat(pos[1]), cy: parseFloat(pos[2]), rOuter: w / 2, linked: linked,
       hasBlank: !!body, quads: (blank.match(/Q/g) || []).length,
       drawn: drawn.length, inks: inks, base: base, texts: texts
     });
   });
+
+  /* DRAWN STRANDS, so check 1 can tell a coupled wheel from an orphan (GitHub
+     #147). A roller chain makes two wheels ONE MACHINE -- that is the decision
+     CL#203 implements -- but solve() places a linked wheel far beyond mesh
+     distance, so a purely geometric mesh test sees the driven sprocket as an
+     orphan. It is not: it is driven, by a strand this page DRAWS.
+
+     Taken off the DOM and never from a page number. Each dashed path is sampled
+     along its length; a sample lying on some wheel's own PITCH circle (within the
+     same tolerance the mesh test uses) attributes that strand to that wheel. A
+     roller chain wraps exactly two sprockets, so exactly two wheels come back --
+     and if a future run ever returns some other count, that is a finding about
+     the drawing rather than something to paper over, so the count travels out. */
+  const strands = [...document.querySelectorAll('svg > g path[stroke-dasharray]')]
+    .map(pth => {
+      let L = 0;
+      try { L = pth.getTotalLength(); } catch (e) { return null; }
+      if (!(L > 0)) return null;
+      /* SCREEN space on both sides, or the comparison is meaningless: a path's
+         own user space is its svg's viewBox, while a wheel's centre comes off a
+         transform on its wrapper. Mapping the samples through getScreenCTM puts
+         them in the one frame every element on the page shares. */
+      const m = pth.getScreenCTM();
+      if (!m) return null;
+      const pts = [];
+      for (let i = 0; i < 96; i++) {
+        try {
+          const q = pth.getPointAtLength(L * i / 96);
+          pts.push([q.x * m.a + q.y * m.c + m.e, q.x * m.b + q.y * m.d + m.f]);
+        } catch (e) { return null; }
+      }
+      return { pts: pts };
+    }).filter(Boolean);
 
   /* THE HUB BADGES. Each is an <a> with an accessible name; loadIcons() fetches
      the icon and its .catch swallows a failure silently, so an empty badge is
@@ -428,7 +470,7 @@ SAMPLE_JS = r"""
 
   const raw = parseFloat(getComputedStyle(document.documentElement)
     .getPropertyValue('--gsfit'));
-  return JSON.stringify({ wheels: wheels, badges: badges,
+  return JSON.stringify({ wheels: wheels, badges: badges, strands: strands,
                           S: Math.floor((raw || 0) * 100) / 100 });
 })()
 """
@@ -630,7 +672,16 @@ async def sample(url, seed, viewport, theme, pin):
     return json.loads(raw), errors
 
 
-def check_mesh(wheels, S, census):
+# HOW MANY CONSECUTIVE SAMPLES ALONG A STRAND COUNT AS WRAPPING A SPROCKET. The path
+# is sampled at 96 points around its whole loop, and a wrap subtends a real arc -- tens
+# of samples on a two-sprocket chain -- while a straight span crossing some unrelated
+# wheel's pitch circle produces one or two. 3 sits an order of magnitude below the
+# smallest genuine wrap and well above a crossing, so it is not a threshold anybody has
+# to re-measure when the deal changes.
+STRAND_WRAP_SAMPLES = 3
+
+
+def check_mesh(wheels, S, census, strands=()):
     """1. MESH AT RENDER TIME.
 
     Two wheels mesh when their centres sit at the sum of their PITCH radii --
@@ -668,8 +719,89 @@ def check_mesh(wheels, S, census):
         partners[i] += 1
         partners[j] += 1
 
+    # A DRAWN STRAND COUPLES THE TWO WHEELS IT WRAPS (GitHub #147, CL#203). Read
+    # off the rendered path, never off a page number: a sample lying on some
+    # wheel's own pitch circle, within the tolerance the mesh test already uses,
+    # attributes the strand to that wheel. A roller chain wraps exactly two
+    # sprockets, so exactly two come back -- and any other count is a finding
+    # about the drawing, so it is reported rather than silently accepted.
+    # SCREEN PIXELS PER SOLVE UNIT, derived from two anchors rather than assumed:
+    # the ratio of their screen separation to their solve-space separation. One
+    # number for the stage, because every wheel shares the same ancestor transform.
+    sscale = 0.0
+    for i in range(n):
+        for j in range(i + 1, n):
+            a, b = wheels[i], wheels[j]
+            du = math.hypot(a["cx"] - b["cx"], a["cy"] - b["cy"])
+            ds = math.hypot(a["sx"] - b["sx"], a["sy"] - b["sy"])
+            if du > 1 and ds > 1:
+                sscale = ds / du
+                break
+        if sscale:
+            break
+
+    couples, odd = [], []
+    for sidx, st in enumerate(strands or ()):
+        on = []
+        for i, w in enumerate(wheels):
+            if not sscale:
+                continue
+            rp = w["rPitch"] * sscale                  # pitch radius, screen px
+            tol = TOL_MESH_PX * sscale
+            # A WRAP FOLLOWS THE PITCH CIRCLE FOR AN ARC; A CROSSING ONLY GRAZES IT.
+            # One sample on the circle is not evidence of wrapping -- a straight span
+            # between two sprockets will cross some third wheel's pitch circle
+            # somewhere along its length, which is a coincidence of the circle and not
+            # a mechanical connection. Measured on the solo stage, where the wheels are
+            # largest: every strand "touched" three wheels under a single-sample test.
+            # Requiring a run of CONSECUTIVE samples separates the two, and makes this
+            # strictly stronger -- a strand that crossed a sprocket without wrapping it
+            # would now be reported rather than counted as a coupling.
+            best = run = 0
+            for (px, py) in st.get("pts", ()):
+                if abs(math.hypot(px - w["sx"], py - w["sy"]) - rp) < tol:
+                    run += 1
+                    best = max(best, run)
+                else:
+                    run = 0
+            if best >= STRAND_WRAP_SAMPLES:
+                on.append(i)
+        if len(on) == 2:
+            couples.append(tuple(sorted(on)))
+        else:
+            odd.append((sidx, len(on)))
+    # DEDUPED, because chainEl draws several paths for ONE strand -- a shadow, the
+    # track and the rollers all wrap the same two sprockets. Counting paths would
+    # report three couplings where the machine has one.
+    couples = sorted(set(couples))
+    for i, j in couples:
+        partners[i] += 1
+        partners[j] += 1
+
     # Connected components, reported.
     seen, comps = set(), 0
+    def components(edges):
+        seen_, c = set(), 0
+        g = {i: [] for i in range(n)}
+        for x, y in edges:
+            g[x].append(y)
+            g[y].append(x)
+        for i in range(n):
+            if i in seen_:
+                continue
+            c += 1
+            st_ = [i]
+            while st_:
+                k = st_.pop()
+                if k in seen_:
+                    continue
+                seen_.add(k)
+                st_.extend(g[k])
+        return c
+
+    mesh_edges = [(i, j) for i, j, _ in pairs]
+    mesh_only_comps = components(mesh_edges)
+    comps_with_strands = components(mesh_edges + list(couples))
     adj = {i: [] for i in range(n)}
     for i, j, _ in pairs:
         adj[i].append(j)
@@ -702,8 +834,14 @@ def check_mesh(wheels, S, census):
                      f"({a['cx']:.1f},{a['cy']:.1f}) meshes with nothing -- the nearest "
                      f"centre distance is off by {near:.2f}px")
     gap = f"{closest_gap[2]:+.1f}px (wheels {closest_gap[0]},{closest_gap[1]})" if closest_gap else "n/a"
+    strand_note = ""
+    if strands:
+        strand_note = (f" ({mesh_only_comps} by mesh alone, {comps_with_strands} once "
+                       f"drawn strands are counted), {len(couples)} strand-coupled pair(s)"
+                       + (f" [{len(odd)} strand(s) wrapped an unexpected wheel count: "
+                          + ", ".join(f"#{i} touched {c}" for i, c in odd) + "]" if odd else ""))
     print(f"1 MESH        {'ok  ' if not fails else 'FAIL'} {len(pairs)} meshing pairs over {n} wheels, "
-          f"{comps} component{'s' if comps != 1 else ''}; worst residual {worst_mesh:.4f}px "
+          f"{comps} component{'s' if comps != 1 else ''}{strand_note}; worst residual {worst_mesh:.4f}px "
           f"of {TOL_MESH_PX}px, closest non-mesh {gap}")
     if census:
         for i, j, diff in pairs:
@@ -951,7 +1089,7 @@ def main():
         return 1
 
     fails = []
-    fails += check_mesh(wheels, S, a.census)
+    fails += check_mesh(wheels, S, a.census, payload.get('strands', []))
     fails += check_blank(wheels, badges, S, a.census)
     fails += check_engraving(wheels, badges, a.census)
     fails += check_ink(wheels, a.census)

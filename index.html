@@ -2247,6 +2247,28 @@ const HEAD_OF = {};
    this is a default rather than a per-wheel choice. */
 const TRAIN = (function () {
   const out = [];
+  /* WHICH WHEEL OF EACH CHAIN TAKES ITS DRIVE BY STRAND, and how many do
+     (GitHub #147). ONE PER CHAIN, and the number is the whole decision: the
+     prototype measured every link stranded at about 51% off every wheel's
+     size, because a strand needs more centre distance than a mesh and the
+     solved bounding box goes past the viewport. One per chain costs about 11%
+     and leaves the machine reading as geared with a strand as an accent.
+     Charles took that call from the size-cost sheet.
+
+     INDEX 1, WHICH IS THE FIRST WHEEL THAT HAS A PARENT INSIDE ITS OWN CHAIN.
+     Index 0's parent is a bridge idler, an origin idler or nothing at all, so
+     a strand there would be carrying another chain's drive across the gap
+     rather than this chain's along it -- and the gap between chains is what
+     the idlers take up, which is a bridge's job and not a strand's. A chain of
+     ONE wheel therefore gets no strand, which is correct and not a shortfall:
+     there is no second wheel for it to drive.
+
+     DECLARED HERE, INSIDE THE IIFE, AND IT HAS TO BE. tools/test.js slices
+     this builder out and runs it in Node against a named list of injected
+     declarations, so a const at module scope is simply not defined there and
+     the suite fails wholesale (CLAUDE.md, "Dormant capability"). A local is
+     visible to the sliced text and to nothing else. */
+  const STRAND_AT = 1;
   /* EMITTED IN CHAIN_ORDER -- the spine, then the stack -- whatever the order in
      PEOPLE, so every bridge hangs off a wheel already on the array. solve()
      derives a wheel's position from g[t.parent] out of the wheels it has ALREADY
@@ -2310,6 +2332,11 @@ const TRAIN = (function () {
           ? (driven ? idlers[idlers.length - 1]
             : mounted ? origin[origin.length - 1] : null)
           : base + i - 1,
+        /* ON THE RECEIVING WHEEL, never the driving one: solve() tests `t.link`
+           on the wheel it is placing and spaces it off its parent by a strand's
+           centre distance instead of a mesh's. Stated because this file said the
+           opposite for the whole life of the dormant code (CL#190). */
+        link: i === STRAND_AT ? 'chain' : null,
         person: p.slug, role: 'link' });
     });
     /* AN EDGE-MOUNTED ORIGIN RUN IS EMITTED AFTER ITS CHAIN, as CHILDREN of the
@@ -2351,14 +2378,22 @@ const TRAIN = (function () {
   return out;
 })();
 /* Whether ANYTHING on the shipped train would read `_spreadBoost` at all
-   (GitHub #103). `linked` in solve() is `!!t.link`, and no shipped TRAIN
-   entry carries one (CLAUDE.md: "No chain or belt is enabled in the shipped
-   train") -- so today this is always false, and fitStage()'s own boost/tight
-   cache-invalidation check below is guarded on it for exactly that reason: a
-   variable with no effect on this train should not be allowed to throw the
-   solve away and rebuild it on a resize either. Computed once, off the same
-   TRAIN a re-enabled `link: 'chain'`/`link: 'belt'` entry would already be
-   part of -- no second place to remember when reviving the dormant capability. */
+   (GitHub #103). `linked` in solve() is `!!t.link` and the builder above now
+   puts one on the second wheel of every chain (GitHub #147), so THIS IS TRUE
+   ON THE SHIPPED PAGE -- it was false for the whole life of the dormant
+   capability, and fitStage()'s boost/tight cache-invalidation check below is
+   live again as a result: a resize crossing one of the boost's quantised
+   thresholds now genuinely has to re-solve, because the strand runs are spaced
+   by it. Computed once, off the same TRAIN the `link` is written into, so there
+   is no second place to remember.
+
+   IT IS STATIC AND THE SOLVE IS NOT. A visitor asking for reduced motion is
+   solved as a direct-mesh train with no strands at all (see `strandsOn` in
+   solve()), and this const cannot see that -- it is computed at module scope,
+   once, before any instance exists. That is correct for what it is used for:
+   the question here is whether the boost COULD matter to this train, and
+   invalidating a cache that did not need it costs a solve, where failing to
+   invalidate one that did costs a wrong composition. */
 const TRAIN_HAS_LINKED = TRAIN.some((t) => !!t.link);
 /* Two lookups into BRIDGES, keyed by TRAIN index: which bridge STARTS at this
    wheel -- the first idler, or the chain head itself when there are none -- and
@@ -5497,7 +5532,15 @@ class Component extends DCLogic {
     if (this._chainEls) {
       const PITCH = Math.PI * MODULE;
       this._chainEls.forEach(c => {
-        if (c.el) c.el.style.strokeDashoffset = (-(this._M[c.comp != null ? c.comp : 0] || 0) * PITCH / 360 * c.sign).toFixed(2) + 'px';
+        /* `reg` IS ADDED, NOT SUBSTITUTED: it is where the rollers sit at rest --
+           the tooth-phase registration chainEl solved off the driving sprocket
+           (GitHub #147) -- and the master-angle term is how far the strand has
+           travelled since. One clock still drives the motion; this only says
+           where the pattern started. It is a CONSTANT per strand, so it cannot
+           accumulate and cannot drift out of registration: the two sprockets and
+           the strand all move exactly one circular pitch per 360 master-degrees,
+           which is the same identity that makes `sign` the negated direction. */
+        if (c.el) c.el.style.strokeDashoffset = ((c.reg || 0) - (this._M[c.comp != null ? c.comp : 0] || 0) * PITCH / 360 * c.sign).toFixed(2) + 'px';
       });
     }
     /* Planetary internals: sun, carrier and planet spins are all fixed multiples
@@ -6505,6 +6548,28 @@ class Component extends DCLogic {
       if (!storedChoice('theme')) this.apply(e.matches ? 'dark' : 'light');
     };
     if (this.mq && this.mq.addEventListener) this.mq.addEventListener('change', this.onSys);
+    /* REDUCED MOTION IS NOW A LAYOUT QUESTION, SO IT NEEDS THE SAME LISTENER THE
+       THEME HAS (GitHub #147). It never did before: motionActive() reads `_rmq`
+       fresh every tick, so a change of preference already reached the flywheel
+       through the loop with nothing to notify. A strand is different -- it is
+       SOLVED, and the solve is cached -- so flipping the preference at runtime
+       has to throw that cache away or the page keeps drawing chains a visitor
+       has just asked not to see. Measured, this needs no reload.
+
+       THE THREE THINGS DROPPED ARE THE THREE THAT REMEMBER THE STRANDS.
+       `_solved` holds the placement and the `chains` list; `_escKey` is the
+       escape runs' cache, and they are seeded with `bridgeRuns`, which a strand
+       is now published into; `_chainEls` is the tracker applyRotation() walks,
+       and a stale entry there is a ref to an element React has removed.
+       forceUpdate() rather than setState because none of this is state -- it is
+       cache, and the render that follows rebuilds all three. */
+    this.onReduce = () => {
+      this._solved = null;
+      this._escKey = null;
+      this._chainEls = [];
+      this.forceUpdate();
+    };
+    if (this._rmq && this._rmq.addEventListener) this._rmq.addEventListener('change', this.onReduce);
     /* THE ATTRIBUTE ONLY, because the theme itself is already in state (GitHub
        #135) -- so the first render drew in it, and calling apply() here would
        setState the value state already holds. paintTheme is the one home for the
@@ -6523,6 +6588,7 @@ class Component extends DCLogic {
 
   componentWillUnmount() {
     if (this.mq && this.mq.removeEventListener) this.mq.removeEventListener('change', this.onSys);
+    if (this._rmq && this._rmq.removeEventListener && this.onReduce) this._rmq.removeEventListener('change', this.onReduce);
     window.removeEventListener('resize', this.onResize);
     if (window.visualViewport) window.visualViewport.removeEventListener('resize', this.onResize);
     if (this._onPointer) window.removeEventListener('pointermove', this._onPointer);
@@ -6697,6 +6763,43 @@ class Component extends DCLogic {
     }
     const slugFor = this._slugFor;
     const g = [], strands = [];
+    /* WHETHER A STRAND IS DRAWN AT ALL, AND IT IS A QUESTION FOR THE SOLVE
+       RATHER THAN FOR THE RENDER (GitHub #147). A visitor who has asked for
+       reduced motion gets the DIRECT-MESH train: every `link` is ignored, the
+       wheels sit at mesh distance, and there is no strand on the page. The
+       alternative -- draw the chain and stop advancing it -- was measured, and
+       every dashoffset sits frozen at 0px, which reads as broken machinery
+       rather than as a still one. So this re-SOLVES; it does not hide.
+
+       THE PREDICATE IS NOT motionActive(), DELIBERATELY, AND THE DIFFERENCE IS
+       THE PAUSE BUTTON. motionActive() answers 'rest' with false, so a page
+       built on it would DROP EVERY STRAND AND RE-FIT THE WHOLE COMPOSITION the
+       moment somebody paused -- and pause is the one control whose entire job is
+       to freeze what is on the screen. What is asked here is narrower: has
+       reduced motion been asked for and NOT overridden.
+
+       "OVERRIDDEN" IS ANY STORED CHOICE, in either direction, which is the same
+       rule motionActive() applies one line further down and not a second one --
+       a visitor who has touched the control is steering, and the system query is
+       only followed while nobody has. That is what makes run-then-pause freeze
+       the strands rather than delete them: the first press stores 'run' and the
+       second stores 'rest', and both are choices, so the layout is settled by
+       the first press and never moves again.
+
+       `_rmq` is the same handle motionActive() reads, and REDUCE_MQ is still the
+       only home for the query string: this is a second question put to one media
+       list, not a second media list.
+
+       READ FRESH, NEVER LATCHED (#7), and reactive without a reload:
+       componentDidMount listens for `change` on REDUCE_MQ exactly as it does
+       for DARK_MQ, and drops `_solved` so this line is asked again.
+
+       WRITTEN AS A FIELD EXPRESSION AND NOT A METHOD CALL, because tools/test.js
+       executes this whole body in Node against a bare context object that has
+       state and a few underscore fields and no methods at all -- `this._rmq` is
+       undefined there, which reads as "no reduced-motion request", which is the
+       state that exercises the linked branch the suite is there to measure. */
+    const strandsOn = !(this._rmq && this._rmq.matches) || this.state.motion != null;
     /* g IS DENSE OVER THE WHEELS ACTUALLY PLACED; TRAIN IS NOT. A parked idler
        is skipped entirely, so a wheel's slot in g stops being its index in
        TRAIN -- gi maps one to the other, and every lookup that used to index g
@@ -7098,7 +7201,7 @@ class Component extends DCLogic {
       const prof = t.prof || {};
       const r = MODULE * t.teeth / 2;
       const ro = r + MODULE * TOOTH_ADD;
-      let chainFrom = null;
+      let chainFrom = null, chainSeat = null;
       /* PER WHEEL, NOT CARRIED. These used to be declared outside the loop and
          mutated, so wheel i's position was whatever the previous iteration left
          behind -- the implicit path, written as shared state. Deriving each wheel
@@ -7151,7 +7254,7 @@ class Component extends DCLogic {
       const host = free ? rootFrom : parentOf[i];
       if (host != null && gi[host] >= 0) {
         const prev = g[gi[host]];
-        const linked = !!t.link;
+        const linked = !!t.link && strandsOn;
         /* A WHEEL IS COMPLETING A BRIDGE when it is an idler, when its host is
            one, or when it is an independent chain's root: the run that sets the
            gap between two chains is perpendicular to them, and only then does the
@@ -7171,6 +7274,48 @@ class Component extends DCLogic {
         let d = linked ? (prev.r + r) * (t.spread || 2) * (this._spreadBoost || 1)
           : free ? prev.r + r + nIdle * MODULE * TEETH_MEAN
           : prev.r + r;
+        /* A CHAIN IS A WHOLE NUMBER OF PITCHES LONG, AND THAT IS WHAT SETS THE
+           CENTRE DISTANCE (GitHub #147). On a real drive you cannot cut half a
+           link, so the loop length is an integer and the centres are moved to
+           suit it -- which is the same order this now works in. Without it the
+           dash pattern, laid at the circular pitch from the path's own start,
+           meets itself at the end of the loop out of step, and the seam lands on
+           the tangent point where the strand leaves the driving sprocket: one
+           malformed roller per strand, in the one place the eye is already
+           looking. NOTHING ELSE CAN FIX IT -- a dashoffset moves every roller
+           together, so no offset closes a loop whose length is not a multiple of
+           the pitch.
+
+           THE LOOP LENGTH IS TWO TANGENTS PLUS TWO WRAPS, and the wraps collapse:
+           `2*al*r2 + (2*PI - 2*al)*r1` is `2*PI*r1 - 2*al*(r1 - r2)`, and
+           `2*PI*r1` is `PI * MODULE * teeth`, already an exact whole number of
+           pitches. So only `2*T - 2*al*(r1 - r2)` has to be quantised, and that
+           is what `loopFree` is. It rises with distance -- its derivative is
+           `2*T/d`, which is positive and under 2 -- so Newton converges from any
+           start and the move is at most half a pitch of loop, a few units of
+           centre distance against a strand run of several hundred.
+
+           SNAPPED INSIDE THE PASS LOOP, not once: a pass that fails to place the
+           wheel grows `d` by 12%, and the grown value is no more a whole number
+           of links than an ungrown one. */
+        const PITCH_LEN = Math.PI * MODULE;
+        const dGap = prev.r - r;
+        const loopFree = (dist) => {
+          const t2 = Math.sqrt(Math.max(0, dist * dist - dGap * dGap));
+          return 2 * t2 - 2 * Math.acos(Math.max(-1, Math.min(1, dGap / dist))) * dGap;
+        };
+        const pitchSnap = (dist) => {
+          const want = Math.round(loopFree(dist) / PITCH_LEN) * PITCH_LEN;
+          let out = dist;
+          for (let k = 0; k < 6; k++) {
+            const t2 = Math.sqrt(Math.max(1e-6, out * out - dGap * dGap));
+            out += (want - loopFree(out)) * out / (2 * t2);
+          }
+          /* A snap that ran away -- a degenerate radius pair, or a target below
+             the tangency limit -- keeps the unsnapped distance rather than a
+             number nothing has checked for clearance. */
+          return out > Math.abs(dGap) && isFinite(out) ? out : dist;
+        };
         const base = t.drive === 'origin' ? originBase
           : bridging ? bridgeBase : t.angle + (this._axisRot || 0);
         const maxStep = linked ? 150 : bridging ? BRIDGE_SWING : 60;
@@ -7196,6 +7341,7 @@ class Component extends DCLogic {
            that already pay the flat push today. */
         let ang = base, placed = false;
         for (let pass = 0; pass < (linked ? 3 : 1) && !placed; pass++) {
+          if (linked) d = pitchSnap(d);
           /* RE-DERIVED EVERY PASS, NOT ONCE: a linked run's `d` grows 12% each
              pass that fails to place it, and a cap computed against the shorter
              `d` would go stale and under-pay a later pass. Direct-mesh wheels
@@ -7277,9 +7423,71 @@ class Component extends DCLogic {
         }
         if (linked) {
           dir = prev.dir;
-          phase = 0;
           chainFrom = host;
+          /* TOOTH-PHASE REGISTRATION: WHERE THE ROLLERS SIT, not merely how far
+             apart they are (GitHub #147). The dash array has always been laid at
+             the gears' own circular pitch, so the SPACING was right; nothing ever
+             read either sprocket's tooth phase, so the REGISTRATION was arbitrary
+             and a roller landed on a tooth tip as often as in a space. With
+             roller chain chosen that is the artwork contradicting its own claim,
+             and it is the one thing a photograph can settle.
+
+             THE STRAND IS THE FIXED THING AND THE DRIVEN SPROCKET IS TURNED TO
+             MEET IT. The driver's phase is not ours to move -- it is either the
+             conjugate mesh with its own parent or the datum of its chain -- so
+             the pattern is registered against the DRIVER, and then the driven
+             sprocket's phase, which has been a bare `0` for the whole life of
+             this branch precisely because nothing meshes with it, is solved for.
+             Two unknowns, one free: exactly one arrangement seats every roller.
+
+             `chainSeat` IS THE PATH DISTANCE, FROM chainEl'S OWN PATH START, at
+             which a tooth-space centre of the DRIVER lies. Recorded here rather
+             than recomputed in chainEl because the phase below is derived from
+             the same number, and two derivations of one fact are how the ink and
+             the geometry come to disagree (the class of fault #163 was). Reduced
+             mod one pitch: which of the driver's spaces it names cannot matter,
+             since `r * 2 * PI / teeth` IS `PI * MODULE`, one pitch exactly, on
+             every wheel the deal can produce.
+
+             chainEl works in the centred cx/cy space and this works in raw
+             solve coordinates. Every term below is a distance, a radius or a
+             bearing between the same two centres, so all of them are invariant
+             under that translation -- which is what lets the two agree without
+             either knowing about the other's frame. */
+          const rA = prev.r, rB = r;
+          const dAB = Math.hypot(x - prev.x, y - prev.y);
+          const thAB = Math.atan2(y - prev.y, x - prev.x);
+          const alAB = Math.acos(Math.max(-1, Math.min(1, (rA - rB) / dAB)));
+          const tanLen = Math.sqrt(Math.max(0, dAB * dAB - (rA - rB) * (rA - rB)));
+          /* The path runs: tangent out (tanLen), the far-side wrap of the driven
+             sprocket (2*al*rB), tangent back (tanLen), then the driver's own
+             wrap. So the driver's arc starts here, at bearing thAB - alAB, and
+             both wraps are traversed in the DECREASING-angle sense -- which is
+             the sign on the `-` below and the reason the strand and the teeth
+             travel together rather than against each other. */
+          const arcA = 2 * tanLen + 2 * alAB * rB;
+          const spaceA = prev.phase * Math.PI / 180 + Math.PI / prev.teeth;
+          const seat = ((arcA + rA * (thAB - alAB - spaceA)) % PITCH_LEN + PITCH_LEN) % PITCH_LEN;
+          chainSeat = seat;
+          /* AND THE SAME SEAT SOLVED BACKWARDS FOR THE DRIVEN SPROCKET. Its wrap
+             begins at path distance tanLen, at bearing thAB + alAB, so the space
+             centre the strand wants is thAB + alAB - (seat - tanLen)/rB, and its
+             phase is that less the half-pitch that separates a space centre from
+             the tooth centre teethPath() puts at local angle zero. */
+          const wantB = thAB + alAB - (seat - tanLen) / rB;
+          phase = (wantB - Math.PI / t.teeth) * 180 / Math.PI;
           strands.push([{ x: prev.x, y: prev.y }, { x: x, y: y }]);
+          /* NOT PUBLISHED INTO `bridgeRuns`, AND THAT IS A KNOWN GAP RATHER THAN
+             A DECISION (GitHub #147). CLAUDE.md's rule is that every structural
+             run goes into that list, because it is what fitEscapes is seeded with
+             and an unpublished run is the one run on the page an escape run may
+             be laid straight across -- and a strand is worse to cross than a
+             bridge, since a bridge draws nothing and this draws metal. `strands`
+             bounds the solve's own search and never leaves solve(). Publishing it
+             is one line here; what stops it is that tools/test.js asserts
+             `bridgeRuns.length` is exactly one run per BRIDGES entry plus one per
+             ORIGINS entry, so a strand in that list fails the suite by count. The
+             two have to move together. */
         } else if (free) {
           /* AN INDEPENDENT CHAIN IS ITS OWN MACHINE, AND NOW SHOWS ITS OWN DRIVE
              (Charles, GitHub #116, CL#123). It has no parent to inherit a tooth
@@ -7353,7 +7561,7 @@ class Component extends DCLogic {
          and inferring it is the class of thing this file already refuses to do
          ("recording it here is free; recovering it afterwards is not"). Null on
          a link wheel, which carries `person` instead. */
-      g.push({ i: i, teeth: t.teeth, color: t.color, cv: t.cv || null, crot: t.crot || 0, slug: slugFor[i] || null, person: t.person, role: t.role, drive: t.drive || null, serves: t.bridge || null, belt: t.link || null, kind: t.kind || 'holes', arms: t.arms || 5, prof: prof, chainFrom: chainFrom,
+      g.push({ i: i, teeth: t.teeth, color: t.color, cv: t.cv || null, crot: t.crot || 0, slug: slugFor[i] || null, person: t.person, role: t.role, drive: t.drive || null, serves: t.bridge || null, belt: t.link || null, kind: t.kind || 'holes', arms: t.arms || 5, prof: prof, chainFrom: chainFrom, chainSeat: chainSeat,
         r: r, ro: ro, x: x, y: y, dir: dir, phase: phase });
     });
     /* NO TWO CHAINS OVERLAP -- said out loud rather than argued for (Charles,
@@ -7408,8 +7616,8 @@ class Component extends DCLogic {
        -- built above in raw solve coordinates, so they are shifted here with
        everything else rather than by a second copy of the centring rule.
 
-       KEPT SEPARATE FROM `chains`, which is the dormant chain-and-belt
-       capability's list and is DRAWN. A bridge is meshed metal and draws nothing:
+       KEPT SEPARATE FROM `chains`, which is the strand list and is DRAWN (one
+       per chain since GitHub #147). A bridge is meshed metal and draws nothing:
        this is the line the metal occupies, published so that anything placing a
        run afterwards can refuse to cross it. fitEscapes is the caller that needs
        it -- a branch's escape run is solved in screen space, after the fit, and
@@ -7446,6 +7654,37 @@ class Component extends DCLogic {
         }
       }
     }
+    /* AND A STRAND MAKES TWO WHEELS ONE MACHINE (Charles, GitHub #147). Centre
+       distance alone cannot see this and never could: solve() places a linked
+       wheel at `(prev.r + r) * spread`, which is over twice mesh distance by
+       construction, so the loop above puts a strand's driver and its driven
+       sprocket in DIFFERENT components every time. The consequence was not
+       cosmetic -- each component carries its own flywheel, so dragging the
+       driver travelled the strand and the sprocket at the far end of it did not
+       turn at all. A roller chain cannot do that, and no still would have shown
+       it.
+
+       SO THE COUPLING IS UNIONED FROM `chains`, WHICH IS THE DRAWN LIST. The
+       page is claiming a mechanical connection exactly where it draws one, and
+       nowhere else -- so this cannot union a pair that is not visibly joined,
+       and cannot miss one that is. Note what that does NOT do: reduced motion
+       re-solves to direct mesh, so `chains` is empty there and the component
+       count is the direct-mesh train's own, unchanged.
+
+       IT DOES NOT COLLAPSE THE MULTI-COMPONENT CONDITION per-component clocks
+       are verified against (CL#190). A chain nothing on stage drives is still a
+       separate mesh -- that is CLAUDE.md's standing rule and it is about DRIVE,
+       not about strands -- so the stage keeps more than one flywheel and every
+       strand still has to name which one it rides. What changes is that a
+       strand's two wheels now name the SAME one, which is what "one machine"
+       means. */
+    chains.forEach(c => {
+      /* Both ends came out of `g` itself, so `gi` resolves them by construction
+         -- no guard, because a miss here would be `chains` naming a wheel that
+         was never placed, which is a defect and not a case. */
+      const a = find(gi[c.a.i]), b = find(gi[c.b.i]);
+      if (a !== b) parent[a] = b;
+    });
     /* Renumbered to 0..n-1 so the component id can index a dense array of
        flywheels rather than a sparse map keyed by whichever wheel won the
        union. */
@@ -9759,13 +9998,18 @@ class Component extends DCLogic {
   }
 
   /* Roller chain wrapped around two sprockets: external tangents + wrap arcs.
-     Uninvoked as shipped — no TRAIN entry carries a `link`, so solve() yields no
-     runs and this is never called. Kept on purpose, intact and correct, against
-     wanting a strand back later. */
+     ONE PER CHAIN AS SHIPPED (GitHub #147) -- the TRAIN builder puts a `link` on
+     the second wheel of every chain that has one, and on nothing else. It is
+     drawn only when the page is not honouring a reduced-motion request: that
+     re-solves to direct mesh, so `solved.chains` is empty and this is not called
+     rather than being called and stilled. */
   chainEl(key, a, b) {
     const h = React.createElement;
     /* Chain/belt pitch is the gears' own circular pitch (π × module), and the strand
-       wraps on the pitch circle — so every roller drops into a tooth space. */
+       wraps on the pitch circle — so the ROLLER SPACING matches the tooth spacing.
+       That was always true and was never the whole claim: where the rollers sit
+       within that spacing is registration, and it is `b.chainSeat` below that
+       carries it. */
     const PITCH = Math.PI * MODULE;
     const r1 = a.r, r2 = b.r;
     const dx = b.cx - a.cx, dy = b.cy - a.cy, d = Math.hypot(dx, dy), th = Math.atan2(dy, dx);
@@ -9804,24 +10048,83 @@ class Component extends DCLogic {
        is why the guard belongs here and not on the read. */
     const sign = a.dir > 0 ? -1 : 1;
     const comp = a.comp != null ? a.comp : 0;
-    const track = (el) => { if (el && this._chainEls) this._chainEls.push({ el: el, sign: sign, comp: comp }); };
-    const run = { willChange: 'stroke-dashoffset' };
+    /* THE ROLLER'S OWN LENGTH ALONG THE STRAND, named because the registration
+       below is stated against its CENTRE and the dash array is stated against
+       its START. A dash runs from the pattern origin forward, so its centre is
+       half a dash further on, and getting that half wrong puts every roller in
+       the machine off by 1.7 units -- about a sixth of a pitch, which is the
+       difference between seated and riding a flank. */
+    const ROLLER_ON = 3.4;
+    /* WHERE THE PATTERN IS PINNED (GitHub #147). `b.chainSeat` is solve()'s
+       answer to "how far along this path does a tooth-space centre of the
+       driving sprocket lie", and it is recorded there rather than recomputed
+       here because the driven sprocket's own phase was solved from the same
+       number -- see the registration note in solve(). A dashoffset shifts the
+       pattern BACKWARD along the path, which is why the seat is subtracted.
+
+       A STRAND WITH NO SEAT DRAWS EXACTLY AS IT ALWAYS DID, unregistered, rather
+       than throwing or drawing nothing: `chainSeat` is null on any wheel solve()
+       did not link, and this is the one place that could be reached with one. */
+    const reg = b.chainSeat == null ? 0
+      : ((ROLLER_ON / 2 - b.chainSeat) % PITCH + PITCH) % PITCH;
+    const track = (el) => { if (el && this._chainEls) this._chainEls.push({ el: el, sign: sign, comp: comp, reg: reg }); };
+    /* THE REGISTRATION IS IN THE STATIC STYLE AS WELL AS IN applyRotation(),
+       because the first paint happens before the first tick: without it every
+       strand would be laid unregistered for one frame and snap into place. */
+    const run = { willChange: 'stroke-dashoffset', strokeDashoffset: reg.toFixed(2) + 'px' };
     const pitchDash = (on) => on.toFixed(2) + ' ' + (PITCH - on).toFixed(2);
+    /* THE STRAND'S INKS ARE TONES OF THE DRIVING SPROCKET'S OWN COLOUR, through
+       the page's own two tone functions, at the page's own theme (GitHub #176).
+
+       They were six hardcoded hex values -- #79838A, #4E575D, #E6EBED and the
+       belt's -- written before the theme system existed, so a strand kept its
+       dark-mode greys on the pale page while every other ink on the artwork
+       moved. `flatTones` and `shades` are what a wheel is painted with, they
+       take the theme as their `soft` flag, and `this.state.theme` is the single
+       home paintTheme() writes -- so a strand now moves with everything else and
+       there is no second opinion about which theme is in force.
+
+       AND THE COLOUR TIES THE TWO SPROCKETS TOGETHER, which is the right reading
+       now that a strand makes them ONE machine (see the union in solve()): the
+       chain is drawn in the machine's own metal rather than in a grey belonging
+       to nothing on the page. Taken from `a`, the driver, because a strand has
+       to pick one of the two and the driver is the wheel the run is solved off.
+
+       Same call shapes gearSvg uses, deliberately -- `shades(c, true)` and
+       `flatTones(c, theme !== 'dark')` -- so a strand and the wheels it joins
+       are tinted by one rule and not by two. */
+    const base = a.color || '#C9D2D6';
+    const ft = flatTones(base, this.state.theme !== 'dark');
+    /* p[0] is the 55%-toward-white end of the ramp: the polished crown of the
+       roller, the one part of a chain that catches the light from directly
+       above the way #10 says everything here is lit. */
+    const p = shades(base, true);
+    /* NO CAST SHADOW IN LIGHT MODE, exactly as the wheels' own shared shadow
+       layer decides it (CL#133). The strand is a dark band on a pale page in
+       light, so a shadow under it is the same grey wash that layer was measured
+       adding -- 22 units darker than the page -- and it is added by the same
+       mistake: an ink written before the light theme existed. Read off
+       `this.state.theme`, which is the shadow layer's own source, rather than a
+       second query of the media list. */
+    const dark = this.state.theme === 'dark';
+    const cast = (w, dy, col) => dark
+      ? h('path', { d: dPath, fill: 'none', stroke: col, strokeWidth: w, transform: 'translate(1,' + dy + ')' })
+      : null;
     if (b.belt === 'belt') {
       /* Toothed timing belt: one moulded tooth per gear tooth space. */
       return h('g', { key: key },
-        h('path', { d: dPath, fill: 'none', stroke: 'rgba(8,16,20,.24)', strokeWidth: 13, transform: 'translate(1,2.5)' }),
-        h('path', { d: dPath, fill: 'none', stroke: '#3A4046', strokeWidth: 7, transform: 'translate(0,-3.4)' }),
-        h('path', { ref: track, d: dPath, fill: 'none', stroke: '#22272B', strokeWidth: 12, strokeDasharray: pitchDash(PITCH * 0.52), style: run }),
+        cast(13, 2.5, 'rgba(8,16,20,.24)'),
+        h('path', { d: dPath, fill: 'none', stroke: ft.line, strokeWidth: 7, transform: 'translate(0,-3.4)' }),
+        h('path', { ref: track, d: dPath, fill: 'none', stroke: ft.well, strokeWidth: 12, strokeDasharray: pitchDash(PITCH * 0.52), style: run }),
         h('path', { d: dPath, fill: 'none', stroke: 'rgba(255,255,255,.18)', strokeWidth: 1.4, transform: 'translate(0,-6)' })
       );
     }
     /* Roller chain: plate links between rollers seated in the tooth spaces. */
     return h('g', { key: key },
-      h('path', { d: dPath, fill: 'none', stroke: 'rgba(8,16,20,.22)', strokeWidth: 12, transform: 'translate(1,2.5)' }),
-      h('path', { ref: track, d: dPath, fill: 'none', stroke: '#79838A', strokeWidth: 11, strokeDasharray: pitchDash(PITCH * 0.78), strokeLinecap: 'round', style: run }),
-      h('path', { ref: track, d: dPath, fill: 'none', stroke: '#4E575D', strokeWidth: 11, strokeDasharray: pitchDash(PITCH * 0.34), strokeLinecap: 'round', style: run }),
-      h('path', { ref: track, d: dPath, fill: 'none', stroke: '#E6EBED', strokeWidth: 3.4, strokeDasharray: pitchDash(3.4), strokeLinecap: 'round', style: run })
+      cast(12, 2.5, 'rgba(8,16,20,.22)'),
+      h('path', { ref: track, d: dPath, fill: 'none', stroke: ft.body, strokeWidth: 11, strokeDasharray: pitchDash(PITCH * 0.78), strokeLinecap: 'round', style: run }),
+      h('path', { ref: track, d: dPath, fill: 'none', stroke: ft.line, strokeWidth: 11, strokeDasharray: pitchDash(PITCH * 0.34), strokeLinecap: 'round', style: run }),
+      h('path', { ref: track, d: dPath, fill: 'none', stroke: p[0], strokeWidth: ROLLER_ON, strokeDasharray: pitchDash(ROLLER_ON), strokeLinecap: 'round', style: run })
     );
   }
 
@@ -11305,9 +11608,20 @@ class Component extends DCLogic {
             : 'none'
         } }))),
       /* A viewBox, so chainEl() can keep emitting solve-unit path data and pitch
-         dash arrays while the element it lands in is already at display size.
-         Nothing in the shipped train draws here -- the dormant strand capability
-         is what this is for, and it stays scale-correct by construction. */
+         dash arrays while the element it lands in is already at display size --
+         which is what keeps a strand scale-correct without any of its geometry
+         knowing the render scale. ONE STRAND PER CHAIN DRAWS HERE NOW (GitHub
+         #147), and none at all on a page honouring a reduced-motion request,
+         because that re-solves to direct mesh and leaves `solved.chains` empty.
+
+         AND IT IS OUTSIDE EVERY WHEEL'S OWN SVG, which is what keeps the strand
+         out of tools/dom_invariants.py's ink census: that walks svgs whose
+         parent carries `willChange: transform`, i.e. the rotating wheel
+         wrappers, and this one is a direct child of the stage. A chain is not
+         part of a wheel -- it is a separate part joining two of them -- so the
+         census having no opinion about it is the right answer and not a hole to
+         plug (GitHub #176). Its inks are still tones of a real wheel colour, so
+         it would satisfy the census if the census ever saw it. */
       h('svg', { key: 'chains', width: solved.w * S, height: solved.h * S, viewBox: '0 0 ' + solved.w + ' ' + solved.h, style: { position: 'absolute', left: 0, top: 0, overflow: 'visible' } },
         solved.chains.map((c, ci) => this.chainEl('c' + ci, c.a, c.b))),
       solved.gears.map(g => h('div', { key: g.i, style: { position: 'absolute', left: (g.cx * S) + 'px', top: (g.cy * S) + 'px', width: 0, height: 0 } },
@@ -12263,6 +12577,19 @@ class Component extends DCLogic {
       toggleMotion: () => {
         const next = this.motionActive() ? 'rest' : 'run';
         try { localStorage.setItem('wozi-motion', next); } catch (e) {}
+        /* THE FIRST PRESS ON A REDUCED-MOTION MACHINE CHANGES THE LAYOUT, and
+           only the first (GitHub #147). Reduced motion with no stored choice is
+           solved as a direct-mesh train with no strands; storing a choice
+           overrides the request, so the train is re-solved WITH them. Every later
+           press -- pause, run, pause -- leaves `state.motion` non-null and
+           therefore leaves strandsOn exactly where it was, which is what keeps
+           pause a freeze rather than a re-composition. The condition is the old
+           value of the predicate, so it can only fire on the transition. */
+        if (this.state.motion == null && this._rmq && this._rmq.matches) {
+          this._solved = null;
+          this._escKey = null;
+          this._chainEls = [];
+        }
         this.setState({ motion: next });
       },
       motionLabel: this.motionActive() ? 'Pause the machine' : 'Run the machine',

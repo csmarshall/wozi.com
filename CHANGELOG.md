@@ -7,6 +7,90 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Added
 
+- **CL#203 — the chain drive is enabled: one roller chain per chain, and a strand now
+  makes two wheels one machine.** (GitHub #147, GitHub #176.)
+
+  Charles's four decisions, all built: **one strand per chain**, **roller chain**, **a
+  strand couples its two sprockets mechanically**, and **reduced motion re-solves to
+  direct mesh** rather than freezing a drawn strand.
+
+  `link: 'chain'` is computed in the `TRAIN` generator at index 1 of every chain, via a
+  `STRAND_AT` **local to the IIFE** so `tools/test.js`'s sliced execution still resolves
+  every name. On today's config that is **one strand** — Harper's single wheel cannot
+  take one. Composition cost measured on the same seed: wheels shrink **11.5% on a desk**
+  and 8.4% on a phone, landing on the ~11% the size-cost sheet predicted.
+
+  **The unioning, which was the blocker.** `solve()` places a linked wheel far beyond
+  mesh distance while the union-find only unions at `r1 + r2`, so driver and driven landed
+  in different components *by construction* — the strand travelled and the driven sprocket
+  did not turn. The union is now taken from `chains`, the **drawn** strand list, so the
+  page claims a mechanical connection exactly where it draws one.
+
+  **Proved by counterfactual on the same solve:** mesh-only gives **3 components with
+  wheel 0 orphaned**; with the strand union it is **2 components, no orphans** — identical
+  to the direct-mesh train. So the count did not change and `CLAUDE.md`'s rule survives:
+  Harper is still a second component because nothing on stage *drives* her, which is a
+  statement about drive, not about strands.
+
+  **And CL#190's test did not go vacuous**, which was the risk worth naming: advancing
+  `_M[1]` moves **0 strands**, advancing `_M[0]` moves the strand on component 0.
+  Reversal symmetric at ±21.99px per 360 master-degrees = π × `MODULE`. The user-facing
+  claim, with a real CDP pointer drag: driver 0°→13.6°, **driven sprocket 299.0°→311.9°**,
+  dashoffset 3.43→17.58px, and 0 of 3 wheels in other components moved.
+
+  **Tooth-phase registration, which roller chain made load-bearing.** Two levers, one
+  derivation: `d` is snapped so the loop is a whole number of pitches (without it the
+  pattern meets itself out of step where the strand leaves the driver — one malformed
+  roller per strand, and no dashoffset can fix it), and `chainSeat` solves the driven
+  sprocket's phase backwards from the same number. Measured off the rendered DOM over 6
+  deals plus portrait and phone: **every sampled roller in contact, worst error
+  0.003–0.013 of a tooth pitch**, holding while turning and in portrait because every term
+  is a relative bearing.
+
+  **Reduced motion re-solves and pause still freezes.** `strandsOn` is deliberately **not**
+  `motionActive()` — that folds in the pause button, so pausing would drop the chains and
+  jump the layout. Proved without a reload: load 3 dashed paths → `reduce` **0** → back
+  **3** → `reduce` **0** → press motion **3** → **press pause: still 3**. Launching *into*
+  `reduce` gives 0 strands, 2 components, 0 orphans.
+
+  **#176.** The strand is structurally invisible to the ink census — check 4 walks svgs
+  whose parent carries `willChange: transform`, and the strand lives in the stage's
+  direct-child svg — so the census was **not** widened. The hardcoded hex went anyway,
+  because that half is real: inks come from `flatTones`/`shades` off the **driving
+  sprocket's** colour, the same two calls `gearSvg` makes, which also ties the two
+  sprockets the union just made one machine. The shadow is gated on theme, confirmed at 4×
+  crop: none in light, kept in dark.
+
+  **`dom_invariants` check 1 had to learn what a strand is, and getting there took a wrong
+  turn worth recording.** A drawn strand now couples the two wheels it wraps, read off the
+  DOM: each dashed path is sampled and attributed to a wheel whose **pitch circle** it
+  follows. Two corrections were needed. First, **one sample on the circle is not a wrap** —
+  a straight span crosses some third wheel's pitch circle incidentally, and on the solo
+  stage every strand "touched" three wheels under a single-sample test; requiring
+  `STRAND_WRAP_SAMPLES` **consecutive** samples separates wrapping from crossing and makes
+  the check strictly stronger. Second, and this is the file's own documented trap,
+  attributing off the **svg's** rect made every wrap undetectable while leaving the
+  incidental crossings visible — a plausible-looking wrong answer — because a rotating
+  element's rect is the box of a spinning square. The **anchor** is zero-size and does not
+  rotate, and the scale is derived from two anchors rather than assumed.
+
+  Proved able to fail, both ways: breaking the mesh gives 10 components and named orphans;
+  disabling the coupling orphans **wheel 0 by 167.25px** and exits 1. So the coupling is
+  precisely what rescues the driven sprocket.
+
+  `npm test` 127/0. `verify_motion` PASS, **3 strands present, 3 advancing**, 0 console
+  errors. `escape_mesh` PASS, worst residual 0.0256px of 0.35. `a11y_audit` PASS both
+  themes. `pill_clip` PASS. `mutation_gate --gate dom` PASS. **36 unseeded loads** across
+  four viewports × three scopes: **zero console warnings** — no overlap, no refused bridge,
+  no unplaceable bearing.
+
+  **Three `tools/` gaps named rather than papered over:** `tools/test.js` asserts
+  `bridgeRuns.length == bridges + origins` exactly, which is why strand segments are **not**
+  published into `bridgeRuns` — leaving a real gap, commented at the site, that a drawn
+  strand is the one run on the page an escape run may be laid straight across. And
+  `verify_motion`'s dashoffset check remains an **aggregate** that would pass with every
+  strand on the wrong clock. `render_cost` and `devices.py` are unmeasured, stated as such.
+
 - **CL#202 — `SPEED_CEIL` was two facts, so the 500× and 1000× stops arrive with the
   flywheel's feel untouched.** (GitHub #150.)
 
