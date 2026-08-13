@@ -7,6 +7,66 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Added
 
+- **CL#196 — the datum's side is now derived from the spine, so one consistent side
+  holds for any number of chains.** (GitHub #172.)
+
+  The `DATUM_MARK_SIDE` note claimed the side was *"taken from the SPINE's outboard
+  normal"* with *"every other chain comparing both of its candidate sides against
+  it."* **No code did that** — `markSign` reduced algebraically to `-side` from the
+  chain's own seat and the spine was never consulted. Charles chose to make the note
+  true rather than weaken it to match, because his requirement is explicit: *"one
+  consistent side is the way to go as remember we need to support N# of chains."*
+
+  **The inconsistency was frequent, not theoretical.** Measured with
+  `getBoundingClientRect()` in real screen pixels, 6 seeds × 2 orientations, sign taken
+  in screen **x** for portrait and **y** for landscape:
+
+  | | HEAD | after |
+  | --- | --- | --- |
+  | mixed-side combinations | **6 of 12** | **0 of 12** |
+
+  e.g. portrait seed 20260731: Charles **right** +8.55, Harper **left** −9.12. Landscape
+  seed 999983: Charles **below** +15.02, Harper **above** −18.81. Identical in light.
+
+  **Measured in screen coordinates deliberately.** `CLAUDE.md` records that this class
+  of fault has been made twice, and that *"every harness here measured along the bridge
+  direction, and both mirror images pass that"* — a handedness error produces a legal
+  mirror image that nothing local objects to. So the evidence is a sign in `x`/`y`, not
+  a magnitude along the axis.
+
+  `markRef` is one direction per stage, published by the spine and scored against by
+  every other chain, which compares **both** of its candidate normals. **No `+1`
+  anywhere** — `DATUM_MARK_SIDE` was retired precisely because a written-down side is a
+  constant nobody re-measures, and this had to stay a comparison.
+
+  The spine is a special case handled honestly: its reference does not exist while its
+  own seat is being searched, so it compares against its own outboard normal and *then*
+  publishes the answer. `datumLayer` splits into a `measure(r)` pass run spine-first via
+  a one-key stable sort, and a draw loop still in the runs' own order — **so paint order
+  is unchanged**, which matters because #17 records that the specular arc must go under
+  the rim engravings.
+
+  **Confined to multi-chain composition, and that is the proof rather than an
+  assertion:** `pixel_regress --query '?who=charles'` is **0px in both themes at both
+  viewports** — a solo page carries one chain, so the spine *is* that chain and nothing
+  may move. The combined stage moves 5,316px dark / 4,811px light / 5,111px `--panel`,
+  and `--path fidget/` is 0px.
+
+  The zero-warning census holds: **0 `wozi:` warnings** across 5 seeds × 2 viewports ×
+  **2 themes** — 20 combinations, with the probe self-tested against `?seed=abc` to
+  prove it can see a `wozi:` warning at all. `npm test` 121/0 with all four `plate*`
+  anchors intact and `mutation_gate`'s `plate-anchor-by-orientation` still CAUGHT.
+  `dom_invariants` PASS on stage, solo and light; `escape_mesh` and `verify_motion` PASS.
+
+  **Two findings filed rather than folded in**, both because they move every scribed
+  line and deserve their own sweep: **#183** — the name now stands 30.0–34.5px outboard
+  at 1440×900 against a tick reach of 11.7–12.3, and `plateMetrics().reach` reports the
+  ticks only, so `PLATE_TOP_CLEAR` bounds a box a third the size of the drawn one. That
+  is #141's condition restored with CL#164's rule. And, folded into #183, that plates
+  can sit under the fixed corner controls in portrait — pre-existing, 2 of 6 seeds on
+  HEAD against 3 of 6 here, because the seat is bounded by the viewport and never by
+  the corner row. Same class as #173.
+
 - **CL#195 — the last unbounded CDP wait, the dead-socket exit code, and an
   unmeasured run that no verdict-only filter could see.** (GitHub #179, #180, #181.)
 

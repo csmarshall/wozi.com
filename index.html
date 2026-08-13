@@ -1829,10 +1829,25 @@ const DATUM_PLATE = {};
    filed against CL#164's geometry, where the name sat on one consistent side and
    so reached 33-39px outboard on the chains where that side was the outboard one.
    CL#166 replaced that rule with "opposite the ticks", which puts the name INBOARD
-   of the rule on every chain -- so it reaches nothing this figure bounds, and what
-   holds it clear of the metal on that side is plateSeat()'s own search. Measured
+   of the rule on every chain -- so it reached nothing this figure bounds, and what
+   held it clear of the metal on that side was plateSeat()'s own search. Measured
    at the shipped size and air: 0px of label ink outboard of the scribe, both
-   chains, both viewports. */
+   chains, both viewports.
+
+   AND #172 HAS PUT IT BACK, ON THE CHAINS THAT ARE NOT THE SPINE. The name's side
+   is the stage's now, taken from the spine, so a chain whose own ticks point the
+   other way carries its name OUTBOARD again -- and this figure does not bound it,
+   because plateMetrics().reach still reports the ticks alone. Measured over six
+   deals on the shipped two-chain stage, on the chain where it happens: 30.0-34.5
+   rendered px of name off the line at 1440x900 against 11.7-12.3 of tick, and
+   20.3-21.4 against 7.1-7.2 on the phone -- so the outermost ink stands about
+   twice this figure off the teeth there. KNOWN AND DELIBERATE, not an oversight:
+   it is CL#164's condition restored along with CL#164's rule, it is a statement
+   about how detached the mark READS rather than a collision (plateSeat() measures
+   the drawn box against every wheel wherever it lands, and the census finds no
+   crowded seat), and closing it means this figure paying for the NAME as well as
+   the ticks -- which needs an ink measurement datumRuns() has not got when it
+   scribes the line. See datumLayer(). */
 const PLATE_TOP_CLEAR = 20;
 
 /* HOW FAR ALONG THE LINE THE PLATE SITS FROM THE END OF THE MARK IT IS STAMPED
@@ -1963,15 +1978,27 @@ const DATUM_ETCH_DEPTH = 0.12;
    SO THE SIDE IS DERIVED, ONCE, IN BRIDGE_BEARING'S OWN SHAPE: the direction is
    taken from the SPINE's outboard normal and every other chain COMPARES BOTH OF
    ITS CANDIDATE SIDES against it, rather than any sign being written down. See
-   datumLayer() for the geometry and for why the reference is the assembly rather
-   than the origin corner -- that alternative is the same rule and was measured to
-   put every name on the side facing the machine on this composition. The
-   compare-never-assert phrasing is load-bearing and it is the second half of the
-   #67 lesson, the half this file has now had to learn three times: a handedness
-   with a hard-coded sign is a legal mirror image of itself, so every measurement
-   taken along the mark passes either way and only a screenshot can tell. Nothing
-   about it is a screen constant -- turn the stage and the answer turns with it --
-   and nothing about it is per-chain, which is the whole point. */
+   datumLayer() for the geometry -- `markRef` is the direction, `markDir` is the
+   comparison -- and for why the reference is the assembly rather than the origin
+   corner: that alternative is the same rule and was measured to put every name on
+   the side facing the machine on this composition. The compare-never-assert
+   phrasing is load-bearing and it is the second half of the #67 lesson, the half
+   this file has now had to learn three times: a handedness with a hard-coded sign
+   is a legal mirror image of itself, so every measurement taken along the mark
+   passes either way and only a screenshot can tell. Nothing about it is a screen
+   constant -- turn the stage and the answer turns with it -- and nothing about it
+   is per-chain, which is the whole point.
+
+   THIS PARAGRAPH DESCRIBED A COMPARISON NO CODE PERFORMED, for the whole life of
+   the retired constant, and that is worth leaving on the record (GitHub #172).
+   The rule as built was "opposite the TICKS", per chain, which reduces
+   algebraically to the negated seat side and never consults the spine at all; it
+   produced one stage-wide side only while every chain's ticks happened to point
+   the same way. CL#188 moved every seat and produced the counter-example -- at
+   390x844 Harper's mark sits on the mirrored origin -- so the emergent
+   coincidence stopped holding and the prose was, for a while, the specification
+   of the fix rather than a description of the code. A note that is ahead of the
+   code reads exactly like one that is behind it. */
 
 /* HOW MUCH LARGER AN 'etch-mark' NAME IS SET THAN THE PLATE'S OWN LETTERING --
    "slightly larger", which is a judgement and so is a sweep, not a derivation.
@@ -4872,9 +4899,16 @@ class Component extends DCLogic {
       /* `deg` IS THE MARK'S OWN ANGLE, which is the travel and not the chain's
          measured axis -- the plate is stamped square to the line it rides, so
          the two cannot be allowed to disagree by the tilt of the deal. */
+      /* AND `spine` IS FORWARDED RATHER THAN RE-DERIVED. datumLayer() takes the
+         stage's one label direction from the spine's outboard normal, so it has
+         to know which run that is -- and chainAxes() has already decided,
+         including its fallback to the first chain when SPINE_SLUG is not on this
+         stage. Comparing `person` against SPINE_SLUG downstream would be a
+         second opinion about the spine that disagrees with chainAxes() in exactly
+         the case the fallback exists for. */
       return { person: c.person, plate: DATUM_PLATE[c.person] || c.person,
-        deg: c.travel, ux: ux, uy: uy, nx: nx, ny: ny, o: o, alt: alt,
-        stations: stations, d0: d0, d1: d1 };
+        spine: c.spine, deg: c.travel, ux: ux, uy: uy, nx: nx, ny: ny,
+        o: o, alt: alt, stations: stations, d0: d0, d1: d1 };
     });
     return runs;
   }
@@ -10032,12 +10066,21 @@ class Component extends DCLogic {
 
        IT ARRIVES ON THE RUN AND IS A FUNCTION OF THE SIDE, for two reasons that
        are both about ownership. The offset needs the label's MEASURED ink, which
-       only datumLayer has, and it needs to know which way round the mark was laid
-       -- which is what this method is being asked to decide. So the run carries
-       the derivation and this asks it per candidate origin, once for the natural
-       side and once for the mirrored one, before either is scored. One home: the
-       number that moves the drawn stamp is the same call that moved the searched
-       box.
+       only datumLayer has, and it may need to know which way round the mark was
+       laid -- which is what this method is being asked to decide. So the run
+       carries the derivation and this asks it per candidate origin, once for the
+       natural side and once for the mirrored one, before either is scored. One
+       home: the number that moves the drawn stamp is the same call that moved the
+       searched box.
+
+       "MAY NEED" IS EXACT AND THE PARAMETER IS NOT DEAD (GitHub #172). The label's
+       side is the STAGE's, compared against a direction taken from the spine, so on
+       every chain but the spine the answer is the same for both candidate origins
+       and this loop is offsetting both boxes the same way. The spine is the
+       exception that keeps the argument: its own reference does not exist yet while
+       its seat is being searched, so it compares against the candidate side handed
+       in here. Dropping the parameter would break exactly the chain that defines
+       the direction for all the others.
 
        ABSENT, IT IS ZERO, WHICH IS EXACTLY THE OLD BEHAVIOUR. A treatment that
        centres its rectangle on the line supplies no offset and is searched as it
@@ -10320,7 +10363,26 @@ class Component extends DCLogic {
         x2: zx.toFixed(2), y2: zy.toFixed(2),
         style: { stroke: INK.line, strokeWidth: HAIR.toFixed(2) + 'px' } }));
     };
-    runs.forEach((r, ri) => {
+    /* THE ONE DIRECTION EVERY NAME ON THIS STAGE IS STRUCK IN (GitHub #172). It
+       is filled in from the SPINE, at the first moment it can be: the spine's
+       outboard normal is whichever way its own seat laid the ticks, so the
+       reference does not exist until that seat has been searched. It comes off
+       that search rather than off a sign written down here -- see DATUM_MARK_SIDE
+       for why there is no constant to reach for.
+
+       NULL IS NOT A DEFAULT, IT IS "THE SPINE IS NOT SEATED YET", and the spine's
+       own measure() is the only thing that can ever see it. */
+    let markRef = null;
+    /* EVERYTHING THAT MUST BE KNOWN BEFORE A LINE CAN BE DRAWN, split from the
+       drawing for one reason: the reference above comes off the SPINE's seat, so
+       the spine has to be measured before any chain that compares itself against
+       it. MEASURING IS ORDER-DEPENDENT NOW AND DRAWING IS NOT -- the draw below
+       stays in the runs' own order, so the paint order of this layer is exactly
+       what it was, and the note at the head of datumLayer() about one layer per
+       stage still holds. plateSeat() carries no state from one run to the next --
+       `metal` is built once by the caller and every other argument is this run's
+       -- so the order the seats are searched in changes no seat. */
+    const measure = (r) => {
       /* The plate is MEASURED before anything is placed, because its width is
          what decides which side of the assembly this whole mark is scribed on --
          see plateSeat(). The stamped metal itself is drawn last, under the rim
@@ -10345,14 +10407,17 @@ class Component extends DCLogic {
          call, resolved once the side is known, so there is one derivation and not
          a searched copy and a drawn copy.
 
-         THE RULE IS "OPPOSITE THE TICKS", PER CHAIN, and what it is FOR is one side
-         for the whole stage at any chain count (GitHub #139). Charles: "one
-         consistent side is the way to go as remember we need to support N# of
-         chains." Worth stating exactly, because the two are not the same claim:
-         nothing here consults another chain, so the stage reads as one side for as
-         long as every chain's ticks point the same way -- which is what the seat
-         normally produces, and what a chain seated on the MIRRORED origin does not.
-         Nothing enforces it, and no gate photographs the disagreement.
+         THE RULE IS ONE SIDE FOR THE WHOLE STAGE, AT ANY CHAIN COUNT (GitHub #139,
+         GitHub #172). Charles: "one consistent side is the way to go as remember we
+         need to support N# of chains." It used to be "opposite the TICKS, per
+         chain", which is a different claim wearing the same words: nothing
+         consulted another chain, so the stage read as one side only for as long as
+         every chain's ticks happened to point the same way. That is an emergent
+         coincidence, and CL#188 produced the deal that breaks it -- at 390x844
+         Harper's mark moves onto the MIRRORED origin, so its ticks and the spine's
+         point opposite ways and the two names landed either side of their own rules.
+         Every chain now compares itself against `markRef`, so the ticks decide the
+         side for the spine ALONE and every other chain follows the spine.
 
          WHY A CONSISTENT SIDE AT ALL. Outboard-of-its-own-chain was the obvious
          reading and it does not scale: a chain's outboard direction mirrors with
@@ -10362,24 +10427,31 @@ class Component extends DCLogic {
          reader can infer. CHAIN_ORDER already takes any number of chains, so the
          rule has to hold for N.
 
-         THE SIDE IS COMPARED, NEVER WRITTEN DOWN. Both candidate sides are scored
-         against the direction the ticks were struck in and the one facing away
-         from them wins. Nothing here is a written sign: the ticks' own direction
-         comes from a seat that already compared both origins. That is
+         THE SIDE IS COMPARED, NEVER WRITTEN DOWN, AND THAT IS TRUE OF THE SPINE
+         TOO. Both candidate sides are scored -- `+r.n` and `-r.n`, the two
+         directions a name on this run could be struck in -- against `markRef`, and
+         the one that agrees with it wins. The spine has no reference to compare
+         against at the moment its own seat is searched, so it compares against its
+         own outboard normal and lands opposite its ticks; that answer is then
+         published as `markRef` and every other chain scores both of its candidates
+         against it. There is no `+1` anywhere in the chain of reasoning: the ticks'
+         own direction comes from a seat that already compared both origins. That is
          BRIDGE_BEARING's construction -- compare, never assert -- for the reason it
          exists there: a hard-coded handedness is a legal mirror image of itself, so
          it passes every measurement taken ALONG the mark and only a screenshot can
          tell. This file has now had to learn that three times.
 
-         AND THE REFERENCE IS THE ASSEMBLY, NOT THE ORIGIN CORNER, WHICH WAS
-         MEASURED RATHER THAN ASSUMED. Away from the low-x low-y corner -- exactly
-         what BRIDGE_BEARING compares against -- is the same shape of rule and it
-         was tried first. On this composition the datum is scribed on the side of
-         its chain NEAREST that corner, so away-from-origin is systematically the
-         side facing the MACHINE: every chain lost its clearance rather than some
-         chains losing it, 17.4px on the spine at 1440x900, and the name sat over
-         metal where the chip had cleared. Away from the assembly is one side just
-         as strictly and keeps the standoff, so that is the reference.
+         AND THE REFERENCE IS AN ASSEMBLY, NOT THE ORIGIN CORNER, WHICH WAS MEASURED
+         RATHER THAN ASSUMED. Away from the low-x low-y corner -- exactly what
+         BRIDGE_BEARING compares against -- is the same shape of rule and it was
+         tried first. On this composition the datum is scribed on the side of its
+         chain NEAREST that corner, so away-from-origin is systematically the side
+         facing the MACHINE: every chain lost its clearance rather than some chains
+         losing it, 17.4px on the spine at 1440x900, and the name sat over metal
+         where the chip had cleared. Away from the assembly is one side just as
+         strictly and keeps the standoff, so that is the reference -- and it is the
+         SPINE's assembly that supplies it now, which is what makes it one direction
+         rather than N of them.
 
          `r.n` IS ALREADY IN SCREEN SPACE -- datumRuns() builds it through the
          stage's own travel angle -- so nothing here needs a second opinion about
@@ -10394,10 +10466,33 @@ class Component extends DCLogic {
          because a centre is being placed and an edge has to clear. */
       const ink = this.textInk(label, font, PLATE_F);
       const rel = this.datumRelief(PLATE_F);
+      /* WHICH WAY ALONG THE NORMAL THIS CHAIN'S NAME IS STRUCK, as a signed step
+         over `r.n`. Both candidates are built and scored; neither is assumed.
+
+         `r.n` IS A UNIT NORMAL, so `s * r.n` dotted with the reference IS how much
+         a name on side `s` agrees with it, and the larger of the two wins. On the
+         spine, where `markRef` is not yet filled in, the reference stands in as the
+         candidate seat's own outboard normal -- `side * r.n`, the direction this
+         candidate would strike its ticks in -- so the winner is the side opposite
+         the ticks and the ticks are what the spine's own seat search decided. Every
+         other chain reads the published reference and `side` does not enter the
+         answer at all, which is exactly the guarantee: a chain seated on the
+         mirrored origin puts its name on the same screen side as the spine's.
+
+         THE TIE GOES TO +1 AND CANNOT BE REACHED. A tie needs `r.n` perpendicular
+         to the reference, and the reference IS a multiple of some run's `r.n` --
+         every run on the stage shares one travel angle (chainAxes() publishes the
+         stage's own `travel` for every chain), so the dot product is +/-1. It is
+         written as a comparison rather than a sign test so that the day a chain
+         gets an axis of its own, this degrades to "whichever agrees more" instead
+         of to a wrong answer. */
+      const markDir = (side) => {
+        const ref = markRef || { x: -side * r.nx, y: -side * r.ny };
+        const agree = (s) => s * (r.nx * ref.x + r.ny * ref.y);
+        return agree(1) >= agree(-1) ? 1 : -1;
+      };
       const markOffset = (side) => {
-        const tickDir = { x: side * r.nx, y: side * r.ny };
-        const away = (s) => -(r.nx * tickDir.x + r.ny * tickDir.y) * s;
-        const markSign = away(1) >= away(-1) ? 1 : -1;
+        const markSign = markDir(side);
         /* The mark's reach toward the rule: the ink on the side that faces it,
            plus the relief copy standing off that ink. */
         const nearInk = (markSign > 0 ? ink.ascent : ink.descent) + rel.depth;
@@ -10418,10 +10513,38 @@ class Component extends DCLogic {
          the line starts a run-out beyond the clip below (#95). Two copies of
          either would put the plate a little way off the end of its own mark. */
       const seat = this.plateSeat(r, S, pw, PLATE_H, PAST, box, metal);
+      /* AND THE STAGE'S REFERENCE IS PUBLISHED HERE, FROM A RESOLVED SEAT. Only
+         the first run measured -- the spine -- finds this empty, and by this point
+         its search has chosen between the natural and the mirrored origin, so
+         `seat.side` is the direction its ticks are actually struck in and
+         `markDir` turns that into the direction its name is actually struck in.
+         Publishing the DRAWN direction rather than the outboard normal is what
+         makes the comparison below a comparison of like with like. */
+      if (!markRef) {
+        const lead = markDir(seat.side);
+        markRef = { x: lead * r.nx, y: lead * r.ny };
+      }
+      return { label: label, font: font, track: track, pw: pw, seat: seat };
+    };
+    /* THE SPINE IS MEASURED FIRST, AND THE SORT IS THE WHOLE OF THAT RULE. One
+       key, on a stable sort, moves the spine's run to the head and leaves every
+       other run exactly where it was -- so which chain defines the reference is the
+       question chainAxes() already answered, forwarded on the run. A stage whose
+       spine has no wheels flags no run, and then the head of the list stands in,
+       which is chainAxes()' own fallback arriving here rather than a second one. */
+    const held = new Map();
+    runs.slice().sort((p, q) => (q.spine ? 1 : 0) - (p.spine ? 1 : 0))
+      .forEach(r => held.set(r, measure(r)));
+    runs.forEach((r, ri) => {
+      const m = held.get(r);
+      const label = m.label, font = m.font, track = m.track, pw = m.pw, seat = m.seat;
       const ox = seat.ox, oy = seat.oy;
       /* OUTBOARD IS WHICHEVER WAY THE MARK WAS LAID. Every tick is struck along
          the normal, away from the assembly the line references -- and the
-         mirrored origin reverses which way that is. */
+         mirrored origin reverses which way that is. THE NAME NO LONGER FOLLOWS IT
+         (GitHub #172): the ticks are this chain's own business and the name is the
+         stage's, so on a mirrored chain the two point the same way rather than
+         opposite ones. */
       const out = seat.side;
       const at = (d, t) => ({ x: ox + r.ux * d + r.nx * t, y: oy + r.uy * d + r.ny * t });
       const edge = this.slabClip(ox, oy, r.ux, r.uy, box);
@@ -10479,7 +10602,7 @@ class Component extends DCLogic {
       /* THE OFFSET THE STAMP IS DRAWN AT, resolved from the same derivation the
          seat was searched with, now that the side is known. Above, not here, so
          that the box that was measured is the box that is drawn (GitHub #162). */
-      const markT = markOffset(out);
+      const markT = r.markOffset(out);
       const c = at(seat.at, markT);
       [[-pw / 2, -PLATE_H / 2], [pw / 2, -PLATE_H / 2], [pw / 2, PLATE_H / 2], [-pw / 2, PLATE_H / 2]]
         .forEach(p => mk(c.x + r.ux * p[0] + r.nx * p[1], c.y + r.uy * p[0] + r.ny * p[1]));
@@ -10489,32 +10612,56 @@ class Component extends DCLogic {
          clearance search and CL#160's far-end anchor go on solving the problem they
          already solved.
 
-         AND BOTH HALVES OF 'etch-mark''S OLD LIMIT ARE NOW CLOSED. The mark was
-         drawn a signed distance off the line while the seat cleared a box centred
-         ON it, so the search answered truthfully about a box nobody drew, in both
-         directions at once.
+         AND 'etch-mark''S OLD LIMIT HAD TWO HALVES, of which the INBOARD one is
+         closed and the OUTBOARD one is open again on purpose (GitHub #172, below).
+         The mark was drawn a signed distance off the line while the seat cleared a
+         box centred ON it, so the search answered truthfully about a box nobody
+         drew, in both directions at once.
 
-         THE OUTBOARD HALF (GitHub #141) WAS NOT ABOUT THIS LABEL AT ALL: the name
-         is struck opposite the ticks (CL#166), so it reaches nothing outboard, and
-         what stands outboard is the ticks -- which datumClear() pays for by name
-         now (plateMetrics().reach) instead of paying the reserved box's
-         half-height. See PLATE_TOP_CLEAR.
+         THE OUTBOARD HALF (GitHub #141) WAS NOT ABOUT THIS LABEL AT ALL: what
+         stands outboard is the ticks, which datumClear() pays for by name
+         (plateMetrics().reach) instead of paying the reserved box's half-height.
+         See PLATE_TOP_CLEAR. AND #172 HAS PUT THE NAME BACK OUTBOARD ON SOME
+         CHAINS, WHICH RE-OPENS THAT FIGURE RATHER THAN CLEARING IT -- said here
+         plainly because the temptation is to assume the #141 fix covers it.
 
-         THE INBOARD HALF (GitHub #162) IS THE RE-ORDERING ABOVE. `markT` always
-         points INBOARD -- `markSign` resolves to `-out` on every chain, since the
-         name goes opposite the ticks and the ticks go outboard -- so the drawn
-         rectangle overhung the searched one on the side that HAS metal, never on
-         the empty one: measured at 1440x900, 14.27px of rectangle and about 9.0px
-         of actual INK past the searched box's inboard edge, the ink reaching
-         26.0px off the line against the box's 17.03px. `markOffset` is derived
-         BEFORE the seat now and the seat asks it per candidate side, so the box
-         that is searched is the box that is stamped. It was never binding on the
-         shipped deal -- CL#166 measured 0.0% of the mark's pixels on metal at every
-         size it swept, because the rule is already stood off the chain by
-         PLATE_TOP_CLEAR and an inboard name lands in that existing gap -- so what
-         this bought back is the guarantee rather than a picture, and it is the
-         crowded deals #88/#109/#110 were about, and a grown DATUM_MARK_GROW, that
-         it holds for. */
+         The name's side is the STAGE's now, so a chain whose own ticks point the
+         other way carries its name on the SAME side as them: outboard. Measured on
+         the shipped two-chain stage over six deals, on the chain where that
+         happens: the name's box edge stands 30.0-34.5 rendered px off the line at
+         1440x900 and 20.3-21.4 at 390x844, against a tick reach of 11.7-12.3 and
+         7.1-7.2. The ticks are what plateMetrics().reach reports and what
+         datumClear() pays for, so on that chain the mark's outermost ink is about
+         twice PLATE_TOP_CLEAR's 20px from the teeth rather than inside it.
+
+         THIS IS EXACTLY THE CONDITION #141 WAS FILED AGAINST -- CL#164's own
+         consistent side reached 33-39px outboard, and CL#166 closed it by removing
+         the outboard case rather than by paying for it. Restoring the consistent
+         side restores it. It is a bound on how detached the mark reads from its
+         chain, not a collision: plateSeat() measures the DRAWN box against every
+         wheel on the stage on whichever side it lands, and the seeded census finds
+         no crowded seat. Paying for it properly means plateMetrics().reach taking
+         the max of the ticks and the NAME -- which needs the label's measured ink,
+         which datumRuns() does not have when it places the line. That is a real
+         change to where every line is scribed and it is not this ticket's.
+
+         THE INBOARD HALF (GitHub #162) IS THE RE-ORDERING ABOVE, and it is the
+         half that is a guarantee rather than a margin. `markT` used to point
+         INBOARD on every chain -- `markSign` resolved to `-out`, since the name
+         went opposite the ticks and the ticks go outboard -- so the drawn rectangle
+         overhung the searched one on the side that HAS metal, never on the empty
+         one: measured at 1440x900, 14.27px of rectangle and about 9.0px of actual
+         INK past the searched box's inboard edge, the ink reaching 26.0px off the
+         line against the box's 17.03px. `markOffset` is derived BEFORE the seat and
+         the seat asks it per candidate side, so the box that is searched is the box
+         that is stamped -- which is what makes the overhang unreachable rather than
+         merely small, and it is why #172 could change which side the name sits on
+         without re-opening #162. It was never binding on the shipped deal -- CL#166
+         measured 0.0% of the mark's pixels on metal at every size it swept, because
+         the rule is already stood off the chain by PLATE_TOP_CLEAR -- so what this
+         bought back is the guarantee rather than a picture, and it is the crowded
+         deals #88/#109/#110 were about, and a grown DATUM_MARK_GROW, that it holds
+         for. */
       els.push(h('g', { key: 'p' + ri,
         transform: 'translate(' + c.x.toFixed(2) + ',' + c.y.toFixed(2) + ') rotate(' + r.deg.toFixed(2) + ')' },
         this.datumStamp(label, font, track, pw, PLATE_H, PLATE_F, INK, HAIR)));
