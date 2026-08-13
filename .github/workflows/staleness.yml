@@ -1,0 +1,192 @@
+name: staleness alarm
+
+# IS THE LIVE SITE THE COMMIT THE REPO THINKS IT IS?
+#
+# This is the only check in the repo that can catch A DEPLOY THAT GOES GREEN
+# WITHOUT PUBLISHING, or one that never ends at all — and a workflow status
+# structurally cannot. A run that hangs is neither red nor finished, so nothing
+# emails, nothing goes red, and no required check reports anything. Measured, and
+# the reason this file exists (GitHub #184): one run hung 93 minutes and another
+# 4h 32m, the live site sat FOUR COMMITS STALE FOR 4½ HOURS, and the only reason
+# anyone found out was Charles reading the delivered page's banner by hand.
+#
+# So it reads the banner too. tools/strip_comments.py pins every backlink in the
+# delivered page to the commit it was built from (CL#159), which makes the served
+# file its own statement of what it came from — not a claim about the deploy, a
+# property of the object. One curl, one grep, one comparison against origin/main.
+#
+# IT IS AN ALARM, NOT A GATE. It gates nothing, blocks nothing, and holds no
+# credential; it exists to be red on a dashboard and in an email when the site
+# and the repo have drifted apart. Nothing else in this repo answers that
+# question at all.
+#
+# WHY ITS OWN WORKFLOW AND NOT mutation.yml, which is already "the weekly
+# slow-or-drifting checks": every `schedule` trigger fires the WHOLE workflow, and
+# both jobs in that file run `if: github.event_name == 'schedule'`. A second,
+# tighter cron there would run the nine-minute mutation sweep and the a11y audit
+# on every tick — hours of browser time per day for a question they do not answer
+# — unless each `if` were rewritten to discriminate on
+# `github.event.schedule`, which is a string comparison against a cron
+# expression and exactly the kind of coupling that breaks silently when somebody
+# retimes one of them. A file whose cadence IS its subject is cheaper to read and
+# cheaper to retime.
+
+on:
+  schedule:
+    # Every half hour, off the half hour. GitHub's scheduler is heavily
+    # contended on round numbers and delays those runs by minutes, which for a
+    # check whose whole output is "how long has this been wrong" is noise added
+    # to the measurement.
+    #
+    # THE CADENCE AND THE GRACE PERIOD ARE JUDGEMENT CALLS, not measurements.
+    # Together they set how long a stale site can go unreported: at worst one
+    # tick plus the grace, so ~75 minutes here. Both hangs would have been named
+    # inside that. Tighten the cron to notice sooner; raise GRACE_MINUTES if a
+    # legitimately slow deploy ever trips it.
+    - cron: '7,37 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: staleness-wozi-com
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  banner:
+    runs-on: ubuntu-latest
+    # A curl and some git. Nothing here waits on a socket it does not bound.
+    timeout-minutes: 10
+    env:
+      # How long after a deployable commit lands before its absence from the live
+      # site counts as staleness rather than as a deploy in flight. A healthy
+      # deploy is ~6 minutes of gates plus ~15 of publish, of which the
+      # CloudFront invalidation waiter alone can be 10 — so this has to clear
+      # about 25 minutes of legitimate work, plus room for a queued second
+      # publish behind it (the publish job is deliberately NOT cancellable).
+      # 45 is that with a margin, and it is chosen rather than derived.
+      GRACE_MINUTES: '45'
+      SITE: https://wozi.com/
+    steps:
+      # FULL HISTORY, because the check is "is every commit since the live one
+      # either undeployable or younger than the grace period", and that question
+      # is unanswerable in a shallow clone.
+      - uses: actions/checkout@v4
+        timeout-minutes: 5
+        with:
+          fetch-depth: 0
+
+      - name: The live banner must name a commit main has already deployed
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          unset TMOUT
+
+          # A single failed curl is a network blip, not a stale site. Retry
+          # before saying anything, because a false alarm on a schedule this
+          # tight is how an alarm gets muted.
+          body=/tmp/live-index.html
+          for i in 1 2 3; do
+            if curl -sS --max-time 20 "$SITE" -o "$body"; then break; fi
+            echo "note: fetch $i of $SITE failed, retrying"
+            sleep 10
+          done
+          if [ ! -s "$body" ]; then
+            echo "::error::could not fetch $SITE at all after three tries — this alarm cannot say anything about staleness, and the site not answering is its own problem"
+            exit 1
+          fi
+
+          # awk, not `head -1` and not `grep -m1`. Both of those close the pipe
+          # on the first match, the writer dies with EPIPE, and `set -o pipefail`
+          # reports a successful match as a failed pipeline — the same trap the
+          # deploy's live-verify step documents at length. awk consumes all of
+          # its input.
+          live=$(grep -o 'blob/[0-9a-f]\{40\}/index\.html' "$body" \
+                 | awk -F/ 'NR==1 { print $2 }')
+
+          if [ -z "$live" ]; then
+            echo "::error::$SITE carries no SHA-pinned banner at all. Either the published object is the raw source rather than a stripped build, or the banner's shape changed and this alarm has been reading for something that no longer exists — see tools/strip_comments.py."
+            exit 1
+          fi
+          echo "live banner:  $live"
+
+          # The tip as of NOW, not as of whenever this run was scheduled.
+          git fetch --quiet origin main
+          main=$(git rev-parse FETCH_HEAD)
+          echo "origin/main:  $main"
+
+          if [ "$live" = "$main" ]; then
+            echo "  ok   the live site is origin/main"
+            exit 0
+          fi
+
+          # A banner naming something this repo has never heard of is worse than
+          # staleness: it means the object came from somewhere else.
+          if ! git cat-file -e "${live}^{commit}" 2>/dev/null; then
+            echo "::error::the live site's banner names $live, which is not a commit in this repository"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$live" "$main"; then
+            echo "::error::the live site was built from $live, which is NOT an ancestor of origin/main — the bucket is carrying a commit this branch does not contain (a force-push, a rewritten history, or a deploy from another ref)"
+            exit 1
+          fi
+
+          # THE LIVE SHA LEGITIMATELY LAGS THE TIP, and this is the part a naive
+          # comparison gets wrong. deploy.yml ignores pushes that touch only
+          # **.md, legacy/** or .gitignore, so a CHANGELOG commit on top of a
+          # deployed one leaves the site correctly behind the tip forever. The
+          # question is therefore not "does the live SHA equal the tip" but "is
+          # there a commit that SHOULD have deployed and has had time to".
+          now=$(date +%s)
+          stale=0
+          pending=0
+          skipped=0
+          while read -r c; do
+            [ -n "$c" ] || continue
+            deployable=0
+            while read -r p; do
+              [ -n "$p" ] || continue
+              case "$p" in
+                *.md|.gitignore) continue ;;
+                legacy/*)        continue ;;
+                *)               deployable=1 ;;
+              esac
+            done < <(git diff-tree --no-commit-id --name-only -r "$c")
+            subject=$(git log -1 --format='%s' "$c")
+            age=$(( (now - $(git log -1 --format='%ct' "$c")) / 60 ))
+            if [ "$deployable" -eq 0 ]; then
+              echo "  skip $c (${age}m, no deployable paths) $subject"
+              skipped=$((skipped + 1))
+            elif [ "$age" -lt "$GRACE_MINUTES" ]; then
+              echo "  wait $c (${age}m, under the ${GRACE_MINUTES}m grace) $subject"
+              pending=$((pending + 1))
+            else
+              echo "  STALE $c (${age}m) $subject"
+              stale=$((stale + 1))
+            fi
+          done < <(git rev-list --reverse "$live..$main")
+
+          if [ "$stale" -gt 0 ]; then
+            echo "::error::the live site is $stale deployable commit(s) behind origin/main, the oldest of them past the ${GRACE_MINUTES}-minute grace. The site is serving $live. Check the deploy workflow for a run that is still RUNNING — a hang is neither red nor finished, which is the case this alarm exists for. DO NOT CANCEL IT to clear the queue: the jobs-log API returns BlobNotFound for a running job, so cancelling destroys the only diagnostic. Let its step bound fire."
+            exit 1
+          fi
+          echo "  ok   the live site is $live: $pending deploy(s) in flight, $skipped commit(s) that never deploy, nothing stale"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### staleness alarm"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Result | ${{ job.status }} |"
+            echo "| Live | https://wozi.com |"
+            echo ""
+            echo "Reads the SHA the delivered page's banner is pinned to and compares it"
+            echo "with \`origin/main\`, ignoring commits that touch no deployable path and"
+            echo "commits younger than the grace period. It is the only check that can"
+            echo "notice a deploy which went green without publishing, or one that never"
+            echo "ended."
+          } >> "$GITHUB_STEP_SUMMARY"

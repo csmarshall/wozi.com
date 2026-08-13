@@ -2,11 +2,15 @@ name: deploy
 
 # Publishes the site to s3://wozi.com and invalidates CloudFront.
 #
-# Three things about this deploy are deliberate and easy to get wrong later:
+# Four things about this deploy are deliberate and easy to get wrong later:
 #
 #   1. It publishes an explicit WHITELIST of paths. Adding a file to the repo
 #      does not put it on the web — it has to be named here too. That is what
-#      keeps legacy/ and every .md in the repo off a public site.
+#      keeps legacy/, tools/ (including the vendored axe-core blob), infra/ and
+#      every .md in the repo off a public site. The whitelist is a list of NAMED
+#      FILES plus one `aws s3 sync` rooted at assets/ and filtered to *.svg;
+#      there is no exclude list anywhere, because an exclude list publishes
+#      whatever nobody thought to exclude.
 #
 #   2. It does not pass --delete. Removing a file from the web is a deliberate
 #      manual step, because the downside is asymmetric: a bad sync with --delete
@@ -18,23 +22,47 @@ name: deploy
 #      for every derived constant, every rejected alternative, every issue
 #      number — and that prose is the project's documentation, not something a
 #      visitor who wanted to look at some gears has to download. So the deploy
-#      strips it: 603KB → 189KB on the landing page, 173KB → 45KB brotli.
+#      strips it, leaving a compact /*L1234*/ backlink where each comment was.
 #
 #      A transform between the repo and the bucket means the reviewed file and
 #      the served file are two different files, and until this existed every
-#      gate here measured the first one. THE FIX IS THE ORDER OF THE STEPS, not
-#      a second set of checks: tools/strip_comments.py runs over this checkout
-#      IN PLACE, before any gate and before any credential, so the geometry
-#      suite, the device profiles, the motion, DOM and escape-mesh gates all
-#      measure THE ARTIFACT without knowing that anything was stripped. Then
-#      tools/pixel_regress.py --ref HEAD compares the two directly: working
-#      tree is the artifact, HEAD is the source, and the transform is allowed
-#      to change every byte so long as it changes no pixel.
+#      gate here measured the first one. THE FIX IS WHERE THE STRIP HAPPENS, not
+#      a second set of checks: tools/strip_comments.py runs ONCE, in the `build`
+#      job, over that job's own checkout, and the result is uploaded as an
+#      artifact. Every gate job downloads that artifact over its own checkout,
+#      so the geometry suite, the device profiles, the motion, DOM, pill and
+#      escape-mesh gates all measure THE ARTIFACT without knowing anything was
+#      stripped. Then tools/pixel_regress.py --ref HEAD compares the two
+#      directly: working tree is the artifact, HEAD is the source, and the
+#      transform is allowed to change every byte so long as it changes no pixel.
 #
 #      keybase.html is NOT stripped and must never be — its body is covered by
 #      a signature, so it is served byte-exact or the ownership proof stops
 #      verifying. robots.txt is asserted byte-identical to the repo copy for
-#      the same class of reason. Both are copied straight from the checkout.
+#      the same class of reason. Both are copied straight from the checkout and
+#      neither is in the artifact at all, which is the strongest form that rule
+#      can take: the artifact CANNOT overwrite a file it does not contain.
+#
+#   4. THE BYTES THAT WERE GATED ARE THE BYTES THAT SHIP, and that property is
+#      what the artifact exists for (GitHub #184). Gates and publish are
+#      separate jobs now, on separate runners with separate checkouts, so
+#      "strip in each job and trust it to come out the same" would rest on the
+#      transform being deterministic across five machines — true today, and a
+#      claim nothing in this file could check. One strip, one artifact,
+#      downloaded by every job that reads or publishes those two files, makes
+#      the identity structural instead of argued. `sha256sum -c` on the way out
+#      is not the guarantee — the artifact is — it is there so the log carries
+#      the digest of exactly what went to the bucket.
+#
+# WHY THIS IS SIX JOBS AND NOT ONE (GitHub #184). It was one job, and a single
+# hung gate therefore held the credential, the publish steps and — through the
+# concurrency group — every later push. Measured: one run hung 93 minutes and
+# another 4h 32m, both on the pixel battery, while the live site silently stayed
+# four commits behind and nothing anywhere went red, because a run that never
+# ENDS is neither passing nor failing. Splitting it buys three things: a hang
+# now blocks only its own commit, the gates can be superseded by a newer push
+# without risking a half-published bucket, and wall clock is the longest gate
+# rather than the sum of all of them.
 
 on:
   push:
@@ -47,87 +75,72 @@ on:
   # the layout gate and the motion gate ran only after a merge had already
   # landed on main -- so every merge was verified after the fact, which for a
   # repo that routinely merges several agent branches one at a time is the
-  # wrong end. The verification steps below all run BEFORE any credential is
-  # assumed, so the pull_request path needs no OIDC role and a fork cannot
-  # assume one; the deploy half is guarded on the event instead.
+  # wrong end. The gate jobs below hold no credential at all now — the OIDC
+  # permission lives on `publish` and nowhere else — so the pull_request path
+  # cannot assume a role even by accident, and a fork cannot either.
   pull_request:
     branches: [main]
   workflow_dispatch:
 
-# Never let two deploys race each other onto the same bucket.
-#
-# cancel-in-progress: false IS DELIBERATE AND MUST STAY FALSE (GitHub #174). A
-# deploy half-way through publishing objects must not be killed by the next push,
-# or the bucket ends up carrying a mix of two commits — and this workflow does not
-# pass --delete, so there is no one atomic step that would put that right again.
-#
-# The cost of that choice is that a run which never ENDS blocks every run behind
-# it: one hung gate held this group for 93 minutes, two later pushes sat
-# `pending`, and the live site silently stayed on an older commit while the repo
-# looked deployed. FLIPPING THIS TO TRUE IS NOT THE FIX and would trade a stale
-# bucket for a mixed one. The fix is that a hang must END — the timeout-minutes
-# below, and the per-CDP-call deadline in tools/fontpin.py and
-# tools/pixel_regress.py that is what actually stopped that run being possible.
-concurrency:
-  group: deploy-wozi-com
-  cancel-in-progress: false
-
+# READ-ONLY BY DEFAULT, AND THE TOKEN THAT CAN ASSUME A ROLE IS SCOPED TO ONE
+# JOB. `id-token: write` used to sit here, which handed every gate the ability
+# to request an OIDC token it had no use for. It is on `publish` only.
 permissions:
-  id-token: write   # required to request the OIDC token
   contents: read
 
 env:
   BUCKET: s3://wozi.com
   DISTRIBUTION: E3VOOVXS0KK0E5
+  # The one home for the artifact's name. Downloaded by every gate job and by
+  # publish; a typo in one of them would silently gate or publish the SOURCE.
+  PAGES_ARTIFACT: stripped-pages
+
+# THERE IS NO WORKFLOW-LEVEL CONCURRENCY, DELIBERATELY (GitHub #184). It used to
+# be `group: deploy-wozi-com, cancel-in-progress: false` for the whole workflow,
+# which is the right rule for publishing objects and the wrong one for gates:
+# every later push queued behind a hung gate instead of superseding it, so one
+# hang stopped all deploys. The two halves want opposite rules, so they now
+# carry their own — see each job's `concurrency` block. Note that each gate job
+# needs a group of its OWN: put four jobs of the same run in one group with
+# cancel-in-progress, and they cancel each other.
 
 jobs:
-  deploy:
+  # ONE STRIP, AND EVERY OTHER JOB READS ITS OUTPUT. Cheap (~40s, no browser),
+  # so both runs of the geometry suite live here too rather than being parallel
+  # jobs that would each pay a checkout to save eight seconds.
+  build:
     runs-on: ubuntu-latest
-    # THE BACKSTOP, AND ONLY THE BACKSTOP (GitHub #174). Until this existed there
-    # was no timeout-minutes anywhere in this file, so GitHub's 360-MINUTE DEFAULT
-    # applied: a gate that stopped answering held the runner for six hours and, via
-    # the concurrency group above, held every deploy behind it.
-    #
-    # 45, and the margin is deliberately generous because A TIMEOUT THAT TRIPS ON A
-    # SLOW-BUT-HEALTHY RUN IS WORSE THAN NONE — it goes red for a reason that has
-    # nothing to do with the page, which is the red that trains everyone to ignore a
-    # workflow. Measured on a laptop, serially, one gate at a time: node
-    # tools/test.js 7.6s; the browser-gate step 3m43 (devices 2m40, verify_motion
-    # 4.8s, pill_clip 18.8s, dom_invariants 1.3 + 1.3 + 1.3s, escape_mesh 37.0s);
-    # the five-run pixel battery 1m03 (14.6 / 14.1 / 8.6 / 14.8 / 11.0s). Call the
-    # gate half five minutes locally and note the one figure with a CI number beside
-    # it — devices.py is 3m38 there against 2m40 here, so this runner is about 1.4x
-    # a laptop rather than the order of magnitude it is tempting to assume. On top of
-    # the gates, the publish half carries a CloudFront invalidation whose own waiter
-    # runs to 10 minutes, which is why 45 rather than the 30 GitHub #174 suggested:
-    # ~15 minutes healthy, and a 3x margin on the slowest part being somebody else's
-    # infrastructure.
-    #
-    # THE PER-STEP BOUNDS BELOW ARE THE PART THAT EARNS ITS KEEP, not this one. A
-    # job-level timeout says "the job timed out" and cancels the remaining steps,
-    # including the `if: always()` summary; a step-level timeout NAMES THE GATE that
-    # hung, which is the whole diagnostic value — the hang that motivated this was
-    # on one specific step and the log said nothing at all about which.
-    timeout-minutes: 45
+    # Safe to cancel: it holds no credential and publishes nothing, so a
+    # superseded push should stop paying for it. Per-job group name because a
+    # shared one would make the gate jobs cancel each other.
+    concurrency:
+      group: wozi-build-${{ github.ref }}
+      cancel-in-progress: true
+    # Healthy is well under a minute. The bound is a backstop for the one step
+    # that can stall rather than fail (a pip index that never answers), which
+    # carries its own 10.
+    timeout-minutes: 15
+    outputs:
+      index-sha256: ${{ steps.digest.outputs.index }}
+      fidget-sha256: ${{ steps.digest.outputs.fidget }}
     steps:
       - uses: actions/checkout@v4
         timeout-minutes: 5
 
-      # The geometry suite runs BEFORE any credential is assumed, so a broken
-      # gear set cannot reach the bucket. It reads its constants straight out of
-      # index.html rather than keeping copies, which is the only way a test of
-      # this page can be honest: change BAND_DEPTH or a tooth floor and gear sets
-      # nothing has measured become reachable, and this is what catches that.
+      # The geometry suite runs FIRST, before the strip and long before any
+      # credential exists anywhere in this workflow, so a broken gear set cannot
+      # reach the bucket. It reads its constants straight out of index.html
+      # rather than keeping copies, which is the only way a test of this page can
+      # be honest: change BAND_DEPTH or a tooth floor and gear sets nothing has
+      # measured become reachable, and this is what catches that.
       - name: Verify the geometry before anything else
         # 7.6s on a laptop and no browser in it, so anything past a minute is a
         # wedged Node rather than a slow suite.
         timeout-minutes: 5
         run: node tools/test.js
 
-      # BUILD WHAT SHIPS, AND DO IT HERE — before Chrome, before the credential,
-      # before every gate below. From this step on, this checkout is the artifact
-      # and not the source, which is what lets every harness after it measure the
-      # delivered file while still being pointed at "the repo".
+      # BUILD WHAT SHIPS. This is the ONLY place in the workflow that runs the
+      # stripper, and that is the point (see header note 4).
       #
       # --in-place refuses on a file that differs from HEAD, so it cannot destroy
       # uncommitted documentation on somebody's laptop; a CI checkout is clean by
@@ -151,8 +164,8 @@ jobs:
           unset TMOUT
           # Brotli buys the LOG a wire figure instead of a gzip one and nothing
           # else, so its absence must not block a deploy: the tool prints "not
-          # measured" and carries on. Contrast the pixel step below, where Pillow
-          # and numpy are the gate itself and are deliberately fatal.
+          # measured" and carries on. Contrast the pixel gate, where Pillow and
+          # numpy are the gate itself and are deliberately fatal.
           python3 -m pip install --quiet --disable-pip-version-check Brotli \
             || echo "note: Brotli unavailable — sizes will be reported as gzip only"
           python3 tools/strip_comments.py --selftest
@@ -167,17 +180,119 @@ jobs:
       # a menu literal would still render and would still draw the same pixels.
       # Cheap enough (no browser) that running it twice costs nothing worth
       # saving, and the two runs answer different questions.
+      #
+      # IT MUST STAY IN THIS JOB, next to the strip. Moved into a gate job it
+      # would be reading a downloaded copy, and the question it answers is about
+      # what the stripper produced.
       - name: Verify the geometry against what ships
         timeout-minutes: 5
         run: node tools/test.js
 
-      # The train being wonky breaks the whole illusion of the page, so the
-      # layout is gated too, not just the gear maths. tools/devices.py drives
-      # headless Chrome at nine real device profiles in both orientations --
-      # with browser chrome subtracted, which is the part that matters: measuring
-      # against a device's NOMINAL height is a viewport no real browser hands
-      # you, and it is exactly why an earlier version of this harness passed a
-      # layout that was visibly broken on Charles's iPhone.
+      # The digest is recorded here, where the bytes are made, and checked again
+      # after every download. It does not make the artifact trustworthy — the
+      # artifact is the mechanism — it makes the log say which bytes these were,
+      # so "the site is wrong" and "the site is not what we gated" stay separable
+      # questions after the fact.
+      - name: Record what was built
+        id: digest
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          unset TMOUT
+          sha256sum index.html fidget/index.html > SHA256SUMS.pages
+          cat SHA256SUMS.pages
+          {
+            echo "index=$(sha256sum index.html | cut -d' ' -f1)"
+            echo "fidget=$(sha256sum fidget/index.html | cut -d' ' -f1)"
+          } >> "$GITHUB_OUTPUT"
+
+      # ONLY THE TWO TRANSFORMED FILES GO IN, and that is a safety property
+      # rather than tidiness: a downloading job overwrites exactly these two
+      # paths and cannot touch keybase.html, robots.txt, config.js or anything
+      # under assets/, because they are not in the archive. The build step's own
+      # list above is still the single place that decides which pages are
+      # transformed; this list is that list plus the manifest.
+      - uses: actions/upload-artifact@v4
+        timeout-minutes: 10
+        with:
+          name: ${{ env.PAGES_ARTIFACT }}
+          path: |
+            index.html
+            fidget/index.html
+            SHA256SUMS.pages
+          if-no-files-found: error
+          retention-days: 7
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # THE GATES. Three jobs, in parallel, each holding no credential and
+  # publishing nothing. Serially these were one step measured at 3m43 plus a
+  # 1m03 pixel battery on a laptop; devices.py alone is 3m38 IN CI against 2m40
+  # here, which is the one figure with a CI number beside it and puts this runner
+  # at about 1.4x a laptop rather than the order of magnitude it is tempting to
+  # assume. Split, the wall clock is the longest gate — devices — and the rest
+  # hide underneath it. Runner-minutes are cheap; a hung deploy is not.
+  #
+  # WHY THREE AND NOT SEVEN. Each job pays a checkout, an artifact download and a
+  # Chrome download before it measures anything, so splitting a 5-second gate
+  # into its own job costs more than it saves. The split follows the long pole:
+  # devices alone, everything else browser-shaped, and the pixel battery.
+  #
+  # RETRY POLICY, AND IT IS THE SAME IN ALL THREE (GitHub #184, #156):
+  #
+  #   exit 2 = "nothing was measured" — a harness fault. No browser, no binary,
+  #            a CDP call that never came back, axe-core unreachable. Retried
+  #            ONCE, because that is not a statement about the page and the
+  #            alternative is a red deploy that blames the artifact for the
+  #            runner.
+  #   exit 1 = "it measured, and the answer is bad" — the page. NEVER RETRIED.
+  #
+  # DO NOT MAKE THIS A BLANKET RETRY. Retrying exit 1 is the
+  # re-run-until-green antipattern: it turns a real failure into a flake in
+  # everybody's head and trains the whole team to ignore the gate. The only
+  # reason the narrow version is safe to automate is that #156 made the two exit
+  # codes mean these two things across every tool in tools/ — before that, seven
+  # sites printed a harness fault and exited 1, and a retry here would have been
+  # re-rolling a verdict.
+  #
+  # AND IF SOMETHING HANGS, LET IT REACH ITS TIMEOUT. Do not cancel the run to
+  # clear the queue. `gh run view --log` and the jobs-log API both return
+  # BlobNotFound for a RUNNING job, so cancelling destroys the log — which is
+  # exactly why both multi-hour hangs are still undiagnosed. Waiting out a
+  # 25-minute step bound costs one runner and yields the diagnostic; cancelling
+  # costs nothing and yields nothing. The concurrency groups below mean a hang no
+  # longer blocks the next push either, so there is no queue to clear.
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  # The train being wonky breaks the whole illusion of the page, so the layout is
+  # gated too, not just the gear maths. tools/devices.py drives headless Chrome at
+  # nine real device profiles in both orientations -- with browser chrome
+  # subtracted, which is the part that matters: measuring against a device's
+  # NOMINAL height is a viewport no real browser hands you, and it is exactly why
+  # an earlier version of this harness passed a layout that was visibly broken on
+  # Charles's iPhone.
+  devices:
+    needs: build
+    runs-on: ubuntu-latest
+    concurrency:
+      group: wozi-devices-${{ github.ref }}
+      cancel-in-progress: true
+    # Healthy is ~5 minutes, nearly all of it the sweep. Backstop only; the step
+    # bound below is the part that names the hang.
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        timeout-minutes: 5
+      # THE ARTIFACT OVER THE CHECKOUT. From here on this tree is what ships, and
+      # not one line of the harness invocation had to change to make that true —
+      # which is the point: a harness that had to be TOLD about stripping would be
+      # a harness that could be told the wrong thing.
+      - uses: actions/download-artifact@v4
+        timeout-minutes: 10
+        with:
+          name: ${{ env.PAGES_ARTIFACT }}
+      - name: The tree under test is the artifact
+        timeout-minutes: 5
+        run: sha256sum -c SHA256SUMS.pages
       - uses: browser-actions/setup-chrome@v1
         id: chrome
         # A download off somebody else's CDN, which is exactly the class of step
@@ -185,44 +300,42 @@ jobs:
         timeout-minutes: 10
         with:
           chrome-version: stable
-
-      # EVERYTHING IN THIS STEP NOW MEASURES THE STRIPPED FILE. It serves the
-      # checkout, and the build step above replaced the two HTML pages in it, so
-      # not a line here had to change to start gating the artifact — which is the
-      # point: a harness that had to be told about stripping would be a harness
-      # that could be told the wrong thing.
-      # PORT 8765 IS FIXED HERE AND THAT IS ONLY SAFE ON A RUNNER. A CI job gets a
-      # clean machine, so a hardcoded port cannot collide; a laptop does not. Run
-      # these commands by hand while anything else is already serving 8765 —
-      # another agent's tree, a harness from an hour ago — and `python3 -m
-      # http.server 8765` fails with EADDRINUSE while every gate below happily
-      # measures WHATEVER IS ALREADY THERE and reports PASS on somebody else's
-      # index.html. It cost real time once. `tools/pixel_regress.py` picks a free
-      # port for exactly this reason (#42).
-      #
-      # Deliberately not changed: in CI the fixed port is fine, and it is what the
-      # step's own URLs are written against. Locally, serve on a port of your own
-      # and pass that URL instead — and check the body you get back is the tree you
-      # meant, which after the build step above means checking for the banner.
       - name: Verify the layout on real device profiles
-        # SEVEN BROWSER GATES IN ONE STEP, so the bound has to cover the slowest of
-        # them plus six others. devices.py is the long pole: 3m38 in CI against 2m40
-        # measured here over three consecutive runs (158.0 / 158.2 / 161.8s). The
-        # rest, locally: verify_motion 4.8s, pill_clip 18.8s, dom_invariants 1.3 +
-        # 1.3 + 1.3s, escape_mesh 37.0s — 3m43 for the whole step. Apply devices.py's
-        # own 1.4x CI factor to all seven and it is a little over five minutes, so 20
-        # is roughly a 4x margin.
+        # 3m38 in CI against 2m40 measured here over three consecutive runs
+        # (158.0 / 158.2 / 161.8s), and it is now the only gate in this step
+        # rather than one of seven. 12 is a >3x margin on the CI figure, and the
+        # retry below can double the healthy time, which 12 still covers.
         #
-        # Every one of these attaches through tools/fontpin.py, so each now carries
-        # a 90s per-CDP-call deadline of its own (GitHub #174) and should report
-        # exit 2 long before this fires. This is here for the failure that is not a
-        # CDP call at all — a python3 -m http.server that never binds, a Chrome
-        # that never starts.
-        timeout-minutes: 20
+        # It attaches through tools/fontpin.py, so it carries a 90s per-CDP-call
+        # deadline of its own (GitHub #174) and should report exit 2 long before
+        # this fires. This is here for the failure that is not a CDP call at all —
+        # a python3 -m http.server that never binds, a Chrome that never starts.
+        timeout-minutes: 12
         env:
           CHROME: ${{ steps.chrome.outputs.chrome-path }}
         run: |
-          python3 -m pip install --quiet --disable-pip-version-check websockets
+          set -uo pipefail
+          unset TMOUT
+          # `set -e` is off from here down, because the gate helper below reads
+          # exit codes rather than letting them abort the step — so anything that
+          # must be fatal says so explicitly. websockets IS the CDP transport:
+          # without it the gate reports exit 2, which the retry would then burn a
+          # second run on before failing anyway.
+          python3 -m pip install --quiet --disable-pip-version-check websockets || {
+            echo "::error::could not install websockets — nothing can be measured"
+            exit 1
+          }
+          # PORT 8765 IS FIXED HERE AND THAT IS ONLY SAFE ON A RUNNER. A CI job
+          # gets a clean machine, so a hardcoded port cannot collide; a laptop
+          # does not. Run these commands by hand while anything else is already
+          # serving 8765 — another agent's tree, a harness from an hour ago — and
+          # `python3 -m http.server 8765` fails with EADDRINUSE while the gate
+          # happily measures WHATEVER IS ALREADY THERE and reports PASS on
+          # somebody else's index.html. It cost real time once.
+          # tools/pixel_regress.py picks a free port for exactly this reason (#42).
+          # Locally, serve on a port of your own, pass that URL, and check the
+          # body you get back is the tree you meant — which after a build means
+          # grepping it for the banner.
           python3 -m http.server 8765 --bind 127.0.0.1 &
           SERVER=$!
           # wait for it rather than sleeping blind
@@ -230,13 +343,96 @@ jobs:
             if curl -sf -o /dev/null http://127.0.0.1:8765/index.html; then break; fi
             sleep 0.25
           done
-          set +e
-          python3 tools/devices.py http://127.0.0.1:8765/ ; LAYOUT=$?
-          python3 tools/verify_motion.py http://127.0.0.1:8765/ ; MOTION=$?
+          # EXIT 2 IS RETRIED ONCE; EXIT 1 NEVER IS. See the block comment above
+          # the gate jobs for why, before touching this. The gate's whole output
+          # is left in the log — never filtered down to a verdict line, because
+          # two intermittent failures were undiagnosable for exactly that reason
+          # (GitHub #181).
+          GATE_RC=0
+          gate() {   # gate <label> <command...>
+            local label=$1; shift
+            "$@"; GATE_RC=$?
+            if [ "$GATE_RC" -eq 2 ]; then
+              echo "::warning::$label exited 2 — nothing was measured (harness fault). Retrying once."
+              "$@"; GATE_RC=$?
+            fi
+          }
+          gate devices python3 tools/devices.py http://127.0.0.1:8765/ ; LAYOUT=$GATE_RC
+          kill $SERVER 2>/dev/null || true
+          if [ $LAYOUT -ne 0 ]; then
+            echo "::error::the layout gate failed (exit $LAYOUT) — not deploying"
+            exit 1
+          fi
+
+  # The four gates that sit in the gaps the other two jobs leave. Locally: motion
+  # 4.8s, pill_clip 18.8s, dom_invariants 1.3 + 1.3 + 1.3s, escape_mesh 37.0s —
+  # about 1m05 for the lot, so ~1m30 at this runner's 1.4x. They share a job
+  # because each is far shorter than the fixed cost of a job of its own.
+  browser-gates:
+    needs: build
+    runs-on: ubuntu-latest
+    concurrency:
+      group: wozi-browser-gates-${{ github.ref }}
+      cancel-in-progress: true
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        timeout-minutes: 5
+      - uses: actions/download-artifact@v4
+        timeout-minutes: 10
+        with:
+          name: ${{ env.PAGES_ARTIFACT }}
+      - name: The tree under test is the artifact
+        timeout-minutes: 5
+        run: sha256sum -c SHA256SUMS.pages
+      - uses: browser-actions/setup-chrome@v1
+        id: chrome
+        timeout-minutes: 10
+        with:
+          chrome-version: stable
+      - name: Motion, type, DOM structure and escape-run mesh
+        # ~1m30 expected in CI; 10 leaves a ~6x margin, and every one of these
+        # attaches through fontpin's 90s per-call deadline, so a wedged CDP call
+        # reports exit 2 rather than sitting here.
+        timeout-minutes: 10
+        env:
+          CHROME: ${{ steps.chrome.outputs.chrome-path }}
+        run: |
+          set -uo pipefail
+          unset TMOUT
+          # Explicitly fatal: see the devices job. `set -e` is off because the
+          # gate helper reads exit codes.
+          python3 -m pip install --quiet --disable-pip-version-check websockets || {
+            echo "::error::could not install websockets — nothing can be measured"
+            exit 1
+          }
+          # 8766 rather than the devices job's 8765. They are separate runners so
+          # they cannot collide, but two numbers cost nothing and one number is a
+          # collision waiting for the day these ever share a machine.
+          python3 -m http.server 8766 --bind 127.0.0.1 &
+          SERVER=$!
+          for i in $(seq 1 40); do
+            if curl -sf -o /dev/null http://127.0.0.1:8766/index.html; then break; fi
+            sleep 0.25
+          done
+          # EXIT 2 IS RETRIED ONCE; EXIT 1 NEVER IS. See the block comment above
+          # the gate jobs. Identical to the devices job's helper on purpose — a
+          # shell function cannot cross a step boundary, and the two must not
+          # drift.
+          GATE_RC=0
+          gate() {   # gate <label> <command...>
+            local label=$1; shift
+            "$@"; GATE_RC=$?
+            if [ "$GATE_RC" -eq 2 ]; then
+              echo "::warning::$label exited 2 — nothing was measured (harness fault). Retrying once."
+              "$@"; GATE_RC=$?
+            fi
+          }
+          gate motion python3 tools/verify_motion.py http://127.0.0.1:8766/ ; MOTION=$GATE_RC
           # Type, which no other gate looks at: the hover pill's label sets
           # overflow:hidden to animate open, so a line box shorter than the ink
           # does not overflow, it CLIPS. That shipped once and was caught by eye.
-          python3 tools/pill_clip.py http://127.0.0.1:8765/ ; PILL=$?
+          gate pill python3 tools/pill_clip.py http://127.0.0.1:8766/ ; PILL=$GATE_RC
           # Structure, which sits in the gap between the two gates above it.
           # node tools/test.js proves the gear MATHS meshes, in Node, with no
           # browser; the pixel gate proves the page draws the same picture as a
@@ -249,8 +445,8 @@ jobs:
           # BOTH SCOPES, because they are different code paths: 127.0.0.1 is a
           # STAGE_HOSTS name so the bare URL is the combined stage -- bridges,
           # idlers, a datum -- and ?who=charles is one chain with none of them.
-          python3 tools/dom_invariants.py http://127.0.0.1:8765/ ; DOM=$?
-          python3 tools/dom_invariants.py http://127.0.0.1:8765/ --query '?who=charles' ; DOM1=$?
+          gate dom python3 tools/dom_invariants.py http://127.0.0.1:8766/ ; DOM=$GATE_RC
+          gate dom-solo python3 tools/dom_invariants.py http://127.0.0.1:8766/ --query '?who=charles' ; DOM1=$GATE_RC
           # AND ONCE IN LIGHT, because check 4 (the ink census) is the one check
           # here whose SUBJECT changes with the theme, and it claims to catch "a
           # theme's palette leaking into the other theme's render" — a claim it
@@ -259,36 +455,63 @@ jobs:
           # inks in light against 56 in dark, with different saturation and value
           # extremes, so eight of the page's inks had never been censused at all.
           #
-          # AND THE LIGHT PIXEL RUN BELOW DOES NOT SUBSUME IT. That run is
-          # DIFFERENTIAL — working tree against a ref — so a light-only fault
+          # AND THE LIGHT PIXEL RUN IN THE OTHER JOB DOES NOT SUBSUME IT. That run
+          # is DIFFERENTIAL — working tree against a ref — so a light-only fault
           # present in both is 0px there and always will be. This one is ABSOLUTE:
           # it asserts every ink is a tone of its own wheel's base, with no ref and
           # no baseline. Combined stage only, because it is a superset: 10 wheels
           # against the solo scope's, and the theme changes the palette rather than
           # the composition. ~1.3s.
-          python3 tools/dom_invariants.py http://127.0.0.1:8765/ --theme light ; DOMLIGHT=$?
+          gate dom-light python3 tools/dom_invariants.py http://127.0.0.1:8766/ --theme light ; DOMLIGHT=$GATE_RC
           # dom_invariants' own mesh check deliberately exempts escape-run
           # ghosts (GitHub #117) -- they live one DOM level deeper than its
           # element test requires, and there are far more of them than linked
           # wheels (200+ on a wide viewport). Nothing had ever checked whether
           # a ghost actually meshes with what it grew from until this existed.
-          python3 tools/escape_mesh.py http://127.0.0.1:8765/ ; ESCMESH=$?
-          set -e
+          gate escape python3 tools/escape_mesh.py http://127.0.0.1:8766/ ; ESCMESH=$GATE_RC
           kill $SERVER 2>/dev/null || true
-          if [ $LAYOUT -ne 0 ] || [ $MOTION -ne 0 ] || [ $PILL -ne 0 ] \
+          if [ $MOTION -ne 0 ] || [ $PILL -ne 0 ] \
              || [ $DOM -ne 0 ] || [ $DOM1 -ne 0 ] || [ $DOMLIGHT -ne 0 ] \
              || [ $ESCMESH -ne 0 ]; then
-            echo "::error::layout, motion, pill, DOM-invariant (dark $DOM, solo $DOM1, light $DOMLIGHT) or escape-mesh gate failed — not deploying"
+            echo "::error::motion, pill, DOM-invariant (dark $DOM, solo $DOM1, light $DOMLIGHT) or escape-mesh gate failed — not deploying"
             exit 1
           fi
 
-      # THE GATE THE STRIPPER RESTS ON. Working tree is the artifact, HEAD is the
-      # source, so this is the only check that can state the whole claim: the
-      # transform may change every byte in the file and must change no pixel of
-      # the drawing. Anything the stripper ate that the parser did not miss —
-      # a swallowed expression, a regex read as division, a template literal cut
-      # short — comes out here as a delta, and 0 is the only passing answer.
-      #
+  # THE GATE THE STRIPPER RESTS ON. Working tree is the artifact, HEAD is the
+  # source, so this is the only check that can state the whole claim: the
+  # transform may change every byte in the file and must change no pixel of the
+  # drawing. Anything the stripper ate that the parser did not miss — a swallowed
+  # expression, a regex read as division, a template literal cut short — comes out
+  # here as a delta, and 0 is the only passing answer.
+  #
+  # It needs the artifact downloaded over a real checkout for exactly that
+  # reason: the tool does `git worktree add --detach <tmp> HEAD` for the
+  # comparison side, so HEAD is the source however dirty the working tree is.
+  pixel:
+    needs: build
+    runs-on: ubuntu-latest
+    concurrency:
+      group: wozi-pixel-${{ github.ref }}
+      cancel-in-progress: true
+    # Healthy is ~2 minutes. Sized so the 25-minute step bound below can run to
+    # completion and still leave the job's own steps room, because THIS is the
+    # step that hung twice and its log is the diagnostic.
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        timeout-minutes: 5
+      - uses: actions/download-artifact@v4
+        timeout-minutes: 10
+        with:
+          name: ${{ env.PAGES_ARTIFACT }}
+      - name: The tree under test is the artifact
+        timeout-minutes: 5
+        run: sha256sum -c SHA256SUMS.pages
+      - uses: browser-actions/setup-chrome@v1
+        id: chrome
+        timeout-minutes: 10
+        with:
+          chrome-version: stable
       # FIVE RUNS, because they are five different code paths and the first one
       # alone would agree with a fault in the other four. 127.0.0.1 is a
       # STAGE_HOSTS name so the bare URL is the combined stage — bridges, idlers,
@@ -317,26 +540,48 @@ jobs:
         # agrees with itself. That is a wide margin on purpose: this is the step that
         # actually hung, the harness deadline below it should always fire first with
         # a sentence, and the cost of over-provisioning a bound whose healthy case is
-        # a minute is nothing at all.
+        # a minute is nothing at all. UNCHANGED BY THE SPLIT — the five runs are
+        # still one step, so the number it was measured against still applies.
         timeout-minutes: 25
         env:
           CHROME: ${{ steps.chrome.outputs.chrome-path }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
           unset TMOUT
+          # DELIBERATELY FATAL, and the one place in this file where that word is
+          # load-bearing. Without Pillow and numpy the tool used to print "cannot
+          # diff" and exit 0 — the strongest gate in the tree passing by not
+          # running. It exits 2 now, which the helper below would retry; failing
+          # here instead says the true thing sooner. Contrast Brotli in the build
+          # job, which buys the log a wire figure and nothing else.
           python3 -m pip install --quiet --disable-pip-version-check \
-            websockets Pillow numpy
-          set +e
-          python3 tools/pixel_regress.py --ref HEAD ; STAGE=$?
-          python3 tools/pixel_regress.py --ref HEAD --query '?who=charles' ; SOLO=$?
-          python3 tools/pixel_regress.py --ref HEAD --path fidget/ ; FIDGET=$?
+            websockets Pillow numpy || {
+            echo "::error::could not install websockets/Pillow/numpy — the pixel gate cannot run, and a pixel gate that does not run is not a pass"
+            exit 1
+          }
+          # EXIT 2 IS RETRIED ONCE; EXIT 1 NEVER IS. See the block comment above
+          # the gate jobs. This is the job where the distinction was learned: the
+          # hang that motivated all of it exits 2 now, and a 0px-vs-nonzero verdict
+          # exits 1 and must stand.
+          GATE_RC=0
+          gate() {   # gate <label> <command...>
+            local label=$1; shift
+            "$@"; GATE_RC=$?
+            if [ "$GATE_RC" -eq 2 ]; then
+              echo "::warning::$label exited 2 — nothing was measured (harness fault). Retrying once."
+              "$@"; GATE_RC=$?
+            fi
+          }
+          gate pixel-stage python3 tools/pixel_regress.py --ref HEAD ; STAGE=$GATE_RC
+          gate pixel-solo python3 tools/pixel_regress.py --ref HEAD --query '?who=charles' ; SOLO=$GATE_RC
+          gate pixel-fidget python3 tools/pixel_regress.py --ref HEAD --path fidget/ ; FIDGET=$GATE_RC
           # The pop-out panel is display:none until clicked, so the three runs above
           # photograph none of it -- five controls were rewritten in CL#169 and this
           # gate reported 0px (GitHub #144). --panel clicks it open first. Proven to
           # be able to fail rather than assumed: mutation_gate carries the SAME
           # one-pixel edit twice, caught here (132px) and surviving in the shut runs
           # (0px), which measures the coverage instead of claiming it.
-          python3 tools/pixel_regress.py --ref HEAD --panel ; PANEL=$?
+          gate pixel-panel python3 tools/pixel_regress.py --ref HEAD --panel ; PANEL=$GATE_RC
           # LIGHT, because every other themed gate in this workflow runs at its
           # own `--theme dark` default and light is where this project's real
           # faults have been (GitHub #157): CL#133 removed the wheel shadow in
@@ -351,16 +596,99 @@ jobs:
           # so the marginal question is "does the light palette still draw the
           # same" and the widest render is where a light-only path is most likely
           # to appear at all. ~15s locally, one more browser launch.
-          python3 tools/pixel_regress.py --ref HEAD --theme light ; LIGHT=$?
-          set -e
+          gate pixel-light python3 tools/pixel_regress.py --ref HEAD --theme light ; LIGHT=$GATE_RC
           if [ $STAGE -ne 0 ] || [ $SOLO -ne 0 ] || [ $FIDGET -ne 0 ] || [ $PANEL -ne 0 ] \
              || [ $LIGHT -ne 0 ]; then
             echo "::error::the stripped page does not draw the same as the source (stage $STAGE, solo $SOLO, fidget $FIDGET, panel $PANEL, light $LIGHT) — not deploying"
             exit 1
           fi
 
+  # ─────────────────────────────────────────────────────────────────────────────
+  # THE ONLY JOB THAT HOLDS A CREDENTIAL, and the only one that writes anything.
+  # It runs only when all three gate jobs have passed, so the geometry suite, the
+  # device sweep and the pixel battery are all still upstream of the OIDC call.
+  # ─────────────────────────────────────────────────────────────────────────────
+  publish:
+    needs: [build, devices, browser-gates, pixel]
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # required to request the OIDC token — this job only
+      contents: read
+    # cancel-in-progress: false IS DELIBERATE AND MUST STAY FALSE (GitHub #174,
+    # #184). A deploy half-way through publishing objects must not be killed by
+    # the next push, or the bucket ends up carrying a mix of two commits — and
+    # this workflow does not pass --delete, so there is no one atomic step that
+    # would put that right again. A STALE BUCKET BEATS A MIXED ONE.
+    #
+    # Do not "simplify" this to match the gate jobs above. They are cancellable
+    # precisely because they write nothing; this one is not, for precisely the
+    # opposite reason.
+    #
+    # The cost that used to come with it is gone. Under one job, `false` meant a
+    # run which never ENDED blocked every run behind it — one hung gate held the
+    # group for 93 minutes while the live site silently stayed on an older
+    # commit. The gates are cancellable jobs of their own now and must have
+    # finished before this job starts, so nothing that can hang is inside this
+    # group any more; what is left here is a queue of publishes, which is the
+    # thing that genuinely must not overlap.
+    concurrency:
+      group: deploy-wozi-com
+      cancel-in-progress: false
+    # 45, and unchanged by the split, because the split took the gate half OUT of
+    # this job and the number was never about the gates: healthy is ~15 minutes
+    # here, of which the CloudFront invalidation waiter alone can be 10 (20s x 30
+    # attempts) and the live-verify step's ~20 retrying assertions can be 15 more
+    # on a wholly broken deploy. Both of those are bounded per step; this is the
+    # backstop, and the margin is deliberately generous because A TIMEOUT THAT
+    # TRIPS ON A SLOW-BUT-HEALTHY RUN IS WORSE THAN NONE — it goes red for a
+    # reason that has nothing to do with the page, which is the red that trains
+    # everyone to ignore a workflow.
+    #
+    # THE PER-STEP BOUNDS ARE THE PART THAT EARNS ITS KEEP, not this one. A
+    # job-level timeout says "the job timed out" and cancels the remaining steps,
+    # including the `if: always()` summary; a step-level timeout NAMES THE STEP
+    # that hung, which is the whole diagnostic value.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        timeout-minutes: 5
+
+      # EVERY PUBLISHED FILE EXCEPT TWO COMES STRAIGHT OFF THIS CHECKOUT —
+      # keybase.html byte-exact because its body is signature-covered,
+      # robots.txt byte-exact because the live-verify step asserts it against the
+      # repo copy, and config.js, support.js, assets/, ssh_public_key and
+      # favicon.ico because nothing transforms them. The two that do not are the
+      # two in the artifact, and they are THE BYTES THE GATES MEASURED rather
+      # than a second strip that would only be probably-identical.
+      - uses: actions/download-artifact@v4
+        timeout-minutes: 10
+        with:
+          name: ${{ env.PAGES_ARTIFACT }}
+
+      - name: What ships is what was gated
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          unset TMOUT
+          # The manifest travels inside the artifact, so this cannot detect a
+          # substituted artifact — the artifact IS the mechanism for that. What
+          # it catches is a truncated or partially-restored download, and what it
+          # buys unconditionally is a log line naming the exact bytes that went to
+          # the bucket, next to the same digests printed by the build job.
+          sha256sum -c SHA256SUMS.pages
+          echo "built in job 'build': index ${{ needs.build.outputs.index-sha256 }}"
+          echo "                      fidget ${{ needs.build.outputs.fidget-sha256 }}"
+          got_index=$(sha256sum index.html | cut -d' ' -f1)
+          got_fidget=$(sha256sum fidget/index.html | cut -d' ' -f1)
+          if [ "$got_index" != "${{ needs.build.outputs.index-sha256 }}" ] \
+             || [ "$got_fidget" != "${{ needs.build.outputs.fidget-sha256 }}" ]; then
+            echo "::error::the pages about to be published are not the pages the gates measured"
+            exit 1
+          fi
+          echo "  ok   both pages match the digests recorded before any gate ran"
+
       - name: Assume the deploy role via OIDC
-        if: github.event_name != 'pull_request'
         # One STS call. If it has not answered in five minutes it is not going to.
         timeout-minutes: 5
         uses: aws-actions/configure-aws-credentials@v4
@@ -376,16 +704,16 @@ jobs:
       # no console error at all.
 
       - name: Publish HTML
-        if: github.event_name != 'pull_request'
         # Three aws s3 cp calls. The AWS CLI has its own retries, so the
         # failure this bounds is a transfer that stalls rather than errors.
         timeout-minutes: 10
         run: |
-          # Two of these three are the STRIPPED artifacts by now and the third is
-          # the repo file untouched — see the header. The loop does not know the
+          # Two of these three are the STRIPPED artifacts and the third is the
+          # repo file untouched — see the header. The loop does not know the
           # difference and must not: what decides whether a file is transformed is
-          # the build step's own list, in one place, and keybase.html's absence
-          # from it is the only thing keeping its signature valid.
+          # the build job's own list, in one place, and keybase.html's absence
+          # from it (and from the artifact) is the only thing keeping its
+          # signature valid.
           for f in index.html keybase.html fidget/index.html; do
             aws s3 cp "$f" "$BUCKET/$f" \
               --content-type "text/html; charset=utf-8" \
@@ -395,7 +723,6 @@ jobs:
           done
 
       - name: Publish the runtime
-        if: github.event_name != 'pull_request'
         timeout-minutes: 10
         run: |
           # config.js carries the link table, the people and the palette, and
@@ -412,7 +739,6 @@ jobs:
           done
 
       - name: Publish hub icons
-        if: github.event_name != 'pull_request'
         timeout-minutes: 10
         run: |
           aws s3 sync assets/ "$BUCKET/assets/" \
@@ -423,7 +749,6 @@ jobs:
           aws s3 ls "$BUCKET/assets/icons/" | awk '{print "  assets/icons/" $4}'
 
       - name: Publish the SSH public key
-        if: github.event_name != 'pull_request'
         timeout-minutes: 5
         run: |
           # No extension, so without an explicit type browsers download it
@@ -434,7 +759,6 @@ jobs:
           echo "  ssh_public_key"
 
       - name: Publish the favicon
-        if: github.event_name != 'pull_request'
         timeout-minutes: 5
         run: |
           # Every browser requests this unconditionally before ever honouring
@@ -446,7 +770,6 @@ jobs:
           echo "  favicon.ico"
 
       - name: Publish the crawl policy
-        if: github.event_name != 'pull_request'
         timeout-minutes: 5
         run: |
           # Before this existed, https://wozi.com/robots.txt returned the raw S3
@@ -471,7 +794,6 @@ jobs:
           echo "  robots.txt"
 
       - name: Invalidate CloudFront
-        if: github.event_name != 'pull_request'
         # `aws cloudfront wait invalidation-completed` polls on its own waiter (20s x
         # 30 attempts = 10 minutes) and an invalidation genuinely can take several,
         # so this is the one publish step whose HEALTHY case is minutes long.
@@ -490,7 +812,6 @@ jobs:
           echo "invalidation complete"
 
       - name: Verify the deploy is actually live
-        if: github.event_name != 'pull_request'
         # EVERY assertion in here retries 6 times with a 10s backoff and a 20s curl
         # cap, and there are about twenty of them — so a wholly broken deploy could
         # sit in this loop for the better part of an hour before printing its verdict.
@@ -582,6 +903,11 @@ jobs:
           # the trip, which is the only thing standing between a visitor and the
           # documentation.
           #
+          # It is also the one assertion the staleness alarm
+          # (.github/workflows/staleness.yml) reads from outside this workflow, on
+          # a schedule, to catch the case this step structurally cannot: a run that
+          # never reached this step at all.
+          #
           # Deliberately NOT `exact` against the checkout, even though the bytes
           # are known: exact() has no retry loop, and index.html changes on every
           # deploy, so it would fail on a perfectly good deploy that had merely
@@ -630,7 +956,9 @@ jobs:
           # EXACT MATCH, NOT PRESENCE (#54). keybase.html's body is
           # signature-covered, so a truncated response still returns 200 while
           # the ownership proof silently stops verifying -- a substring check
-          # cannot tell those apart.
+          # cannot tell those apart. It is compared against THIS CHECKOUT's copy,
+          # which the artifact does not contain and therefore cannot have
+          # touched.
           #
           # cards/ was the other user of this and is gone (CL#143): the pages,
           # the vCard and their assets are no longer published, and the objects
@@ -693,4 +1021,6 @@ jobs:
             echo "| Commit | \`${{ github.sha }}\` |"
             echo "| Invalidation | \`${{ steps.invalidate.outputs.id }}\` |"
             echo "| Live | https://wozi.com |"
+            echo "| index.html | \`${{ needs.build.outputs.index-sha256 }}\` |"
+            echo "| fidget/index.html | \`${{ needs.build.outputs.fidget-sha256 }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
