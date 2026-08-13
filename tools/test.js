@@ -564,20 +564,34 @@ function workflowSteps(wf) {
      carries list items at the very same indent, and a scan of the whole document
      picks them up as steps. They have no run block so they change no verdict, but
      a parser that reports four phantom steps is one nobody can check by eye. */
-  let at = -1, stepsIndent = 0;
+  /* EVERY job's steps block, not the first one (GitHub #184, CL#199). This took
+     the FIRST `steps:` and stopped at the first dedent, which collected the whole
+     workflow while it was a single job -- and silently collected only `build` the
+     moment CL#198 split it into five. The assertion above is about the WHOLE
+     workflow: it asks whether some publish step copies each published file, and a
+     parser that can only see one job answers a narrower question than the test
+     asks. It failed LOUDLY rather than passing on a partial read, which is the only
+     reason this was a five-minute fix -- see the `no publish step was found`
+     message it carries. */
+  const blocks = [];
   for (let i = 0; i < all.length; i++) {
     const m = all[i].match(/^(\s*)steps:\s*$/);
-    if (m) { at = i + 1; stepsIndent = m[1].length; break; }
+    if (!m) continue;
+    const stepsIndent = m[1].length;
+    const body = [];
+    for (let j = i + 1; j < all.length; j++) {
+      const raw = all[j];
+      if (raw.trim() && raw.length - raw.trimStart().length <= stepsIndent) break;
+      body.push(raw);
+    }
+    blocks.push({ stepsIndent, body });
   }
-  if (at < 0) throw new Error('deploy.yml has no steps: block');
+  if (!blocks.length) throw new Error('deploy.yml has no steps: block');
+  const lines = [];
+  for (const b of blocks) lines.push(...b.body);
+  const stepsIndent = blocks[0].stepsIndent;
   const itemIndent = stepsIndent + 2;
   const marker = ' '.repeat(itemIndent) + '- ';
-  const lines = [];
-  for (let i = at; i < all.length; i++) {
-    const raw = all[i];
-    if (raw.trim() && raw.length - raw.trimStart().length <= stepsIndent) break;
-    lines.push(raw);
-  }
 
   const steps = [];
   let cur = null, runIndent = null;

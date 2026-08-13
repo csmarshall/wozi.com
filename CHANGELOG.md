@@ -7,6 +7,45 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Added
 
+- **CL#199 — `tools/test.js` read only the first job's steps, so CL#198's split made it
+  blind to every publish command.** (GitHub #184.)
+
+  CL#198's own first CI run went red on this, which is the outcome it deserved.
+
+  `workflowSteps()` found the **first** `steps:` block and stopped at the first dedent.
+  That collected the whole workflow while `deploy.yml` was a single job — and silently
+  collected only `build` the moment it became five. So the assertion *"every file the site
+  needs is copied to the bucket by a publish step"* was reading a job with no publish
+  commands in it.
+
+  **It failed loudly rather than passing on a partial read**, and that is the whole
+  reason this was a five-minute fix: the test carries its own guard —
+
+  > *no publish step was found in `.github/workflows/deploy.yml` — the parser is reading
+  > nothing, so nothing below can fail*
+
+  A parser that had quietly found zero publish steps and concluded "no file is missing"
+  would have shipped a workflow with an unverified whitelist, and nothing would have said
+  so. This is the same property `a11y_audit`'s `RESULT: NOT AUDITED` and CL#195's
+  `RESULT: NOT MEASURED` have, arrived at independently: **a check that cannot see its
+  subject must say so rather than agree.**
+
+  Fixed by collecting **every** `steps:` block in the file. The assertion is about the
+  whole workflow, and a parser that can only see one job answers a narrower question than
+  the test asks.
+
+  **Proved able to fail, twice**, because a fix that makes a red test green is worthless
+  until it is shown to still bite: dropping the `robots.txt` publish gives *2* failures
+  (this test and "every path the deploy publishes exists in the repo"), and emptying the
+  `publish` job's steps trips the guard again. Restored tree 121/0.
+
+  **How it reached CI is my process failure, recorded so it is not repeated.** I ran
+  `npm test` before applying the workflow patch and not after — I verified the YAML, the
+  job graph and the retry semantics, but not the suite that **parses the file I had just
+  restructured.** `tools/test.js` reads `index.html` *and* `deploy.yml` as text; a change
+  to either needs the suite re-run, and "it is only a workflow" is exactly the reasoning
+  that skipped it.
+
 - **CL#197 — `/fidget/`'s train turned backwards under the finger, and had since its
   first commit.** (GitHub #182.)
 
