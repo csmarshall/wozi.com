@@ -7,6 +7,92 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Added
 
+- **CL#194 — Wear's fracture gets its own drawn contour, because a silhouette was all it
+  ever had.** (GitHub #146.)
+
+  Charles: *"wear adjustments don't seem to be reflected in gears"*. **The mechanism was
+  working and the marked wheels were inspectable — the mark was simply below the bar this
+  codebase already sets.** Measured: full Wear moved **205 of 1,296,000 pixels (0.016%)**
+  and removed **8.61px** of tooth flank on the deeper mark, **4.28px** on the shallower,
+  against **`MIN_CUT_PX` = 10.3** — the floor a *cut* must clear here to read at all. On
+  a phone it is 5.35px and 2.66px, the latter at the aliasing floor.
+
+  Two escapes were closed by measurement before this was chosen. **Depth cannot fix it**:
+  `fBot` bottoms out at 0.44 of the flank and below that you are authoring a different
+  crack, which `CLAUDE.md` forbids. **Position is not the constraint either**: marks were
+  measured landing both in mesh gaps and on open rim, and in the best case — open rim
+  against the page — the 1:1 sweep was *still* indistinguishable across all five slider
+  positions.
+
+  **The fix is the one CL#133 already made for cut openings, whose fault was identical —
+  a shape whose only contrast is its silhouette.** `ft.line` at `m * CHIP_INK_MUL`, drawn
+  **outside** the clipped group (inside, the clip is `path + holes` under `evenodd` and a
+  stroke on a hole boundary loses its inner half). `teethPath` stays the one home: a
+  `chipOut` out-parameter is filled **from the same point strings `d` is concatenated
+  from**, so the ink cannot drift from the cut.
+
+  **The pixel count is the wrong headline, and the agent said so rather than quoting the
+  flattering number.** It is a diff against the *unworn* render, and the old mark's
+  biggest pixels were already saturated by silhouette — so the metric is nearly blind to
+  what was broken. The measurement that matters is the mark's **absolute contrast against
+  the ground it sits on**, from a single worn shot:
+
+  | | wear 0 | any wear > 0 |
+  | --- | --- | --- |
+  | light, deeper mark | **2.00:1** | **4.07:1** |
+  | light, shallower mark | **3.51:1** | **5.96:1** |
+  | dark, both | 8.09:1 / 5.05:1 | **unchanged** |
+
+  **Dark gains area; light gains contrast.** That inversion is the honest result and it
+  is not a compromise — in dark the wheel-against-page edge is already the strongest
+  thing in the box, and light is where the 35% contrast deficit lived. At **1:1 in light
+  on a desk the mark is visible from 25% up**, where before there was nothing.
+
+  **`CHIP_INK_MUL = 0.30` is bounded from above by a dark-theme fact, not by taste.** A
+  heavier line begins to *fill* the notch rather than outline it: over the ladder
+  0 / 0.30 / 0.45 / 0.60 / 0.90 the largest channel delta the mark moves goes
+  **205 / 205 / 172 / 139 / 109**. So 0.30 is the heaviest weight that leaves the
+  silhouette **exactly as strong as it was** while adding the ink, and past 0.60 the
+  authored jag stops reading as a crack and becomes a blob.
+
+  **Both stated guarantees proved rather than assumed.** Wear 0 is byte-identical to
+  HEAD — `pixel_regress` **0px** on the stage, `?who=charles` and `--theme light`,
+  controls 0px — and the wear-0 render is byte-identical across *every* rung of the ink
+  ladder, so the contour is **absent** at severity 0 rather than faint. `WEAR_SCUFF_RATIO`
+  and `teethPath`'s fractions are untouched, and with Wear at 100% the difference from
+  HEAD is 208px desk / 90px phone in dark and 216 / 101 in light — the ink and nothing
+  else, since both sides draw the same fracture.
+
+  **The ink census is unchanged at Wear 100%**: 56 inks on the stage, 42 solo, 64 light,
+  identical to Wear 0. `ft.line` is already on every wheel and is the darkest tone
+  `flatTones` produces.
+
+  **A phone at 1:1 still cannot show it**, stated rather than glossed: the weight is in
+  modules so it scales with the wheel, and the wheel is 62% the size (`--gsfit` 0.867
+  against 1.396), which puts the line near 1.8px. Accepted, because #5 asked for a detail
+  that rewards inspection and it now does at desk scale. Flooring the weight in *pixels*
+  the way `MIN_CUT_PX` is would make a phone's mark relatively heavier than a desk's, and
+  that reopens the "correct at exactly one screen size" argument from the other side — a
+  new decision, not this ticket's.
+
+  **My own figures in the ticket were wrong**: *"205 px / delta 137 light"* paired a dark
+  pixel count with a light delta. Per theme at HEAD it is dark 210px / Δ205, light 198px
+  / Δ153.
+
+  `npm test` 121/0. `a11y_audit` PASS both themes. `strip_comments --selftest` ok.
+
+  **Two harness findings worth keeping.** `DETERMINISTIC_FLAGS` remove Chrome's licence
+  to abandon an uncommitted frame, so `captureScreenshot` can hang under another agent's
+  headless Chrome — and one killed run leaves its Chrome holding the `--user-data-dir`,
+  which Chrome treats as a **singleton**, so every later launch hands its command line to
+  the survivor and never listens on the new debug port. The symptom is a silent stall,
+  not an error. And `--shot` mode has **no `stable_render` control**, so a single shot has
+  no self-control: one run came back at 1,209px and was a raster flake, agreeing at
+  210/210 on two re-shoots. The workaround — planting `wozi-wear` in localStorage the way
+  `wozi-theme` is planted, and driving `pixel_regress`/`dom_invariants` themselves — is
+  probably the cheap answer to **#177**: three ~20-line wrappers rather than a new
+  harness.
+
 - **CL#193 — the 93-minute deploy hang had a proven cause: a CDP round trip with no
   ceiling. And it was not the dropped socket I guessed.** (GitHub #174.)
 

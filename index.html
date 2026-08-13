@@ -862,6 +862,41 @@ const timingMark = (rIn, rOut, mod, col) => {
    open scale. AWAITING CHARLES'S CALL on where in that range it sits, the same
    way SPINDOWN_RANGE_MS is. */
 const GHOST_TIMING_SPAN = 0.60;
+/* THE FRACTURE'S OWN CONTOUR, AS A FRACTION OF THE MODULE (GitHub #146).
+   Charles: "wear adjustments don't seem to be reflected in gears". The
+   mechanism was working -- the marks were simply below the bar this codebase
+   already sets for a feature to be legible. Measured on a 1440x900 desk page,
+   full Wear moved 205 of 1,296,000 pixels and removed 8.61px of tooth flank on
+   the deeper mark, against MIN_CUT_PX = 10.3, the floor a CUT has to clear
+   here to read at all. Neither depth nor position could close that: `fBot`
+   already bottoms out at 0.44 of the flank, and past it the crack stops being
+   the one authored shape; and marks landing on open rim were no more legible
+   than marks landing in a mesh gap.
+
+   So the fix is the one CL#133 already made for cut openings, whose fault was
+   identical -- a shape whose only contrast is its silhouette. `ft.line`, the
+   working contour for interior details, is what every cut edge and both
+   epicyclics are drawn in, so this adds no new ink to the census. It also
+   targets the right deficit: light mode had the same pixel count as dark and
+   35% less contrast (max channel delta 137 against 205), because a nibble out
+   of a silhouette depends entirely on figure against ground, and a drawn line
+   does not.
+
+   IN MODULES, so the weight tracks the tooth it is drawn on rather than being
+   correct at one wheel size, the same reasoning timingMark()'s 0.22 carries.
+
+   A CHOSEN proportion -- what a fracture face should weigh against the flank it
+   crosses is a drawing convention, not a measurement -- but the choice is NOT
+   free at the top, and the bound is a dark-theme one. In dark the page is
+   darker than the metal, so the crack's silhouette is what carries it, and a
+   heavy enough contour starts to FILL the notch instead of outlining it: over
+   the ladder 0 / 0.30 / 0.45 / 0.60 / 0.90 the largest channel delta the mark
+   moves goes 205 / 205 / 172 / 139 / 109 at 1440x900. 0.30 is therefore the
+   heaviest line that leaves the silhouette exactly as strong as it was while
+   adding the ink, and past 0.60 the authored jag stops reading as a crack at
+   all and becomes a blob. Photographed both themes, desk and phone, 1:1 and 8x
+   before it was picked. Charles's to move. */
+const CHIP_INK_MUL = 0.30;
 /* The Table of Gears list's own type treatment (GitHub #127) -- read by
    togList's item() below AND by the Speed/Wear row labels in renderVals(),
    so the panel's two label styles cannot drift apart into two "the same but
@@ -7354,7 +7389,12 @@ class Component extends DCLogic {
      TOOTH_* constants alone, never of the web style bolted to the same wheel.
      The parameter used to be in this signature and was never read (#57), which
      invited exactly the wrong idea -- that a profile could change the teeth. */
-  teethPath(n, r, chipIdx, mod, chipSev) {
+  /* `chipOut`, when given, is an out-parameter: the chipped tooth's fracture
+     face comes back on it as `.face`, an `M ... L ...` polyline in the same
+     authored units the returned `d` is in, for the caller to ink (GitHub #146).
+     Absent -- and it is absent for every unchipped wheel, the epicyclic members
+     and the ghost blanks -- nothing extra is built. */
+  teethPath(n, r, chipIdx, mod, chipSev, chipOut) {
     const m = mod || MODULE;
     const ro = r + m * TOOTH_ADD, rr = Math.max(TOOTH_ROOT_MIN, r - m * TOOTH_DED), a = 2 * Math.PI / n;
     const phi = TOOTH_PA * Math.PI / 180, rb = r * Math.cos(phi);
@@ -7404,19 +7444,49 @@ class Component extends DCLogic {
         const fTop = 0.93, fBot = fTop - sev * (fTop - 0.44);
         const relIn = (f) => fBot + (f - 0.44) / (fTop - 0.44) * (fTop - fBot);
         const breakAt = relIn(0.62), j1 = relIn(0.52), j2 = relIn(0.70), j3 = fBot;
+        /* THE FRACTURE'S POINTS ARE COLLECTED AS THEY ARE EMITTED, NEVER
+           RECOMPUTED (GitHub #146). The crack is pure silhouette on its own --
+           a nibble out of a tooth, legible only where the wheel happens to
+           stand against a contrasting ground -- which is exactly the fault
+           CL#133 found in every cut family and fixed by drawing the opening's
+           own contour in `ft.line`. The caller inks the same face here, so it
+           needs the polyline; taking it from a second copy of these four
+           fractions is how the ink and the cut would come to disagree about
+           where the crack is, so `chipOut` is filled from the SAME strings the
+           `d` below is built out of. teethPath stays the one home for a chipped
+           tooth (CLAUDE.md), and the ink is a rendering OF that home rather
+           than a second opinion about it. */
+        const up = [];
         for (let s = 1; s <= STEPS; s++) {
           const R = flank[s];
           if (R > lvl(breakAt)) break;
-          d += 'L' + P(R, c - half(R)) + ' ';
+          up.push(P(R, c - half(R)));
         }
-        d += 'L' + P(lvl(fTop), c - half(lvl(fTop)) * 0.5) + ' ';
-        d += 'L' + P(lvl(j1), c - half(lvl(j1)) * 0.2) + ' ';
-        d += 'L' + P(lvl(j2), c + half(lvl(j2)) * 0.35) + ' ';
-        d += 'L' + P(lvl(j3), c + half(lvl(j3)) * 0.8) + ' ';
+        const jag = [
+          P(lvl(fTop), c - half(lvl(fTop)) * 0.5),
+          P(lvl(j1), c - half(lvl(j1)) * 0.2),
+          P(lvl(j2), c + half(lvl(j2)) * 0.35),
+          P(lvl(j3), c + half(lvl(j3)) * 0.8)
+        ];
+        const down = [];
         for (let s = STEPS; s >= 1; s--) {
           const R = flank[s];
           if (R > lvl(j3)) continue;
-          d += 'L' + P(R, c + half(R)) + ' ';
+          down.push(P(R, c + half(R)));
+        }
+        for (const pt of up) d += 'L' + pt + ' ';
+        for (const pt of jag) d += 'L' + pt + ' ';
+        for (const pt of down) d += 'L' + pt + ' ';
+        if (chipOut) {
+          /* The face runs from the last point of the RISING flank, through the
+             four jag points, to the first point of the falling one -- so the
+             inked line starts and ends on unbroken metal and reads as a crack
+             across the crown rather than as a floating tick. When severity is
+             low enough that no flank step clears `breakAt`, the rising flank
+             contributed nothing and the path's own current point is where the
+             flank left the fillet, which is where the face therefore starts. */
+          chipOut.face = 'M' + [up.length ? up[up.length - 1] : P(rStart > rFil ? rStart : rFil, c - hRoot)]
+            .concat(jag, down.length ? [down[0]] : []).join(' L');
         }
       } else {
         for (let s = 1; s <= STEPS; s++) d += 'L' + P(flank[s], c - half(flank[s])) + ' ';
@@ -7971,7 +8041,15 @@ class Component extends DCLogic {
     }
     const chip = this.props.character ? (g.i * 5 + 3) % g.teeth : wearChip;
     const chipSev = this.props.character ? 1 : wearSev;
-    const path = this.teethPath(g.teeth, r, chip, undefined, chipSev);
+    /* THE INK IS ASKED FOR ONLY WHEN THERE IS A FRACTURE TO INK (GitHub #146).
+       `chip` is -1 on every wheel the wear pair did not choose, and `chipSev` is
+       0 at the slider's own zero -- so at Wear 0 no contour is requested, none is
+       recorded and none is drawn. That is what keeps the shipped default byte-
+       identical to the render `character:false` has produced since CL#16, rather
+       than merely faint: absent, not transparent. */
+    const chipInk = {};
+    const path = this.teethPath(g.teeth, r, chip, undefined, chipSev,
+      chip >= 0 && chipSev > 0 ? chipInk : undefined);
     /* Every wheel carries the same engraving band: a solid annulus one module deep just
        inside the tooth roots. The web is held clear of it so nothing is ever cut through
        the lettering, and because MODULE is shared the band is identical on all wheels. */
@@ -9305,6 +9383,23 @@ class Component extends DCLogic {
           stroke: ft.line, strokeWidth: w, strokeOpacity: op,
           strokeLinejoin: 'round' });
       }).call(this),
+      /* THE FRACTURE FACE, INKED (GitHub #146, CHIP_INK_MUL above). Drawn
+         OUTSIDE the clipped group for the same reason the cut contour above is
+         (CLAUDE.md): inside, the clip is `path + holes` under evenodd and a
+         stroke sitting ON that boundary loses its inner half, which would halve
+         exactly the weight this line exists to supply. Nothing is clipped away
+         here in any case -- the crack lives out past the tooth roots, where no
+         family cuts -- but the rule is about where a boundary stroke belongs,
+         not about whether this deal's holes happen to reach it.
+
+         Full strength, no strokeOpacity: at CHIP_INK_MUL the line is comfortably
+         clear of the aliasing floor at every viewport, so the opacity lift
+         CL#133's cut contour needs when its width bottoms out has nothing to
+         correct for here. `ft.line` is the ink the cut edges and both epicyclics
+         already use, so the wheel gains no new colour. */
+      chipInk.face ? h('path', { key: 'chipink', d: chipInk.face, fill: 'none',
+        stroke: ft.line, strokeWidth: (m * CHIP_INK_MUL).toFixed(2),
+        strokeLinejoin: 'round', strokeLinecap: 'round' }) : null,
       post,
       h('circle', { r: hubR, fill: 'url(#' + id + 'u)', stroke: p[3], strokeWidth: 1.2 }),
       h('circle', { r: Math.max(3, hubR * 0.4), fill: p[3], opacity: 0.5 }),
