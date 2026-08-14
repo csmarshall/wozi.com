@@ -1,6 +1,8 @@
 # index.html regions — what can be held at once, and what cannot
 
-`index.html` is 9,844 lines and one file, and that is the whole of GitHub #113's
+`index.html` is **12,620** lines (2026-08-14; it was written down as 9,844 and drifted
+2,776 lines before anyone re-counted — treat any line figure here as indicative and
+run `wc -l`) and one file, and that is the whole of GitHub #113's
 remaining cost. Costs (1) and (2) are closed with numbers — brotli is live at
 198,588 bytes, HTML parse is 7ms unthrottled — and neither of them made the file
 any easier to work on concurrently. Roughly a dozen open tickets edit it, so they
@@ -403,7 +405,7 @@ textual from semantic independence rather than reporting one verdict.
 
 Say this out loud, because a map reads like a fix and this is not one.
 
-- **It does not make the file smaller, faster or easier to read.** 9,844 lines
+- **It does not make the file smaller, faster or easier to read.** 12,620 lines
   before, 9,844 after. Cost (2) already established that the size is not a
   performance problem; this does not revisit that.
 - **It does not raise the concurrent ceiling much.** Two, sometimes three. The
