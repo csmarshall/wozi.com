@@ -14,7 +14,7 @@ fixed controls, and when a phone reports something odd.
 
 **The test for whether something belongs here is "can no harness in this repo
 answer it".** If a harness can, it belongs as a gate instead. Two pages are
-covered: the landing page (checks 1–8) and `/fidget/` (checks 9–13), which is a
+covered: the landing page (checks 1–8, 14) and `/fidget/` (checks 9–13), which is a
 separate published page with its own physics loop and is *more* device-dependent
 than the landing page, because a finger is its only real input.
 
@@ -525,3 +525,38 @@ to**. The chrome buttons are roughly 31px tall (11px text, 9px padding, 1px
 border), over the WCAG 24px floor and under 44px too. So the box sizes are a gate
 somebody could write; whether 27px is acquirable with a thumb, at the far edge of
 a phone, is the part only a thumb answers.
+
+## 14. A datum name under the open pop-out panel (GitHub #186)
+
+**Do.** On a landscape phone, on the combined stage — `wozi.com` itself, not a
+personal subdomain, since a solo page draws one chain and one datum. Open the
+pop-out menu with the corner toggle and look for the datum names ("Charles",
+"Harper") struck along their scribed rules. Close it again. Repeat on two or
+three reloads, because the seat is dealt.
+
+**Correct.** Either the names sit clear of the panel, or one is partly behind it
+and reads as a thing temporarily covered — the panel is opaque and centred, so a
+name behind it should look occluded rather than broken. Closing the menu restores
+it with nothing moved.
+
+**Failure.** A name that appears to be *cut* rather than covered, or one whose
+scribed rule visibly stops at the panel edge; anything that moves when the panel
+opens or closes, which would mean the seat is re-solving on a transient state and
+is a different bug from this one.
+
+**Why no harness, and why this is deliberate rather than an omission.** CL#201
+gave `plateSeat` a `_ctlBox` so the fixed corner row bars stations — corner-control
+clashes went from **8 of 24 seed/viewport/theme combinations to 0**. The pop-out
+panel is **not** in that box, and that was a decision rather than an oversight:
+the panel is `display: none` until opened, so this is only ever visible in a state
+the visitor chose and it resolves the moment they close it, whereas the corner row
+is always there. Barring it unconditionally would cost stations permanently to
+avoid a transient overlap — and the seat is already tight enough that CL#201 drove
+desk line-to-teeth air to 0.00px. Barring it only while open would re-solve on
+toggle, which moves the composition when the menu opens: a visible jump for a
+transient state, and worse than the overlap.
+
+So what a human is judging here is not whether the overlap happens — it does, by
+design — but whether it **reads** as acceptable. No harness can answer that, and
+it is most likely to bite on a landscape phone, where the panel is proportionally
+largest and the chains sit closest together.
