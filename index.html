@@ -2268,7 +2268,25 @@ const TRAIN = (function () {
      declarations, so a const at module scope is simply not defined there and
      the suite fails wholesale (CLAUDE.md, "Dormant capability"). A local is
      visible to the sliced text and to nothing else. */
-  const STRAND_AT = 1;
+  /* NO WHEEL TAKES A STRAND ON THE SHIPPED PAGE. Charles, on seeing CL#203 live:
+     "chain drive is gross, it looks wrong" -- and then the diagnosis, which is his
+     and is correct: "wouldn't the teeth go INSIDE the chains not outside anyway?"
+
+     They would. A roller chain seats its rollers in the tooth spaces, so the chain
+     rides ON the sprocket and the tooth tips stand proud of it -- you see the teeth
+     engaging THROUGH the chain at the wrap. chainEl draws the band centred on the
+     pitch circle, which is right, but the band is opaque and wide enough to bury the
+     addendum, so the wrap reads as a belt slung over the outside of the gear rather
+     than a chain meshing with it. That is a drawing fault, not a solver fault, and it
+     is the whole of what looked wrong.
+
+     So the capability goes back to dormant, with everything CL#203 fixed kept: the
+     strand rides its own component's clock, a strand-coupled pair is one machine,
+     the tooth-phase registration is solved, the palette is a tone of the driver, the
+     shadow is theme-gated, and a drawn strand is published into bridgeRuns. Set this
+     to an index again and it all comes back -- correct except for the tooth occlusion,
+     which is GitHub #190. */
+  const STRAND_AT = -1;
   /* EMITTED IN CHAIN_ORDER -- the spine, then the stack -- whatever the order in
      PEOPLE, so every bridge hangs off a wheel already on the array. solve()
      derives a wheel's position from g[t.parent] out of the wheels it has ALREADY

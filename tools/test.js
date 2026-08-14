@@ -1280,7 +1280,18 @@ function grabDecl(decl) {
    person anywhere (a typo, warned). A fixture that does not care passes neither
    and gets the stage back as the config, which is what a combined stage is. */
 function buildTrain(people, conf, mount) {
-  const expr = grabBlock('const TRAIN = (function', '(', ')');
+  /* THE FIXTURE ALWAYS CARRIES A STRAND, WHATEVER THE SHIPPED PAGE DOES. The page
+     sets STRAND_AT = -1 so no wheel is chain-driven (CL#205 — Charles turned it off
+     because the teeth read as buried under the band, GitHub #190). But the tests
+     below are about the CAPABILITY: whether a drawn strand is published into
+     bridgeRuns, whether an escape run refuses to cross one, whether the count is a
+     composition rather than a coincidence. Those are properties of the machinery, and
+     the machinery has to stay proved while it is dormant -- CL#190 is the entry about
+     what happens when it does not, where per-component clocks moved out from under
+     strand code nothing exercised and no gate noticed for months.
+     The shipped default is a separate fact and is pinned by its own test below. */
+  const expr = grabBlock('const TRAIN = (function', '(', ')')
+    .replace(/const STRAND_AT = -?\d+;/, 'const STRAND_AT = 1;');
   const bridges = [], origins = [], headOf = {};
   const built = new Function('STAGE', 'CONF', 'MAX_IDLERS', 'ORIGIN_MOUNT',
     'BRIDGES', 'ORIGINS', 'HEAD_OF', 'console',
@@ -3743,6 +3754,33 @@ test('an escape run refuses to cross a bridge, not only another escape run', () 
     });
   });
   ok(bad.length === 0, bad.join('\n      '));
+});
+
+/* THE SHIPPED PAGE DRAWS NO STRAND, AND THAT IS A DECISION RATHER THAN A DEFAULT
+   (CL#205, GitHub #190). Charles turned the chain drive off on seeing it live: the
+   band is opaque and wide enough to bury the addendum, so the wrap reads as a belt
+   slung over the outside of a gear instead of a chain meshing with it. The teeth
+   should stand proud of the chain, which is what he pointed out and what #190 is.
+
+   Pinned here for the same reason `togPeople` is asserted to stay empty: the easy
+   regression is somebody flipping it back while fixing something else, and the page
+   would then ship a drawing nobody re-judged. The fixture above deliberately forces a
+   strand regardless, so the capability stays proved while it is dormant.
+
+   This is not a claim that the chain drive is wrong -- the solver, the clocks, the
+   tooth-phase registration and the publication are all correct and gated. It is a
+   claim about what the page currently chooses to draw. */
+test('the shipped page enables no chain drive, so nobody re-enables it by accident', () => {
+  const at = grabDecl('const STRAND_AT =');
+  const m = at.match(/const STRAND_AT = (-?\d+);/);
+  ok(m, 'STRAND_AT is no longer a plain integer declaration, so this test cannot read '
+    + 'what the page ships: ' + at.trim().slice(0, 80));
+  eq(parseInt(m[1], 10), -1,
+    'the shipped page now enables a chain drive (STRAND_AT = ' + m[1] + '). That is a '
+    + 'visible change to every viewport and it was turned OFF deliberately in CL#205 '
+    + '-- the chain band buries the tooth addendum, so the wrap reads as a belt rather '
+    + 'than a mesh (GitHub #190). Re-enable it once #190 is fixed and the drawing has '
+    + 'been judged again, not before');
 });
 
 test('the bridges come out of solve(), and stay distinct from the drawn strands', () => {

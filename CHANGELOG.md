@@ -7,6 +7,53 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Added
 
+- **CL#205 — the chain drive is off again: the band buries the teeth it is supposed to
+  be meshing with.** (GitHub #190.)
+
+  Charles, on seeing CL#203 live: *"chain drive is gross, it looks wrong"* — and then the
+  diagnosis, which is his and is correct: *"wouldn't the teeth go **inside** the chains not
+  outside anyway?"*
+
+  **They would.** A roller chain seats its rollers in the tooth spaces, so the chain rides
+  *on* the sprocket and the tooth tips stand proud of it — at the wrap you see the teeth
+  engaging **through** the chain. `chainEl` draws the band centred on the pitch circle,
+  which is right, but the band is **opaque and wide enough to cover the addendum**, so it
+  hides the very teeth it is engaging. The wrap reads as a belt slung over the outside of
+  a gear.
+
+  **A drawing fault, not a solver fault**, and the distinction is what makes this a
+  one-line retreat rather than a revert: CL#203's tooth-phase work measured **every
+  sampled roller in contact, worst error 0.003–0.013 of a tooth pitch.** The rollers are
+  in exactly the right places. They are painted over.
+
+  `STRAND_AT = -1`, and **everything CL#203 fixed is kept**: the strand rides its own
+  component's clock (#175), a strand-coupled pair is one machine, the tooth-phase
+  registration is solved, the palette is a tone of the driving sprocket, the shadow is
+  theme-gated, and a drawn strand is published into `bridgeRuns` so an escape run refuses
+  to cross it (CL#204). Set the constant to an index and it all comes back — correct
+  except for the occlusion, which is #190.
+
+  **The stage is pixel-identical to `5c743b8`**, the commit before the chain landed, at
+  every viewport and in both themes. So the retreat is exact rather than approximate.
+
+  **Two test changes, and they pull in opposite directions on purpose.**
+
+  The fixture now **forces a strand regardless of the shipped default**, because the tests'
+  subject is the *capability* — is a drawn strand published, does an escape run refuse to
+  cross one — and that has to stay proved while it is dormant. CL#190 is the cautionary
+  entry: per-component clocks moved out from under strand code nothing exercised, and no
+  gate noticed for months. Without this the two #187 tests fail as **vacuous**, which is
+  itself the guards working correctly: they refuse to pass on a page with no strand rather
+  than reporting a contented green.
+
+  And the dormancy itself is **pinned** — *"the shipped page enables no chain drive, so
+  nobody re-enables it by accident"* — for the same reason `togPeople` is asserted to stay
+  empty. The easy regression is somebody flipping it back while fixing something else, and
+  the page would then ship a drawing nobody re-judged. Proved to bite: re-enabling turns
+  the suite red by name.
+
+  Suite **130 → 131**.
+
 - **CL#204 — a drawn strand is a structural run, so an escape run may no longer be laid
   across it; and the datum's reach contract is asserted rather than assumed.**
   (GitHub #187, GitHub #185.)
