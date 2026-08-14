@@ -805,6 +805,31 @@ const TOOTH_THICK = 0.495; /* tooth thickness at the pitch circle, as a fraction
                               is backlash. Measured at all six pairs: 0.495 gives zero
                               interference with 0.11px between the flanks, so they read as
                               touching without anti-aliasing ever fusing them. */
+/* THE ROLLER CHAIN'S TWO PROPORTIONS (GitHub #190). Both are stated against the
+   circular pitch, because that is the one dimension a chain and the sprocket it
+   meshes with are obliged to share -- so a change to MODULE carries them with it
+   and neither can drift into being correct at one size only.
+
+   CHAIN_PLATE_PITCH is the side plate's height. An ANSI roller chain's plate
+   stands about nine tenths of a pitch tall, which is TALLER than the tooth is
+   deep -- so the plate crosses the tooth tips, the wheel is painted over the
+   strand, and what a reader sees at the wrap is a tooth engaging THROUGH the
+   chain. That is the whole of #190: the retired band was 11 units against a
+   14-unit tooth depth, so it neither showed the teeth through it nor stood proud
+   of them, and the wrap read as a belt lying in the tooth spaces.
+
+   THE ROLLER'S DIAMETER IS NOT HERE, because it is not a proportion anyone gets
+   to choose: a roller fills the tooth space, and TOOTH_THICK already states how
+   much of the pitch the tooth takes, so the space is the remainder. chainEl
+   derives it there rather than repeating a number that is already written down. */
+const CHAIN_PLATE_PITCH = 0.90;
+/* The lit face inside the plate's own drawn edge, as a fraction of the plate's
+   height. An authored proportion of a drawn part, like ENGRAVE_TRACK -- there is
+   nothing to derive it from, and it is named so it is tuned in one place. */
+const CHAIN_PLATE_FACE = 0.74;
+/* The polished crown on the roller's crest, as a fraction of its diameter. Same
+   kind of number, same reason. */
+const CHAIN_ROLLER_CROWN = 0.46;
 /* Where the raised boss disc's edge sits, as a multiple of hubR (GitHub #95).
    Every family that draws a boss draws it at this radius, and a family that
    cuts a pattern starting inside it runs that pattern's innermost ring
@@ -10088,8 +10113,25 @@ class Component extends DCLogic {
        its START. A dash runs from the pattern origin forward, so its centre is
        half a dash further on, and getting that half wrong puts every roller in
        the machine off by 1.7 units -- about a sixth of a pitch, which is the
-       difference between seated and riding a flank. */
-    const ROLLER_ON = 3.4;
+       difference between seated and riding a flank.
+
+       IT IS ZERO NOW, AND THAT IS WHAT MAKES A ROLLER ROUND (GitHub #190). A
+       dash under a round cap is drawn `on + width` long, so the old 3.4-on /
+       3.4-wide roller came out a CAPSULE twice as long as it was tall -- a
+       roller lying on its side, not a roller. A circle is the degenerate case:
+       zero length, all cap, so its drawn length along the strand IS its
+       diameter. The half-dash term above therefore vanishes rather than being
+       deleted -- a circle has no length for the registration to be stated
+       against half of -- and the seat below is unchanged, which is why the
+       rollers stay exactly where CL#203's tooth-phase work put them.
+
+       THE BELT VARIANT SHARES THIS TERM AND MOVES BY 1.7 UNITS BECAUSE OF IT,
+       which is stated rather than hidden: a moulded belt tooth is drawn
+       `PITCH * 0.52` long and was never centred by half a ROLLER's length in
+       the first place, so the old value was not right for it either. Whichever
+       of the two is eventually judged, a belt's own seat is its own question
+       and no gate photographs it today. */
+    const ROLLER_ON = 0;
     /* WHERE THE PATTERN IS PINNED (GitHub #147). `b.chainSeat` is solve()'s
        answer to "how far along this path does a tooth-space centre of the
        driving sprocket lie", and it is recorded there rather than recomputed
@@ -10154,12 +10196,56 @@ class Component extends DCLogic {
         h('path', { d: dPath, fill: 'none', stroke: 'rgba(255,255,255,.18)', strokeWidth: 1.4, transform: 'translate(0,-6)' })
       );
     }
-    /* Roller chain: plate links between rollers seated in the tooth spaces. */
+    /* Roller chain: plate links between rollers seated in the tooth spaces.
+
+       THE PLATE MAY NOT BE THE ONLY THING YOU SEE (GitHub #190). Charles, on
+       CL#203 live: "wouldn't the teeth go INSIDE the chains not outside
+       anyway?" -- and they would. What was drawn was an 11-wide opaque band
+       centred on the pitch circle against a 7-unit addendum, so it reached
+       5.5 of the 7 and stopped just short of the tooth tips: it neither showed
+       the teeth standing through it nor stood proud of them. The wrap read as
+       a smooth ribbon lying in the tooth spaces, which is a belt.
+
+       Note what did NOT need fixing, because it is easy to reach for and it is
+       already true: the strand svg is a direct child of the stage and every
+       wheel is painted AFTER it, so a wheel already occludes the chain it
+       meshes with -- #18's layering, one layer up. Drawing the wrap arcs
+       further behind buys nothing. What was wrong was the SHAPE.
+
+       SO BOTH DIMENSIONS COME OFF THE PITCH NOW, and neither is chosen:
+
+         - THE ROLLER FILLS THE TOOTH SPACE, and the space is what the tooth
+           does not take: TOOTH_THICK already states the tooth's thickness at
+           the pitch circle as a fraction of the circular pitch, so the roller's
+           diameter is the remainder of that same pitch. Derived off the wheel's
+           own tooth rather than measured off a render, which is what makes a
+           seated roller read as seated at every module.
+         - THE PLATE STANDS PROUD OF THE ADDENDUM, at CHAIN_PLATE_PITCH of the
+           pitch -- 19.8 units against a 14-unit tooth depth, so the plate DOES
+           cross the tips, the teeth are painted over it, and what you see at
+           the wrap is a tooth engaging THROUGH the chain.
+
+       AND EACH PLATE SPANS EXACTLY ONE PITCH, roller to roller. A round cap
+       adds half the stroke width at each end, so the dash's own length is
+       `PITCH - PLATE_H` and the drawn plate comes out one pitch long with its
+       rounded ends centred on the rollers -- which is where a real plate's
+       eyes are, and where the roller then covers the seam. Written as a plain
+       fraction of the pitch it was a second, competing statement of the same
+       fact, and one of the two would have drifted. */
+    const PLATE_H = PITCH * CHAIN_PLATE_PITCH;
+    const ROLLER_D = PITCH * (1 - TOOTH_THICK);
     return h('g', { key: key },
-      cast(12, 2.5, 'rgba(8,16,20,.22)'),
-      h('path', { ref: track, d: dPath, fill: 'none', stroke: ft.body, strokeWidth: 11, strokeDasharray: pitchDash(PITCH * 0.78), strokeLinecap: 'round', style: run }),
-      h('path', { ref: track, d: dPath, fill: 'none', stroke: ft.line, strokeWidth: 11, strokeDasharray: pitchDash(PITCH * 0.34), strokeLinecap: 'round', style: run }),
-      h('path', { ref: track, d: dPath, fill: 'none', stroke: p[0], strokeWidth: ROLLER_ON, strokeDasharray: pitchDash(ROLLER_ON), strokeLinecap: 'round', style: run })
+      cast(PLATE_H, 2.5, 'rgba(8,16,20,.22)'),
+      /* The plate's own edge, then its lit face inside it -- the same contour
+         idiom CL#133 gave every cut opening, for the same reason: a shape whose
+         silhouette is not drawn loses its edge against whatever is behind it,
+         and behind this one is a tooth. CHAIN_PLATE_FACE is an authored
+         proportion of the plate and says so. */
+      h('path', { ref: track, d: dPath, fill: 'none', stroke: ft.line, strokeWidth: PLATE_H.toFixed(2), strokeDasharray: pitchDash(PITCH - PLATE_H), strokeLinecap: 'round', style: run }),
+      h('path', { ref: track, d: dPath, fill: 'none', stroke: ft.body, strokeWidth: (PLATE_H * CHAIN_PLATE_FACE).toFixed(2), strokeDasharray: pitchDash(PITCH - PLATE_H), strokeLinecap: 'round', style: run }),
+      h('path', { ref: track, d: dPath, fill: 'none', stroke: ft.line, strokeWidth: ROLLER_D.toFixed(2), strokeDasharray: pitchDash(ROLLER_ON), strokeLinecap: 'round', style: run }),
+      /* The polished crown, on top of the roller's own dark body. */
+      h('path', { ref: track, d: dPath, fill: 'none', stroke: p[0], strokeWidth: (ROLLER_D * CHAIN_ROLLER_CROWN).toFixed(2), strokeDasharray: pitchDash(ROLLER_ON), strokeLinecap: 'round', style: run })
     );
   }
 

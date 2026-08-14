@@ -7,6 +7,52 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Added
 
+- **CL#206 — the chain's rollers were capsules and its plates never reached the teeth, so
+  the wrap read as a belt.** (GitHub #190.) **Still dormant; this fixes the drawing, not
+  the decision.**
+
+  **The ticket's premise was wrong, and the correction is the finding.** #190 proposed
+  drawing the wrap arcs *behind* the wheel so the teeth occlude the chain. **That is
+  already the status quo** — the strand `<svg>` is a direct child of the stage and every
+  wheel div paints after it, confirmed in the DOM and visible in the before-crop, where
+  tooth outlines sit clearly over the band. Drawing it "further behind" buys nothing.
+
+  **The fault was the band's DIMENSIONS, not its depth.** The band was **11 units wide
+  against a 7-unit addendum**, centred on the pitch circle — so it reached 5.5 of the 7
+  and stopped just inside the tooth tips. It neither stood proud of the teeth nor let them
+  stand through it: it filled the tooth spaces as a smooth ribbon, which is exactly what a
+  belt is.
+
+  **And the rollers were not circles.** `ROLLER_ON = 3.4` under a round cap draws
+  `on + width` long, so every "roller" was a **capsule twice as long as it was tall**.
+  `ROLLER_ON = 0` is the degenerate case that makes a circle — and the registration term
+  `(ROLLER_ON / 2 - chainSeat)` is unchanged, because the half-dash vanishes when a dash
+  has no length. So `pitchSnap` and `chainSeat` are untouched and the rollers sit exactly
+  where CL#203 put them, which the driven-sprocket sheet shows.
+
+  Both dimensions are now **derived rather than chosen**: the roller diameter is
+  `PITCH * (1 - TOOTH_THICK)` — the roller fills the tooth space, and `TOOTH_THICK`
+  already states how much of the pitch the tooth takes, so the space is the remainder, no
+  new number. And `CHAIN_PLATE_PITCH = 0.90` is the ANSI proportion, which puts the plate
+  at **19.8 units against a 14-unit tooth depth** so it *crosses* the tips and the teeth
+  paint over it. Each plate's dash is `PITCH - PLATE_H`, so with round caps a plate spans
+  exactly one pitch and ends centred on its rollers.
+
+  **The answer to Charles's question is now yes**: a tooth is visibly engaging through the
+  chain, on both sprockets, at both viewports, in both themes.
+
+  **Inert on the shipped page** — `STRAND_AT` is still `-1` and `pixel_regress` is **0px on
+  all five paths** with controls 0px. With a strand enabled locally: `dom_invariants` PASS
+  on stage (3 components by mesh alone → **2 once the drawn strand counts**), solo and
+  light; **strand attribution still works** despite the path count going 3 → 4, because
+  CL#203's check samples every dashed path and dedupes — checked rather than assumed.
+  `escape_mesh` PASS, worst residual 0.0256px. `verify_motion` PASS, **4 strand paths
+  present, 4 advancing**. `npm test` 131/0.
+
+  One consequence stated in the code rather than hidden: the **belt** variant shares `reg`,
+  so its moulded tooth moves 1.7 units. It was never centred by half a roller's length to
+  begin with, and no gate photographs a belt.
+
 - **CL#205 — the chain drive is off again: the band buries the teeth it is supposed to
   be meshing with.** (GitHub #190.)
 
