@@ -3651,16 +3651,30 @@ test('an escape run refuses to cross a bridge, not only another escape run', () 
      really does lie across the run that was placed without it.
 
      AND THE SET IT IS SEEDED WITH INCLUDES ORIGIN RUNS (CL#123). THREE is three
-     roots, so two of its four published runs are origin runs -- a self-driven
+     roots, so two of its six published runs are origin runs -- a self-driven
      chain's own drive is metal across the composition exactly as a bridge is, and
-     every one of them is planted in turn below rather than only the first. */
+     every one of them is planted in turn below rather than only the first.
+
+     AND DRAWN STRANDS (GitHub #187). Two more of the six, since the chain drive
+     was enabled: `mid` and `spine` each carry one, `tiny` is a single wheel and
+     cannot. This test grew that coverage the moment solve() started publishing
+     them, which is the point -- but grew it by ACCIDENT, and a coverage increase
+     nobody asserts is a coverage decrease waiting to happen (which is #185's
+     whole lesson, one file over). So the strand share of the planted set is
+     asserted rather than assumed. */
   const bad = [];
   const seg = (p) => ({ x: p.cx, y: p.cy });
+  const isStrandRun = (solved, s) => solved.chains.some(c =>
+    (s[0].cx === c.a.cx && s[0].cy === c.a.cy && s[1].cx === c.b.cx && s[1].cy === c.b.cy)
+    || (s[0].cx === c.b.cx && s[0].cy === c.b.cy && s[1].cx === c.a.cx && s[1].cy === c.a.cy));
   [0, 90].forEach(rot => {
     const { solved, order, origins } = runSolve(THREE, { axisRot: rot });
     ok(origins.length > 0 && solved.bridgeRuns.length > origins.length,
       'rot ' + rot + ': the fixture publishes no origin run, so this test cannot '
       + 'tell whether fitEscapes sees one');
+    ok(solved.bridgeRuns.filter(s => isStrandRun(solved, s)).length > 0,
+      'rot ' + rot + ': no drawn strand is among the runs planted below, so this '
+      + 'test says nothing about whether an escape run may cross a chain');
     const spineSlug = order[0].slug;
     const branches = chainAxesOf(solved, rot, spineSlug).filter(c => !c.spine);
     const clear = fitEscapesOn(Object.assign({}, solved, { bridgeRuns: [] }), rot, spineSlug);
@@ -3733,9 +3747,16 @@ test('an escape run refuses to cross a bridge, not only another escape run', () 
 
 test('the bridges come out of solve(), and stay distinct from the drawn strands', () => {
   /* Two different classes of run, and Task 6 kept them apart deliberately:
-     `chains` is the dormant chain-and-belt capability's list and IS drawn, a
-     bridge is meshed metal that draws nothing. Merging them would put a strand
-     on screen wherever a chain is bridged. */
+     `chains` is the chain-and-belt capability's list and IS drawn, a bridge is
+     meshed metal that draws nothing. Merging the LISTS would put a strand on
+     screen wherever a chain is bridged, so they stay separately addressable on
+     the solve -- which is what the two source assertions below pin.
+
+     THAT IS NOT THE SAME QUESTION AS WHAT GOES INTO THE PUBLISHED RUN SET
+     (GitHub #187). "Is this drawn?" and "may a later run be laid across this?"
+     are different questions with different answers, and only the first
+     distinguishes a strand from a bridge. Both are structural metal, so both are
+     published; the lists stay apart because the render reads one of them. */
   const ret = SRC.slice(SRC.indexOf('this._solved = { gears: g'));
   ok(/bridgeRuns: bridges/.test(ret.slice(0, 200)),
     'solve() still keeps its bridge runs to itself, so nothing placed after the '
@@ -3743,18 +3764,52 @@ test('the bridges come out of solve(), and stay distinct from the drawn strands'
   ok(/chains: chains/.test(ret.slice(0, 200)),
     'the drawn strand list is gone or renamed — bridges and strands must stay '
     + 'separately addressable');
-  /* ONE PUBLISHED RUN PER STRUCTURAL RUN, and there are two kinds now (CL#123):
-     a BRIDGES entry -- the run that carries another chain's drive in, or, for an
-     independent chain, the step that carries its position -- and an ORIGINS
-     entry, the run a self-driven chain turns on. Both are metal laid across the
-     composition, so both have to come out where a later bridge and fitEscapes can
-     refuse to cross them; an origin run that stayed inside solve() would be the
-     exact hole this test was written to close, reopened for the new run. Counted
-     off the TRAIN builder's own two arrays rather than off a number, because
-     which chains get which run is the config's business and not this test's. */
+  /* ONE PUBLISHED RUN PER STRUCTURAL RUN, and there are THREE kinds now (CL#123,
+     GitHub #187): a BRIDGES entry -- the run that carries another chain's drive
+     in, or, for an independent chain, the step that carries its position -- an
+     ORIGINS entry, the run a self-driven chain turns on, and a DRAWN STRAND, one
+     per chain since the roller chain was enabled. All three are metal laid across
+     the composition, so all three have to come out where a later bridge and
+     fitEscapes can refuse to cross them; a run that stayed inside solve() would
+     be the exact hole this test was written to close, reopened for a new kind of
+     run -- which is precisely what happened when the chain drive landed and the
+     strands were left out.
+
+     THE COUNT IS STILL A COMPOSITION AND NOT A CEILING, which is the whole point
+     of not simply relaxing it. `>= bridges + origins` would pass with anything at
+     all smuggled into the list; this says the published set is exactly the three
+     structural populations and nothing else, each counted off the thing that owns
+     it -- the TRAIN builder's own two arrays, and solve()'s own DRAWN strand
+     list. `solved.chains` is derived from the gears' `chainFrom`, on a different
+     pass from the pushes being counted, so the two sides are independent readings
+     rather than one number compared with itself.
+
+     A ZERO STRAND COUNT WOULD MAKE THE NEW TERM VACUOUS, so it is asserted to be
+     non-zero before it is used. Reduced motion re-solves to direct mesh and the
+     harness has no `_rmq`, so the linked branch is the one that runs here; if
+     that ever stops being true this says so instead of silently going back to
+     testing what it tested before CL#203. */
   const { solved, bridges, origins } = runSolve(CASCADE, { axisRot: 0 });
-  eq(solved.bridgeRuns.length, bridges.length + origins.length,
-    'solve() does not publish one run per bridge and one per origin run');
+  ok(solved.chains.length > 0,
+    'the fixture solved with no drawn strand at all, so the strand term below '
+    + 'is vacuous and this test cannot see whether strands are published');
+  eq(solved.bridgeRuns.length, bridges.length + origins.length + solved.chains.length,
+    'solve() does not publish exactly one run per bridge, one per origin run and '
+    + 'one per drawn strand');
+  /* AND THE STRAND TERM NAMES THE ACTUAL SEGMENTS, not merely the right number of
+     them. A count is satisfied by publishing any three segments; what fitEscapes
+     needs is the line the metal is drawn along, so every drawn strand's own two
+     sprocket centres have to appear as a published run. Both orientations are
+     accepted -- a segment has no direction and the crossing test does not care --
+     and the comparison is exact, because both sides are the same `cx`/`cy`
+     arithmetic off the same centring shift and neither is re-derived. */
+  const missing = solved.chains.filter(c => !solved.bridgeRuns.some(s =>
+    (s[0].cx === c.a.cx && s[0].cy === c.a.cy && s[1].cx === c.b.cx && s[1].cy === c.b.cy)
+    || (s[0].cx === c.b.cx && s[0].cy === c.b.cy && s[1].cx === c.a.cx && s[1].cy === c.a.cy)));
+  eq(missing.length, 0,
+    'a drawn strand is not in bridgeRuns, so it is the one run on the page an '
+    + 'escape run may be laid straight across (' + missing.length + ' of '
+    + solved.chains.length + ' strands unpublished)');
   ok(solved.bridgeRuns.every(s => s.length === 2
       && s.every(p => Number.isFinite(p.cx) && Number.isFinite(p.cy))),
     'a published bridge run is not a finite two-point segment in stage units');
@@ -4089,6 +4144,230 @@ test('the datum is scribed straight along the travel, and stands off by the stat
   });
   ok(bad.length === 0, bad.slice(0, 6).join('\n      ')
     + (bad.length > 6 ? `\n      … and ${bad.length - 6} more` : ''));
+});
+
+/* ---- #185: the NAME term in plateMetrics().reach ------------------------- */
+
+/* WHY THESE ARE CONTRACTS AND NOT FIGURES (GitHub #185, CL#201).
+
+   CL#201 made `plateMetrics().reach` the MAX of the tick reach and the struck
+   NAME's own ink reach, so #76's bound is paid against what is actually drawn.
+   The suite lifts `plateMetrics`/`datumClear` out of index.html and runs them
+   with no component and no canvas, so `this._nameReach` is undefined there, the
+   name term resolves to 0, and every assertion above went on measuring the
+   tick-only quantity the page had stopped using. Nothing went red. The coverage
+   simply shrank, which is exactly the failure CL#199 had been fixed for hours
+   earlier in this same file.
+
+   A CANVAS-BACKED FIGURE WOULD BE THE WRONG REPAIR. Stubbing text metrics here
+   puts a second source of truth for type beside the vendored face and `fontpin`,
+   and any number it produced would be invalidated by the next DATUM_MARK_GROW
+   move. The RELATIONSHIP would not be: `reach` is a max that folds the name in,
+   it never drops below the ticks, it rises with the name, absence is a
+   documented fallback rather than an accident, and the page never takes that
+   fallback. All five are checkable with no canvas at all.
+
+   The stub below is therefore NOT a type metric. It is an arbitrary,
+   deliberately ASYMMETRIC pair of numbers -- ascent unequal to descent -- chosen
+   so that a side-independence claim cannot pass by symmetry. Nothing asserts
+   what it returns; everything asserts what the geometry does with it. */
+const DATUM_MARK_AIR_N = grabNumber('DATUM_MARK_AIR');
+const DATUM_ETCH_DEPTH_N = grabNumber('DATUM_ETCH_DEPTH');
+
+/* The page's own plateMetrics, run against a `this` of the test's choosing --
+   the same lift datumRunsOn() does, hoisted so both the fallback and the
+   fed cases can be asked of one function rather than of two copies. */
+const plateMetricsOn = (function () {
+  const fn = new Function('MODULE',
+    'return function ' + grabBlock('  plateMetrics(s) {', '{', '}') + ';')(page.MODULE);
+  return (s, nameReach) => fn.call(
+    nameReach === undefined ? {} : { _nameReach: nameReach }, s);
+})();
+const datumClearOn = (function () {
+  const metrics = new Function('MODULE',
+    'return function ' + grabBlock('  plateMetrics(s) {', '{', '}') + ';')(page.MODULE);
+  const fn = new Function('MODULE', 'PLATE_TOP_CLEAR',
+    'return function ' + grabBlock('  datumClear(S) {', '{', '}') + ';')(
+    page.MODULE, page.PLATE_TOP_CLEAR);
+  return (S, nameReach) => fn.call(
+    Object.assign({ plateMetrics: metrics },
+      nameReach === undefined ? {} : { _nameReach: nameReach }), S);
+})();
+
+/* The render scales the rest of the datum tests sweep, plus the two ends the fit
+   can reach: a phone and an ultrawide. */
+const PLATE_SCALES = [0.6, 1, 1.396, 1.47, 2.2, 3.4];
+
+test('plateMetrics().reach folds the name in, and never drops below the ticks (#185)', () => {
+  const bad = [];
+  PLATE_SCALES.forEach(S => {
+    const absent = plateMetricsOn(S);
+    /* 1. NEVER LESS THAN THE TICK REACH. The ticks are struck at `out * tick`
+          whatever else the mark draws, so a `reach` under them is a bound paid
+          in a quantity smaller than the ink it bounds -- #141 exactly. */
+    if (!(absent.reach >= absent.tick - 1e-12))
+      bad.push(`S ${S}: reach ${absent.reach} is under the tick reach ${absent.tick} `
+        + `with no name to fold in`);
+    /* 2. ABSENT IS THE DOCUMENTED FALLBACK, NOT AN ACCIDENT: with no
+          `_nameReach` the answer is exactly the pre-CL#201 max over the three
+          terms this method can derive from `s` alone. Stated as the arithmetic
+          rather than as a number, so DATUM_MARK_GROW and MODULE may move. */
+    const preCL201 = Math.max(absent.tick, absent.h / 2, absent.hair / 2);
+    if (Math.abs(absent.reach - preCL201) > 1e-12)
+      bad.push(`S ${S}: with no name measured, reach is ${absent.reach} rather than `
+        + `the tick-and-box ${preCL201} the fallback is documented to give`);
+    if (absent.name !== 0)
+      bad.push(`S ${S}: the absent name term reports ${absent.name} rather than 0, `
+        + `so the fallback is not the one datumClear() pays against`);
+    /* 3. IT GROWS WITH THE NAME, and the growth is the max taking over rather
+          than a sum: below the fallback the name changes nothing, above it the
+          name IS the answer. A `reach` that added the two would pass a
+          monotonicity check alone, which is why the value is pinned to the
+          larger of the two on each side of the crossover. */
+    let last = -Infinity;
+    [0, preCL201 * 0.5, preCL201, preCL201 * 1.5, preCL201 * 4].forEach(n => {
+      const got = plateMetricsOn(S, n).reach;
+      if (got < last - 1e-12)
+        bad.push(`S ${S}: reach fell from ${last} to ${got} as the name grew`);
+      last = got;
+      if (Math.abs(got - Math.max(preCL201, n)) > 1e-12)
+        bad.push(`S ${S}: with a name reaching ${n}, reach is ${got} rather than `
+          + `max(${preCL201}, ${n}) — the name is not folded in as a max`);
+      if (got < absent.tick - 1e-12)
+        bad.push(`S ${S}: a name of ${n} took reach ${got} below the tick reach`);
+    });
+    /* 4. AND #76's BOUND IS PAID OUT OF IT. datumClear() is the consumer the
+          whole term exists for, so a `reach` the name reaches into has to buy
+          the mark LESS air, never more, and never a negative one. */
+    let lastAir = Infinity;
+    [0, preCL201, preCL201 * 4, page.PLATE_TOP_CLEAR * 4].forEach(n => {
+      const air = datumClearOn(S, n);
+      if (air > lastAir + 1e-12)
+        bad.push(`S ${S}: datumClear rose to ${air} as the name grew to ${n} — the `
+          + `bound is being paid in the wrong direction`);
+      if (!(air >= 0)) bad.push(`S ${S}: datumClear went negative (${air}) at name ${n}`);
+      lastAir = air;
+    });
+    if (!(datumClearOn(S, preCL201 * 8) < datumClearOn(S, 0) + 1e-12))
+      bad.push(`S ${S}: a name eight times the fallback bought no less air than none `
+        + `at all, so the name term never reaches #76's bound`);
+  });
+  ok(bad.length === 0, bad.join('\n      '));
+});
+
+test('the name term arrives on the component, and the page never takes the fallback (#185)', () => {
+  /* THE SUITE'S FALLBACK IS A HARNESS CONDITION, NOT A PAGE ONE. Absent
+     `_nameReach` in a real render would silently restore the pre-CL#201 bound
+     and reopen #183, and no assertion above could tell -- both would be green.
+     What CAN be checked without a canvas is the ORDER the page does it in, which
+     is the whole of the guarantee: datumLayer() publishes the figure BEFORE it
+     reads plateMetrics() and before it calls datumRuns(), which is the call that
+     spends the bound. Source order, because that is what the property is. */
+  const layer = grabBlock('  datumLayer(solved, S, box, metal) {', '{', '}');
+  const pub = layer.indexOf('this._nameReach =');
+  const readMark = layer.indexOf('const MARK = this.plateMetrics(S);');
+  const runs = layer.indexOf('this.datumRuns(');
+  ok(pub >= 0, 'datumLayer() no longer publishes _nameReach at all, so plateMetrics() '
+    + 'is back to the tick-only reach on the real page (#183 reopened)');
+  ok(readMark >= 0 && pub < readMark,
+    'datumLayer() takes its own MARK sizes before publishing _nameReach, so the '
+    + 'mark is drawn against a stale tick-only reach');
+  ok(runs >= 0 && pub < runs,
+    'datumLayer() scribes the runs before publishing _nameReach, so datumRuns() '
+    + 'pays #76\'s bound against a reach the name is not in yet');
+  /* AND THE PUBLISHED FIGURE IS A REAL MEASUREMENT on the treatment that ships.
+     `etch-mark` is the one that strikes a bare name clear of the rule, and it is
+     the only one whose ink can be the outboard extreme; a zero here on that
+     treatment is the fallback reached in the page. */
+  ok(/const STRUCK = DATUM_LABEL === 'etch-mark';/.test(layer),
+    'datumLayer() no longer decides the name term on the struck treatment, so '
+    + 'which treatments publish a reach is anybody\'s guess');
+  ok(/this\._nameReach = STRUCK\s*\?[\s\S]*?markStand\(/.test(layer),
+    'the published name reach is no longer markStand()\'s own figure — a second '
+    + 'derivation of the reach is precisely the drift #183 was filed about');
+  /* plateMetrics() reads it back by exactly one route, and the `|| 0` IS the
+     documented fallback. Pinned so it cannot become an `if` somewhere else, or
+     a second default, without this saying so. */
+  const pm = grabBlock('  plateMetrics(s) {', '{', '}');
+  ok(/const name = this\._nameReach \|\| 0;/.test(pm),
+    'plateMetrics() no longer reads _nameReach as `this._nameReach || 0`, so the '
+    + 'documented absent-is-zero fallback has moved or grown a second form');
+  ok(/reach: Math\.max\(tick, h \/ 2, hair \/ 2, name\)/.test(pm),
+    'reach is no longer the max over the tick, the box, the hairline and the '
+    + 'name — the term CL#201 added has been dropped or reordered into a sum');
+});
+
+test('markStand()\'s reach is the same on either side of the rule (#185)', () => {
+  /* THE PROPERTY THAT MAKES THE CENTRE STEP WORK, and until now argued only in a
+     comment: the stamp's centre is offset by exactly the NEAR side's own ink, so
+     the near edge lands at `air` and the far edge at `reach` whichever way the
+     name is struck. One figure therefore bounds a name on either side, which is
+     what lets datumRuns() scribe every line before any seat has been searched.
+
+     RUN WITH AN ASYMMETRIC INK STUB. ascent and descent are deliberately
+     unequal: with a symmetric pair the claim is true of any formula that
+     mistakes one for the other, so the test would pass on the bug it exists to
+     catch. Nothing below asserts the stub's own numbers. */
+  const markStandOn = new Function('DATUM_MARK_AIR',
+    'return function ' + grabBlock('  markStand(label, font, fs, hair, pad) {', '{', '}') + ';')(
+    DATUM_MARK_AIR_N);
+  const datumReliefOn = new Function('DATUM_ETCH_DEPTH',
+    'return function ' + grabBlock('  datumRelief(fs) {', '{', '}') + ';')(DATUM_ETCH_DEPTH_N);
+  const bad = [];
+  /* Ink pairs, all asymmetric, spanning a name with a deep descender and one
+     with none -- the exact difference textInk() exists to stop mattering. */
+  [[10, 3], [24, 7.5], [7.2, 2.1], [40, 1]].forEach(pair => {
+    [8, 13, 21].forEach(fs => {
+      const ctx = { textInk: () => ({ ascent: pair[0], descent: pair[1] }),
+        datumRelief: datumReliefOn };
+      const hair = Math.max(1, fs * 0.1), pad = fs * 0.2;
+      const st = markStandOn.call(ctx, 'x', 'ignored', fs, hair, pad);
+      const rel = datumReliefOn(fs);
+      const air = hair / 2 + DATUM_MARK_AIR_N * pad;
+      /* Where the drawn glyphs land, read off the placement the same way
+         datumStamp() draws them: the stamp sits at `centre(s)`, the baseline a
+         further `rel.base` along the same axis, and the relief copies stand
+         `rel.depth` either side of the ink. */
+      [1, -1].forEach(s => {
+        const baseline = st.centre(s) + rel.base;
+        const edges = [baseline - pair[0] - rel.depth, baseline + pair[1] + rel.depth];
+        const near = Math.min(Math.abs(edges[0]), Math.abs(edges[1]));
+        const far = Math.max(Math.abs(edges[0]), Math.abs(edges[1]));
+        /* The ink must lie wholly on the side it was struck toward: an edge on
+           the far side of the rule is a name crossing the line it labels. */
+        if (edges[0] * s < -1e-9 || edges[1] * s < -1e-9)
+          bad.push(`ink ${pair} fs ${fs} s ${s}: the name straddles its own rule `
+            + `(edges ${edges[0].toFixed(4)}, ${edges[1].toFixed(4)})`);
+        if (Math.abs(near - air) > 1e-9)
+          bad.push(`ink ${pair} fs ${fs} s ${s}: the nearest drawn pixel stands `
+            + `${near.toFixed(4)} off the rule, not the stated air ${air.toFixed(4)}`);
+        if (Math.abs(far - st.reach) > 1e-9)
+          bad.push(`ink ${pair} fs ${fs} s ${s}: the furthest drawn pixel reaches `
+            + `${far.toFixed(4)}, but markStand reports ${st.reach.toFixed(4)} — the `
+            + `reach is not the placement read from the other end`);
+      });
+      /* And the two sides agree with each other, which is the claim itself
+         rather than a consequence of each agreeing with `reach`. */
+      const farOf = (s) => {
+        const baseline = st.centre(s) + rel.base;
+        return Math.max(Math.abs(baseline - pair[0] - rel.depth),
+          Math.abs(baseline + pair[1] + rel.depth));
+      };
+      if (Math.abs(farOf(1) - farOf(-1)) > 1e-9)
+        bad.push(`ink ${pair} fs ${fs}: the name reaches ${farOf(1).toFixed(4)} struck one `
+          + `way and ${farOf(-1).toFixed(4)} the other, so one figure cannot bound both `
+          + `sides and datumRuns() cannot scribe before a seat is searched`);
+      /* The reach rises with the ink, so a taller name buys less air. Asserted
+         as a relationship, never as a figure: a number here would be a type
+         metric in the suite, which is the thing #185 declined to introduce. */
+      const taller = markStandOn.call(
+        { textInk: () => ({ ascent: pair[0] * 2, descent: pair[1] }), datumRelief: datumReliefOn },
+        'x', 'ignored', fs, hair, pad);
+      if (!(taller.reach > st.reach))
+        bad.push(`ink ${pair} fs ${fs}: doubling the ascent did not increase the reach`);
+    });
+  });
+  ok(bad.length === 0, bad.join('\n      '));
 });
 
 test('a datum station is a clickable gear, never a ghost or an idler', () => {

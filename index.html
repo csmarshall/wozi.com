@@ -7477,17 +7477,23 @@ class Component extends DCLogic {
           const wantB = thAB + alAB - (seat - tanLen) / rB;
           phase = (wantB - Math.PI / t.teeth) * 180 / Math.PI;
           strands.push([{ x: prev.x, y: prev.y }, { x: x, y: y }]);
-          /* NOT PUBLISHED INTO `bridgeRuns`, AND THAT IS A KNOWN GAP RATHER THAN
-             A DECISION (GitHub #147). CLAUDE.md's rule is that every structural
-             run goes into that list, because it is what fitEscapes is seeded with
-             and an unpublished run is the one run on the page an escape run may
-             be laid straight across -- and a strand is worse to cross than a
-             bridge, since a bridge draws nothing and this draws metal. `strands`
-             bounds the solve's own search and never leaves solve(). Publishing it
-             is one line here; what stops it is that tools/test.js asserts
-             `bridgeRuns.length` is exactly one run per BRIDGES entry plus one per
-             ORIGINS entry, so a strand in that list fails the suite by count. The
-             two have to move together. */
+          /* AND `strands` IS NOW PUBLISHED, at the centring step below rather
+             than here (GitHub #187). CLAUDE.md's rule is that every structural
+             run goes into `bridgeRuns`, because that is what fitEscapes is
+             seeded with and an unpublished run is the one run on the page an
+             escape run may be laid straight across -- and a strand is worse to
+             cross than a bridge, since a bridge draws nothing and this draws
+             metal. This list still does its original job of bounding the
+             solve's own search; what changed is that it no longer stops there.
+
+             PUBLISHED AT THE BOUNDARY, NOT PUSHED HERE, AND THE DIFFERENCE IS
+             ORDERING. `bridgeRuns` is read DURING this loop too -- bridgeAnchor
+             refuses a candidate that crosses one -- so a strand pushed inline
+             would be consulted by the bridges placed after it and invisible to
+             the ones placed before, which is an anchor search whose answer
+             depends on deal order. The union is taken once, where the runs are
+             shifted into stage units, so every consumer outside solve() sees
+             the whole set and no consumer inside it sees half of one. */
         } else if (free) {
           /* AN INDEPENDENT CHAIN IS ITS OWN MACHINE, AND NOW SHOWS ITS OWN DRIVE
              (Charles, GitHub #116, CL#123). It has no parent to inherit a tooth
@@ -7622,8 +7628,19 @@ class Component extends DCLogic {
        run afterwards can refuse to cross it. fitEscapes is the caller that needs
        it -- a branch's escape run is solved in screen space, after the fit, and
        until now it was tested against other escape runs only, so a bridge was
-       the one run on the page it could cross without anything noticing. */
-    const bridges = bridgeRuns.map(s => s.map(p => ({ cx: p.x - minX, cy: p.y - minY })));
+       the one run on the page it could cross without anything noticing.
+
+       AND THE STRANDS GO IN WITH THEM (GitHub #187, GitHub #147). The two stay
+       separate as LISTS -- `chains` is what gets drawn and carries the wheels
+       either end, this carries bare segments -- but they are the same thing to
+       the one question this list answers: is there structural metal lying along
+       here that a later run may not cross. A strand is the strongest possible
+       yes, because unlike a bridge it is visible, so an escape run laid across
+       one is a drawing of a rod through a chain rather than a spacing error.
+       CLAUDE.md states the rule as EVERY structural run, and a drawn strand was
+       the one the enabling of the chain drive left out. */
+    const bridges = bridgeRuns.concat(strands)
+      .map(s => s.map(p => ({ cx: p.x - minX, cy: p.y - minY })));
     /* The wordmark hangs from the lowest wheel on two cords, clear of every gear. */
     /* WHICH MESH EACH WHEEL BELONGS TO (GitHub #122, CL#142).
 

@@ -7,6 +7,78 @@ them in issues and commits (`fix: #14 stamp hidden under specular arc`).
 
 ### Added
 
+- **CL#204 — a drawn strand is a structural run, so an escape run may no longer be laid
+  across it; and the datum's reach contract is asserted rather than assumed.**
+  (GitHub #187, GitHub #185.)
+
+  **#187 — `CLAUDE.md` states the rule and CL#203 had just broken it**: *"every structural
+  run must be published into `bridgeRuns` or it becomes the one run on the page that
+  anything may be laid straight across."* A drawn chain is exactly such a run.
+
+  One line, and **at the boundary rather than the push site**: `bridgeRuns.concat(strands)`
+  where the centring step reads them. Pushing inline would have let a strand be consulted
+  by bridges placed *after* it and be invisible to those placed before, making
+  `bridgeAnchor`'s answer depend on deal order. Taking the union once means every consumer
+  outside `solve()` sees the whole set and no consumer inside it sees half of one.
+
+  **It changes behaviour, and the measurement is the deliverable rather than the green
+  suite.** Over 2,940 deals across 7 fixtures × 2 rotations × 7 viewports: **84,080**
+  candidate-vs-strand crossing tests where there were previously **0** — the strands were
+  not in the list to test against — **75** candidate headings refused *because of a
+  strand*, and **60 escape runs of 19,319 actually placed differently**.
+
+  **All of them on a bushy tree**, a cascade of `child:`-dependent chains that `config.js`
+  can express today. On the shipped two-chain config it is **0**, exactly as the
+  pre-existing bridge seeding has always been — `index.html`'s own comment says it "does
+  not fire on any shipped viewport". **So this is a latent guarantee that now fires on
+  reachable configurations, on identical terms to the seeding it joins — and that is why
+  all four pixel runs are 0px. Expected, not a no-op.**
+
+  **The first probe reported a contented zero and the instrument was wrong.**
+  `fitEscapes` converts every seeded run into screen space, so matching against raw
+  `cx`/`cy` matched nothing. The zero was the measurement failing, not the fix — the same
+  shape as the blind CDP probe in CL#183 and the rotating-rect attribution in CL#203, and
+  the third time in this session that a control was what separated "no effect" from "not
+  measured".
+
+  **The suite asserts composition, not a relaxed count.**
+  `bridgeRuns.length == bridges + origins + solved.chains.length`, guarded by a
+  non-vacuity check that the fixture produced a strand at all, with `solved.chains` read
+  on a different pass from the pushes being counted so the two sides are independent.
+  **Plus an identity assertion**, because a count alone is satisfied by publishing any
+  three segments: every drawn strand's own two sprocket centres must appear as a published
+  segment. The mutant that publishes `bridgeRuns.slice(0, strands.length)` — right number,
+  wrong segments — is caught **only** by that.
+
+  An existing crossing test's blocker loop grew from 4 planted runs to 6 and 7
+  automatically. That was **accidental coverage**, so it is now asserted: it fails if no
+  strand is among the runs it plants.
+
+  **#185 — the contract, not the value.** CL#201 made `reach` the max of the tick and the
+  name, but `tools/test.js` lifts `datumClear`/`plateMetrics` with no canvas, so the name
+  term resolved to absent ⇒ 0 ⇒ the pre-CL#201 behaviour. Nothing was red; the coverage
+  had shrunk silently, which is CL#199's failure one level up.
+
+  Asserted: `reach` never below the tick reach; absent `_nameReach` gives *exactly* the
+  old `max(tick, h/2, hair/2)`, stated as arithmetic; `reach == max(fallback, name)` on
+  **both sides of the crossover**, because a sum would pass monotonicity alone;
+  `datumClear` pays it in the right direction and never goes negative; and the fallback is
+  never reached in a real render, as a source-order check that `_nameReach` is published
+  before `MARK` is read.
+
+  **`markStand`'s side-independence is run against a deliberately ASYMMETRIC ink stub**,
+  because a symmetric one would pass on the exact bug. No type metrics are introduced and
+  nothing asserts the stub's numbers.
+
+  **Nine mutants: 8 caught, 1 control green** — including the no-op reorder that must
+  survive. Suite **127 → 130**.
+
+  Verified: `mutation_gate --only plate-anchor-by-orientation` CAUGHT, and re-checked
+  against the working tree directly because that gate mutates a worktree of **HEAD** and
+  said so ("5 uncommitted changes are NOT under test"). `escape_mesh` PASS, worst residual
+  0.0135px of 0.35. `dom_invariants` PASS on stage, solo and light. `pixel_regress` **0px**
+  on all four paths, controls 0px.
+
 - **CL#203 — the chain drive is enabled: one roller chain per chain, and a strand now
   makes two wheels one machine.** (GitHub #147, GitHub #176.)
 
